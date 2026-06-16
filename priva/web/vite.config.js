@@ -2,6 +2,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { viteStaticCopy } from 'vite-plugin-static-copy'
 
+// Backend the dev server proxies /api to. Override with VITE_API_TARGET
+// (e.g. to run a second instance against a different port).
+const API_TARGET = process.env.VITE_API_TARGET || 'http://localhost:8081'
+
 export default defineConfig({
   plugins: [
     react(),
@@ -19,17 +23,17 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api/agent/ws': {
-        target: 'http://localhost:8081',
+        target: API_TARGET,
         changeOrigin: true,
         ws: true,
       },
       '/api/pty/ws': {
-        target: 'http://localhost:8081',
+        target: API_TARGET,
         changeOrigin: true,
         ws: true,
       },
       '/api': {
-        target: 'http://localhost:8081',
+        target: API_TARGET,
         changeOrigin: true,
       },
     },
