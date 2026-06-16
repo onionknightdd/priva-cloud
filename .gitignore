@@ -1,0 +1,63 @@
+# ---- macOS ----
+.DS_Store
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# ---- Node / Web (priva/web) ----
+node_modules/
+priva/web/dist/
+priva/web/nohup.out
+npm-debug.log*
+yarn-error.log*
+
+# ---- Build artifacts / packaged releases ----
+dist/*.tar.gz
+
+# ---- Runtime data ----
+# Agent gateway runtime queues, locks and auth token (machine-local, may hold secrets)
+.priva-agent-gateway/
+
+# Application logs
+priva/logs/
+
+# Process id files
+*.pid
+priva/bin/*.pid
+
+# Generic log / temp output
+*.log
+nohup.out
+
+# ---- Editor / local ----
+.idea/
+*.swp
+
+# ---- Claude Code local settings ----
+.claude/settings.local.json
+
+# ---- Local runtime config (ship config.example.yaml instead) ----
+priva/api/config.yaml
+.prod-agent-gateway/
+
+# ---- Internal docs — not for public release ----
+docs/project-analysis-report.md
+docs/project-analysis-report-zh.md
+
+# ---- Stray legacy paths a still-running server may recreate ----
+/vivian/

@@ -1,0 +1,41 @@
+# Priva — example configuration.
+#
+# Copy this file to `config.yaml` (same directory) and adjust as needed:
+#     cp config.example.yaml config.yaml
+#
+# Every key is optional; anything you omit falls back to a built-in default
+# (see priva/api/services/config.py). Values can also be supplied via
+# environment variables.
+
+app_name: "Priva API Server"
+app_version: "1.0.0"
+
+server:
+  host: "0.0.0.0"
+  port: 8001
+  debug: false
+  work_dir: "~/priva_workspace"   # where agent sessions and per-user data live
+
+auth:
+  # IMPORTANT: set a long, random, unique secret before exposing Priva on a
+  # network. The default is intentionally insecure so misconfiguration is loud.
+  jwt_secret: "change-me-to-a-long-random-string"
+  jwt_expire_hours: 24
+  default_password: "changeme"    # initial password for new users; change on first login
+  admins: ["admin"]               # usernames granted admin rights
+  global_api_key: null            # set a string to require an API key on every request
+  enable_anonymous: false
+
+# The sections below all have sensible defaults — uncomment only to override.
+#
+# scheduler:                      # background job runner
+#   shutdown_timeout: 60
+#   command_poll_interval: 1.0
+#   heartbeat_interval: 5.0
+#
+# channels:                       # IM channel workers
+#   command_poll_interval: 1.0
+#   heartbeat_interval: 5.0
+#
+# logging:                        # access / server / app / scheduler logs
+#   # full schema in priva/api/services/config.py
