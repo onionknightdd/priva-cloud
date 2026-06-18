@@ -16,7 +16,7 @@ This document is the executable contract for the pod: §0 what is reused/strippe
 
 A binding modification from the user (decided during the Agent-Gateway drill — `components/agent-gateway.md` §3/§13), superseding this spec wherever they conflict: **there is no central `session_index` table — the JSONL is the session store (decision 15).** Consequences for the pod:
 
-- **§2.2 (`is_first_run`)** — no longer sourced from `session_index.status`. It is supplied per turn by the gateway, derived from a **`first_run_done` CAS on `channel_binding`** (IM) or **gateway-mint-on-empty + a disk-existence guard** (WebUI). The §2.5 **reconcile-as-create** check becomes the primary WebUI backstop and is unchanged. There is **no `ClaimFirstRun` RPC**.
+- **§2.2 (`is_first_run`)** — no longer sourced from `session_index.status`. It is supplied per turn by the brain, derived from a **`first_run_done` CAS on `channel_binding`** (IM) or **brain-mint-on-empty + a disk-existence guard** (WebUI). The §2.5 **reconcile-as-create** check becomes the primary WebUI backstop and is unchanged. There is **no `ClaimFirstRun` RPC**.
 - **§2.7 (path derivation)** — `cwd_hash`/`config_home` are **not** persisted centrally. The pod derives the JSONL path with the **in-pod SDK** (the §1.3 single-account `os.environ` exception already makes this correct); the reader plane (`state-reader`) locates files by globbing `projects/*/<uuid>.jsonl`. The whole "persist `cwd_hash` at mint to avoid the SDK sanitizer in the parent" apparatus is moot.
 - **§3.4 (fork lineage)** — `fork_parent_uuid`/`RecordForkLineage` move off `session_index` (a `channel_binding`/lineage column or dropped — TBD in the data-spine M5 body rewrite).
 - **Unchanged:** the CREATE/RESUME **split** (§2.1/§2.3 — the actual remap fix, which is table-independent), the **lowercase invariant** (§2.8), and the **consistency assertion** (§2.5). M5 changes only *where the create-vs-resume bit comes from*, not the split.
@@ -37,6 +37,18 @@ A binding modification from the user (blueprint **M6**), superseding this spec w
 
 ---
 
+## Revision note — Full edge adoption (agentgateway.dev) · 2026-06-18
+
+A platform-wide decision locked after this spec was first drafted (see `components/control-panel.md` + the `components/agent-gateway.md` reconciliation banner): **full edge adoption of [agentgateway.dev](https://agentgateway.dev) + option (a)** — one app = the routing **brain** + the Control Panel. This spec was written when the front door was a single thing called "the gateway / the Agent Gateway." That role is now split into **three** distinct collaborators the pod talks to; name them precisely.
+
+> **Terminology guard — THREE different "gateways" (aligned with `agent-gateway.md` / `control-panel.md` §0).** (1) **agentgateway** — the **external** Rust L7 edge proxy; the byte pipe clients connect to; **not our code**. It terminates the client transport, verifies the JWT, and **steers** each browser turn to this pod via EPP/InferencePool `x-gateway-destination-endpoint` (§9.6 Ingress). (2) **the brain** — our per-request routing logic (the `ext_proc` face of the Control Panel; formerly drilled as "the Agent Gateway"); `N` stateless replicas. It relays **coordination** — resolve identity, **mint** `session_uuid`, **wake** via CR-patch, **relay** a permission decision — **never bytes**. Its only direct pod call is the discrete **permission-relay POST** (§6.4 / agent-gateway §7.3). (3) **the channel-connector** — a **separate Deployment** that holds the outbound WeCom socket (agentgateway is inbound-only) and does the IM **fan-out** (§9.6 Ingress; agent-gateway §5/§8). The **egress / token-count path** (§9.6, §13-2) is a *fourth*, unrelated "gateway" — **deferred under M6** (outbound goes direct on the user's BYOK key); do not conflate it with the three above.
+
+Byte path: **client ⇄ agentgateway ⇄ pod** (browser) and **WeCom ⇄ channel-connector ⇄ pod** (IM) — the pod's `serialize_*` wire format (§0) is streamed/fanned out at the edge, never re-serialized. The **brain steps off the byte path**; it only coordinates.
+
+**What this changed in this doc (DONE 2026-06-18):** the generic "the gateway / the Agent Gateway" now reads as **the brain** (mint, wake, permission-relay, signed `account_id`) **except** where the text clearly means the byte path (→ **agentgateway**) or the IM socket/fan-out (→ **the channel-connector**). The §0/§1.2 strip-destination rows, the §9.6 Ingress rows, the wake path (§8.5), the permission relay (§6.4), and every mint/`is_first_run` reference are reconciled inline. **Nothing about the pod's *internal* mechanics changed** — the run/stream/permission/fork/rewind seams are identical; only the external collaborators are named correctly. Where this doc conflicts with control-panel.md on the edge/packaging shape, control-panel.md wins; this doc remains authoritative for the pod's internal contract.
+
+---
+
 ## 0. What is reused / stripped / modified from `priva/api`
 
 | Subsystem (current code) | Disposition | Where it goes / what changes |
@@ -48,7 +60,7 @@ A binding modification from the user (blueprint **M6**), superseding this spec w
 | PTY (`routers/pty.py`, `services/pty_session.py`) | **KEEP** | Live PTY is an idle-grace gate; runs against the per-account `/workspace`. Drop the `/tmp/priva_pty_preexec.log` write (`pty_session.py:75`). |
 | Fork seam (`routers/agent.py:546-572` → `sdk_fork_session`) | **KEEP, MODIFY** | Fork is SUPPORTED (data-spine C4). Add lineage registration + sole-writer child write (§3). |
 | File checkpoint/rewind (`options.py:262-264`; `routers/agent.py:503-543` `/rewind`) | **KEEP, MODIFY** | Local-disk-only on the PVC; gate on the in-pod lock; no remote `session_store` (§4). |
-| `serialization.py` (`serialize_message`/`serialize_result_message`/`get_event_label`) | **KEEP verbatim** | Pure functions, zero state, zero env reads — the wire format the gateway fans out. |
+| `serialization.py` (`serialize_message`/`serialize_result_message`/`get_event_label`) | **KEEP verbatim** | Pure functions, zero state, zero env reads — the wire format **agentgateway** streams through (browser) and the **channel-connector** fans out (IM); neither re-serializes. |
 | Retry engine (`retry.py:14-36`), `heal_orphan_tool_uses`/`strip_synthetic_records` logic | **KEEP logic, MODIFY path** | Correct loop hygiene; only the JSONL path derivation is multi-tenant-broken (§2.7). |
 | `options.py:260-261` `if session_id: options.resume = session_id` (BOTH create + resume) | **MODIFY** | The M2 remap root cause; split CREATE (`--session-id`) vs RESUME (`--resume`) from the server-supplied `is_first_run` (M5: `channel_binding.first_run_done` CAS / WebUI disk-guard — §2.2). |
 | Capture-and-remap (`service.py:469,487-489,508-510,522-523,820-829,847-855,1021-1025`) + `remap_session` (`permission_coordinator.py:126-130`) | **STRIP** | Deleted; replaced by the §2.5 consistency assertion. |
@@ -56,10 +68,10 @@ A binding modification from the user (blueprint **M6**), superseding this spec w
 | Module-global `registry = PermissionCoordinatorRegistry()` (`permission_coordinator.py:133`) | **MODIFY** | Becomes a per-pod `RunContext` on `app.state`, keyed on immutable lowercase `session_uuid` (§5). |
 | `_vision_sessions` sticky map (`service.py:104-115`) | **MODIFY** | Per-account runtime config from the data-spine; if sticky, a per-`session_uuid` `RunContext` field (§5). |
 | `_memfd_cache` (`options.py:31`), `_logger` (`options.py:20`) | **KEEP** | One CLI binary per pod; stateless logger. |
-| User DB / auth (`services/user_store.py`, `services/auth.py`, `routers/auth.py`, `routers/admin*.py`) | **STRIP** | → control plane + data-spine; the gateway injects a signed `account_id`. |
-| Channel daemon (`services/channels/*`, `routers/channels.py`) | **STRIP** | → Agent Gateway. The pod makes **no** IM calls. |
+| User DB / auth (`services/user_store.py`, `services/auth.py`, `routers/auth.py`, `routers/admin*.py`) | **STRIP** | → control plane + data-spine; **the brain** injects a signed `account_id` (via `ext_proc`). |
+| Channel daemon (`services/channels/*`, `routers/channels.py`) | **STRIP** | → **the channel-connector** (the lifted IM socket workers; agent-gateway §0/§5). The pod makes **no** IM calls. |
 | APScheduler (`services/scheduler/*`, `routers/scheduler.py`) | **STRIP** | → central scheduler; it wakes the pod to run a turn. |
-| Static SPA (`priva/web`, `main.py` StaticFiles mounts `:74-79`) | **STRIP** | → central WebUI/gateway. The pod is JSON/WS API only. |
+| Static SPA (`priva/web`, `main.py` StaticFiles mounts `:74-79`) | **STRIP** | → the **Control Panel** app's faces, edge-served by **agentgateway** (control-panel.md §5). The pod is JSON/WS API only. |
 | `crypto.py:10` hardcoded process-wide Fernet key | **STRIP from image** | Used by the one-time migrator only (data-spine §5); the operator-injected secret bundle replaces it — the pod never decrypts (§7, §13-3). |
 | `read_user_env` (`user_env.py`), plaintext `settings.local.json` creds | **STRIP** | → operator-injected in-memory bundle from the tmpfs secret mount (§7). |
 | Cross-tenant boot side effects: `list_users()` (`main.py:111`), OpenClaw auto-connect (`main.py:137-142`), perpetual `_temp_cleanup_loop` (`main.py:123-131`) | **STRIP / MODIFY** | The pod knows only its own account; the perpetual timer fights scale-to-zero (§1, §8). |
@@ -82,13 +94,13 @@ One scale-to-zero uvicorn pod per account. It keeps the JSON/WS API surface and 
 | `files_router`/`user_files_router` (`:211,217`), `user_data_router` (`:213`), `resource_router` (`:214`) | **KEEP** | Per-account file ops over the pod's own `/workspace`; write paths that wake the pod. |
 | `metrics_router` (`:219`) | **KEEP** | Per-pod Prometheus scrape. |
 | `/health` (`:189-201`) | **KEEP, minimized** | K8s liveness/readiness; reduce to `{status,version,time}`; add `/readyz` (RED until boot completes). Drop `_detect_local_ip`/`_public_host`/`_base_url`. |
-| `auth_router` (`:203`) | **STRIP** | → gateway + data-spine Accounts RPCs. |
+| `auth_router` (`:203`) | **STRIP** | → the brain (identity resolution) + data-spine Accounts RPCs. |
 | `admin_router`/`admin_files_router` (`:204-205`) | **STRIP** | Cross-tenant admin + whole-host file browser → control panel. |
-| `channels_router` (`:216`) | **STRIP** | → Agent Gateway. |
+| `channels_router` (`:216`) | **STRIP** | → the channel-connector (socket) + Control Panel (channel config API). |
 | `scheduler_router` (`:215`) | **STRIP** | → central scheduler. |
-| StaticFiles `/` + `/static` + scalar docs (`:74-79,187,221`), mimetypes font reg (`:9-15`) | **STRIP** | → central WebUI/gateway. |
+| StaticFiles `/` + `/static` + scalar docs (`:74-79,187,221`), mimetypes font reg (`:9-15`) | **STRIP** | → the Control Panel faces, edge-served by agentgateway. |
 
-**Lifespan strips.** `get_user_store().list_users()` (`:111`) and the OpenClaw auto-connect loop over ALL users (`:137-142`) are multi-tenant violations — deleted. `_temp_cleanup_loop` perpetual `asyncio.sleep(3600)` (`:123-131`) is an artificial non-idle reason that fights scale-to-zero — replaced by an on-wake bounded sweep / central `ExpireTempFiles` RPC. `cleanup_expired_files()` itself iterates **all** users (`temp_files.py` `base.iterdir()`) and must be rescoped to the single `account_id` before any in-pod sweep can run, since the pod mounts only `/export/<account_id>`. `seed_bundled_skills()` (`:106`) is KEPT but retargeted to the per-account `config_home` (today it writes `priva_home()/resource/skills`, default `~/.config/priva` — unwritable under RO-rootfs). `CORSMiddleware allow_origins=["*"]` narrows to the gateway/mesh origin.
+**Lifespan strips.** `get_user_store().list_users()` (`:111`) and the OpenClaw auto-connect loop over ALL users (`:137-142`) are multi-tenant violations — deleted. `_temp_cleanup_loop` perpetual `asyncio.sleep(3600)` (`:123-131`) is an artificial non-idle reason that fights scale-to-zero — replaced by an on-wake bounded sweep / central `ExpireTempFiles` RPC. `cleanup_expired_files()` itself iterates **all** users (`temp_files.py` `base.iterdir()`) and must be rescoped to the single `account_id` before any in-pod sweep can run, since the pod mounts only `/export/<account_id>`. `seed_bundled_skills()` (`:106`) is KEPT but retargeted to the per-account `config_home` (today it writes `priva_home()/resource/skills`, default `~/.config/priva` — unwritable under RO-rootfs). `CORSMiddleware allow_origins=["*"]` narrows to the agentgateway/mesh origin.
 
 ### 1.3 The dual-set `CLAUDE_CONFIG_DIR` rule (load-bearing)
 
@@ -97,7 +109,7 @@ One scale-to-zero uvicorn pod per account. It keeps the JSON/WS API surface and 
 - **Process env at boot:** `os.environ["CLAUDE_CONFIG_DIR"] = config_home` and `os.environ["HOME"] = account_mount_home`. Safe because one pod == one account (process-global == account-global). This is the **only** thing that makes the SDK's in-process helpers resolve correctly: `_get_project_dir`/`_find_project_dir` (used by the **in-process** fork write `session_mutations.py:298,547` and by the kept `heal`/`strip` path helpers) read `os.environ` **only** (`sessions.py:144`), *not* `options.env`. `_get_projects_dir(env_override)` honors the override (`sessions.py:130-141`) but the fork/heal call sites do not pass it.
 - **`options.env` per run:** `env_dict["CLAUDE_CONFIG_DIR"] = config_home` — authoritative for the spawned CLI (`subprocess_cli.py:430-436` overlays `options.env` onto inherited env, verified).
 
-`PRIVA_HOME` must also be pinned at boot to a writable PV path (it backs `priva_home()` → audit default + skill seeding; `paths.py:14` falls back to `Path.home()/.config`, unwritable under RO-rootfs). `server.work_dir` (default `~/priva_workspace`, `config.py:15`, written by `get_user_workspace`'s `makedirs`, `auth.py:141`) and the credential surface must likewise resolve onto the PVC (§7, §9). The data-spine §1.6 CI ban on importing `claude_agent_sdk._internal.sessions` in the multi-tenant parent is carved narrowly: the **in-pod fork/rewind/heal** call sites (single-account, `os.environ` correct) are exempt and gated by a boot-time `assert os.environ["CLAUDE_CONFIG_DIR"] == config_home`; the ban still holds for the data-plane/gateway. This forecloses ever co-tenanting two accounts in one pod (the only safe alternative would be a future SDK whose mutation helpers thread an explicit `env_override` instead of reading `os.environ`).
+`PRIVA_HOME` must also be pinned at boot to a writable PV path (it backs `priva_home()` → audit default + skill seeding; `paths.py:14` falls back to `Path.home()/.config`, unwritable under RO-rootfs). `server.work_dir` (default `~/priva_workspace`, `config.py:15`, written by `get_user_workspace`'s `makedirs`, `auth.py:141`) and the credential surface must likewise resolve onto the PVC (§7, §9). The data-spine §1.6 CI ban on importing `claude_agent_sdk._internal.sessions` in the multi-tenant parent is carved narrowly: the **in-pod fork/rewind/heal** call sites (single-account, `os.environ` correct) are exempt and gated by a boot-time `assert os.environ["CLAUDE_CONFIG_DIR"] == config_home`; the ban still holds for the data-plane/brain. This forecloses ever co-tenanting two accounts in one pod (the only safe alternative would be a future SDK whose mutation helpers thread an explicit `env_override` instead of reading `os.environ`).
 
 ### 1.4 De-singletonized `create_app()`
 
@@ -140,11 +152,11 @@ That capture-and-remap is the **running-session id mutation** M2 exists to kill.
 
 ### 2.2 `is_first_run` — server-supplied per turn (M5)
 
-`is_first_run` decides CREATE vs RESUME and is **server-authoritative**, supplied per turn by the gateway/scheduler — but under **M5 there is no `session_index.status`** to read it from. Its source is: **IM** = an atomic `first_run_done` 0→1 CAS on `channel_binding` (data-spine §2.4/§3.4); **WebUI** = empty `session_id` ⇒ CREATE (the gateway just minted the uuid), populated `session_id` ⇒ RESUME guarded by an NFS-safe `stat` of the derived path (absent ⇒ reconcile-as-create, §2.5). It is **never** inferred from a disk probe alone, a CLI `system.init`/`result` event, or merely whether the client supplied a `session_id`. The current `stream_id = session_id or str(uuid.uuid4())` (`service.py:684,995`) does the opposite — it infers "create" from the absence of a client id and **mints its own uuid4**, both forbidden under M2/M5 (the pod never mints). Both are deleted; `session_uuid` + `is_first_run` are required inputs.
+`is_first_run` decides CREATE vs RESUME and is **server-authoritative**, supplied per turn by the brain/scheduler — but under **M5 there is no `session_index.status`** to read it from. Its source is: **IM** = an atomic `first_run_done` 0→1 CAS on `channel_binding` (data-spine §2.4/§3.4); **WebUI** = empty `session_id` ⇒ CREATE (the brain just minted the uuid), populated `session_id` ⇒ RESUME guarded by an NFS-safe `stat` of the derived path (absent ⇒ reconcile-as-create, §2.5). It is **never** inferred from a disk probe alone, a CLI `system.init`/`result` event, or merely whether the client supplied a `session_id`. The current `stream_id = session_id or str(uuid.uuid4())` (`service.py:684,995`) does the opposite — it infers "create" from the absence of a client id and **mints its own uuid4**, both forbidden under M2/M5 (the pod never mints). Both are deleted; `session_uuid` + `is_first_run` are required inputs.
 
 The IM `first_run_done` CAS returns `True` to exactly one caller (single-writer data-plane), eliminating the TOCTOU where two surfaces both CREATE over one JSONL; the pod never re-reads any status on the hot path. `is_first_run` is added to `AgentRunRequest`/`WsInitFrame` (today they carry only `session_id`, `models/agent.py:24,209`).
 
-**Surface contract (locked §13-7).** New-vs-resume is decided at the surface, but the **gateway mints the canonical `session_uuid` — the client never invents one** (a client-chosen id could violate the uniqueness / no-remap invariant). **WebUI:** an **empty** `session_id` for a new session (gateway mints locally + returns the `session_uuid`, which the UI reuses on every later turn) or a populated `session_id` to RESUME a history session. **IM channels:** always bound to a **fixed** `session_uuid` in `channel_binding`; a user **reset** (`RebindChannel`, resetting `first_run_done=0`) is the only way to mint a new one. The empty/new case is `is_first_run=True`; the populated case is a pure RESUME.
+**Surface contract (locked §13-7).** New-vs-resume is decided at the surface, but the **brain mints the canonical `session_uuid` — the client never invents one** (a client-chosen id could violate the uniqueness / no-remap invariant). **WebUI:** an **empty** `session_id` for a new session (the brain mints locally + returns the `session_uuid`, which the UI reuses on every later turn) or a populated `session_id` to RESUME a history session. **IM channels:** always bound to a **fixed** `session_uuid` in `channel_binding`; a user **reset** (`RebindChannel`, resetting `first_run_done=0`) is the only way to mint a new one. The empty/new case is `is_first_run=True`; the populated case is a pure RESUME.
 
 ### 2.3 The two invocation shapes (the whole ballgame)
 
@@ -174,7 +186,7 @@ A defensive `assert not (options.session_id and options.resume)` lives in `build
 ### 2.4 State machine — one session's id is immutable for life
 
 ```
-        mint (gateway-local WebUI / BindChannel IM) — lowercase session_uuid, NO status row (M5)
+        mint (brain-local WebUI / BindChannel IM) — lowercase session_uuid, NO status row (M5)
                     │
                     ▼  CREATE: --session-id <uuid>
               ┌───────────┐                                   ┌──────────────────┐
@@ -215,7 +227,7 @@ The split (`options.py:260-261`), the six-site capture deletion + `remap_session
 
 ### 2.7 Path derivation — in-pod via the SDK (M5)
 
-Under **M5 the platform persists no path metadata** (no `session_index`, no `cwd_hash`/`config_home` column). Because **one pod serves exactly one account**, the pod resolves its own JSONL path **in-process via the SDK** — `os.environ["CLAUDE_CONFIG_DIR"]` is correct for this single account (the §1.3 dual-set), so the SDK's `os.environ`-only helpers (`_get_project_dir`/`_find_project_dir`, `sessions.py:144`) resolve to the right directory. This is exactly the single-account exception to the data-spine §1.6 ban (which still forbids the *data-plane/gateway* from importing `_internal.sessions`):
+Under **M5 the platform persists no path metadata** (no `session_index`, no `cwd_hash`/`config_home` column). Because **one pod serves exactly one account**, the pod resolves its own JSONL path **in-process via the SDK** — `os.environ["CLAUDE_CONFIG_DIR"]` is correct for this single account (the §1.3 dual-set), so the SDK's `os.environ`-only helpers (`_get_project_dir`/`_find_project_dir`, `sessions.py:144`) resolve to the right directory. This is exactly the single-account exception to the data-spine §1.6 ban (which still forbids the *data-plane/brain* from importing `_internal.sessions`):
 
 ```
                     <config_home>/projects/<cwd_hash>/<session_uuid>.jsonl
@@ -232,7 +244,7 @@ Under **M5 the platform persists no path metadata** (no `session_index`, no `cwd
 
 ### 2.8 Lowercase invariant
 
-`_UUID_RE` is compiled `IGNORECASE` (`sessions.py:47`) and `_validate_uuid` returns its input **verbatim** (`sessions.py:69-72`). On a case-sensitive FS, mixed-case and lowercase `.jsonl` are different files. Enforcement is layered (M5 — **no DB `CHECK`, no `MintSession`**): the **mint lowercases `uuid4()`** (gateway-local for WebUI / `BindChannel` for IM); the pod lowercases before `options.session_id`/`options.resume` and any derived path; the §2.5 assertion compares lowercase byte-for-byte. The fork child id is `str(uuid4())` (already lowercase, `session_mutations.py:400`) but is normalized anyway before it becomes a PK; the real lowercase risk is a caller-supplied resume/`session_id`, not the SDK-minted fork id.
+`_UUID_RE` is compiled `IGNORECASE` (`sessions.py:47`) and `_validate_uuid` returns its input **verbatim** (`sessions.py:69-72`). On a case-sensitive FS, mixed-case and lowercase `.jsonl` are different files. Enforcement is layered (M5 — **no DB `CHECK`, no `MintSession`**): the **mint lowercases `uuid4()`** (brain-local for WebUI / `BindChannel` for IM); the pod lowercases before `options.session_id`/`options.resume` and any derived path; the §2.5 assertion compares lowercase byte-for-byte. The fork child id is `str(uuid4())` (already lowercase, `session_mutations.py:400`) but is normalized anyway before it becomes a PK; the real lowercase risk is a caller-supplied resume/`session_id`, not the SDK-minted fork id.
 
 ---
 
@@ -293,7 +305,7 @@ fork(P) → child C   (M5: lineage lives in the JSONL, no session_index row)
 | Fork kind | Wakes the pod? | Why |
 |---|---|---|
 | Resume-time `--fork-session` | already awake | the pod is mid-run; the CLI writes the child under the live process |
-| Out-of-band `/fork` | **yes** (if asleep) | the owning pod must perform the `O_EXCL` write under the sole-writer lock; the gateway wakes it via CR-patch before routing the fork |
+| Out-of-band `/fork` | **yes** (if asleep) | the owning pod must perform the `O_EXCL` write under the sole-writer lock; the brain wakes it via CR-patch before the fork is routed (to this pod via agentgateway) |
 
 Reading lineage (`fork_count`, the child transcript) is always wake-free via the `state-reader`; only *writing* the child file is gated on the pod. The fork write counts as an in-flight `SessionRun` (§5) and pins the pod awake for its duration; the operator cannot scale-to-zero mid-fork.
 
@@ -341,7 +353,7 @@ RO rootfs / $TMPDIR(tmpfs)          ← NEVER host snapshots (RO fails the write
 `POST /rewind` (`routers/agent.py:503-543`) refuses while a run is live (409), runs with `permission_mode="bypassPermissions"` + `enable_file_checkpointing=True`, then `client.query("")` → first replayed frame → `client.rewind_files(checkpoint_uuid)`. The MODIFY deltas:
 
 - **Gate on the in-pod lock, not the registry.** The current `if registry.get(req.session_id)` (`agent.py:517`) is too weak — an `agent_run_events` run that never registered a coordinator, a live PTY editing the same workspace, or a scheduler run would be missed. The 409-while-live guard consults the **authoritative in-pod single-writer `asyncio.Lock` for `session_uuid`** (§5, decision 18). Rewind is itself a **writer** (it restores files on the PVC), so it **acquires** that lock for the whole operation and counts as an in-flight `SessionRun`; the ephemeral `ClaudeSDKClient` spawn inside must **not** re-acquire it (no self-deadlock — the handler holds it, the spawn is awaited inline). Rewind also 409s on a **live PTY** on the same workspace and on a **pending approval** for the session, so it cannot race a half-executed approved tool or a PTY edit.
-- **`cwd` is `/workspace`, not `get_user_workspace(user)`** (`agent.py:514`); `req.session_id` is lowercased; the audit `session.rewound` (`agent.py:531-537`) writes through the per-account audit writer (`/audit/<account_id>/`), actor = gateway-asserted `account_id`.
+- **`cwd` is `/workspace`, not `get_user_workspace(user)`** (`agent.py:514`); `req.session_id` is lowercased; the audit `session.rewound` (`agent.py:531-537`) writes through the per-account audit writer (`/audit/<account_id>/`), actor = brain-asserted `account_id`.
 - **The rewind turn is a real turn.** `client.query("")` writes a `{type:user, content:""}` message into the resumed transcript and triggers a CLI turn. Therefore rewind (i) acquires a concurrency slot (§5) and self-reports its token usage like any turn (spend deferred — M6, §7); (ii) its `system.init`/`ResultMessage` run through the §2.5 assertion (it is a normal resumed turn, **not** a fork — it must pass; a Phase-0 probe confirms the resumed empty-turn does not autocompact-mint a new id); (iii) the design does **not** claim "transcript untouched" for the empty-turn path — the empty user message is appended. (If a Phase-0 probe shows `replay-user-messages` can surface a `UserMessage` frame without sending a new turn, drop the `query("")`.)
 - **No M2 break.** Rewind always RESUMEs an existing immutable `session_uuid`; after the §2 split it forces the RESUME branch (`options.resume = sid`, `options.session_id = None`, `options.fork_session = False`).
 
@@ -442,7 +454,7 @@ Because asyncio is single-threaded, the lock prevents two coroutines from interl
 ```
 admit(sid, kind):                              (sid = lower(session_uuid), required — never None)
   async with _admission:
-    if _draining:                         -> 503 Draining (gateway re-buffers)
+    if _draining:                         -> 503 Draining (the brain re-buffers)
     if current task already holds Lock[sid] -> reentrant no-op (return existing run)
     if sid in {r.session_uuid for r in active.values()}:   # same session
         pass                              # does NOT consume a cap slot; serializes on Lock[sid]
@@ -473,7 +485,7 @@ Lock-map GC is **retain-with-LRU** (bounded like `_VISION_SESSIONS_MAX`), never 
  │ Lock[B] held ── run B (CLI)        len == cap                 │
  │ Lock[C] held ── rewind C                                      │
  │ 2nd turn for A ─▶ waits Lock[A]  (NOT a new cap slot)         │
- │ admit(D,"run"): D not active, len>=cap ─▶ 429 to gateway      │
+ │ admit(D,"run"): D not active, len>=cap ─▶ 429 to caller       │
  └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -496,7 +508,7 @@ The `fork_session=True` **run flag** (mechanism 2, §3.2) is treated as `kind="f
 4. All `RunContext` maps keyed on `lower(session_uuid)`; `checkpoint_uuid` is opaque, never transformed.
 5. No self-deadlock: admit at one layer + reentrancy no-op; nested ops never re-acquire.
 6. Drain-safe: every in-flight op is a `SessionRun` in `active`; `_draining` blocks new admits; SIGTERM awaits `active` empty (§8.4); `active` non-empty ⇒ non-idle.
-7. No pod-minted ids: `admit` requires a platform-minted `session_uuid`. The gateway/control-plane MUST mint for **every** CREATE including ephemeral/subagent runs (`subagents.py:144` is routed a minted child/fresh `session_uuid`, never `None`).
+7. No pod-minted ids: `admit` requires a platform-minted `session_uuid`. The brain/control-plane MUST mint for **every** CREATE including ephemeral/subagent runs (`subagents.py:144` is routed a minted child/fresh `session_uuid`, never `None`).
 8. WS and SSE permission paths both register into `RunContext.coordinators[session_uuid]` (today the WS path bypasses the registry via `coordinator_out`, `agent.py:734-747`, while only SSE registers at `service.py:1003`) so `/permission/respond` resolves on either path.
 
 ---
@@ -527,7 +539,7 @@ The `asyncio.Future` the run awaits **never leaves the pod** (decision 6). Redis
 └──────▲────────────────────────────────▲─────────┘
        │ resolve(request_id, decision)    │ heartbeat
        │ (local OR via in:reply relay)    │
-  gateway replica Rx (reply hours later)  operator reconcile
+  brain replica Rx (reply hours later)    operator reconcile
   HGETALL approval:index → {session_uuid,pod}     SCARD pin:approval > 0 ⇒ REFUSE sleep
   status==resolved? idempotent no-op
   owns pod WS? POST /permission/respond : RPUSH in:reply:{request_id}
@@ -539,11 +551,11 @@ The Tier-1 writes must **confirm before** the Future is awaited, else a pod dyin
 
 ### 6.3 Index lifecycle (idempotent dup-guard)
 
-On resolve/timeout/cancel the `finally` does **`SREM pin:approval` + `HSET approval:index status=resolved` + re-`EXPIRE` 25h** — it does **NOT `DEL` the index**. Keeping the index (status=resolved) is what makes a duplicate/late reply (two replicas, retried card tap, `in:reply` racing a direct POST) resolve **exactly once**: the gateway `HGETALL`s it, sees `status=resolved`, and idempotently no-ops instead of wrongly telling the user "expired, re-ask" for a request that was actually answered. `resolve()` already guards on `future.done()` (`permission_coordinator.py:99`). The index is `DEL`-ed only by the boot-purge of orphans (§6.5) and by TTL expiry. `cancel_all` (`:106-110`) and the timeout branch (`:68-77`) must clear Tier-1 (SREM pin + status=resolved), not just the in-memory `pending` dict.
+On resolve/timeout/cancel the `finally` does **`SREM pin:approval` + `HSET approval:index status=resolved` + re-`EXPIRE` 25h** — it does **NOT `DEL` the index**. Keeping the index (status=resolved) is what makes a duplicate/late reply (two replicas, retried card tap, `in:reply` racing a direct POST) resolve **exactly once**: the brain `HGETALL`s it, sees `status=resolved`, and idempotently no-ops instead of wrongly telling the user "expired, re-ask" for a request that was actually answered. `resolve()` already guards on `future.done()` (`permission_coordinator.py:99`). The index is `DEL`-ed only by the boot-purge of orphans (§6.5) and by TTL expiry. `cancel_all` (`:106-110`) and the timeout branch (`:68-77`) must clear Tier-1 (SREM pin + status=resolved), not just the in-memory `pending` dict.
 
 ### 6.4 Cross-replica / late-reply routing
 
-A reply may arrive hours later on any gateway replica (sticky-L4 is best-effort; the flow is the blueprint's "2 · Permission rendezvous (reply hours later)", `multi-tenant-platform.md:260-272`). `POST /permission/respond` (`agent.py:485`) changes from `registry.get(request.session_id)` to resolve `session_uuid → RunContext.coordinators → coordinator.resolve(request_id, …)`; the gateway sends `session_uuid` (from the index HASH). The `owner_username` 403 (`:488-490`) becomes a **hard** assertion that the gateway-asserted actor **== the session's owning account**: **no impersonator may answer an approval (locked §13-6)** — a permission request is answerable only by the user, via their authenticated WebUI session or their bound IM channel; a `resolve` whose actor ≠ the owning account is **rejected (403)** even if audited. (This reverses blueprint decision-10's "impersonator may answer approvals, audited"; impersonation may still spend/act under audit, just not answer approvals.) If the receiving replica does not own the pod WS, it `RPUSH`es `in:reply:{request_id}`; the replica owning the WS `BLPOP`s and POSTs on its held connection.
+A reply may arrive hours later on any brain replica (sticky-L4 is best-effort; the flow is the blueprint's "2 · Permission rendezvous (reply hours later)", `multi-tenant-platform.md:260-272`). `POST /permission/respond` (`agent.py:485`) changes from `registry.get(request.session_id)` to resolve `session_uuid → RunContext.coordinators → coordinator.resolve(request_id, …)`; the brain sends `session_uuid` (from the index HASH). The `owner_username` 403 (`:488-490`) becomes a **hard** assertion that the brain-asserted actor **== the session's owning account**: **no impersonator may answer an approval (locked §13-6)** — a permission request is answerable only by the user, via their authenticated WebUI session or their bound IM channel; a `resolve` whose actor ≠ the owning account is **rejected (403)** even if audited. (This reverses blueprint decision-10's "impersonator may answer approvals, audited"; impersonation may still spend/act under audit, just not answer approvals.) If the receiving replica does not own the pod WS, it `RPUSH`es `in:reply:{request_id}`; the replica owning the WS `BLPOP`s and POSTs on its held connection.
 
 ### 6.5 Boot-purge (zombie-pin fix) + the operator gate
 
@@ -637,8 +649,8 @@ There is no signal handling in the kept lifespan (`main.py:158-171` only cancels
 
 ```
 SIGTERM:
- [1] readiness → NotReady (gateway/operator stop routing new turns)
- [2] _draining = True; new admits → 503 (gateway re-buffers to inbox)
+ [1] readiness → NotReady (agentgateway/operator stop routing new turns)
+ [2] _draining = True; new admits → 503 (the brain re-buffers to inbox)
  [3] for each in-flight SessionRun: client.interrupt() (stop at next tool boundary,
        client.py:313) → await run finish/flush JSONL (bounded by grace) → client.disconnect()
        (terminate CLI subprocess, client.py:608); force-kill on teardown failure
@@ -654,7 +666,7 @@ SIGTERM:
 ### 8.5 Wake path — CR patch is the sole authority
 
 ```
-gateway/scheduler wants to wake account_id
+the brain/scheduler wants to wake account_id
   → pre-gate (active + under cap)  → durable Tier-1 inbox RPUSH (ack "on it…" only after this)
   → SET awake:lock:{account_id} NX PX~10s  → CR PATCH spec.wake.requestedAt  ◀ ONLY scale-up trigger
   → (optional) PUBLISH wake:pod  (reconcile NUDGE only)
@@ -758,7 +770,7 @@ FileCanvas (`built_in.py:64-82`) computes `_workspace_root = os.path.realpath(cw
 | Egress | DNS (kube-dns) | allow |
 | Egress | KMS | **deny** (the pod holds no KMS path — §7 SB1/SB2) |
 | Egress | other tenant pods | **deny** (default-deny pod-to-pod still holds) |
-| Egress | IM endpoints (WeCom/Feishu/Discord/OpenClaw) | **deny** (the gateway owns IM) |
+| Egress | IM endpoints (WeCom/Feishu/Discord/OpenClaw) | **deny** (the channel-connector owns the IM socket) |
 
 The `state-reader`/`audit-reader` read the **volume**, never the pod, so the pod's NetworkPolicy needs **no** reader rule. **Egress security gateway DEFERRED (M6 — was the single forced outbound HTTP path, §13-2):** the MCP validator (`mcp/validator.py`) and command/HTTP hooks (`hooks/executor.py`, `hooks/builder.py`) make their outbound calls **directly** "for the moment" — no allow-list, no forced traversal, no credential injection at egress. **All outbound creds (the BYOK LLM key, MCP, hooks) ride the operator-injected bundle (§7 SB1)**, not an egress proxy. The default-deny-internet rule is relaxed (operator §2.4); **pod-to-pod stays default-deny**. *Reversible: re-add the forward proxy + allow-lists + the deny-direct-internet rule to restore controlled egress (and, with M6 lifted, metering).*
 
@@ -776,7 +788,7 @@ The `state-reader`/`audit-reader` read the **volume**, never the pod, so the pod
 | `main.py:123-131` | Replace perpetual `_temp_cleanup_loop` with on-wake bounded sweep / `ExpireTempFiles`; rescope `cleanup_expired_files()` to the single account. |
 | `main.py:96-171` (lifespan) | Insert the §11 boot: `os.environ["CLAUDE_CONFIG_DIR"]/["HOME"]/["PRIVA_HOME"]` dual-set → data-plane client → **load operator-injected secret bundle from the tmpfs mount (no KMS call)** → write sanitized `$CLAUDE_CONFIG_DIR/.claude.json` → signed-sentinel base_url probe → Redis T1+T2 → spend reconcile → orphan-pin purge → eager `get_audit_logger(base_dir=/audit/<A>)` → canonicalize `/workspace` realpath → construct `app.state.run_ctx` + SIGTERM handler + heartbeat → register route/awake → `Readyz` green. |
 | `main.py:106` | Retarget `seed_bundled_skills()` to the per-account `config_home`. |
-| `main.py:179-185` | Narrow CORS to the gateway/mesh origin. |
+| `main.py:179-185` | Narrow CORS to the agentgateway/mesh origin. |
 | `options.py:260-261` | Replace `if session_id: options.resume = session_id` with the `is_first_run` CREATE/RESUME split; add `is_first_run`, `config_home` params; `sid=session_uuid.lower()`; `assert not (session_id and resume)`. |
 | `options.py:265-266` | Rebind fork guard to the RESUME shape: `if fork_session and options.resume:` (`session_id` is None on the fork path). |
 | `options.py:160,205` | Inject `env_dict["CLAUDE_CONFIG_DIR"]=config_home`; set `ANTHROPIC_BASE_URL`/`AUTH_TOKEN` from the operator-injected **BYOK** bundle (M6 — no force-override-to-a-meter); add `assert options.session_store is None` when checkpointing. |
@@ -806,7 +818,7 @@ The `state-reader`/`audit-reader` read the **volume**, never the pod, so the pod
 | `crypto.py:10` | Delete the hardcoded Fernet key from the pod image (migrator-only). |
 | `config.py` (new fields) | `approval_window=24h`, `idle_grace_seconds` (default **1800s/30min**), `min_alive_after_wake_s`, `termination_drain_max_s` (≈300s), Redis T1/T2 + data-plane addr + `SECRET_MOUNT` tmpfs path (**no KMS addr**), `checkpoint_budget_mb` (≈2048); read-only from the CRD/quota. |
 | `services/secrets/*` (NEW) | `boot.py` (loads the operator-injected tmpfs secret mount → in-memory `SecretBundle`), `claude_config.py` (sanitized `.claude.json`), `baseurl_probe.py` (signed-sentinel). **No `kms.py` in the pod** — KMS unwrap lives in the operator (§7 SB1/SB2, §13-3). |
-| `services/dataplane/client.py` (NEW) | Thin client: `Get*Config` + (IM) `BindChannel`/`RebindChannel`/`ClaimFirstRunIM`. **M5: no `MintSession`/`GetSession`/`TouchSession`/`RecordForkLineage`** — WebUI mints are gateway-local, sessions live on the filesystem, lineage is the JSONL `forkedFrom` header, listing/`fork_count` via the state-reader. **No `GetWrappedSecret`** — the operator fetches+unwraps secrets at spawn, not the pod. |
+| `services/dataplane/client.py` (NEW) | Thin client: `Get*Config` + (IM) `BindChannel`/`RebindChannel`/`ClaimFirstRunIM`. **M5: no `MintSession`/`GetSession`/`TouchSession`/`RecordForkLineage`** — WebUI mints are brain-local, sessions live on the filesystem, lineage is the JSONL `forkedFrom` header, listing/`fork_count` via the state-reader. **No `GetWrappedSecret`** — the operator fetches+unwraps secrets at spawn, not the pod. |
 | `AgentTenant` CRD / operator (NEW manifests) | securityContext (§9.2), scoped mounts (§9.4), `runtimeClassName`, `replicas:1 strategy:Recreate`, per-tenant NetworkPolicy (§9.6), `terminationGracePeriodSeconds`. No k8s/Dockerfile manifests exist in the repo today. |
 
 ---
@@ -882,6 +894,6 @@ All seven open questions were answered by the user on 2026-06-18 and are now loc
 
 5. **Per-user CSI access-point for pods; state-reader broad RO (§9.4) — RESOLVED.** The operator emits a **per-user PV / CSI access-point whose root *is* the account subdir** as the default pod mount (parent unreachable by construction; natural per-user quota); `subPath:<account_id>` on a shared RWX PVC is the adequate fallback. The isolation is **asymmetric by design**: pods get narrow RW to their own subdir; the trusted **`state-reader`/`audit-reader` get broad read-only** scope across all users (whole-tree mount) to serve the control panel's wake-free cross-tenant reads. The chosen CSI driver must support per-user uid + `root_squash`.
 
-6. **No impersonation answering of approvals (§6.4, decision 10) — RESOLVED.** A permission request is answerable **only by the user** — via their authenticated WebUI session (their own key) or their bound IM channel. The pod **rejects** any `resolve` whose gateway-asserted actor ≠ the session's owning account, **even an audited impersonator**. This **reverses** blueprint decision-10's "impersonator may answer approvals, audited." (Impersonation may still **spend the target's budget / use their tools, audited**, per the rest of decision 10 — only approval-answering is forbidden. If impersonation should be fully out, say so.)
+6. **No impersonation answering of approvals (§6.4, decision 10) — RESOLVED.** A permission request is answerable **only by the user** — via their authenticated WebUI session (their own key) or their bound IM channel. The pod **rejects** any `resolve` whose brain-asserted actor ≠ the session's owning account, **even an audited impersonator**. This **reverses** blueprint decision-10's "impersonator may answer approvals, audited." (Impersonation may still **spend the target's budget / use their tools, audited**, per the rest of decision 10 — only approval-answering is forbidden. If impersonation should be fully out, say so.)
 
-7. **Gateway mints `session_uuid`; client never invents it (§2.2) — RESOLVED.** New-vs-resume is decided at the surface: **WebUI** sends an **empty** session id for a new session (session id in the body ⇒ resume); **IM** is always bound to a **fixed** `session_uuid` in `channel_binding` (a user **reset** mints a new one). On the empty/new case the **gateway mints** the canonical `session_uuid` (lowercase UUIDv4) **locally** (M5 — no `session_index` row/CAS), returns it, and the surface uses it thereafter — the **client never supplies/invents a uuid** (a client-chosen id could violate uniqueness / the no-remap invariant). `is_first_run` is server-derived (**IM** = `first_run_done` CAS on `channel_binding`; **WebUI** = empty-id + disk-existence guard, M5 §2.2), supplied per turn for **every** CREATE incl. ephemeral/subagent runs.
+7. **The brain mints `session_uuid`; client never invents it (§2.2) — RESOLVED.** New-vs-resume is decided at the surface: **WebUI** sends an **empty** session id for a new session (session id in the body ⇒ resume); **IM** is always bound to a **fixed** `session_uuid` in `channel_binding` (a user **reset** mints a new one). On the empty/new case the **brain mints** the canonical `session_uuid` (lowercase UUIDv4) **locally** (M5 — no `session_index` row/CAS), returns it, and the surface uses it thereafter — the **client never supplies/invents a uuid** (a client-chosen id could violate uniqueness / the no-remap invariant). `is_first_run` is server-derived (**IM** = `first_run_done` CAS on `channel_binding`; **WebUI** = empty-id + disk-existence guard, M5 §2.2), supplied per turn for **every** CREATE incl. ephemeral/subagent runs.
