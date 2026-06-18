@@ -222,6 +222,19 @@ The one package every service depends on (a `uv` workspace path-dep). Contents:
 
 > Rule: `libs/common` may **not** import any service. Services import `common` + their own package only. This is the import boundary that keeps the carve clean (enforced in Phase 0).
 
+### 6.1 Extraction order within `libs/common` (dependency-grounded, verified 2026-06-19)
+
+Move order is forced by the real import edges (measured on the monolith). Each move uses a **re-export shim**: the real code lands in `priva_common`, the old `api.*` path becomes `from priva_common.X import *`, so the monolith keeps booting and **no importer changes** until its service is extracted.
+
+1. **`config`** (leaf — stdlib + pydantic only; 31 importers). **RESHAPE, not a pure move:** today `Settings.yaml_file = Path(__file__).parent.parent / "config.yaml"` (`config.py:137`) is `__file__`-relative and breaks once the file moves. Repoint to an env var (`PRIVA_CONFIG_FILE`, default `./config.yaml`) so each service loads its own config.
+2. **`logging`** (imports `config`; 47 importers) — `get_app_logger` / `AccessLogMiddleware` / `configure_logging`.
+3. **`crypto`** + **`_pagination`** (each imports `logging`; 5 + 4 importers) — clean once logging is in.
+4. **`models/*`** (38 importers) — the shared DTOs.
+5. **`serialization`** (imports `models` **and** `claude_sdk/retry.SYNTHETIC_MODEL`, a *pod* module; 4 importers). **RESHAPE:** lift `SYNTHETIC_MODEL` into `priva_common` (a shared wire/retry constant) so `serialization` carries no pod dependency.
+6. **`redis_catalog`** (NEW — pure addition, no shim).
+
+Acceptance per move: `PYTHONPATH=priva:libs/common/src python -c "import api.main"` still resolves (uv not required for this check).
+
 ---
 
 ## 7. The inversion (the seam everything hangs off)
@@ -312,3 +325,22 @@ Each phase is independently shippable and reversible; the monolith keeps running
 | **OQ-5** | **`/models` list source** under BYOK | static price-card/config (control-panel) **vs.** probe the user's provider (pod) |
 
 None block Phase 0–1. **OQ-2 is resolved (`uv` workspace);** the remaining items (OQ-1/3/4/5) are decided when their phase lands.
+
+---
+
+## 13. Local launch / dev mode
+
+**Yes — every subsystem can run on a laptop, and the split makes this *easier*, not harder.** Today the three daemons import `claude_sdk` in-process (tangled); after the split every boundary is gRPC/HTTP/Redis, so each service runs standalone and is wired by env vars pointing at `localhost` instead of cluster Service DNS.
+
+**Runs as a plain process (no K8s):** data-spine (gRPC + SQLite/Redis), control-panel (its 3 listeners), agent-pod (one process per dev tenant), channel-connector (+ Redis lease + WeCom socket), scheduler (+ Redis), state-reader, web (Vite dev). All just `uv run`.
+
+**The only K8s-coupled behaviors** (everything else is portable):
+- **operator (kopf)** — reconciles `AgentTenant` CRDs + scales Deployments; with no K8s there is nothing to reconcile.
+- **scale-0↔1 / wake** — the brain's "CR-patch wake" assumes the operator scales pods.
+- **agentgateway** — the Rust edge; but it runs as a **standalone binary with a static config**, not only via CRDs.
+
+**Two local modes:**
+- **(A) compose, NO K8s — the everyday loop:** all Python services + web as processes; **agentgateway as a local binary** (static config) *or* a brain dev-edge that skips it; **no operator** — agent-pod(s) always-on, and the brain's wake becomes "ensure the pod is reachable." Full request path locally, minus autoscaling. Fast.
+- **(B) local K8s (kind/k3d) — full fidelity:** the real operator + CRDs + agentgateway CRDs + scale-0↔1, for testing the wake/scale dynamics.
+
+**Design rule this imposes on the split (so mode A stays trivial):** the two K8s-coupled seams — **wake/scale** (brain→operator) and **steer/edge** (brain↔agentgateway) — each sit behind a small interface with a **dev impl** (always-on pod + localhost steer) and a **prod impl** (CR-patch + EPP), swapped by profile/env. One seam per service; the K8s coupling never leaks into business logic. (Phases 0–2 are plain processes anyway, so local-launch is free until the brain/operator land.)

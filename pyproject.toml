@@ -1,0 +1,12 @@
+# Priva Cloud — monorepo workspace root (uv).
+# Layout + extraction plan: docs/architecture/code-split.md
+#
+# Activate the workspace with:  uv sync
+# This installs every member (libs/*, services/*) editable into one venv.
+
+[tool.uv.workspace]
+members = ["libs/*", "services/*"]
+
+[tool.uv]
+# The root is a workspace anchor only — not an installable package.
+package = false
