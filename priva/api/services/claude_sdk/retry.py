@@ -14,7 +14,11 @@ logger = get_app_logger(__name__)
 MAX_ATTEMPTS = 10
 BACKOFF_SCHEDULE = [0, 2, 4, 8, 16, 30, 30, 30, 30, 30]
 RETRYABLE_ERRORS = frozenset({"server_error", "unknown"})
-SYNTHETIC_MODEL = "<synthetic>"
+
+# Canonical home is priva_common.wire (Phase-0 §6.1 step 6) so the shared
+# serializer carries no dependency on this pod module; re-exported here for
+# existing in-pod references (should_retry / _is_synthetic_record below).
+from priva_common.wire import SYNTHETIC_MODEL  # noqa: E402
 
 
 def should_retry(message: AssistantMessage) -> bool:
