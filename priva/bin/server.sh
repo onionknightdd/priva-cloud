@@ -11,6 +11,11 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PID_FILE="${SCRIPT_DIR}/server.pid"
 SCHEDULER_PID_FILE="${SCRIPT_DIR}/scheduler.pid"
 CONFIG_FILE="${PROJECT_ROOT}/api/config.yaml"
+# The settings loader moved to priva_common.config (Phase-0 split) and no longer
+# resolves config.yaml relative to its own file. Export the absolute path so the
+# server + scheduler + channels children all load the same config and
+# logging.py resolves relative log paths under PROJECT_ROOT.
+export PRIVA_CONFIG_FILE="${CONFIG_FILE}"
 LOG_DIR="${PROJECT_ROOT}/logs"
 SERVER_LOG="${LOG_DIR}/server.log"
 APP_LOG="${LOG_DIR}/app.log"
