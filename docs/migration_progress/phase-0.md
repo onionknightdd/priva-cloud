@@ -1,6 +1,6 @@
 # Phase 0 — Monorepo skeleton + in-place boundary refactor
 
-**Status:** in progress
+**Status:** done (increments 1–7 landed + boot-green; optional smoke test deferred)
 **Branch:** `main` (fresh repo; work lands on `main` — see overall-goal §4)     **Depends on:** — (first phase)
 **Canonical refs:** `code-split.md` §3 (target layout), §6 (`libs/common` contract), §6.1 (extraction order), §10 (verb legend)
 
@@ -26,13 +26,13 @@ Stand up the monorepo and pull the shared contract layer (`libs/common` = `priva
 ## 3. Actions (checklist)
 
 - [x] **increment-1:** monorepo skeleton — root `pyproject.toml` (uv workspace), `libs/common` package (`priva-common`, src layout, `__init__.py` with the no-service-import rule), `services/` `protos/` `deploy/` dirs + intent READMEs. *(commit `92470c2`)*
-- [ ] **increment-2:** extract **`config`** → `priva_common.config` (RESHAPE: `__file__` → `PRIVA_CONFIG_FILE`), shim at `api.services.config`. 28 importers — shim keeps them untouched. **Prereqs:** (a) add `pyyaml` + `pydantic-settings` to `libs/common/pyproject.toml` (currently only `pydantic`, `redis`); (b) default `PRIVA_CONFIG_FILE` to `priva/api/config.yaml` (absolute, not CWD) and `export` it in `server.sh` to match `CONFIG_FILE` (`server.sh:13`); (c) keep `Settings.yaml_file` a `Path` ClassVar (`logging.py:319`); (d) `config.yaml` is absent today (only `config.example.yaml`) — confirm the missing-file case stays tolerated (defaults apply).
-- [ ] **increment-3:** extract **`metrics`** → `priva_common.metrics` first (leaf; 2 importers), **then** **`logging`** → `priva_common.logging`, shim at `api.middleware.logging`. 44 importers. `logging` depends on **both** `config` and `metrics` (`logging.py:280` lazily imports `..metrics`; `:319` uses `Settings.yaml_file`) — re-point both when it moves. Lazy import ⇒ boot-check won't catch a broken `metrics`; exercise a real request.
-- [ ] **increment-4:** extract **`crypto`** + **`_pagination`** (each depends on `logging`; 1 + 3 importers), shims at their old paths.
-- [ ] **increment-5:** extract **`models/*`** → `priva_common.models` (38 importers), shims.
-- [ ] **increment-6:** extract **`serialization`** (RESHAPE: lift `SYNTHETIC_MODEL` into `priva_common` first; 2 importers), shim.
-- [ ] **increment-7:** add **`redis_catalog`** (NEW — pure addition, no shim; the T1/T2 key definitions, `code-split.md` §6).
-- [ ] **close-out:** confirm `priva_common` imports nothing service-side; (optional but recommended) add a minimal smoke test since no suite exists.
+- [x] **increment-2:** extracted **`config`** → `priva_common.config` (RESHAPE: `__file__` → `PRIVA_CONFIG_FILE`, CWD-fallback `api/config.yaml`, `yaml_file` kept a `Path` ClassVar); shim at `api.services.config`; `server.sh` exports `PRIVA_CONFIG_FILE`. Missing `config.yaml` still tolerated. Deps `pyyaml`+`pydantic-settings` added at close-out. *(commit `f4300b8`)*
+- [x] **increment-3:** extracted **`metrics`** → `priva_common.metrics` (leaf, first) **then** **`logging`** → `priva_common.logging`; re-pointed logging's `config` (`:19`) + lazy `metrics` (`:280`) imports; shims at both old paths. Lazy edge verified by recording a metric + rendering `/metrics`. *(commit `5e53744`)*
+- [x] **increment-4:** extracted **`crypto`** + **`_pagination`** (re-pointed each `..middleware.logging` → `priva_common.logging`), shims at old paths; encrypt/decrypt + cursor roundtrips pass. *(commit `64e43c8`)*
+- [x] **increment-5:** extracted **`models/*`** → `priva_common.models` (whole package); `api/models/` is now a shim package — `__init__` + 14 per-submodule shims (importers use `from ..models.<sub> import`). *(commit `928c1a6`)*
+- [x] **increment-6:** extracted **`serialization`** (RESHAPE: `SYNTHETIC_MODEL` lifted to new `priva_common.wire`; `claude_sdk/retry.py` re-imports it; serialization re-pointed `.retry`→`wire` and `...models.agent`→`priva_common.models.agent`); shim at old path. *(commit `3ab16a1`)*
+- [x] **increment-7:** added **`redis_catalog`** (NEW — pure addition, no shim; the 7 T1/T2 keys from `code-split.md §6` + siblings/TTLs, stdlib only). *(commit `c3dd922`)*
+- [x] **close-out:** `priva_common` imports nothing service-side (boundary CLEAN); all old import paths resolve through shims; `pyproject.toml` deps reconciled (added `pydantic-settings`, `pyyaml`, `prometheus-client`, `fastapi`, `loguru`, `cryptography`, `claude-agent-sdk==0.1.81`). Minimal smoke-test suite still deferred (no `tests/` yet).
 
 ## 4. Acceptance criteria
 
@@ -54,9 +54,17 @@ Stand up the monorepo and pull the shared contract layer (`libs/common` = `priva
 ## 6. Verification log (append-only)
 
 - 2026-06-19 increment-1: skeleton committed `92470c2`; monolith untouched. Boot-check `PYTHONPATH=priva:libs/common/src python -c "import api.main"` → **BOOT OK** (verified). `uv` not installed locally (only needed for `uv sync` / `uv run`, not for the boot-check).
+- 2026-06-20 increments 2–7: each module extracted via re-export shim, **boot-check green after every increment** (`PYTHONPATH=priva:libs/common/src .venv/bin/python -c "import api.main"` → BOOT OK). Commits `f4300b8` (config), `5e53744` (metrics+logging), `64e43c8` (crypto+_pagination), `928c1a6` (models), `3ab16a1` (serialization+wire), `c3dd922` (redis_catalog). Per-increment spot-checks: shim re-exports are the **same objects** (identity asserted); config `yaml_file` resolves via `PRIVA_CONFIG_FILE`; lazy `logging→metrics` edge records + `/metrics` renders; crypto + cursor roundtrips; all 14 model submodule shims import; `SYNTHETIC_MODEL` single-valued across `wire` + `retry`.
+- 2026-06-20 close-out: **boundary CLEAN** — `grep -rnE '^\s*(from|import)\s+(api|services)\b' libs/common/src/priva_common` → no matches. Full shim sanity (all old `api.*` paths import) → OK. Importer counts re-measured across **all** import forms (excl. shim), method `grep -rlE '<all-paths>' priva/api`: config 17, metrics 2, logging 42, crypto 1, `_pagination` 3, models 37, serialization 1 (counts gauge blast-radius only; the move order follows the import edges).
 
 ## 7. Status & handoff notes
 
-Increment-1 (skeleton, `92470c2`) and the first docs pass are on `main` and **pushed to `origin`**. A first docs reconciliation pass landed 2026-06-19: `agent-pod`→`agent-runner` rename across `docs/`, the `priva-cloud` CLI / package-layout design in `code-split.md` §3.1/§3.2/§14, and the branch model corrected to work-on-`main`. A second, **pre-migration doc-refinement** pass followed (2026-06-19, docs only — no code): `metrics`-before-`logging` ordering (lazy import at `logging.py:280`), the increment-2 prereqs (deps + `PRIVA_CONFIG_FILE` default + `yaml_file` `Path` + missing-`config.yaml`), `callback`→agent-runner reclassification, and importer counts re-measured to 28/44/1/3/38/2. **Next: increment-2 — extract `config`** with the `__file__`→`PRIVA_CONFIG_FILE` RESHAPE (prereqs in §3), add the `api.services.config` shim, run the boot-check, append to the log above. Then proceed down the §3 checklist in order — the order is dependency-forced, don't reorder.
+**Phase 0 is functionally complete (2026-06-20).** All seven `libs/common` extractions landed via re-export shims, dependency-ordered, **boot-green after every increment**; the monolith still runs as one process and no importer changed. `priva_common` now holds `config`, `metrics`, `logging`, `crypto`, `_pagination`, `models/*`, `serialization`, `wire` (`SYNTHETIC_MODEL`), and the new `redis_catalog`; the §6 import boundary is drawn and verified CLEAN. `libs/common/pyproject.toml` deps reconciled to what the moved code needs.
 
-Do **not** push until the phase boots green *and* the user OKs (overall-goal.md §4).
+Earlier passes (context): skeleton `92470c2`; docs reconciliation 2026-06-19 (`agent-pod`→`agent-runner`, `priva-cloud` CLI/layout in `code-split.md` §3.1/§3.2/§14, branch-model fix); pre-migration doc-refinement 2026-06-19 (`metrics`-before-`logging`, increment-2 prereqs, `callback`→agent-runner).
+
+**Only remaining Phase-0 nicety:** stand up a minimal smoke test (import + a couple of route assertions) since there's still no `tests/` — deferred, not blocking.
+
+**Next phase: Phase 1 — protos + data-spine** (`overall-goal.md §5`, `code-split.md §11`). Infra = none for now, so it proceeds with a stubbed data-plane client and the gates are flagged until real infra exists. Open the (to-be-created) `phase-1.md` and continue from there.
+
+Push policy (overall-goal.md §4): push only when the phase boots green *and* the user OKs.

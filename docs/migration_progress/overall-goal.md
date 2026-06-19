@@ -14,12 +14,12 @@
 
 ## 0. Current state (update this whenever it changes)
 
-- **Phase:** 0 — *Monorepo skeleton + in-place boundary refactor.* In progress.
+- **Phase:** 0 — *Monorepo skeleton + in-place boundary refactor.* **Done (2026-06-20).** Phase 1 next.
 - **Branch:** `main` — this is a fresh repo (cut from a prior Priva branch), so migration work lands directly on `main`; there are **no** per-phase `split/phase-N` branches (§4). Skeleton commit: `92470c2` (uv workspace + `libs/common` + dev-mode doc).
-- **Done:** Phase 0 increment-1 — the additive skeleton (root `pyproject.toml`, `libs/common`, `services/` `protos/` `deploy/` dirs + READMEs). Monolith untouched and booting. **Also (2026-06-19):** docs reconciled — `agent-pod`→`agent-runner` rename across `docs/`, the `priva-cloud` CLI / package-layout design recorded in `code-split.md` (§3.1/§3.2/§14), and the branch model corrected to work-on-`main`.
-- **Next:** Phase 0 increment-2 — extract `config` then `logging` into `libs/common` via re-export shims (see `phase-0.md`).
-- **Not pushed:** Phase 0 work is local-only on `main`. Push to `github` only when the phase boots green *and* the user OKs (see §4 push policy).
-- **Last updated:** 2026-06-19.
+- **Done:** **All of Phase 0.** increment-1 skeleton (`92470c2`); then increments 2–7 (2026-06-20) extracted the shared contract layer into `priva_common` via re-export shims — `config`/`metrics`/`logging`/`crypto`/`_pagination`/`models/*`/`serialization`/`wire` + the new `redis_catalog` — dependency-ordered, **boot-green after every step**, no importer changed, monolith still one process. §6 import boundary verified CLEAN. Commits `f4300b8`→`c3dd922`. **Also (2026-06-19):** docs reconciled (`agent-pod`→`agent-runner`, `priva-cloud` CLI/layout `code-split.md` §3.1/§3.2/§14, branch-model fix) + pre-migration doc-refinement.
+- **Next:** Phase 1 — `protos/` + **data-spine** (gRPC contracts + data-plane client; swap store call-sites §8). Infra = none, so it proceeds against a stubbed client with the live gate flagged. Create/open `phase-1.md`.
+- **Not pushed yet:** Phase 0 increments 2–7 are local commits on `main`. Push when the user OKs (§4 push policy; phase is boot-green).
+- **Last updated:** 2026-06-20.
 
 ---
 
@@ -122,7 +122,7 @@ Status legend: `not started` · `in progress` · `blocked` · `done`. Update the
 
 | Phase | Doc | Status | Branch | Last updated |
 |-------|-----|--------|--------|--------------|
-| 0 — skeleton + boundary refactor | [phase-0.md](phase-0.md) | in progress | `main` | 2026-06-19 |
+| 0 — skeleton + boundary refactor | [phase-0.md](phase-0.md) | done | `main` | 2026-06-20 |
 | 1 — protos + data-spine | [phase-1.md](phase-1.md) | not started | — | 2026-06-19 |
 | 2 — agent-runner | [phase-2.md](phase-2.md) | not started | — | 2026-06-19 |
 | 3 — control-panel / brain | [phase-3.md](phase-3.md) | not started | — | 2026-06-19 |

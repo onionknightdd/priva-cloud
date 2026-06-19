@@ -4,7 +4,20 @@ version = "0.0.0"
 description = "Shared contract layer for Priva Cloud: wire format, models, data-plane client, crypto, redis catalog, settings, observability."
 requires-python = ">=3.11"
 dependencies = [
-    "pydantic>=2",
+    # Models / DTOs
+    "pydantic>=2.10",
+    # Settings loader (config.py)
+    "pydantic-settings",
+    "pyyaml",
+    # Observability (metrics.py, logging.py)
+    "prometheus-client",
+    "fastapi",
+    "loguru",
+    # Crypto (crypto.py)
+    "cryptography",
+    # Wire format (serialization.py) — shared pod↔connector
+    "claude-agent-sdk==0.1.81",
+    # Redis catalog (redis_catalog.py)
     "redis>=5",
 ]
 
