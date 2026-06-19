@@ -1,7 +1,7 @@
 # Phase 1 — `protos/` + data-spine service
 
 **Status:** not started
-**Branch:** `split/phase-1`     **Depends on:** Phase 0 (needs `priva_common` + `redis_catalog`)
+**Branch:** `main`     **Depends on:** Phase 0 (needs `priva_common` + `redis_catalog`)
 **Canonical refs:** `code-split.md` §8 (stores → data-plane), components/`data-spine.md` (§1.7 contracts, §2.11/§2.12 job & channel records, §4 Redis keys)
 
 ## 1. Objective & scope

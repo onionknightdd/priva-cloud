@@ -1,7 +1,7 @@
 # Phase 6 — K8s wiring
 
 **Status:** not started
-**Branch:** `split/phase-6`     **Depends on:** Phases 1–5 (all deployables exist)
+**Branch:** `main`     **Depends on:** Phases 1–5 (all deployables exist)
 **Canonical refs:** `deploy/README.md`, `code-split.md` §13 (dev overlay), `agent-gateway.md` (the Rust edge + CRDs), components/`control-panel.md` §0.1 (faces/internal NetworkPolicy boundary)
 
 ## 1. Objective & scope
@@ -13,7 +13,7 @@ Containerize every deployable and wire the whole platform on Kubernetes so the *
 
 ## 2. Design / approach
 
-All manifests live under `deploy/` (`deploy/README.md`). The **NetworkPolicy boundary** enforces the architecture: the agent-pod admits ingress only from agentgateway/the mesh; control-panel's `:8080` faces are edge-reachable while `:8081` internal is cluster-only (`control-panel.md` §0.1). The Rust **agentgateway** is configured via its CRDs (`Gateway`/`HTTPRoute`/`AgentgatewayPolicy`/`AgentgatewayBackend`) — but note it also runs as a standalone binary with static config for local mode A (`code-split.md` §13). The `dev/` overlay gives full-fidelity local runs on kind/k3d (mode B).
+All manifests live under `deploy/` (`deploy/README.md`). The **NetworkPolicy boundary** enforces the architecture: the agent-runner admits ingress only from agentgateway/the mesh; control-panel's `:8080` faces are edge-reachable while `:8081` internal is cluster-only (`control-panel.md` §0.1). The Rust **agentgateway** is configured via its CRDs (`Gateway`/`HTTPRoute`/`AgentgatewayPolicy`/`AgentgatewayBackend`) — but note it also runs as a standalone binary with static config for local mode A (`code-split.md` §13). The `dev/` overlay gives full-fidelity local runs on kind/k3d (mode B).
 
 ## 3. Actions (checklist)
 

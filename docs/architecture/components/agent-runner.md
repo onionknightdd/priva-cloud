@@ -1,12 +1,12 @@
 ---
 Status: Draft · Date: 2026-06-17 · Branch: multi-tenant-platform
-Parent: ../multi-tenant-platform.md · Component: Agent Pod (scale-to-zero, one per user)
+Parent: ../multi-tenant-platform.md · Component: Agent Runner (scale-to-zero, one per user)
 Consumes: ./data-spine.md (M1 + M2 + the two-tier Redis catalog) as a binding contract
 ---
 
-# Priva Agent Pod — Component Specification
+# Priva Agent Runner — Component Specification
 
-**Scope:** the **Agent Pod** is the fork-and-strip of today's `priva/api` uvicorn process. There is **one scale-to-zero pod per account**. It runs the Claude Agent SDK (the `claude` CLI spawned as a subprocess; SDK installed at `/opt/miniconda3/lib/python3.13/site-packages/claude_agent_sdk`, pinned at `0.2.93`); the CLI owns the agent loop and writes session JSONL to disk under `CLAUDE_CONFIG_DIR`. The pod mounts **only** its own RWX subdir (`/export/<account_id>` → `/workspace`) plus its own audit subdir, and is the **sole writer** of its JSONL / PV / file-checkpoints / audit. It runs under hardened `runc` (non-root, drop ALL caps, RO-rootfs; `runtimeClassName` reserved on the CRD for gVisor/Kata escalation). It **consumes** the data-spine contract — it does not re-decide it: the platform-minted lowercase `session_uuid` *is* the CLI `--session-id`, immutable, no remap (M2); paths are derived **in-pod via the SDK** (single-account, so `os.environ` is correct — M5 §2.7), and there is **no central session table** (M5 — the JSONL is the session store); the in-pod `asyncio.Future` permission rendezvous and per-session `asyncio.Lock` stay in-pod, with Redis as a status mirror / pin only. The pod **keeps** the agent run loop, the `PermissionCoordinator`, the options builder, hooks, MCP, PTY, **and the fork + file-checkpoint/rewind paths**. Every load-bearing SDK and priva claim is cited as `file:line` and was verified against the installed code.
+**Scope:** the **Agent Runner** is the fork-and-strip of today's `priva/api` uvicorn process. There is **one scale-to-zero pod per account**. It runs the Claude Agent SDK (the `claude` CLI spawned as a subprocess; SDK installed at `/opt/miniconda3/lib/python3.13/site-packages/claude_agent_sdk`, pinned at `0.2.93`); the CLI owns the agent loop and writes session JSONL to disk under `CLAUDE_CONFIG_DIR`. The pod mounts **only** its own RWX subdir (`/export/<account_id>` → `/workspace`) plus its own audit subdir, and is the **sole writer** of its JSONL / PV / file-checkpoints / audit. It runs under hardened `runc` (non-root, drop ALL caps, RO-rootfs; `runtimeClassName` reserved on the CRD for gVisor/Kata escalation). It **consumes** the data-spine contract — it does not re-decide it: the platform-minted lowercase `session_uuid` *is* the CLI `--session-id`, immutable, no remap (M2); paths are derived **in-pod via the SDK** (single-account, so `os.environ` is correct — M5 §2.7), and there is **no central session table** (M5 — the JSONL is the session store); the in-pod `asyncio.Future` permission rendezvous and per-session `asyncio.Lock` stay in-pod, with Redis as a status mirror / pin only. The pod **keeps** the agent run loop, the `PermissionCoordinator`, the options builder, hooks, MCP, PTY, **and the fork + file-checkpoint/rewind paths**. Every load-bearing SDK and priva claim is cited as `file:line` and was verified against the installed code.
 
 This document is the executable contract for the pod: §0 what is reused/stripped/modified, §1 process shape & the de-singletonized factory, §2 the no-remap session lifecycle (M2), §3 session fork & lineage, §4 file checkpointing & rewind, §5 concurrency & the per-pod `RunContext`, §6 the permission coordinator & pin-pod-awake, §7 secrets & BYOK-key boot, §8 idle detection & scale-to-zero, §9 pod security context & mounts, §10 the consolidated code-delta table, §11 the authoritative boot sequence, §12 the resolved-risk register, §13 the resolved decisions (the seven questions the user answered 2026-06-18).
 
@@ -776,7 +776,7 @@ The `state-reader`/`audit-reader` read the **volume**, never the pod, so the pod
 
 ---
 
-## 10. Code deltas (current → Agent Pod)
+## 10. Code deltas (current → Agent Runner)
 
 | File:line (current) | Change |
 |---|---|

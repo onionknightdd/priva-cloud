@@ -2,10 +2,12 @@
 # Layout + extraction plan: docs/architecture/code-split.md
 #
 # Activate the workspace with:  uv sync
-# This installs every member (libs/*, services/*) editable into one venv.
+# This installs every member (libs/*, services/*, tools/*) editable into one venv.
 
 [tool.uv.workspace]
-members = ["libs/*", "services/*"]
+# tools/* holds the `priva-cloud` launcher (tools/cli); members are created lazily
+# per phase, so these globs may match nothing yet (uv tolerates empty globs).
+members = ["libs/*", "services/*", "tools/*"]
 
 [tool.uv]
 # The root is a workspace anchor only — not an installable package.

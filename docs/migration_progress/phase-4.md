@@ -1,7 +1,7 @@
 # Phase 4 — Lift connector + scheduler (sever the inversion)
 
 **Status:** not started
-**Branch:** `split/phase-4`     **Depends on:** Phase 2 (a pod to dispatch to), Phase 3 (the brain RPC to call)
+**Branch:** `main`     **Depends on:** Phase 2 (a pod to dispatch to), Phase 3 (the brain RPC to call)
 **Canonical refs:** `code-split.md` §7 (the inversion), §9 (stateful → stateless); `agent-gateway.md` §4.4 (option A — connector → brain RPC → dial pod); components/`scheduler.md` (leaderless exactly-once)
 
 ## 1. Objective & scope

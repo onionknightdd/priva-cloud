@@ -15,10 +15,10 @@
 ## 0. Current state (update this whenever it changes)
 
 - **Phase:** 0 — *Monorepo skeleton + in-place boundary refactor.* In progress.
-- **Branch:** `split/phase-0` · **HEAD:** `92470c2` (Phase 0 skeleton; uv workspace + `libs/common` + dev-mode doc).
-- **Done:** Phase 0 increment-1 — the additive skeleton (root `pyproject.toml`, `libs/common`, `services/` `protos/` `deploy/` dirs + READMEs). Monolith untouched and booting.
+- **Branch:** `main` — this is a fresh repo (cut from a prior Priva branch), so migration work lands directly on `main`; there are **no** per-phase `split/phase-N` branches (§4). Skeleton commit: `92470c2` (uv workspace + `libs/common` + dev-mode doc).
+- **Done:** Phase 0 increment-1 — the additive skeleton (root `pyproject.toml`, `libs/common`, `services/` `protos/` `deploy/` dirs + READMEs). Monolith untouched and booting. **Also (2026-06-19):** docs reconciled — `agent-pod`→`agent-runner` rename across `docs/`, the `priva-cloud` CLI / package-layout design recorded in `code-split.md` (§3.1/§3.2/§14), and the branch model corrected to work-on-`main`.
 - **Next:** Phase 0 increment-2 — extract `config` then `logging` into `libs/common` via re-export shims (see `phase-0.md`).
-- **Not pushed:** `split/phase-0` is local-only WIP. Push to `github` only when the phase boots green *and* the user OKs (see §4 push policy).
+- **Not pushed:** Phase 0 work is local-only on `main`. Push to `github` only when the phase boots green *and* the user OKs (see §4 push policy).
 - **Last updated:** 2026-06-19.
 
 ---
@@ -33,7 +33,7 @@ Turn the single-tenant Priva monolith into a **multi-tenant Kubernetes platform 
 
 | Deployable | Role |
 |---|---|
-| `agent-pod` | per-tenant agent runtime (run/stream/permission/fork/rewind) — the **only** thing that runs the agent |
+| `agent-runner` | per-tenant agent runtime (run/stream/permission/fork/rewind) — the **only** thing that runs the agent |
 | `control-panel` | brain (ext_proc routing) + admin API + faces — **one process, three listeners** (`:9000` gRPC, `:8080` faces, `:8081` internal) |
 | `channel-connector` | WeCom/OpenClaw outbound socket + Redis lease + IM fan-out |
 | `scheduler` | leaderless fire → claim → wake → dispatch |
@@ -53,7 +53,7 @@ These are authoritative. This journal *references* them; it must not restate or 
 |---|---|
 | `docs/architecture/multi-tenant-platform.md` | the master architecture (the whole platform) |
 | `docs/architecture/code-split.md` | **the bridge** — per-file map (§4), dual-face router classification (§5), `libs/common` contract + dependency-ordered extraction (§6/§6.1), the inversion (§7), persistence migration (§8), the 7-phase strangler sequence (§11), open items (§12), local-dev modes (§13) |
-| `docs/architecture/components/agent-pod.md` | the pod runtime drill |
+| `docs/architecture/components/agent-runner.md` | the pod runtime drill |
 | `docs/architecture/components/control-panel.md` | brain + admin + faces; the one-process/three-listeners model (§0.1) |
 | `docs/architecture/components/agent-gateway.md` | the Rust edge **and** the channel-connector → brain call (§4.4, locked option A = internal RPC) |
 | `docs/architecture/components/data-spine.md` | the data plane + gRPC contracts |
@@ -77,7 +77,7 @@ These are authoritative. This journal *references* them; it must not restate or 
 
 ## 4. Operational runbook (local)
 
-**Repo / branches.** One branch per phase: **`split/phase-N`**, cut fresh from the previous phase's branch (or `main` once a phase merges). Phase 0 is on `split/phase-0`.
+**Repo / branches.** This is a **fresh repo** cut from a prior Priva branch, dedicated to the split. Migration work lands **directly on `main`** — there are **no** per-phase `split/phase-N` branches. (Cut a short-lived topic branch only if a specific increment warrants isolation; the default is `main`.)
 
 **The boot-check gate** (verified passing 2026-06-19) — run after every increment in Phases 0–3 (while the monolith still exists):
 ```bash
@@ -87,7 +87,9 @@ PYTHONPATH=priva:libs/common/src python -c "import api.main; print('BOOT OK')"
 
 **Run the monolith locally:** `priva/bin/server.sh` (uvicorn API + scheduler + channels daemons). Per-service local runs after the split: `code-split.md` §13 — two modes: **(A)** plain processes, no K8s (the everyday loop), **(B)** kind/k3d full fidelity.
 
-**`uv` workspace.** The monorepo uses a `uv` workspace (root `pyproject.toml`). **`uv` is not installed by default here** — `pip install uv`, then `uv sync`. You do **not** need `uv` for the boot-check above (it uses `PYTHONPATH`); you do need it to run services standalone (`uv run`).
+**`uv` workspace.** The monorepo uses a `uv` workspace (root `pyproject.toml`, members `libs/* services/* tools/*`). **`uv` is not installed by default here** — `pip install uv`, then `uv sync`. You do **not** need `uv` for the boot-check above (it uses `PYTHONPATH`); you do need it to run services standalone (`uv run`).
+
+> **Gotcha — `uv sync` prunes the boot-check venv.** The legacy monolith (`priva/`) is **not** a workspace member, so its deps (`fastapi`, `uvicorn`, …) aren't tracked by `uv sync`; running `uv sync` reconciles `.venv` to the workspace and **removes** them, which breaks the boot-check. Local setup that keeps both working: `uv venv && uv pip install -r requirements.txt` (monolith deps) — and after any `uv sync`, re-run `uv pip install -r requirements.txt` to restore them. (This is transient: the monolith goes away at Phase 4.)
 
 **Git / push policy — read carefully:**
 - **Push ONLY to the `github` remote** (`git@github.com:onionknightdd/priva.git` — public). This is the only allowed push target.
@@ -106,7 +108,7 @@ Source: `code-split.md` §11. Each phase is independently shippable and reversib
 |----|------|------------------|-----------------|
 | **0** | Monorepo skeleton + in-place boundary refactor | `libs/common` + `services/*` dirs; extract serialization/models/crypto/pagination/metrics/settings/redis-catalog into `common` via shims; draw the import boundary | `priva_common` imports nothing service-side; **boot-check green** |
 | **1** | `protos/` + **data-spine** service | gRPC contracts; data-spine over the DB; swap all store call-sites (§8) to the client | `user_store`/`config_store`/`job_store`/`run_history`/`audit_log` call-sites go through the data-plane client |
-| **2** | **agent-pod** | package `claude_sdk` + pod-internal agent router + hooks/mcp/skills exec + pty/files + relocated executors; read signed `account_id` | pod serves a turn end-to-end behind a signed header |
+| **2** | **agent-runner** | package `claude_sdk` + pod-internal agent router + hooks/mcp/skills exec + pty/files + relocated executors; read signed `account_id` | pod serves a turn end-to-end behind a signed header |
 | **3** | **control-panel / brain** | ext_proc brain (`resolve·mint·wake·steer` as one factored fn — agent-gateway §4.4) + admin/auth/config routers + serve `web`; holds no agent state | brain steers a browser turn; admin API on the data plane |
 | **4** | **Lift connector + scheduler** | strip in-process `agent_run` from both (§7); connector gets Redis lease + brain RPC (option A); scheduler gets leaderless exactly-once + dispatch | neither imports `claude_sdk`; IM + cron turns run on the pod |
 | **5** | **operator + state-reader** | kopf `AgentTenant` controller (sole scaler); RO JSONL reader | scale 0↔1 via CR; wake-free session reads |
@@ -120,9 +122,9 @@ Status legend: `not started` · `in progress` · `blocked` · `done`. Update the
 
 | Phase | Doc | Status | Branch | Last updated |
 |-------|-----|--------|--------|--------------|
-| 0 — skeleton + boundary refactor | [phase-0.md](phase-0.md) | in progress | `split/phase-0` | 2026-06-19 |
+| 0 — skeleton + boundary refactor | [phase-0.md](phase-0.md) | in progress | `main` | 2026-06-19 |
 | 1 — protos + data-spine | [phase-1.md](phase-1.md) | not started | — | 2026-06-19 |
-| 2 — agent-pod | [phase-2.md](phase-2.md) | not started | — | 2026-06-19 |
+| 2 — agent-runner | [phase-2.md](phase-2.md) | not started | — | 2026-06-19 |
 | 3 — control-panel / brain | [phase-3.md](phase-3.md) | not started | — | 2026-06-19 |
 | 4 — lift connector + scheduler | [phase-4.md](phase-4.md) | not started | — | 2026-06-19 |
 | 5 — operator + state-reader | [phase-5.md](phase-5.md) | not started | — | 2026-06-19 |
@@ -142,7 +144,7 @@ Every phase has a `phase-N.md` in this directory. Keep them **living** — they 
 # Phase N — <title>
 
 **Status:** not started | in progress | blocked | done
-**Branch:** split/phase-N        **Depends on:** Phase N-1
+**Branch:** main        **Depends on:** Phase N-1
 **Canonical refs:** code-split.md §…, components/<doc>.md §…
 
 ## 1. Objective & scope

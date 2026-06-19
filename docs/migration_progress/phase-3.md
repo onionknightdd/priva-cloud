@@ -1,7 +1,7 @@
 # Phase 3 — control-panel / brain
 
 **Status:** not started
-**Branch:** `split/phase-3`     **Depends on:** Phase 1 (admin API on the data plane), Phase 2 (a pod to steer)
+**Branch:** `main`     **Depends on:** Phase 1 (admin API on the data plane), Phase 2 (a pod to steer)
 **Canonical refs:** components/`control-panel.md` (§0.1 one-process / three-listeners), `agent-gateway.md` §4.4 (the factored `resolve·mint·wake·steer`), `code-split.md` §5 (dual-face router split), §9 (stateless)
 
 ## 1. Objective & scope

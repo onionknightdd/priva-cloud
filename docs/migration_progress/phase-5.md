@@ -1,8 +1,8 @@
 # Phase 5 — operator + state-reader (NEW infra)
 
 **Status:** not started
-**Branch:** `split/phase-5`     **Depends on:** Phase 3 (brain wake seam), Phase 2 (the pod Deployment to scale)
-**Canonical refs:** components/`operator.md` (kopf controller), components/`agent-pod.md` (scale-0↔1 / wake), `code-split.md` §8 (session JSONL stays PVC), §13 (dev/prod wake seam)
+**Branch:** `main`     **Depends on:** Phase 3 (brain wake seam), Phase 2 (the pod Deployment to scale)
+**Canonical refs:** components/`operator.md` (kopf controller), components/`agent-runner.md` (scale-0↔1 / wake), `code-split.md` §8 (session JSONL stays PVC), §13 (dev/prod wake seam)
 
 ## 1. Objective & scope
 

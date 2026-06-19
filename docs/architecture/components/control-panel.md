@@ -1,7 +1,7 @@
 ---
 Status: Draft · Date: 2026-06-18 · Branch: multi-tenant-platform
 Parent: ../multi-tenant-platform.md · Component: Control Panel (the unified front-tier app — brain + two faces + admin — behind agentgateway)
-Consumes: ./agent-gateway.md (the routing-brain mechanics it re-homes), ./data-spine.md (identity/binding RPCs + two-tier Redis), ./agent-pod.md (the pod run/stream/permission seams) as binding contracts; depends on **agentgateway.dev** (external OSS L7 proxy) as the edge
+Consumes: ./agent-gateway.md (the routing-brain mechanics it re-homes), ./data-spine.md (identity/binding RPCs + two-tier Redis), ./agent-runner.md (the pod run/stream/permission seams) as binding contracts; depends on **agentgateway.dev** (external OSS L7 proxy) as the edge
 ---
 
 # Priva Control Panel — Component Specification
@@ -21,7 +21,7 @@ It is built by **lifting `priva/api`'s admin surface (`routers/admin.py`, 745 li
 > **Terminology guard — THREE different "gateways," do not conflate.**
 > 1. **agentgateway** (agentgateway.dev) — the **external** Rust L7 proxy; Kubernetes infrastructure (Helm + CRDs); **not our code**. The edge pipe. Knows nothing of "tenant/session/pod."
 > 2. **the brain** — *our* per-request routing logic, this app's `ext_proc` face. Formerly drilled standalone as "the Agent Gateway" (`agent-gateway.md`).
-> 3. **the egress / token-count path** — the *outbound* LLM/MCP path. **M6: no metering proxy** — BYOK pods call the provider directly; the platform only **counts tokens** (pod-self-reported); the egress security gateway is deferred (agent-pod §9.6/§13-2). Distinct from both.
+> 3. **the egress / token-count path** — the *outbound* LLM/MCP path. **M6: no metering proxy** — BYOK pods call the provider directly; the platform only **counts tokens** (pod-self-reported); the egress security gateway is deferred (agent-runner §9.6/§13-2). Distinct from both.
 >
 > "**Control Panel**" = this whole app (brain + faces + admin). It is **not** agentgateway's built-in admin UI (`:15000/ui/`), which is **read-only in Kubernetes mode** and serves proxy inspection only (§9.4).
 
@@ -95,7 +95,7 @@ Gateway (gatewayClassName: agentgateway)
      ▼
 HTTPRoute  ui      : match PathPrefix /ui    → backendRef: control-panel-svc:8080
 HTTPRoute  admin   : match PathPrefix /admin → backendRef: control-panel-svc:8080
-HTTPRoute  runtime : match PathPrefix /v1    → backendRef: InferencePool agent-pods
+HTTPRoute  runtime : match PathPrefix /v1    → backendRef: InferencePool agent-runners
                                                  (EPP = control-panel ext_proc, §2.3)
 
 AgentgatewayPolicy  edge-auth   (targetRefs: Gateway)
@@ -110,7 +110,7 @@ AgentgatewayPolicy  runtime     (targetRefs: HTTPRoute/runtime)
   traffic.rateLimit.global: { descriptors: [{ unit: Tokens,
         entries: [{ expression: 'jwt.sub' }] }],  backendRef: metering-ratelimit-svc }  # coarse 429 backstop (§8)
 
-AgentgatewayBackend  agent-pods : InferencePool (group inference.networking.k8s.io)    # the steered target (§2.3)
+AgentgatewayBackend  agent-runners : InferencePool (group inference.networking.k8s.io)    # the steered target (§2.3)
 AgentgatewayBackend  llm/mcp    : spec.ai.* / spec.mcp.*                               # egress — metering drill (§8)
 ```
 
@@ -184,14 +184,14 @@ Once the brain steers (§2.3), the turn streams **client ⇄ agentgateway ⇄ po
 ```
 client (WS primary / SSE fallback — agent-gateway §13-3)
    ⇄ agentgateway  (TLS · verified JWT · ext_proc-steered to pod_ip · streams bytes, no re-serialize)
-   ⇄ Agent Pod     (run/stream; serialize_message in-pod — agent-pod §0/§4)
+   ⇄ Agent Runner     (run/stream; serialize_message in-pod — agent-runner §0/§4)
 ```
 
 agentgateway supports **WebSocket** (native upgrade bridge), **SSE** (unbuffered by default), HTTP/2 and gRPC streaming, and — critically — **no default request timeout**, and its timeouts **do not kill an active stream** (research §3). So long agent turns (minutes of token streaming, a parked permission `await`) are safe once routed. The serializer stays in-pod (agent-gateway §4.2): agentgateway re-frames bytes, it does not re-serialize.
 
 ### 3.2 The first-byte caveat
 
-The one timeout risk (research §3): a *configured* `request_timeout` aborts a backend slow to send **first headers** — relevant only if a **cold wake** runs long. Mitigations already in place: (i) predictive wake (§2.4) makes the warm path the norm; (ii) the cold path's hold lives in the **`ext_proc` stream** (its own message timeout, set generously), and on overrun degrades to a buffered "retry" short-circuit (§2.2) rather than a hung request; (iii) leave `request_timeout` unset on `/v1` (the default) so only the deliberate ext_proc bound governs. Cap/drain backpressure (pod **429** over cap, **503** draining — agent-pod §5.5/§8.4) is surfaced by agentgateway to the client; on 503 the brain re-buffers to the inbox (agent-gateway §4.2), unchanged.
+The one timeout risk (research §3): a *configured* `request_timeout` aborts a backend slow to send **first headers** — relevant only if a **cold wake** runs long. Mitigations already in place: (i) predictive wake (§2.4) makes the warm path the norm; (ii) the cold path's hold lives in the **`ext_proc` stream** (its own message timeout, set generously), and on overrun degrades to a buffered "retry" short-circuit (§2.2) rather than a hung request; (iii) leave `request_timeout` unset on `/v1` (the default) so only the deliberate ext_proc bound governs. Cap/drain backpressure (pod **429** over cap, **503** draining — agent-runner §5.5/§8.4) is surfaced by agentgateway to the client; on 503 the brain re-buffers to the inbox (agent-gateway §4.2), unchanged.
 
 ---
 
@@ -200,7 +200,7 @@ The one timeout risk (research §3): a *configured* `request_timeout` aborts a b
 The cross-replica permission relay (agent-gateway §7) is **unchanged in mechanism** and lives in this app, because it is *state coordination through Redis*, not something agentgateway can do (agentgateway has no notion of a parked, hours-later approval bound to a specific pod instance). Two edge deltas:
 
 - **Reply transport.** With WS primary (agent-gateway §13-3), the human's approval rides the same agentgateway-terminated socket as the stream. agentgateway routes that WS message to the app/pod; the brain resolves it via `HGETALL approval:index:{request_id}` → exact `pod`, relaying cross-replica via `in:reply:{request_id}` if needed (agent-gateway §7.3, verbatim).
-- **No-impersonation (agent-gateway §7.4 / agent-pod §13-6).** The gate — *answerable only by the owning account* — is enforced in **two** layers as before, now with agentgateway as the outer auth: agentgateway has already verified the answerer's JWT (`jwt.account_id`) at the edge; the brain asserts `answerer.account_id == index.account_id` (**403** on mismatch); the pod independently re-asserts on `/permission/respond`. An impersonating admin's *answer* is rejected even though their audited *spend/tool* impersonation survives (decision-10 reversal). The IM `asker_id` second check (agent-gateway §7.4) is preserved.
+- **No-impersonation (agent-gateway §7.4 / agent-runner §13-6).** The gate — *answerable only by the owning account* — is enforced in **two** layers as before, now with agentgateway as the outer auth: agentgateway has already verified the answerer's JWT (`jwt.account_id`) at the edge; the brain asserts `answerer.account_id == index.account_id` (**403** on mismatch); the pod independently re-asserts on `/permission/respond`. An impersonating admin's *answer* is rejected even though their audited *spend/tool* impersonation survives (decision-10 reversal). The IM `asker_id` second check (agent-gateway §7.4) is preserved.
 
 The relay's "holds no Future" invariant (agent-gateway §7.1) is intact: the Future is in-pod; agentgateway holds bytes; this app holds only Redis coordination.
 
@@ -266,7 +266,7 @@ Per CLAUDE.md's dangerous-ops table, each mutating action shows a confirmation d
 
 | Action | Confirmation | Executes via |
 |---|---|---|
-| **Terminate a user's pod** | dialog + **type the username** to arm + red confirm button (shows current state: running turn? draining?) | Operator CR patch 1→0, graceful drain (agent-pod §8.4) or forced — §7.4 |
+| **Terminate a user's pod** | dialog + **type the username** to arm + red confirm button (shows current state: running turn? draining?) | Operator CR patch 1→0, graceful drain (agent-runner §8.4) or forced — §7.4 |
 | **Stop a running turn** (no pod kill) | dialog + red confirm | Redis cancel signal to the live run (agent-gateway §9.4) |
 | **Disable / offboard an account** | dialog + type-name | data-spine status → pre-gate blocks future turns (agent-gateway §6.1) |
 | **Edit a guardrail / budget policy** | diff preview + confirm | `AgentgatewayPolicy` CRD write (eventual-consistency note, §11-R6) |
@@ -290,7 +290,7 @@ Lifts `admin.py:/users` CRUD (`:52,58,88,157`) onto data-spine Accounts/Identiti
 There is **no spend cap, no `$`, no ledger, no reserve-before** "for the moment" (BYOK + token-count-only — blueprint M6). The Budgets screen is **display-only**: per-account/model **token usage** from the pod-self-reported metric (§9). The deferred-but-re-addable path (a `$` cap via price card, or a token cap enforced at the edge via `AgentgatewayPolicy.traffic.rateLimit.global unit:Tokens`) is described in §8; until then the screen shows usage, not enforcement.
 
 ### 7.4 Pod lifecycle (terminate / wake)
-`POST /admin/v2/pods/{account}/terminate` and `/wake` → **Operator** CR patch (the sole scaler — agent-pod §8.5; the Control Panel never scales directly). Terminate = scale 1→0 with graceful drain (agent-pod §8.4) or forced; wake = `spec.wake.requestedAt` patch (same idempotent path as the brain's wake, agent-gateway §6.3). Confirmation + audit per §6.2. Operator mechanics are the **Operator drill**.
+`POST /admin/v2/pods/{account}/terminate` and `/wake` → **Operator** CR patch (the sole scaler — agent-runner §8.5; the Control Panel never scales directly). Terminate = scale 1→0 with graceful drain (agent-runner §8.4) or forced; wake = `spec.wake.requestedAt` patch (same idempotent path as the brain's wake, agent-gateway §6.3). Confirmation + audit per §6.2. Operator mechanics are the **Operator drill**.
 
 ### 7.5 Sessions & Audit (wake-free, cross-user)
 Cross-user session/transcript browse goes through the **state-reader** (broad RO mount across all PVCs — data-spine §3.8) by globbing `projects/*/<uuid>.jsonl` (M5) — **never waking a pod**, never a local FS path (replaces `admin_files.py`). Admin-wide scan is rare and accepted-slower (agent-gateway §8.3). Audit reads the per-user audit JSONL (C1), lifting `admin.py:/audit:242` filters.
@@ -305,7 +305,7 @@ Cross-user session/transcript browse goes through the **state-reader** (broad RO
 > **M6:** the metering-proxy half of this section is **withdrawn** (see the LLM bullet). MCP *scope/observe* (agentgateway) and *Auth* (agentgateway verifies; we mint the platform JWT) are **unchanged**.
 
 - **LLM budgets — DEFERRED (M6).** There is **no metering proxy, no virtual key, no spend ledger, no reserve-before, no `$`**. Users **bring their own LLM keys** (BYOK — operator-injected, operator §6); the platform only **counts tokens**, **pod-self-reported** from the SDK `result` usage (observability-only — nothing enforced). agentgateway *could* later enforce a token-budget 429 (`traffic.rateLimit.global unit:Tokens`) and the old `backendRef`→ledger seam *could* return — both **deferred, not deleted**, switching on without re-plumbing once a price card / cap is wanted. *(Was: our metering-ledger as system-of-record with the rate-limit `backendRef` pointing at it — withdrawn under M6. Note: with BYOK + the deferred egress gateway, LLM calls go pod→provider **directly**, bypassing agentgateway, so even agentgateway's token counters don't see them — hence pod-self-report, §9.)*
-- **MCP egress — PARTIAL.** agentgateway does tool-level **CEL authorization** (`backend.mcp.authorization`, per-tool, per-`jwt`-claim), federation, all transports, and tool-call counters — a genuine fit for *scope + observe*. **Gap:** injecting *per-tenant upstream credentials* into an MCP server is **undocumented** (generic `backend.auth`/`headerModifiers` may apply — unverified, §11-R7). The agent-pod §13-2 egress-gateway decision is **deferred (M6)** — the egress gateway is not built "for the moment"; MCP *scope+observe* stays agentgateway's, and **per-tenant MCP upstream credentials are operator-injected** (the BYOK-style secret bundle, operator §6), not proxy-injected.
+- **MCP egress — PARTIAL.** agentgateway does tool-level **CEL authorization** (`backend.mcp.authorization`, per-tool, per-`jwt`-claim), federation, all transports, and tool-call counters — a genuine fit for *scope + observe*. **Gap:** injecting *per-tenant upstream credentials* into an MCP server is **undocumented** (generic `backend.auth`/`headerModifiers` may apply — unverified, §11-R7). The agent-runner §13-2 egress-gateway decision is **deferred (M6)** — the egress gateway is not built "for the moment"; MCP *scope+observe* stays agentgateway's, and **per-tenant MCP upstream credentials are operator-injected** (the BYOK-style secret bundle, operator §6), not proxy-injected.
 - **Auth — STRONG.** JWT/OIDC/mTLS/API-key/ext-authz/RBAC(CEL) all native. We mint the platform JWT (brain), agentgateway verifies it; `jwt.role`/`jwt.account_id`/`jwt.sub` drive admin-gate, rate-limit key, and MCP scope. (OIDC *login* is standalone-only in agentgateway — not a K8s policy field — so **we** own login/JWT-mint regardless; §11-R8.)
 
 ---
@@ -384,4 +384,4 @@ The dashboard reconstructs everything from **Prometheus + OTLP + ledger + data-s
 8. **Dashboard reconstructs state from Prometheus + OTLP + ledger + data-spine.** agentgateway has no config/budget read API and emits no `$`; the Control Panel computes cost from a price card and drives config via K8s CRDs (§7/§9).
 9. **Pod terminate (and stop-turn) = Control Panel UI → Operator.** Confirm-dialog + type-to-arm + audit-before-return; Operator is the sole scaler; gateway/edge impact is none new (mid-stream-death handling) (§6.2/§7.4, agent-gateway §9.4).
 
-> **Owed next (revised):** the **`agent-gateway.md` reconciliation pass** (§0.3) is **done** (2026-06-18). The **Operator** drill is **done** (`operator.md`). The **central scheduler** drill is **done** (`scheduler.md` — the admin `/scheduler/*` re-point in §7.2/§10 lands there; `PushToChannel` resolved). The **metering proxy is DROPPED** (blueprint **M6** — BYOK + token-count-only). The `data-spine §2.7` idle-default fix is **done** (180→1800). **All components are now drilled.** The **deep M6 body cleanup is DONE (2026-06-18)** — agent-pod, data-spine, agent-gateway, and blueprint §3/§4 are rewritten M6-correct (the blueprint §2 decisions table / system diagram / §5-7 remain under the supersession banner, as with M1/M2/M5). The **channel-connector sub-pass is DONE (2026-06-19)** — agent-gateway §4.4 locks the connector→brain call as an **internal RPC** (option A; not a synthetic `/v1` re-inject), with the brain's `resolve·mint·wake·steer` factored into one function shared by `ext_proc` (browser) and the internal RPC (IM). **No platform work remains.**
+> **Owed next (revised):** the **`agent-gateway.md` reconciliation pass** (§0.3) is **done** (2026-06-18). The **Operator** drill is **done** (`operator.md`). The **central scheduler** drill is **done** (`scheduler.md` — the admin `/scheduler/*` re-point in §7.2/§10 lands there; `PushToChannel` resolved). The **metering proxy is DROPPED** (blueprint **M6** — BYOK + token-count-only). The `data-spine §2.7` idle-default fix is **done** (180→1800). **All components are now drilled.** The **deep M6 body cleanup is DONE (2026-06-18)** — agent-runner, data-spine, agent-gateway, and blueprint §3/§4 are rewritten M6-correct (the blueprint §2 decisions table / system diagram / §5-7 remain under the supersession banner, as with M1/M2/M5). The **channel-connector sub-pass is DONE (2026-06-19)** — agent-gateway §4.4 locks the connector→brain call as an **internal RPC** (option A; not a synthetic `/v1` re-inject), with the brain's `resolve·mint·wake·steer` factored into one function shared by `ext_proc` (browser) and the internal RPC (IM). **No platform work remains.**

@@ -1,7 +1,7 @@
 # Phase 0 — Monorepo skeleton + in-place boundary refactor
 
 **Status:** in progress
-**Branch:** `split/phase-0`     **Depends on:** — (first phase)
+**Branch:** `main` (fresh repo; work lands on `main` — see overall-goal §4)     **Depends on:** — (first phase)
 **Canonical refs:** `code-split.md` §3 (target layout), §6 (`libs/common` contract), §6.1 (extraction order), §10 (verb legend)
 
 ## 1. Objective & scope
@@ -54,6 +54,6 @@ Stand up the monorepo and pull the shared contract layer (`libs/common` = `priva
 
 ## 7. Status & handoff notes
 
-Increment-1 (skeleton) is done and committed (local-only WIP on `split/phase-0`; **not pushed**). **Next: increment-2 — extract `config`** with the `__file__`→`PRIVA_CONFIG_FILE` RESHAPE, defaulting to the current location so the monolith boots unchanged; add the `api.services.config` shim; run the boot-check; append to the log above. Then proceed down the §3 checklist in order — the order is dependency-forced, don't reorder.
+Increment-1 (skeleton) is done and committed on `main` (local-only; **not pushed**). A docs reconciliation pass also landed on `main` (2026-06-19): `agent-pod`→`agent-runner` rename across `docs/`, the `priva-cloud` CLI / package-layout design in `code-split.md` §3.1/§3.2/§14, and the branch model corrected to work-on-`main`. **Next: increment-2 — extract `config`** with the `__file__`→`PRIVA_CONFIG_FILE` RESHAPE, defaulting to the current location so the monolith boots unchanged; add the `api.services.config` shim; run the boot-check; append to the log above. Then proceed down the §3 checklist in order — the order is dependency-forced, don't reorder.
 
-Do **not** push `split/phase-0` until the phase boots green *and* the user OKs (overall-goal.md §4).
+Do **not** push until the phase boots green *and* the user OKs (overall-goal.md §4).

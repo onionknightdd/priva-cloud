@@ -1,14 +1,14 @@
 ---
 Status: Draft · Date: 2026-06-18 · Branch: multi-tenant-platform
 Parent: ../multi-tenant-platform.md · Component: Central Scheduler (owns 100% of cron/interval/one-shot jobs; N stateless leaderless replicas) — realizes blueprint **decision 9** (§85) and **§205-208**
-Consumes: ./data-spine.md (the `scheduled_job`/`job_fire`/`job_run_record` schema §2.11, the scheduler RPC surface §1.7, the Redis fire-claim #14 / `awake:lock` #10 / `inbox` #1), ./operator.md (the CR-patch wake — the scheduler is a *waker*, never a scaler; the wake-storm limiter), ./agent-pod.md (the pod **executes** every dispatched job; the inbox drain §11 B7c; the in-pod single-writer lock), ./agent-gateway.md (the `PushToChannel` proactive-IM seam §8.4 — the scheduler's only delivery path), ./control-panel.md (admin `/scheduler/*` verbs land here) as binding contracts
+Consumes: ./data-spine.md (the `scheduled_job`/`job_fire`/`job_run_record` schema §2.11, the scheduler RPC surface §1.7, the Redis fire-claim #14 / `awake:lock` #10 / `inbox` #1), ./operator.md (the CR-patch wake — the scheduler is a *waker*, never a scaler; the wake-storm limiter), ./agent-runner.md (the pod **executes** every dispatched job; the inbox drain §11 B7c; the in-pod single-writer lock), ./agent-gateway.md (the `PushToChannel` proactive-IM seam §8.4 — the scheduler's only delivery path), ./control-panel.md (admin `/scheduler/*` verbs land here) as binding contracts
 ---
 
 # Priva Central Scheduler — Component Specification
 
 **Scope.** The **Central Scheduler** owns **100% of cron / interval / one-shot jobs** (blueprint decision 9 §85; §205). Unlike the operator, this is **not** a green-field component: there is a substantial, working single-machine scheduler today — **~3.5k LOC** across `priva/api/services/scheduler/*` (a standalone `AsyncIOScheduler` daemon `daemon.py:68`, a YAML job store `job_store.py`, daily-partitioned JSONL run history `run_history.py`, four job-type executors, an in-pod MCP tool server `mcp_tools.py`, and a file-command IPC bus `shared.py:46`) plus the `routers/scheduler.py` API and `models/scheduler.py`. So this drill is a **fork-strip-and-invert** of real code, grounded `file:line` in it (§1) and in every cross-doc promise (§0).
 
-**The one load-bearing inversion.** Today the scheduler **is the agent runner**: a `scheduled_agent` job calls `agent_run_events(...)` **in-process inside the daemon** (`daemon.py:298-315`), with `bypassPermissions`, reading the user's env (`daemon.py:247`), spawning the `claude` subprocess, writing the user's JSONL. That is impossible in the multi-tenant platform: the scheduler has **no pod, no PVC mount, no user secrets, and — under M6 — no LLM key** (the user's BYOK key lives in *their* pod). Therefore the multi-tenant scheduler **executes nothing**. It becomes a pure **fire → claim → wake → dispatch** service; **the pod executes the job** (agent-pod §0 `:61` "central scheduler wakes the pod to run a turn"). Everything below follows from that single move.
+**The one load-bearing inversion.** Today the scheduler **is the agent runner**: a `scheduled_agent` job calls `agent_run_events(...)` **in-process inside the daemon** (`daemon.py:298-315`), with `bypassPermissions`, reading the user's env (`daemon.py:247`), spawning the `claude` subprocess, writing the user's JSONL. That is impossible in the multi-tenant platform: the scheduler has **no pod, no PVC mount, no user secrets, and — under M6 — no LLM key** (the user's BYOK key lives in *their* pod). Therefore the multi-tenant scheduler **executes nothing**. It becomes a pure **fire → claim → wake → dispatch** service; **the pod executes the job** (agent-runner §0 `:61` "central scheduler wakes the pod to run a turn"). Everything below follows from that single move.
 
 > **Terminology guard — four distinct things, do not conflate.** (1) **the Central Scheduler** (this doc) — the platform component; `N` stateless replicas that decide *when* a job fires and *dispatch* it; **executes no user payload**. (2) **APScheduler** — the in-process Python library (`AsyncIOScheduler`, `CronTrigger`, `IntervalTrigger`, `DateTrigger`) each replica uses as its local *clock*; it is **not** the durable store (the data-plane is) and **not** cross-replica (the Redis+SQLite fire-claim is). (3) **the operator** — the **sole scaler**; the scheduler **requests** a wake by patching the CR (`spec.wake.requestedAt`), exactly like the brain does, and **never** scales a pod (operator §0 O3, §10 `:362`). (4) **the pod** — **executes** every dispatched job (the `claude` turn *and* the http/script/tool-retry tasks); it is the single writer for its account. The rule everything stands on: **the scheduler dispatches; the pod executes; the operator scales.**
 
@@ -29,8 +29,8 @@ This table is the drill's spine — each row is a requirement **cited to where i
 | SC1 | **Owns 100% of cron/interval/one-shot jobs** in the data-plane (not in `.priva.user.yml`) | blueprint dec 9 §85, §205; data-spine §2.11 (`:282` `scheduled_job`), §5 (`:600` YAML→`scheduled_job`) | §3, §4 |
 | SC2 | **Exactly-one-fire** via `UNIQUE(job_id, fire_epoch)` (durable authority) + Redis claim lock (fast pre-filter) | blueprint §207, §392; data-spine §2.11 (`:300` `job_fire`), §4 #14 (`:577`), §1.7 (`:102` `ClaimJobFire`) | §4.2 |
 | SC3 | **Fire → wake the pod** by **CR-patch** (`spec.wake.requestedAt`); the scheduler is a *waker*, **never** a scaler | blueprint §85, §323-326; operator §0 O3, §3.1, §10 (`:362` "Wake … brain ext_proc, **scheduler**"); data-spine §4 #10 `awake:lock` (`:573`) | §5.2 |
-| SC4 | **Dispatch via the durable inbox**: `RPUSH inbox:{account_id}` (T1), the pod **drains and executes** | blueprint flow-3 §325-326; agent-gateway §6 (`:346` RPUSH, `:359` "POD drains inbox FIFO"); agent-pod §11 B7c (`:827`) | §5.1 |
-| SC5 | **SKIP-if-busy, not queue** — if the target session's in-pod writer lock is held → `skipped(already_running)`, rely on next fire | blueprint §327, §354 ("**SKIP** adopted … matches the single-writer invariant"); agent-pod §4 (`:343` gate on the in-pod lock); data-spine §4 #11 (session-lock mirror) | §5.4 |
+| SC4 | **Dispatch via the durable inbox**: `RPUSH inbox:{account_id}` (T1), the pod **drains and executes** | blueprint flow-3 §325-326; agent-gateway §6 (`:346` RPUSH, `:359` "POD drains inbox FIFO"); agent-runner §11 B7c (`:827`) | §5.1 |
+| SC5 | **SKIP-if-busy, not queue** — if the target session's in-pod writer lock is held → `skipped(already_running)`, rely on next fire | blueprint §327, §354 ("**SKIP** adopted … matches the single-writer invariant"); agent-runner §4 (`:343` gate on the in-pod lock); data-spine §4 #11 (session-lock mirror) | §5.4 |
 | SC6 | **Active-check at fire time — NOT a budget check (M6)**: a disabled/offboarded account is `skipped` with no wake | blueprint §206/§324 **superseded by M6**; data-spine §2.10 `retention_state` (`:268`) | §5.3 |
 | SC7 | **Bounded wake-retry** then misfire policy: **5 attempts, 2s→60s + jitter** | blueprint §328, residual default §423 | §5.5 |
 | SC8 | **Cron-storm spreading**: per-fire **jitter** on the CR patch, composing with the operator's wake-concurrency limiter (~20) | blueprint §329, §318; operator §9 / OP5 (`:395`), §9 (`:342` "per-fire jitter: wakers (scheduler) spread CR patches") | §5.5, §10.2 |
@@ -46,7 +46,7 @@ This table is the drill's spine — each row is a requirement **cited to where i
 
 ## 1. The current code — fork / strip / invert / lift
 
-Mapping every existing scheduler file to its multi-tenant fate. **STRIP** = deleted; **INVERT** = survives but its execution moves to the pod; **LIFT** = re-homed into this component (re-pointed to the data-plane/Redis); **→ pod** = the code physically moves into the agent-pod runtime.
+Mapping every existing scheduler file to its multi-tenant fate. **STRIP** = deleted; **INVERT** = survives but its execution moves to the pod; **LIFT** = re-homed into this component (re-pointed to the data-plane/Redis); **→ pod** = the code physically moves into the agent-runner runtime.
 
 | Current code | Fate | Why / where it goes |
 |---|---|---|
@@ -105,7 +105,7 @@ Mapping every existing scheduler file to its multi-tenant fate. **STRIP** = dele
 - **Redis** — T2 `job:{job_id}:fire:{fire_epoch}` claim pre-filter (#14), `awake:lock:{account_id}` (#10), `awake:set` liveness hint (#9), `lock:session:{session_uuid}` mirror read for SKIP (#11), pub/sub `scheduler:reload` / `scheduler:trigger`; **T1** `inbox:{account_id}` RPUSH (#1) — the only durable dispatch write.
 - **operator** — by **CR patch** only (`spec.wake.requestedAt`), via the K8s API; never a direct pod call, never a scale.
 - **gateway** — the `PushToChannel(account_id, session_uuid, payload)` seam for proactive delivery (§6) — but, as §6 resolves, the *common* path routes delivery through the **pod's** outbound emit, not a direct scheduler call.
-- It **never** calls a pod directly and **never** touches an IM endpoint (SC9; agent-pod §9.6 IM egress denied).
+- It **never** calls a pod directly and **never** touches an IM endpoint (SC9; agent-runner §9.6 IM egress denied).
 
 ### 2.3 Internal API surface (replaces `routers/scheduler.py`'s host-local file/state coupling)
 
@@ -196,11 +196,11 @@ OWN the fire (§4.2)
        else (awake): the pod is already draining; the RPUSH alone delivers (no wake needed).
    │
    ▼
-operator scales 0→1 (sole scaler) → POD BOOT (agent-pod §11) → drains inbox FIFO (B7c) → EXECUTES the frame (§5.6)
+operator scales 0→1 (sole scaler) → POD BOOT (agent-runner §11) → drains inbox FIFO (B7c) → EXECUTES the frame (§5.6)
    → on completion: FinishRun(outcome) + (if notify) emit result → gateway → PushToChannel (§6)
 ```
 
-The dispatch write is **`inbox` + (maybe) wake** — identical to how the gateway buffers a cold-start IM turn (agent-gateway §6 `:346`). The scheduler adds nothing new to the pod's intake; a `SCHED FRAME` is just an inbound turn whose `origin` is `'scheduler'`. The pod **already** drains the inbox on boot (agent-pod §11 B7c `:827`, non-destructive peek / ack-on-completion), so a crash mid-drain loses no fired job.
+The dispatch write is **`inbox` + (maybe) wake** — identical to how the gateway buffers a cold-start IM turn (agent-gateway §6 `:346`). The scheduler adds nothing new to the pod's intake; a `SCHED FRAME` is just an inbound turn whose `origin` is `'scheduler'`. The pod **already** drains the inbox on boot (agent-runner §11 B7c `:827`, non-destructive peek / ack-on-completion), so a crash mid-drain loses no fired job.
 
 ### 5.2 Wake = CR-patch, under `awake:lock` (SC3)
 
@@ -218,7 +218,7 @@ Before dispatch the replica checks **only** that the account may run:
 
 Blueprint §354 locks **SKIP, not queue** (matches the single-writer invariant — a session has exactly one writer, the pod; you cannot run two turns on one session). Realized in two layers:
 1. **Scheduler pre-filter (cheap, avoids a needless wake).** For an **agent** job, read the session-lock **mirror** `lock:session:{session_uuid}` (Redis #11, T2). Held → `skipped('already_running')`, rely on next fire (`daemon.py:204-215`'s `lock.locked()` check, re-homed to the distributed mirror). Mirror is best-effort (the in-pod lock is authoritative), so this only *saves work*; it is not the correctness gate.
-2. **Pod authority (the real gate).** The mirror can be stale, so the **pod** re-checks at drain: when admitting a `SCHED FRAME` for a session whose **in-pod `asyncio.Lock` is held** (agent-pod §4 `:343` "gate on the in-pod lock, not the registry"), the pod records `skipped('already_running')` for that `run_id` rather than queueing. Non-agent jobs (§5.6) take no session lock and skip this gate.
+2. **Pod authority (the real gate).** The mirror can be stale, so the **pod** re-checks at drain: when admitting a `SCHED FRAME` for a session whose **in-pod `asyncio.Lock` is held** (agent-runner §4 `:343` "gate on the in-pod lock, not the registry"), the pod records `skipped('already_running')` for that `run_id` rather than queueing. Non-agent jobs (§5.6) take no session lock and skip this gate.
 
 ### 5.5 Wake-retry & jitter (SC7, SC8)
 
@@ -227,13 +227,13 @@ Blueprint §354 locks **SKIP, not queue** (matches the single-writer invariant �
 
 ### 5.6 What "execute" means in the pod, per job type (the executors that moved → pod, §1)
 
-The pod's boot-drain handler (agent-pod §11 B7c) dispatches a `SCHED FRAME` by `job_type`:
+The pod's boot-drain handler (agent-runner §11 B7c) dispatches a `SCHED FRAME` by `job_type`:
 - **`scheduled_agent`** → run as a normal **session turn**: `agent_run_events(prompt, session_id=session_uuid, …)` — but now under the pod's **real** permission/identity model, **not** the daemon's `bypassPermissions` (a scheduled run is still the user's run in the user's pod; permission policy is the pod's, not a scheduler override). Contends the session's single-writer lock (§5.4). This is the case the inversion is *for*.
 - **`http_call`** → `execute_http_call` (lifted from `builtin_tasks.py:35`) runs **in the pod** — outbound from the user's network identity. No session lock (account-level task). *(Efficiency caveat in §13: this is the one type that needs nothing from the pod; running it pod-side is chosen for isolation/egress-consistency, and is the reversible default.)*
 - **`user_script`** → `execute_user_script` (`builtin_tasks.py:98`) runs in the pod's `cwd` on the PVC, as the user's uid — the only place it *can* run safely.
 - **`tool_retry`** → `execute_tool_retry` (`tool_retry.py:128`) uses `McpConfigManager(account)` + the operator-injected MCP creds (M6 bundle) — only present in the pod.
 
-So **all four executors physically relocate into the agent-pod runtime**; the scheduler keeps their *definitions* only. *(Owed cross-doc note to agent-pod.md: the pod gains a "scheduled-frame executor" branch in the boot-drain — §13.)*
+So **all four executors physically relocate into the agent-runner runtime**; the scheduler keeps their *definitions* only. *(Owed cross-doc note to agent-runner.md: the pod gains a "scheduled-frame executor" branch in the boot-drain — §13.)*
 
 ---
 
@@ -245,7 +245,7 @@ The gateway drill **deferred the scheduler↔gateway orchestration to this drill
 
 **Resolution — delivery rides the dispatch frame; the gateway delivers proactively; the scheduler stays fire-and-forget.**
 1. The `SCHED FRAME` carries `notify:bool` (+ optional explicit `surface`), derived from the job config at dispatch.
-2. The pod runs the turn and **emits its result outbound to the gateway** — exactly as it does for an IM turn (the pod makes **no** IM call itself; agent-pod §9.6). For a scheduler-origin run there is **no live client socket** (the "sender" was the scheduler), so this is precisely the gateway's existing **proactive** case ("any reply *after* a human-feedback wait — the inbound frame's stream is long gone", agent-gateway §8 `:439`).
+2. The pod runs the turn and **emits its result outbound to the gateway** — exactly as it does for an IM turn (the pod makes **no** IM call itself; agent-runner §9.6). For a scheduler-origin run there is **no live client socket** (the "sender" was the scheduler), so this is precisely the gateway's existing **proactive** case ("any reply *after* a human-feedback wait — the inbound frame's stream is long gone", agent-gateway §8 `:439`).
 3. The gateway routes that proactive result to the account's **bound** channel via **`PushToChannel(account_id, session_uuid, payload)`** (§8.4) — same fan-out + chunker + lease owner as interactive replies. The binding is resolved by the gateway from `account_id` (never a scheduler-supplied channel — no impersonation).
 4. Silent jobs (`notify=false`) skip steps 2–3 entirely: the pod just writes `FinishRun` + the event JSONL; the WebUI surfaces it.
 
@@ -320,13 +320,13 @@ Covered in §5.5: per-fire jitter (scheduler) × wake-concurrency limiter (opera
 | `services/scheduler/job_store.py` | **Delete** (YAML+fcntl). Replaced by data-plane job-CRUD RPC. |
 | `services/scheduler/run_history.py` | **Reduce** to a data-plane `ListRuns` client + cursor helper; the JSONL writer/purger moves to the pod (§9.2). |
 | `services/scheduler/shared.py` | **Delete** `write_command`/paths (file bus); **keep** `build_trigger` (`:71`). |
-| `services/scheduler/builtin_tasks.py`, `tool_retry.py` | **Move → agent-pod runtime** (the pod's scheduled-frame executor, §5.6). Unchanged logic; new home. |
+| `services/scheduler/builtin_tasks.py`, `tool_retry.py` | **Move → agent-runner runtime** (the pod's scheduled-frame executor, §5.6). Unchanged logic; new home. |
 | `services/scheduler/mcp_tools.py` | **Stays in the pod**; re-point `get_job_store`→data-plane RPC, `write_command`→`PUBLISH scheduler:reload` (§7.1). |
 | `routers/scheduler.py` | **Split** (§1): user CRUD → internal API via brain; admin → Control Panel; live-output → state-reader tail. |
 | `models/scheduler.py` | **Keep** as the wire/DB shape; add `origin`/`notify`/`run_id` to the dispatched-frame model; retire the `agent_run` backcompat post-migration. |
 | **NEW** `scheduler/engine.py` (claim + dispatch), `scheduler/wake.py` (awake-lock + CR-patch + retry/jitter), `scheduler/api.py` (internal §2.3) | The net-new multi-replica machinery. |
 | **NEW** K8s: scheduler `Deployment` (`N` replicas) + SA/RBAC (data-plane client + **CR-patch** on `AgentTenant`, no scale) + NetworkPolicy + the `scheduler:reload`/`scheduler:trigger` channels | Deployment manifests. |
-| `pod` boot-drain (agent-pod §11 B7c) | **Add** the scheduled-frame branch: dispatch by `job_type` to the relocated executors / `agent_run_events`; write `FinishRun`; emit-if-`notify` (§5.6, §6). |
+| `pod` boot-drain (agent-runner §11 B7c) | **Add** the scheduled-frame branch: dispatch by `job_type` to the relocated executors / `agent_run_events`; write `FinishRun`; emit-if-`notify` (§5.6, §6). |
 | Migration (data-spine §5) | `.priva.user.yml scheduled_jobs[]` → `scheduled_job`; `.priva.scheduler.history.{date}.jsonl` → `job_run_record` (already specified data-spine `:600-601`). |
 
 ---
@@ -339,7 +339,7 @@ Covered in §5.5: per-fire jitter (scheduler) × wake-concurrency limiter (opera
 | SR2 | **Scheduler as confused-deputy / SSRF** — running every tenant's scripts + HTTP + MCP centrally | blocker | The scheduler **executes nothing** (§2.1); all four executors run in the per-user pod (§5.6). The central component only fires/claims/wakes. |
 | SR3 | **Lost fire on replica death** mid-dispatch | major | Dispatch is durable before any execution: the claim row + the `inbox` RPUSH (T1 AOF) both persist; another replica/the pod completes; wake-retry covers a failed patch within the inbox TTL (§5.5). |
 | SR4 | **Cron storm melts the operator** (every 9am job at once) | major | Per-fire jitter spreads CR patches × operator wake-limiter bounds concurrency; queued wakes safe (turn already buffered) (§5.5, §10.2; operator OP5). |
-| SR5 | **Two turns on one session** (scheduled run races a live user turn) | major | SKIP-not-queue, two layers: scheduler mirror pre-filter + the **pod's authoritative in-pod lock** at admit (§5.4; agent-pod §4). Single-writer invariant preserved. |
+| SR5 | **Two turns on one session** (scheduled run races a live user turn) | major | SKIP-not-queue, two layers: scheduler mirror pre-filter + the **pod's authoritative in-pod lock** at admit (§5.4; agent-runner §4). Single-writer invariant preserved. |
 | SR6 | **Over-budget run** (the blueprint's flow-3 concern) | — | **Dissolved by M6**: no spend, no cap, no pre-check — the gate is active-only (§5.3). Reversible: the dormant `budget_exceeded` slot + a restored pre-check re-enable it. |
 | SR7 | **Wakes a pod for a trivial job** (e.g. a 200ms healthcheck `http_call`) | minor | Accepted for v1 (isolation > efficiency); flagged as the one reversible optimization candidate (scheduler-direct lightweight HTTP **iff** an egress-controlled path exists — moot while egress is deferred, M6) (§13). |
 | SR8 | **Missed `scheduler:reload`** (pub/sub is best-effort) → a deleted job keeps firing / a new job never loads | minor | Periodic full reconcile re-list is the correctness floor; pub/sub is only the low-latency path (§4.3, §10.3). |
@@ -365,8 +365,8 @@ Covered in §5.5: per-fire jitter (scheduler) × wake-concurrency limiter (opera
 
 **Owed (small, filed):**
 - **data-spine §1.7 reword — DONE (applied this drill):** `FinishRun` attributed to the pod; `StartRun(running|skipped)` + `ListActiveJobs` added to the scheduler's list (§3.3). The §2.11 schema was already correct.
-- **agent-pod.md note** — the boot-drain (§11 B7c) gains a scheduled-frame branch that hosts the relocated `builtin_tasks`/`tool_retry` executors + `agent_run_events` for `scheduled_agent` (§5.6); and the pod owns the `.scheduler-runs/` JSONL writer + retention prune (§9.2). Fold into the next agent-pod deep pass.
-- **This is the LAST component drill.** The **deep M6 body cleanup is now DONE (2026-06-18)** — the spend-machinery + egress-gateway bodies in `agent-pod.md`, `data-spine.md`, `agent-gateway.md`, and `multi-tenant-platform.md §3/§4` are rewritten M6-correct (the blueprint §2 decisions table / system diagram / §5-7 stay under the supersession banner, as with M1/M2/M5). The only remaining owed item is the **channel-connector** sub-pass flagged in agent-gateway §4.4.
+- **agent-runner.md note** — the boot-drain (§11 B7c) gains a scheduled-frame branch that hosts the relocated `builtin_tasks`/`tool_retry` executors + `agent_run_events` for `scheduled_agent` (§5.6); and the pod owns the `.scheduler-runs/` JSONL writer + retention prune (§9.2). Fold into the next agent-runner deep pass.
+- **This is the LAST component drill.** The **deep M6 body cleanup is now DONE (2026-06-18)** — the spend-machinery + egress-gateway bodies in `agent-runner.md`, `data-spine.md`, `agent-gateway.md`, and `multi-tenant-platform.md §3/§4` are rewritten M6-correct (the blueprint §2 decisions table / system diagram / §5-7 stay under the supersession banner, as with M1/M2/M5). The only remaining owed item is the **channel-connector** sub-pass flagged in agent-gateway §4.4.
 
 **Open (deferred, reversible):**
 - **OS1 — `http_call` in the scheduler.** The one job type that needs nothing from the pod. Running it pod-side (v1) costs a wake for a trivial outbound call. A future scheduler-side lightweight HTTP executor is viable **iff** it routes through the controlled egress path — which is **deferred under M6** (no controlled path exists yet), so v1 keeps it in the pod (SR7).
@@ -375,4 +375,4 @@ Covered in §5.5: per-fire jitter (scheduler) × wake-concurrency limiter (opera
 
 ---
 
-> **Status.** Central Scheduler drilled (solo/conversational, M6-correct). With this, **all platform components are drilled**: data-spine, agent-pod, agent-gateway, control-panel, operator, scheduler — and the metering proxy is **dropped** (M6). The scheduler is the **last** component drill, and the **deep M6 body cleanup is DONE (2026-06-18)**. The only remaining platform work is the **channel-connector** sub-pass (agent-gateway §4.4).
+> **Status.** Central Scheduler drilled (solo/conversational, M6-correct). With this, **all platform components are drilled**: data-spine, agent-runner, agent-gateway, control-panel, operator, scheduler — and the metering proxy is **dropped** (M6). The scheduler is the **last** component drill, and the **deep M6 body cleanup is DONE (2026-06-18)**. The only remaining platform work is the **channel-connector** sub-pass (agent-gateway §4.4).

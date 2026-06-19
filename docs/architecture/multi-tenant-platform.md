@@ -11,7 +11,7 @@
 >   DB is a single SQLite file owned by one `priva-dataplane` writer process; every reference
 >   to "Postgres" below means this SQLite-service. **No object storage** (C2).
 > - **M2 — no CLI session-id remap; no `cli_session_id` column** (`components/data-spine.md` §2.3,
->   §3; `components/agent-pod.md` §2). The platform-minted `session_uuid` *is* the immutable
+>   §3; `components/agent-runner.md` §2). The platform-minted `session_uuid` *is* the immutable
 >   `--session-id`; CREATE (`--session-id`) and RESUME (`--resume`) are split. There is **no
 >   `RemapSession` RPC and no mutable `cli_session_id` column** — wherever this doc says "remap
 >   hook" or "mutable `cli_session_id`," that model is withdrawn.
@@ -20,7 +20,7 @@
 >   `account` + `identity_link` + `channel_binding`(+`first_run_done`). `is_first_run` = a binding CAS (IM) /
 >   gateway-mint + disk-guard (WebUI). Drops `session_index`, `cwd_hash`/`config_home` persistence, and the
 >   `MintSession`-row-commit / `ClaimFirstRun` central session RPCs. The remap fix is the CREATE/RESUME split
->   (table-independent), so M5 does not reintroduce remap. **data-spine + agent-pod bodies are fully
+>   (table-independent), so M5 does not reintroduce remap. **data-spine + agent-runner bodies are fully
 >   rewritten to M5** (2026-06-18) — `session_index` withdrawn, `channel_binding` gained `first_run_done`.
 > - **M6 — BYOK + metering deferred** (2026-06-18). Every user supplies their **own real LLM provider key**
 >   (BYOK) — there is **no shared org key and no virtual-key indirection**. **Spend tracking/enforcement is
@@ -29,21 +29,21 @@
 >   data-plane, observability-only — trust is fine with nothing enforced). The **metering-proxy component is
 >   dropped**; the BYOK key is just an **operator-injected secret** (like MCP tokens). The **egress security
 >   gateway is deferred** — pods call the provider/internet directly (default-deny-internet relaxed). **Supersedes**
->   decision 11 (metering proxy) + **C3**, the **virtual-key half** of decision 23 / agent-pod SB2·§13-3, and the
->   **egress-injection/metering half** of decision 3 / agent-pod §13-2. Reversible: token-count keeps flowing so
+>   decision 11 (metering proxy) + **C3**, the **virtual-key half** of decision 23 / agent-runner SB2·§13-3, and the
+>   **egress-injection/metering half** of decision 3 / agent-runner §13-2. Reversible: token-count keeps flowing so
 >   `$ = tokens × price card` + caps + egress allow-listing switch on later. *All component docs reconciled; the
->   **deep M6 body cleanup is DONE (2026-06-18)** — agent-pod (§7/§9.6/§11/§13), data-spine (§2.6/§2.8/§4 #5), and
+>   **deep M6 body cleanup is DONE (2026-06-18)** — agent-runner (§7/§9.6/§11/§13), data-spine (§2.6/§2.8/§4 #5), and
 >   this blueprint **§3/§4** are rewritten M6-correct, not just banner-flagged. Still under this banner by design
 >   (as with M1/M2/M5): the §2 decisions table, the system diagram, and §5/§6/§7.*
 > - **C1 — audit log is per-user JSONL on a dedicated audit volume**, not a DB table.
 > - **C3 — spend lives in the metering proxy + Redis `spend:reserve`**, not a SQLite `budget_ledger`. *(Spend now **deferred** — see M6; the proxy/ledger/`spend:reserve` are not built "for the moment.")*
 > - **C4 — session fork is SUPPORTED** (a fork is a first-class CHILD create with a new immutable
 >   `session_uuid`; parent untouched ⇒ not a remap). File checkpointing/rewind is in scope,
->   local-disk-only on the per-user PVC (`components/agent-pod.md` §3–§4).
+>   local-disk-only on the per-user PVC (`components/agent-runner.md` §3–§4).
 > - **Residual defaults:** `usage_rollup` dropped (usage **pod-self-reported**, M6 — was "read from the proxy
 >   API," now no proxy); hook execution logs stay per-user PV; M2 empirically verified at Phase 0.
 >
-> Component drills landed: **data-spine** (done), **agent-pod** (done), **agent-gateway** (done + reconciled to
+> Component drills landed: **data-spine** (done), **agent-runner** (done), **agent-gateway** (done + reconciled to
 > full-edge-adoption 2026-06-18), **Control Panel** (done — `components/control-panel.md`, full edge adoption on
 > agentgateway.dev + option (a)), **`AgentTenant` operator** (done — `components/operator.md`), **central scheduler**
 > (done — `components/scheduler.md`, M6-correct). The **metering proxy is DROPPED (M6)** — BYOK + token-count-only
@@ -52,10 +52,10 @@
 > deferred **`PushToChannel`** seam (delivery rides the dispatch frame; the gateway pushes; the scheduler stays
 > fire-and-forget), and applied one small cross-doc fix: **data-spine §1.7** now attributes `FinishRun` to the pod and
 > adds the scheduler's `StartRun(running|skipped)` + `ListActiveJobs` (the §2.11 schema was already correct).
-> The **deep M6 body cleanup is DONE (2026-06-18)** — agent-pod, data-spine, agent-gateway, and this blueprint
+> The **deep M6 body cleanup is DONE (2026-06-18)** — agent-runner, data-spine, agent-gateway, and this blueprint
 > **§3/§4** are rewritten M6-correct (the §2 decisions table, the system diagram, and §5/§6/§7 stay under the
 > supersession banner above, as with M1/M2/M5). **The only remaining platform work** (neither a drill): the
-> agent-pod.md **full-edge terminology pass** (gateway→agentgateway/brain/connector) + the **channel-connector**
+> agent-runner.md **full-edge terminology pass** (gateway→agentgateway/brain/connector) + the **channel-connector**
 > sub-pass (agent-gateway §4.4).
 
 ---
@@ -63,7 +63,7 @@
 ## 0. Overview
 
 Fork single-machine Priva into a Kubernetes multi-tenant platform for **hundreds of
-semi-trusted internal users**: one **scale-to-zero Agent Pod per user** (standard pod +
+semi-trusted internal users**: one **scale-to-zero Agent Runner per user** (standard pod +
 namespace + RBAC + NetworkPolicy isolation), a **stateless Agent Gateway** as the single
 front door for every surface, and a central control plane (**Postgres + two-tier Redis +
 LLM metering proxy + scheduler + `AgentTenant` operator + admin console**) that holds all
@@ -78,7 +78,7 @@ volume; Postgres is the system of record for anything queried across users.
 > `cli_session_id` column**; the `session_uuid` resolves the JSONL path directly. The only
 > sanctioned id-minting path is an explicit **fork**, which creates a CHILD session with its
 > own new immutable `session_uuid` (parent untouched ⇒ not a remap; see C4). See
-> `components/data-spine.md` §3 and `components/agent-pod.md` §2.
+> `components/data-spine.md` §3 and `components/agent-runner.md` §2.
 
 ---
 
@@ -224,7 +224,7 @@ stickiness is best-effort (<50ms one-hop budget).
   tracking is **deferred** — no reserve-before-call, no `402 budget_exceeded`, no ledger. Token usage is
   **pod-self-reported** (SDK `result` → data-plane, observability-only). The BYOK key is just an
   **operator-injected secret** (envelope-encrypted in the data-plane, KMS-unwrapped by the operator at spawn —
-  `components/agent-pod.md` §7). *Reversible: the token counts keep flowing, so `$ = tokens × price card` + caps +
+  `components/agent-runner.md` §7). *Reversible: the token counts keep flowing, so `$ = tokens × price card` + caps +
   a metering proxy can return later.*
 - **Control Panel (`ops-console`)** — admin-only SPA + `/admin/v2/*`, RBAC-gated, every mutating
   call audits before returning. Reads a **cached fleet-projector** (operator informer cache +
@@ -257,14 +257,14 @@ stickiness is best-effort (<50ms one-hop budget).
   sole writer host).
 
 ### Tenant plane
-The **Agent Pod** is a fork-and-strip of today's `priva/api` uvicorn process: the agent/run
+The **Agent Runner** is a fork-and-strip of today's `priva/api` uvicorn process: the agent/run
 loop, `PermissionCoordinator`, options builder, hooks, MCP, PTY are reused; the user DB, static
 SPA, channel daemon, and APScheduler are removed and replaced by calls to central services. It's
 the only process touching a user's JSONL. It runs the in-pod permission coordinator (Future
 never serializes), enforces single-writer per session via the in-pod lock, and runs up to
 `min(mem-derived, quota.max_concurrent_sessions)` concurrent `claude` subprocesses. At boot it
 **loads operator-injected secrets — including the user's own BYOK LLM key — from a tmpfs mount** (the pod
-decrypts nothing and holds no KMS key — the operator unwraps at spawn; see `components/agent-pod.md` §7; **M6:
+decrypts nothing and holds no KMS key — the operator unwraps at spawn; see `components/agent-runner.md` §7; **M6:
 no virtual key, no metering proxy**), and **purges any orphaned approval-index entries**
 (post-accept-loss) so the operator un-pins. It exports `IdleState` to Redis.
 
@@ -283,7 +283,7 @@ risk for semi-trusted internal users.
   **Cube/E2B sandbox-as-a-service is explicitly out**: it solves per-execution isolation for the
   *shared-host* model, which the pod-per-user model already supersedes, and it would fight the
   CLI's local Bash.
-- **Network (decision 3, refined by `components/agent-pod.md` §9.6/§13-2; egress gateway DEFERRED — M6):**
+- **Network (decision 3, refined by `components/agent-runner.md` §9.6/§13-2; egress gateway DEFERRED — M6):**
   default-deny **pod-to-pod** still holds. The **egress security gateway is deferred** "for the moment": all HTTP
   outbound (the BYOK LLM call, MCP HTTP/SSE, hooks, tool web) goes **direct** — no allow-list, no forced
   traversal, no credential injection at egress (all creds, including the BYOK key, ride the operator-injected
@@ -363,7 +363,7 @@ dual-authority race.
 | **Blocker** | IM channel socket = per-bot SPOF; fast TTL risks WeCom double-connect split-brain | Explicit lease (10s TTL/3s heartbeat), channel-ownership a monitored role, re-handshake before ready; **bounded inbound stall documented** as a channel-health condition |
 | **Major** | Per-pod concurrency is genuinely NEW (today's daemon is serial); singletons assume one run | Run-context made **multi-instance** (per-run coordinator+queue, no module singletons); cap enforced in **one place — the pod** (gateway/scheduler get 429); effective cap = `min(mem-derived, quota)` |
 | **Major** | Single Redis tier mixes non-reconstructible state with a fail-closed spend hot-path | **Two tiers**: persistent/AOF for inbox + approval-index + binding-cache + spend reservations; ephemeral cache for routing/awake. Ack only after durable write; degraded-spend reconciles against the proxy event log |
-| **Major** | Impersonation vs the `asker_id` approval gate | ACT_AS **does** spend the target's budget + use their secrets/tools (inherent), spend tagged `impersonator_account_id` at the proxy, **audited** — **but may NOT answer approvals** (locked `components/agent-pod.md` §13-6, reversing the earlier "may answer, audited"): a permission request is answerable only by the user, via their WebUI session or bound IM channel. *(Secrets are operator-injected, not pod-decrypted — §7.)* |
+| **Major** | Impersonation vs the `asker_id` approval gate | ACT_AS **does** spend the target's budget + use their secrets/tools (inherent), spend tagged `impersonator_account_id` at the proxy, **audited** — **but may NOT answer approvals** (locked `components/agent-runner.md` §13-6, reversing the earlier "may answer, audited"): a permission request is answerable only by the user, via their WebUI session or bound IM channel. *(Secrets are operator-injected, not pod-decrypted — §7.)* |
 | **Major** | Two wake transports (CR patch + Redis pub/sub) with no serialization point | **CR patch is the only scale-up trigger**; Redis `wake:pod` is a reconcile **nudge only**. `awake:lock` guards the CR patch across all wakers |
 | **Major** | Scheduler SKIP vs flow QUEUE contradiction for a busy session | **SKIP** adopted (matches single-writer invariant): `skipped(already_running)`, rely on next fire |
 | **Major** | `channel_binding` defined three incompatible ways | One schema keyed off `identity_id`, referencing stable `session_uuid`; **identity-auth writes, gateway reads** |
@@ -372,7 +372,7 @@ dual-authority race.
 | **Major** | Single-writer lock described as both Redis distributed lock and in-pod lock — dual authority | **In-pod `asyncio.Lock` (+fcntl best-effort) authoritative**; Redis `lock:session:` demoted to a **status mirror** (TTL/heartbeat to clear a dead pod's "running") |
 | Minor | Instant ack fires before budget/quota check | Gateway **pre-gate before ack+wake** (revoked / capped answered without wake) |
 | Minor | Unbounded inbound buffer → flood/overflow | **~50 msgs/account cap**, **~1h per-entry TTL**, duplicate-coalescing, atomic drain-then-attach |
-| Minor | Egress allow-list would break tool use | **Locked (agent-pod §13-2):** all HTTP outbound routes through an **egress gateway** that allow-lists, injects credentials, and meters; direct internet + pod-to-pod **denied**. Stdio-MCP/env-reading tools use operator-injected secrets. |
+| Minor | Egress allow-list would break tool use | **Locked (agent-runner §13-2):** all HTTP outbound routes through an **egress gateway** that allow-lists, injects credentials, and meters; direct internet + pod-to-pod **denied**. Stdio-MCP/env-reading tools use operator-injected secrets. |
 | Minor | Three inconsistent views of spend | **Proxy Redis counter = single enforcement authority**; the proxy event log is the spend system-of-record; the control panel reads usage/spend **straight from the proxy API**. *(`usage_rollup` is dropped — residual default #1; no SQLite cache of token/cost rows.)* |
 
 ---
