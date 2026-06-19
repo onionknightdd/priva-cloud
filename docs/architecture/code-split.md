@@ -11,7 +11,7 @@
 The drills answered **what** each subsystem does and **how** it behaves. They cite current code in their `§0` lift/strip/relocate tables — but those tables are scattered across six files and stop at **file granularity**. This doc:
 
 1. **Consolidates** the six `§0` tables into one place, so there is a single answer to "where does `X.py` go?"
-2. **Resolves the per-router splits** the drills deferred — 7 routers expose *both* an admin/config face (→ Control Panel) and a runtime face (→ agent-runner). Each endpoint is classified in §5.
+2. **Resolves the per-router splits** the drills deferred — 6 routers expose *both* an admin/config face (→ Control Panel) and a runtime face (→ agent-runner): `hooks`, `mcp`, `skills`, `subagents`, `pty`, `scheduler` (§5.2). Each endpoint is classified in §5.
 3. **Defines `libs/common`** — the shared contract layer (wire format, models, data-plane client, crypto) that no single drill owns.
 4. **Sets the extraction order** (§11) so the carve is a reversible strangler, not a big-bang.
 
@@ -175,7 +175,8 @@ Verbs: **LIFT** (move as-is) · **RESHAPE** (move + change) · **SPLIT** (divide
 | `main.py` (225) | **SPLIT** | each deployable gets its own entrypoint; router fan-in (`:203-219`) splits per §5; CORS (`:181`)→edge; SPA mount (`:79`)→control-panel faces; OpenClaw lifespan (`:133-153`)→connector; temp-cleanup (`:131`)→agent-runner |
 | `models/*` (15) | **libs/common** | **LIFT** — shared pydantic DTOs (agent, auth, channels, scheduler, hooks, mcp, skills, skill_hub, subagents, resource, admin, admin_files, plugin, user_env) |
 | `utils/crypto.py` | **libs/common** | **LIFT** — envelope crypto shared by data-spine (store) + operator (unwrap) |
-| `utils/sensitive_mask.py`, `callback.py`, `script_lint.py` | **libs/common** | **LIFT** |
+| `utils/sensitive_mask.py`, `script_lint.py` | **libs/common** | **LIFT** |
+| `utils/callback.py` | **agent-runner** | **RELOCATE** — follows `scheduler/tool_retry.py` (its only importer; §4.3). Lazily imports `services.user_store` (`callback.py:97`), so it **cannot** lift to `libs/common` without breaking the §6 boundary; RESHAPE to invert that dep only if ever shared. |
 | `middleware/logging.py` | **libs/common** | **LIFT** — every service mounts it |
 | `metrics.py`, `routers/metrics.py` (`/metrics`) | **libs/common** | **RESHAPE** — each deployable exposes its own `/metrics` |
 | `static/*` (scalar/swagger) | **control-panel** | **LIFT** (API docs) or drop |
@@ -255,18 +256,19 @@ The one package every service depends on (a `uv` workspace path-dep). Contents:
 
 > Rule: `libs/common` may **not** import any service. Services import `common` + their own package only. This is the import boundary that keeps the carve clean (enforced in Phase 0).
 
-### 6.1 Extraction order within `libs/common` (dependency-grounded, verified 2026-06-19)
+### 6.1 Extraction order within `libs/common` (dependency-grounded, re-verified 2026-06-19)
 
-Move order is forced by the real import edges (measured on the monolith). Each move uses a **re-export shim**: the real code lands in `priva_common`, the old `api.*` path becomes `from priva_common.X import *`, so the monolith keeps booting and **no importer changes** until its service is extracted.
+Move order is forced by the real import edges (measured on the monolith). Each move uses a **re-export shim**: the real code lands in `priva_common`, the old `api.*` path becomes `from priva_common.X import *`, so the monolith keeps booting and **no importer changes** until its service is extracted. Importer counts below are distinct importing files (re-measured 2026-06-19); they gauge blast-radius — the *order* follows the import edges, not the counts.
 
-1. **`config`** (leaf — stdlib + pydantic only; 31 importers). **RESHAPE, not a pure move:** today `Settings.yaml_file = Path(__file__).parent.parent / "config.yaml"` (`config.py:137`) is `__file__`-relative and breaks once the file moves. Repoint to an env var (`PRIVA_CONFIG_FILE`, default `./config.yaml`) so each service loads its own config.
-2. **`logging`** (imports `config`; 47 importers) — `get_app_logger` / `AccessLogMiddleware` / `configure_logging`.
-3. **`crypto`** + **`_pagination`** (each imports `logging`; 5 + 4 importers) — clean once logging is in.
-4. **`models/*`** (38 importers) — the shared DTOs.
-5. **`serialization`** (imports `models` **and** `claude_sdk/retry.SYNTHETIC_MODEL`, a *pod* module; 4 importers). **RESHAPE:** lift `SYNTHETIC_MODEL` into `priva_common` (a shared wire/retry constant) so `serialization` carries no pod dependency.
-6. **`redis_catalog`** (NEW — pure addition, no shim).
+1. **`config`** (leaf — stdlib + pydantic only; 28 importers). **RESHAPE, not a pure move:** today `Settings.yaml_file = Path(__file__).parent.parent / "config.yaml"` (`config.py:137`) is `__file__`-relative and breaks once the file moves. Repoint to an env var **`PRIVA_CONFIG_FILE`**, **defaulting to the monolith's `priva/api/config.yaml`** (an absolute path — *not* CWD-relative `./config.yaml`, which varies per daemon). `server.sh` should `export PRIVA_CONFIG_FILE` to match its existing `CONFIG_FILE` (`server.sh:13`). **Keep `yaml_file` a `Path` ClassVar** — `logging.py:319` resolves relative log paths via `Settings.yaml_file.parent.parent / path`, so the default must keep `.parent.parent` pointing at the monolith root (config↔logging coupling — see step 3). `config.yaml` is absent today (only `config.example.yaml`); the missing-file case must stay tolerated (pydantic defaults apply).
+2. **`metrics`** (leaf — `prometheus_client` only; 2 importers). **Must precede `logging`:** `logging.py:280` imports `HTTP_DURATION` / `HTTP_REQUESTS` from `..metrics`. That import is **lazy** (inside the request path), so the boot-check won't catch a broken `metrics` import — exercise/inspect a real request after the move. **RESHAPE:** each deployable exposes its own `/metrics`.
+3. **`logging`** (imports `config` **and** `metrics`; 44 importers) — `get_app_logger` / `AccessLogMiddleware` / `configure_logging`. When it moves, re-point its `..metrics` import to `priva_common.metrics` and its `Settings.yaml_file` use to `priva_common.config`.
+4. **`crypto`** + **`_pagination`** (each imports `logging`; 1 + 3 importers) — clean once logging is in.
+5. **`models/*`** (38 importers) — the shared DTOs.
+6. **`serialization`** (imports `models` **and** `claude_sdk/retry.SYNTHETIC_MODEL`, a *pod* module; 2 importers). **RESHAPE:** lift `SYNTHETIC_MODEL` (a trivial string constant, `retry.py:17`) into `priva_common` (e.g. `priva_common.wire`) so `serialization` carries no pod dependency; leave `retry.py` re-importing it.
+7. **`redis_catalog`** (NEW — pure addition, no shim).
 
-Acceptance per move: `PYTHONPATH=priva:libs/common/src python -c "import api.main"` still resolves (uv not required for this check).
+Acceptance per move: `PYTHONPATH=priva:libs/common/src python -c "import api.main"` still resolves (uv not required for this check). Because the `logging→metrics` edge is lazy, additionally confirm a request actually records metrics after step 3.
 
 ---
 
