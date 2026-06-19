@@ -1,20 +1,2 @@
-from __future__ import annotations
-
-from pydantic import BaseModel, Field
-
-
-class PluginInfo(BaseModel):
-    id: str
-    name: str
-    description: str
-    enabled: bool = False
-    config: dict = Field(default_factory=dict)
-
-
-class PluginListResponse(BaseModel):
-    plugins: list[PluginInfo]
-
-
-class PluginConfigUpdate(BaseModel):
-    enable: bool
-    config: dict = Field(default_factory=dict)
+"""Re-export shim → priva_common.models.plugin (Phase-0 §6.1 step 5)."""
+from priva_common.models.plugin import *  # noqa: F401,F403
