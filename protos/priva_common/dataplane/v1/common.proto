@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+// Priva Cloud data-plane contract, v1. Wire convention (locked): timestamps and
+// JSON-blob columns ride as `string`. Proto sources live under
+// protos/priva_common/dataplane/v1/ so generated Python lands in the
+// priva_common.dataplane.v1 package with correct intra-package imports.
+package priva.dataplane.v1;
+
+message Empty {}
+
+message BoolValue { bool value = 1; }
+
+message CountValue { int64 value = 1; }
+
+// Shared reference used by Account/Binding/Quota/Scheduler.
+message AccountRef { string account_id = 1; }

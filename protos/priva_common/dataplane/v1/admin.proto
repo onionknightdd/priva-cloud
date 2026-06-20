@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package priva.dataplane.v1;
+
+import "priva_common/dataplane/v1/common.proto";
+
+message Health { string status = 1; }            // "ok"
+message Ready { bool ready = 1; string detail = 2; }
+message StatsResponse { int64 accounts = 1; int64 jobs = 2; int64 runs = 3; }
+
+service AdminService {
+  rpc Healthz(Empty) returns (Health);
+  rpc Readyz(Empty) returns (Ready);
+  rpc Stats(Empty) returns (StatsResponse);
+}

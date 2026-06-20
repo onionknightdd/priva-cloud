@@ -14,6 +14,13 @@ class UserRecord(BaseModel):
     api_key: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    # Phase-1 data-spine additions (additive/defaulted — file-backed callers ignore them).
+    # account_id is the minted UUID PK; the request layer stays username-keyed in Phase 1.
+    # api_key_lookup (HMAC) is an internal column and is NEVER surfaced on this DTO.
+    account_id: str | None = None
+    status: str = "active"
+    feishu_user_id: str | None = None
+    feishu_display_name: str | None = None
 
 
 class UsageCounts(BaseModel):

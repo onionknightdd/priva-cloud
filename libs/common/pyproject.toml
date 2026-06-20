@@ -19,7 +19,15 @@ dependencies = [
     "claude-agent-sdk==0.1.81",
     # Redis catalog (redis_catalog.py)
     "redis>=5",
+    # Data-plane gRPC contract (dataplane/) — generated stubs import grpc + protobuf.
+    # grpc_client lazy-imports grpc so the in-process transport never needs it loaded.
+    "grpcio>=1.60",
+    "protobuf",
 ]
+
+[dependency-groups]
+# Codegen-only: grpcio-tools (protoc + plugins). Not a runtime dep — used by protos/gen.sh.
+dev = ["grpcio-tools>=1.60"]
 
 [build-system]
 requires = ["hatchling"]

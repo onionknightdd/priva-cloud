@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+package priva.dataplane.v1;
+
+import "priva_common/dataplane/v1/common.proto";
+
+// scheduled_job — `trigger` and `job_config` are JSON strings on the wire.
+message Job {
+  string job_id = 1;
+  string account_id = 2;
+  string name = 3;
+  string prompt = 4;        // legacy mirror of job_config.prompt
+  string trigger = 5;       // JSON: {type:interval,...} | {type:cron,expr}
+  string job_type = 6;      // agent_run | http_call | user_script | tool_retry
+  string job_config = 7;    // JSON discriminated union
+  string timezone = 8;
+  string model = 9;
+  string status = 10;       // active | paused
+  string created_at = 11;
+  string updated_at = 12;
+}
+
+message JobRef { string job_id = 1; }
+message JobList { repeated Job jobs = 1; }
+
+message CreateJobRequest {
+  string account_id = 1;
+  string name = 2;
+  string prompt = 3;
+  string trigger = 4;
+  string job_type = 5;
+  string job_config = 6;
+  string timezone = 7;
+  string model = 8;
+  string status = 9;
+}
+
+message UpdateJobRequest {
+  string job_id = 1;
+  string name = 2;
+  string prompt = 3;
+  string trigger = 4;
+  string job_type = 5;
+  string job_config = 6;
+  string timezone = 7;
+  string model = 8;
+  string status = 9;
+  repeated string update_mask = 10;
+}
+
+message SetJobStatusRequest {
+  string job_id = 1;
+  string status = 2;
+}
+
+// job_run_record — metadata only (output transcript stays on PV).
+message Run {
+  string run_id = 1;
+  string job_id = 2;
+  string job_name = 3;
+  string account_id = 4;
+  string session_id = 5;
+  string started_at = 6;
+  string finished_at = 7;
+  string status = 8;        // running|success|error|cancelled|skipped
+  int64 duration_ms = 9;
+  bool is_error = 10;
+  string error_message = 11;
+  int64 num_turns = 12;
+  string result_summary = 13;
+}
+
+message StartRunRequest {
+  string run_id = 1;
+  string job_id = 2;
+  string job_name = 3;
+  string account_id = 4;
+  string session_id = 5;
+  string started_at = 6;
+  string status = 7;        // running | skipped
+}
+
+message FinishRunRequest {
+  string run_id = 1;
+  string finished_at = 2;
+  string status = 3;
+  int64 duration_ms = 4;
+  bool is_error = 5;
+  string error_message = 6;
+  int64 num_turns = 7;
+  string result_summary = 8;
+}
+
+message ListRunsRequest {
+  string account_id = 1;
+  int32 limit = 2;
+  string before = 3;   // keyset cursor
+  string after = 4;    // keyset cursor
+  string job_id = 5;   // filter
+  string status = 6;   // filter
+}
+
+message RunPage {
+  repeated Run runs = 1;
+  string next_cursor = 2;
+  string prev_cursor = 3;
+  int64 total = 4;     // -1 when a filter is active (total unknown)
+}
+
+service SchedulerService {
+  rpc CreateJob(CreateJobRequest) returns (Job);
+  rpc GetJob(JobRef) returns (Job);
+  rpc UpdateJob(UpdateJobRequest) returns (Job);
+  rpc DeleteJob(JobRef) returns (Empty);
+  rpc ListJobs(AccountRef) returns (JobList);
+  rpc ListActiveJobs(Empty) returns (JobList);
+  rpc SetJobStatus(SetJobStatusRequest) returns (Job);
+  rpc StartRun(StartRunRequest) returns (Run);
+  rpc FinishRun(FinishRunRequest) returns (Run);
+  rpc ListRuns(ListRunsRequest) returns (RunPage);
+}
