@@ -85,7 +85,11 @@ async def _proxy_http(request: Request, path: str) -> Response:
     # follow_redirects so AR's trailing-slash 307s (which point at AR's own
     # origin) are resolved here instead of leaking to the browser, which would
     # otherwise be bounced straight at the runner and bypass the proxy.
-    client = httpx.AsyncClient(timeout=httpx.Timeout(None), follow_redirects=True)
+    # trust_env=False: the CP->AR hop is internal localhost — it must NEVER be
+    # routed through an ambient HTTP_PROXY / system forward proxy (which would
+    # 502 the localhost call). Honoring proxy env is correct only for external
+    # egress (e.g. routers/resource.py reaching the model provider), not here.
+    client = httpx.AsyncClient(timeout=httpx.Timeout(None), follow_redirects=True, trust_env=False)
     req = client.build_request(request.method, url, headers=headers, content=body)
 
     if wants_stream:
