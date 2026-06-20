@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 # Minimal containers may not register web font types; browsers refuse fonts
@@ -85,6 +86,12 @@ def create_app() -> FastAPI:
     @app.get("/health", include_in_schema=False)
     async def health():
         return {"status": "ok", "service": "control-panel", "time": datetime.now(timezone.utc).isoformat()}
+
+    # The admin SPA is mounted at "/admin" (StaticFiles serves only "/admin/..."),
+    # so a bare "/admin" with no trailing slash 404s. Redirect it to "/admin/".
+    @app.get("/admin", include_in_schema=False)
+    async def _admin_index_redirect():
+        return RedirectResponse(url="/admin/")
 
     # --- CP-served routers ---
     from .routers.auth import router as auth_router
