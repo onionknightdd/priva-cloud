@@ -22,6 +22,7 @@ ENV/
 # ---- Node / Web (priva/web) ----
 node_modules/
 priva/web/dist/
+priva/web/dist-admin/
 priva/web/nohup.out
 npm-debug.log*
 yarn-error.log*
