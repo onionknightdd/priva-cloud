@@ -43,3 +43,8 @@ wecom-aibot-python-sdk
 grpcio>=1.60
 grpcio-tools>=1.60
 protobuf
+# K8s control plane (Phase 3+): operator (kopf), control-panel/operator kube client,
+# and the Envoy ext_proc stubs the control-panel EPP implements for agentgateway.
+kopf>=1.37
+kubernetes>=29
+xds-protos

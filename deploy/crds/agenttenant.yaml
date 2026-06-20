@@ -1,0 +1,59 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: agenttenants.priva.io
+spec:
+  group: priva.io
+  scope: Namespaced
+  names:
+    plural: agenttenants
+    singular: agenttenant
+    kind: AgentTenant
+    shortNames: [at]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Account
+          type: string
+          jsonPath: .spec.accountId
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: PodIP
+          type: string
+          jsonPath: .status.podIP
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [accountId]
+              properties:
+                accountId: {type: string}
+                username: {type: string}
+                desiredState:
+                  type: string
+                  enum: [active, offboarding, purge]
+                  default: active
+                image: {type: string}
+                idle:
+                  type: object
+                  properties:
+                    graceSeconds: {type: integer}
+                    minAliveAfterWakeSeconds: {type: integer}
+                concurrency:
+                  type: object
+                  properties:
+                    maxConcurrentSessions: {type: integer}
+                wake:
+                  type: object
+                  properties:
+                    requestedAt: {type: string}
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
