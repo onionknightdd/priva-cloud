@@ -1,0 +1,17 @@
+.git
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+logs/
+*.bundle
+.claude
+.idea
+.vscode
+# web: keep the built SPAs (priva/web/dist, dist-admin); drop sources/deps
+priva/web/node_modules
+priva/web/.vite
+priva/web/src
+# tests aren't needed in runtime images
+tests/
