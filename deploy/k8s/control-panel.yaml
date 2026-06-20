@@ -43,4 +43,5 @@ spec:
   selector: {app: control-panel}
   ports:
     - {port: 8080, targetPort: 8080, name: http}
-    - {port: 9000, targetPort: 9000, name: extproc}
+    # h2c so agentgateway dials the ext_proc EPP as gRPC (HTTP/2 cleartext).
+    - {port: 9000, targetPort: 9000, name: extproc, appProtocol: kubernetes.io/h2c}

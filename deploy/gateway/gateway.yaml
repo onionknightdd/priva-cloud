@@ -1,0 +1,15 @@
+# The single edge. agentgateway provisions a proxy Deployment+Service for this Gateway.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: priva-gateway
+  namespace: priva-cloud
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same

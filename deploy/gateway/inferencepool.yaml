@@ -1,0 +1,21 @@
+# The pool of per-account agent-runner pods. Its EndpointPicker is the
+# control-panel ext_proc brain (:9000): agentgateway calls it per request and
+# routes to the returned x-gateway-destination-endpoint (the woken account's pod).
+apiVersion: inference.networking.k8s.io/v1
+kind: InferencePool
+metadata:
+  name: agent-runners
+  namespace: priva-cloud
+spec:
+  selector:
+    matchLabels:
+      app: agent-runner
+  targetPorts:
+    - number: 8091
+  endpointPickerRef:
+    group: ""
+    kind: Service
+    name: control-panel
+    port:
+      number: 9000
+    failureMode: FailClose
