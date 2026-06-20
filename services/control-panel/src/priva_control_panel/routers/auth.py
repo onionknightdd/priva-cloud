@@ -25,7 +25,8 @@ from ..services.auth import (
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from ..services.compute_user_stats import compute_user_stats
 from priva_common.config import get_settings
-from priva_common.user_env import has_user_env, mask_token, read_user_env, write_user_env
+from priva_common.user_env import mask_token
+from ..services.secret_env import has_user_env, read_user_env, write_user_env
 from priva_common.user_store import get_user_store, UserRecord
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -37,6 +38,17 @@ async def check_setup():
     return SetupStatus(needs_setup=not store.has_users())
 
 
+def _provision_tenant(user) -> None:
+    """Best-effort: create the account's AgentTenant CR. Never block user creation
+    (a local CP without a cluster, or a transient kube error, must still succeed)."""
+    from ..provisioner import ensure_tenant
+    try:
+        ensure_tenant(user.account_id, user.username)
+    except Exception as exc:  # pragma: no cover
+        from priva_common.logging import get_app_logger
+        get_app_logger(__name__).warning("provision tenant failed for {}: {}", user.username, exc)
+
+
 @router.post("/setup", response_model=LoginResponse)
 async def setup_admin(request: SetupRequest):
     store = get_user_store()
@@ -44,6 +56,9 @@ async def setup_admin(request: SetupRequest):
         raise HTTPException(403, "Setup already completed")
     user = store.create_user(request.username, request.password, role="admin")
     token = create_jwt(user.username, user.role)
+
+    # Provision the per-account agent-runner (operator reconciles the AgentTenant CR).
+    _provision_tenant(user)
 
     # Write env if provided
     if request.env:

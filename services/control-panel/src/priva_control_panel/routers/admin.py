@@ -39,8 +39,11 @@ from priva_common.config import get_settings
 # not available to the control-panel; the few admin endpoints that used them
 # return 503 below. Per-user skill management is reached via the proxied
 # /api/resource/skills routes instead.
-from priva_common.user_env import write_user_env
+from ..services.secret_env import write_user_env
+from priva_common.logging import get_app_logger
 from priva_common.user_store import UserRecord, get_user_store
+
+logger = get_app_logger(__name__)
 
 router = APIRouter(
     prefix="/api/admin",
@@ -67,6 +70,13 @@ async def create_user(
         user = store.create_user(request.username, password, request.role)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+    # Provision the per-account agent-runner (operator reconciles the AgentTenant CR).
+    from ..provisioner import ensure_tenant
+    try:
+        ensure_tenant(user.account_id, user.username)
+    except Exception as exc:  # pragma: no cover
+        logger.warning("provision tenant failed for {}: {}", user.username, exc)
 
     # Write env if provided
     if request.env:

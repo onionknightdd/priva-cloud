@@ -18,7 +18,7 @@ from priva_common.models.resource import (
 )
 from ..services.auth import get_user_workspace, require_user
 from priva_common.config import get_settings
-from priva_common.user_env import read_user_env
+from ..services.secret_env import read_user_env
 from priva_common.user_store import UserRecord
 
 logger = get_app_logger(__name__)
