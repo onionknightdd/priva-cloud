@@ -1,0 +1,19 @@
+# data-spine — example bootstrap config (single-writer state + secret store pod).
+#
+# Runs the gRPC server (`data-spine serve`) on :50051 backed by SQLite on a RWO PVC.
+# Env form: PRIVA_DATASPINE__SQLITE_PATH, PRIVA_SERVER__PORT, …
+
+app_name: "Priva data-spine"
+
+server:
+  host: "0.0.0.0"
+  port: 50051           # gRPC listener (the data plane)
+  work_dir: "~/priva_workspace"
+
+dataspine:
+  transport: "in_process"          # the server itself owns the DB in-process
+  backend: "sqlite"
+  sqlite_path: "/data/priva.dataspine.db"   # on the RWO PVC mount
+  api_key_hmac_secret: null        # shared signing secret; override via Secret/env
+
+# logging.* defaults are fine.

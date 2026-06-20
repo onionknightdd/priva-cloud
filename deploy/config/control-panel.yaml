@@ -1,0 +1,44 @@
+# control-panel — example bootstrap config (in-cluster brain/EPP + admin/auth/config + SPAs).
+#
+# Every key here can equivalently be supplied as an env var with the PRIVA_ prefix and
+# "__" nesting (this is how the K8s ConfigMap/Secret feed it — no file needed):
+#     server.port            -> PRIVA_SERVER__PORT
+#     dataspine.grpc_dsn     -> PRIVA_DATASPINE__GRPC_DSN
+#     auth.jwt_secret        -> PRIVA_AUTH__JWT_SECRET   (from a Secret, not this file)
+#
+# Secrets (auth.jwt_secret, dataspine.api_key_hmac_secret) belong in a K8s Secret,
+# NOT in this committed file. The placeholders below are for local reference only.
+
+app_name: "Priva control-panel"
+
+server:
+  host: "0.0.0.0"
+  port: 8080            # HTTP face: user SPA (/) + admin SPA (/admin) + auth/admin/config API
+  work_dir: "~/priva_workspace"
+
+auth:
+  jwt_secret: "change-me"        # platform JWT signing; override via Secret/env in cluster
+  admins: ["admin"]
+
+dataspine:
+  transport: "grpc"              # talk to the data-spine pod
+  grpc_dsn: "data-spine.priva-cloud.svc.cluster.local:50051"
+  api_key_hmac_secret: null      # shared CP<->AR signing secret; override via Secret/env
+
+kubernetes:
+  in_cluster: true
+  namespace_system: "priva-cloud"
+  namespace_tenants: "priva-cloud"   # alpha: control plane + tenant pods share one ns
+  runner_image: "priva/agent-runner:dev"
+  runner_image_pull_policy: "IfNotPresent"
+  runner_service_port: 8091
+  idle_grace_seconds: 1800
+  min_alive_after_wake_seconds: 1800
+  max_concurrent_sessions: 3
+  wake_timeout_seconds: 60
+
+edge:
+  jwt_issuer: "priva-cp"
+  extproc_port: 9000             # gRPC ext_proc (EPP) listener agentgateway calls per /v1 request
+
+# logging.* defaults are fine; relative paths resolve under PRIVA_LOG_DIR -> server.work_dir -> CWD.

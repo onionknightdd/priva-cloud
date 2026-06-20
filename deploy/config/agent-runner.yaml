@@ -1,0 +1,27 @@
+# agent-runner — example bootstrap config (one scale-to-zero pod per account).
+#
+# The account this pod is pinned to is NOT config — it arrives as env at spawn
+# (ACCOUNT_ID / USERNAME, set by the operator). Per-account credentials arrive as an
+# operator-injected K8s Secret (ANTHROPIC_* env), not from this file.
+#
+# Env form (fed by the pod's env/ConfigMap): PRIVA_DATASPINE__GRPC_DSN, PRIVA_SERVER__PORT, …
+
+app_name: "Priva agent-runner"
+
+server:
+  host: "0.0.0.0"
+  port: 8091            # runtime API the EPP steers agentgateway to (InferencePool member)
+  work_dir: "~/priva_workspace"
+
+dataspine:
+  transport: "grpc"     # shared state + activity heartbeat over the data-spine pod
+  grpc_dsn: "data-spine.priva-cloud.svc.cluster.local:50051"
+  api_key_hmac_secret: null   # shared CP<->AR signing secret; override via Secret/env
+
+agent:
+  permission_timeout_seconds: 600   # parked permission await bound
+
+pty:
+  enabled: false
+
+# logging.* defaults are fine.
