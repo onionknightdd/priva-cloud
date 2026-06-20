@@ -1,0 +1,20 @@
+# Shared non-secret bootstrap env for CP / operator / agent-runner pods.
+# (data-spine uses its own env — it's the in-process owner of the DB, not a client.)
+# Idle values are short here so scale-to-zero is observable in a demo.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: priva-config
+  namespace: priva-cloud
+data:
+  PRIVA_DATASPINE__TRANSPORT: "grpc"
+  PRIVA_DATASPINE__GRPC_DSN: "data-spine.priva-cloud.svc.cluster.local:50051"
+  PRIVA_LOG_DIR: "/tmp/logs"
+  PRIVA_KUBERNETES__IN_CLUSTER: "true"
+  PRIVA_KUBERNETES__NAMESPACE_SYSTEM: "priva-cloud"
+  PRIVA_KUBERNETES__NAMESPACE_TENANTS: "priva-cloud"
+  PRIVA_KUBERNETES__RUNNER_IMAGE: "priva/agent-runner:dev"
+  PRIVA_KUBERNETES__RUNNER_IMAGE_PULL_POLICY: "IfNotPresent"
+  PRIVA_KUBERNETES__IDLE_GRACE_SECONDS: "120"
+  PRIVA_KUBERNETES__MIN_ALIVE_AFTER_WAKE_SECONDS: "60"
+  PRIVA_KUBERNETES__WAKE_TIMEOUT_SECONDS: "90"
