@@ -88,16 +88,20 @@ class Repository(ABC):
     @abstractmethod
     def run_insert(self, row: dict) -> None: ...
     @abstractmethod
+    def run_upsert(self, row: dict) -> None: ...
+    @abstractmethod
     def run_update(self, run_id: str, fields: dict) -> None: ...
     @abstractmethod
     def run_get(self, run_id: str) -> dict | None: ...
+    @abstractmethod
+    def run_get_latest(self, account_id: str, job_id: str) -> dict | None: ...
     @abstractmethod
     def run_list(self, account_id: str, *, limit: int, before: tuple | None,
                  after: tuple | None, job_id: str | None, status: str | None) -> tuple[list[dict], bool]: ...
     @abstractmethod
     def run_count(self, account_id: str) -> int: ...
     @abstractmethod
-    def run_delete_before(self, account_id: str, cutoff_date: str) -> int: ...
+    def run_delete_before(self, account_id: str, cutoff_date: str) -> list[str]: ...
     # admin
     @abstractmethod
     def table_count(self, table: str) -> int: ...
@@ -282,6 +286,25 @@ class SqliteRepo(Repository):
             tuple(row[c] for c in cols),
         )
 
+    def run_upsert(self, row):
+        # Each append writes the full current snapshot of the run; upsert on run_id
+        # so birth (running) + outcome (+ skip-without-birth) all converge.
+        cols = [c for c in self._RUN_COLS if c in row]
+        ph = ", ".join("?" for _ in cols)
+        updates = ", ".join(f"{c}=excluded.{c}" for c in cols if c != "run_id")
+        self._write(
+            f"INSERT INTO job_run_record ({', '.join(cols)}) VALUES ({ph}) "
+            f"ON CONFLICT(run_id) DO UPDATE SET {updates}",
+            tuple(row[c] for c in cols),
+        )
+
+    def run_get_latest(self, account_id, job_id):
+        return self._one(
+            "SELECT * FROM job_run_record WHERE account_id = ? AND job_id = ? "
+            "ORDER BY started_at DESC, run_id DESC LIMIT 1",
+            (account_id, job_id),
+        )
+
     def run_update(self, run_id, fields):
         if not fields:
             return
@@ -326,11 +349,22 @@ class SqliteRepo(Repository):
         return self._one("SELECT COUNT(*) AS n FROM job_run_record WHERE account_id = ?", (account_id,))["n"]
 
     def run_delete_before(self, account_id, cutoff_date):
+        # Returns the deleted run_ids (so callers can delete their PVC transcripts).
         # cutoff_date is an ISO date/datetime string; lexicographic compare works on ISO-8601.
-        return self._write(
-            "DELETE FROM job_run_record WHERE account_id = ? AND started_at < ?",
-            (account_id, cutoff_date),
-        )
+        with self._lock:
+            ids = [
+                r["run_id"]
+                for r in self._conn.execute(
+                    "SELECT run_id FROM job_run_record WHERE account_id = ? AND started_at < ?",
+                    (account_id, cutoff_date),
+                ).fetchall()
+            ]
+            self._conn.execute(
+                "DELETE FROM job_run_record WHERE account_id = ? AND started_at < ?",
+                (account_id, cutoff_date),
+            )
+            self._conn.commit()
+            return ids
 
     # admin -----------------------------------------------------------------
     def table_count(self, table):

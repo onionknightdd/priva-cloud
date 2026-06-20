@@ -687,6 +687,9 @@ def _atomic_write(path: Path, content: str) -> None:
 
 
 async def main() -> None:
+    # Separate process: compose the in-process data-plane before any store access.
+    from priva_data_spine import compose
+    compose()
     daemon = SchedulerDaemon()
     await daemon.start()
 

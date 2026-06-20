@@ -98,6 +98,19 @@ def create_app() -> FastAPI:
 
         configure_logging(settings)
 
+        # Compose the in-process data-plane (data-spine over SQLite) and register
+        # its handlers before any account/scheduler store access. Lazy import so
+        # `import api.main` (boot-check) never needs the service package; only a
+        # running server does. Selects transport/backend from settings.dataspine.
+        from priva_data_spine import compose
+        compose()
+        logger.info(
+            "data-plane composed: transport={}, backend={}, sqlite={}",
+            settings.dataspine.transport,
+            settings.dataspine.backend,
+            settings.dataspine.sqlite_path,
+        )
+
         # Seed runtime skills from the source-code seed (per-skill delete+rewrite).
         # Runtime dir ($PRIVA_HOME/priva/resource/skills) is the live source of
         # truth read by the Skill Hub thereafter.

@@ -1,121 +1,68 @@
+"""JobStore — client-backed adapter over the data-plane (Phase 1, J1).
+
+Preserves the username-keyed signatures (list_jobs / get_job / save_jobs /
+list_all_user_jobs) so routers, mcp_tools and the daemon are unchanged;
+username↔account_id mapping is internal. Jobs live in data-spine (SQLite).
+"""
+
 from __future__ import annotations
 
-import fcntl
-import os
-import tempfile
-import threading
-from datetime import datetime
-from pathlib import Path
+from priva_common.dataplane import get_client
 
-import yaml
-
-from ..config import get_settings
-from ..user_store import get_user_store
-from ...models.scheduler import ScheduledJobDefinition, TriggerConfig
 from ...middleware.logging import get_scheduler_logger
+from ...models.scheduler import ScheduledJobDefinition
 
 logger = get_scheduler_logger(__name__)
 
 
-def _get_work_dir() -> Path:
-    settings = get_settings()
-    return Path(settings.server.work_dir).expanduser()
-
-
-def _get_user_config_path(username: str) -> Path:
-    return _get_work_dir() / username / ".priva.user.yml"
-
-
 class JobStore:
-    def __init__(self):
-        self._lock = threading.Lock()
+    @staticmethod
+    def _client():
+        return get_client()
+
+    def _account_id(self, username: str) -> str | None:
+        user = self._client().accounts.get_by_username(username)
+        return user.account_id if user else None
 
     def list_jobs(self, username: str) -> list[ScheduledJobDefinition]:
-        path = _get_user_config_path(username)
-        if not path.exists():
+        account_id = self._account_id(username)
+        if account_id is None:
             return []
-
-        try:
-            with open(path, "r") as f:
-                fcntl.flock(f, fcntl.LOCK_SH)
-                try:
-                    data = yaml.safe_load(f) or {}
-                finally:
-                    fcntl.flock(f, fcntl.LOCK_UN)
-        except Exception:
-            logger.warning("Failed to read jobs for user {}", username)
-            return []
-
-        raw_jobs = data.get("scheduled_jobs", [])
-        if not isinstance(raw_jobs, list):
-            return []
-
-        jobs = []
-        for item in raw_jobs:
-            if not isinstance(item, dict):
-                continue
-            try:
-                jobs.append(ScheduledJobDefinition.model_validate(item))
-            except Exception:
-                logger.warning("Skipping invalid job definition for user {}: {}", username, item.get("id", "?"))
-                continue
-        return jobs
+        return self._client().scheduler.list_jobs(account_id)
 
     def get_job(self, username: str, job_id: str) -> ScheduledJobDefinition | None:
-        for job in self.list_jobs(username):
+        # Ownership-safe: only return the job if it belongs to this user's account.
+        account_id = self._account_id(username)
+        if account_id is None:
+            return None
+        for job in self._client().scheduler.list_jobs(account_id):
             if job.id == job_id:
                 return job
         return None
 
     def save_jobs(self, username: str, jobs: list[ScheduledJobDefinition]) -> None:
-        path = _get_user_config_path(username)
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        with self._lock:
-            # Read existing data to preserve sibling keys
-            existing = {}
-            if path.exists():
-                try:
-                    with open(path, "r") as f:
-                        fcntl.flock(f, fcntl.LOCK_SH)
-                        try:
-                            existing = yaml.safe_load(f) or {}
-                        finally:
-                            fcntl.flock(f, fcntl.LOCK_UN)
-                except Exception:
-                    existing = {}
-
-            # Serialize jobs
-            existing["scheduled_jobs"] = [
-                job.model_dump(mode="json") for job in jobs
-            ]
-
-            # Atomic write: temp file + os.replace()
-            fd, tmp_path = tempfile.mkstemp(
-                dir=path.parent, suffix=".tmp", prefix=".priva.user."
-            )
-            try:
-                with os.fdopen(fd, "w") as f:
-                    fcntl.flock(f, fcntl.LOCK_EX)
-                    try:
-                        yaml.dump(existing, f, default_flow_style=False, allow_unicode=True)
-                    finally:
-                        fcntl.flock(f, fcntl.LOCK_UN)
-                os.replace(tmp_path, path)
-            except Exception:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
+        # Replace-the-list semantics, expressed as a diff against the stored set.
+        # (Not atomic across the N ops — acceptable for the alpha; documented.)
+        account_id = self._account_id(username)
+        if account_id is None:
+            raise ValueError(f"User '{username}' not found")
+        sched = self._client().scheduler
+        existing = {j.id for j in sched.list_jobs(account_id)}
+        desired = set()
+        for defn in jobs:
+            desired.add(defn.id)
+            if defn.id in existing:
+                sched.update_job(defn.id, defn)
+            else:
+                sched.create_job(account_id, defn)
+        for job_id in existing - desired:
+            sched.delete_job(job_id)
 
     def list_all_user_jobs(self) -> dict[str, list[ScheduledJobDefinition]]:
-        """List all jobs for all users. Uses UserStore.list_users() as sole source of truth."""
-        store = get_user_store()
-        users = store.list_users()
-        result = {}
-        for user in users:
-            jobs = self.list_jobs(user.username)
+        client = self._client()
+        result: dict[str, list[ScheduledJobDefinition]] = {}
+        for user in client.accounts.list():
+            jobs = client.scheduler.list_jobs(user.account_id)
             if jobs:
                 result[user.username] = jobs
         return result

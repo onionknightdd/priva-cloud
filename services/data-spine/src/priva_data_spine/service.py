@@ -320,10 +320,15 @@ class SchedulerService:
         self.repo.job_update(job_id, {"status": status})
         return self.get_job(job_id)
 
+    def _resolve_job_id(self, job_id):
+        # FK-safe: a run may reference a job that never existed or was deleted
+        # mid-flight; store NULL rather than violating the FK (matches migrate).
+        return job_id if (job_id and self.repo.job_get(job_id)) else None
+
     def start_run(self, account_id, record: JobRunRecord):
         self.repo.run_insert({
             "run_id": record.run_id,
-            "job_id": record.job_id or None,
+            "job_id": self._resolve_job_id(record.job_id),
             "job_name": record.job_name,
             "account_id": account_id,
             "session_id": record.session_id,
@@ -336,6 +341,35 @@ class SchedulerService:
             "result_summary": record.result_summary,
         })
         return self._to_run(self.repo.run_get(record.run_id))
+
+    def record_run(self, account_id, record: JobRunRecord):
+        # Full-snapshot upsert (mirrors the monolith's append-the-whole-record).
+        self.repo.run_upsert({
+            "run_id": record.run_id,
+            "job_id": self._resolve_job_id(record.job_id),
+            "job_name": record.job_name,
+            "account_id": account_id,
+            "session_id": record.session_id,
+            "started_at": _iso(record.started_at),
+            "finished_at": _iso(record.finished_at),
+            "status": record.status,
+            "duration_ms": record.duration_ms,
+            "is_error": int(record.is_error),
+            "error_message": record.error_message,
+            "num_turns": record.num_turns,
+            "result_summary": record.result_summary,
+        })
+        return self._to_run(self.repo.run_get(record.run_id))
+
+    def get_run(self, account_id, run_id):
+        row = self.repo.run_get(run_id)
+        if row is None or row["account_id"] != account_id:
+            return None  # ownership-safe
+        return self._to_run(row)
+
+    def get_latest_run(self, account_id, job_id):
+        row = self.repo.run_get_latest(account_id, job_id)
+        return self._to_run(row) if row else None
 
     def finish_run(self, record: JobRunRecord):
         self.repo.run_update(record.run_id, {
