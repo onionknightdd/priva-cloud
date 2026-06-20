@@ -82,7 +82,10 @@ async def _proxy_http(request: Request, path: str) -> Response:
     # SSE / streamed responses: stream raw bytes through, no buffering.
     wants_stream = "text/event-stream" in (request.headers.get("accept") or "") or request.url.path.endswith("/stream")
 
-    client = httpx.AsyncClient(timeout=httpx.Timeout(None))
+    # follow_redirects so AR's trailing-slash 307s (which point at AR's own
+    # origin) are resolved here instead of leaking to the browser, which would
+    # otherwise be bounced straight at the runner and bypass the proxy.
+    client = httpx.AsyncClient(timeout=httpx.Timeout(None), follow_redirects=True)
     req = client.build_request(request.method, url, headers=headers, content=body)
 
     if wants_stream:
