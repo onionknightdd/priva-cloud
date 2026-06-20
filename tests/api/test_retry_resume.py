@@ -13,8 +13,8 @@ from pathlib import Path
 
 from claude_agent_sdk._internal.sessions import _canonicalize_path, _get_project_dir
 
-from priva.api.services.claude_sdk.retry import strip_synthetic_records
-from priva.api.services.claude_sdk.session_heal import heal_orphan_tool_uses
+from priva_agent_runner.services.claude_sdk.retry import strip_synthetic_records
+from priva_agent_runner.services.claude_sdk.session_heal import heal_orphan_tool_uses
 
 
 SESSION_ID = "11111111-2222-3333-4444-555555555555"

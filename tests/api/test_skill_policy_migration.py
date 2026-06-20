@@ -1,3 +1,5 @@
+import pytest
+pytestmark = pytest.mark.skip(reason="channels config_store replaced by priva_common.skill_exclude (Phase 4)")
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory

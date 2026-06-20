@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from priva.api.services.mcp.built_in import resolve_generated_files
+from priva_agent_runner.services.mcp.built_in import resolve_file_canvas_files
 
 
 class GeneratedMcpToolsTests(unittest.TestCase):
@@ -14,7 +14,7 @@ class GeneratedMcpToolsTests(unittest.TestCase):
             with open(absolute_path, "wb") as f:
                 f.write(b"%PDF-1.4")
 
-            files = resolve_generated_files(["reports/report.pdf", absolute_path], tmpdir)
+            files = resolve_file_canvas_files(["reports/report.pdf", absolute_path], tmpdir)
             resolved_path = os.path.realpath(absolute_path)
 
             self.assertEqual(len(files), 1)
@@ -26,8 +26,8 @@ class GeneratedMcpToolsTests(unittest.TestCase):
 
     def test_rejects_missing_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            with self.assertRaisesRegex(ValueError, "Generated file not found"):
-                resolve_generated_files(["missing.pdf"], tmpdir)
+            with self.assertRaisesRegex(ValueError, "FileCanvas file not found"):
+                resolve_file_canvas_files(["missing.pdf"], tmpdir)
 
     def test_rejects_directories(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -35,7 +35,7 @@ class GeneratedMcpToolsTests(unittest.TestCase):
             os.makedirs(folder, exist_ok=True)
 
             with self.assertRaisesRegex(ValueError, "not a file"):
-                resolve_generated_files(["exports"], tmpdir)
+                resolve_file_canvas_files(["exports"], tmpdir)
 
     def test_rejects_workspace_escape(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -44,7 +44,7 @@ class GeneratedMcpToolsTests(unittest.TestCase):
                 other_path = other.name
             try:
                 with self.assertRaisesRegex(ValueError, "outside the workspace"):
-                    resolve_generated_files([other_path], tmpdir)
+                    resolve_file_canvas_files([other_path], tmpdir)
             finally:
                 os.unlink(other_path)
 

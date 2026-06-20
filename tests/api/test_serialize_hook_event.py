@@ -2,7 +2,7 @@ import unittest
 
 from claude_agent_sdk.types import HookEventMessage
 
-from priva.api.services.claude_sdk.serialization import (
+from priva_agent_runner.services.claude_sdk.serialization import (
     get_event_label,
     serialize_hook_event,
     serialize_message,

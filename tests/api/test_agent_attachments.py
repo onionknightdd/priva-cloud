@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from fastapi import HTTPException
 
-from priva.api.routers.agent import _validate_attachments
+from priva_agent_runner.routers.agent import _validate_attachments
 
 
 class AgentAttachmentValidationTests(unittest.TestCase):

@@ -3,8 +3,8 @@ import unittest
 
 from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 
-from priva.api.services.claude_sdk.permission_coordinator import PermissionCoordinator
-from priva.api.services.claude_sdk.service import (
+from priva_agent_runner.services.claude_sdk.permission_coordinator import PermissionCoordinator
+from priva_agent_runner.services.claude_sdk.service import (
     _askuser_answers_map,
     _make_unified_can_use_tool,
 )

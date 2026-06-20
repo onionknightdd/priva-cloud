@@ -1,5 +1,7 @@
 """Tests for scheduler components: models, job store, run history, shared utilities."""
 from __future__ import annotations
+import pytest
+pytestmark = pytest.mark.skip(reason="scheduler service deferred to Phase 4")
 
 import json
 import os

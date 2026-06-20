@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from types import SimpleNamespace
 
-from priva.api.services.hooks.built_in_hooks import require_permission_risky_tools
+from priva_agent_runner.services.hooks.built_in_hooks import require_permission_risky_tools
 
 
 class _FakeStore:
@@ -33,7 +33,7 @@ class RequirePermissionRiskyHookTests(unittest.TestCase):
     def _invoke(self, *, risky_list, tool_name, tool_input):
         # Patch get_user_store via monkeypatching the module attribute the
         # hook looks up at runtime.
-        from priva.api.services import user_store as user_store_mod
+        import priva_common.user_store as user_store_mod
         original = user_store_mod.get_user_store
         user_store_mod.get_user_store = lambda: _FakeStore({"risky_tool_list": risky_list})
         try:

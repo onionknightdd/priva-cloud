@@ -1,6 +1,6 @@
 import unittest
 
-from priva.api.services.hooks.risky_matcher import (
+from priva_common.risky_matcher import (
     match,
     matches_any,
     parse_rule,

@@ -2,7 +2,7 @@ import unittest
 
 from fastapi import HTTPException
 
-from priva.api.services.temp_files import validate_file_content
+from priva_agent_runner.services.temp_files import validate_file_content
 
 
 class TempFileValidationTests(unittest.TestCase):
