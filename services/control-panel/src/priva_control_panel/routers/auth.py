@@ -4,7 +4,7 @@ import secrets
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..models.auth import (
+from priva_common.models.auth import (
     ApiKeyResponse,
     ChangePasswordRequest,
     LoginRequest,
@@ -13,7 +13,7 @@ from ..models.auth import (
     SetupStatus,
     UserPublic,
 )
-from ..models.user_env import UserEnvResponse, UserEnvSettings, UserEnvUpdateRequest
+from priva_common.models.user_env import UserEnvResponse, UserEnvSettings, UserEnvUpdateRequest
 from ..services.auth import (
     create_jwt,
     decode_jwt,
@@ -22,11 +22,11 @@ from ..services.auth import (
     require_user,
     user_record_to_public,
 )
-from ..services.audit_log import AuditEntry, get_audit_logger
+from priva_common.audit_log import AuditEntry, get_audit_logger
 from ..services.compute_user_stats import compute_user_stats
-from ..services.config import get_settings
-from ..services.user_env import has_user_env, mask_token, read_user_env, write_user_env
-from ..services.user_store import get_user_store, UserRecord
+from priva_common.config import get_settings
+from priva_common.user_env import has_user_env, mask_token, read_user_env, write_user_env
+from priva_common.user_store import get_user_store, UserRecord
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 

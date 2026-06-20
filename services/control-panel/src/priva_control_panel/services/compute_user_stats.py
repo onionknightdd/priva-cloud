@@ -11,15 +11,15 @@ from pathlib import Path
 from claude_agent_sdk import list_sessions
 from claude_agent_sdk._internal.sessions import _canonicalize_path, _get_project_dir
 
-from ..models.auth import (
+from priva_common.models.auth import (
     DailyModelTokens,
     HeatmapBucket,
     ModelUsage,
     UsageCounts,
     UsageStats,
 )
-from .audit_log import get_audit_logger
-from .config import get_settings
+from priva_common.audit_log import get_audit_logger
+from priva_common.config import get_settings
 
 
 HEATMAP_DAYS = 183

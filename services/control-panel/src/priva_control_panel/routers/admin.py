@@ -7,7 +7,7 @@ from pathlib import Path
 from claude_agent_sdk import list_sessions
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from ..models.admin import (
+from priva_common.models.admin import (
     AdminStatsResponse,
     AuditEntryResponse,
     AuditLogResponse,
@@ -28,19 +28,19 @@ from ..models.admin import (
     SensitivePatternsUpdate,
     UserStatsEntry,
 )
-from ..models.plugin import PluginConfigUpdate, PluginInfo, PluginListResponse
-from ..models.auth import UserCreate, UserPublic, UserUpdate
-from ..models.mcp import McpLevel, McpServerListResponse, McpServerSummary
-from ..models.skills import SkillLevel, SkillListResponse
-from ..services.audit_log import AuditEntry, get_audit_logger
+from priva_common.models.plugin import PluginConfigUpdate, PluginInfo, PluginListResponse
+from priva_common.models.auth import UserCreate, UserPublic, UserUpdate
+from priva_common.models.mcp import McpLevel, McpServerListResponse, McpServerSummary
+from priva_common.models.skills import SkillLevel, SkillListResponse
+from priva_common.audit_log import AuditEntry, get_audit_logger
 from ..services.auth import require_admin, user_record_to_public
-from ..services.config import get_settings
-from ..services.scheduler.job_store import get_job_store
-from ..services.scheduler.shared import get_state_path, write_command
-from ..services.skills import delete_skill as service_delete_skill
-from ..services.skills import list_skills as service_list_skills
-from ..services.user_env import write_user_env
-from ..services.user_store import UserRecord, get_user_store
+from priva_common.config import get_settings
+# Scheduler (deferred, Phase 4) and skills (moved to agent-runner) services are
+# not available to the control-panel; the few admin endpoints that used them
+# return 503 below. Per-user skill management is reached via the proxied
+# /api/resource/skills routes instead.
+from priva_common.user_env import write_user_env
+from priva_common.user_store import UserRecord, get_user_store
 
 router = APIRouter(
     prefix="/api/admin",
@@ -176,8 +176,8 @@ async def delete_user(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
-    # Clean up scheduler jobs for deleted user
-    write_command("remove_user", {"username": username})
+    # Scheduler job cleanup for the deleted user is deferred (Phase 4): the
+    # scheduler subsystem is not part of this deployment yet.
 
     audit = get_audit_logger()
     audit.append(AuditEntry(
@@ -292,44 +292,22 @@ async def get_audit_log(
 
 @router.get("/scheduler/jobs")
 async def admin_list_scheduler_jobs():
-    """List all users' scheduled jobs."""
-    store = get_job_store()
-    all_jobs = store.list_all_user_jobs()
-    result = []
-    for username, jobs in all_jobs.items():
-        for job in jobs:
-            result.append({
-                "username": username,
-                **job.model_dump(mode="json"),
-            })
-    return {"jobs": result, "total": len(result)}
+    """Deferred (Phase 4): scheduler is not part of this deployment yet."""
+    raise HTTPException(503, "Scheduler is unavailable in this deployment")
 
 
 @router.get("/scheduler/running")
 async def admin_list_running_tasks():
-    """List all running scheduler tasks across users."""
-    import json
-    state_path = get_state_path()
-    if not state_path.exists():
-        return {"running": [], "total": 0}
-    try:
-        with open(state_path, "r") as f:
-            state = json.load(f)
-    except Exception:
-        return {"running": [], "total": 0}
-    running = state.get("running", [])
-    return {"running": running, "total": len(running)}
+    """Deferred (Phase 4): scheduler is not part of this deployment yet."""
+    raise HTTPException(503, "Scheduler is unavailable in this deployment")
 
 
 # --- Admin per-user skills endpoints ---
 
 @router.get("/users/{username}/skills", response_model=SkillListResponse)
 async def get_user_skills(username: str):
-    """List all skills for a specific user."""
-    store = get_user_store()
-    if store.get_user(username) is None:
-        raise HTTPException(404, f"User '{username}' not found")
-    return service_list_skills(username)
+    """Moved to agent-runner: use the proxied /api/resource/skills routes."""
+    raise HTTPException(503, "Per-user skill management is served by agent-runner")
 
 
 @router.delete("/users/{username}/skills/{level}/{name}")
@@ -339,22 +317,8 @@ async def delete_user_skill(
     name: str,
     current_user: UserRecord = Depends(require_admin),
 ):
-    """Delete a skill for a specific user."""
-    store = get_user_store()
-    if store.get_user(username) is None:
-        raise HTTPException(404, f"User '{username}' not found")
-
-    service_delete_skill(level, name, username)
-
-    audit = get_audit_logger()
-    audit.append(AuditEntry(
-        actor=current_user.username,
-        action="skill.deleted",
-        target=name,
-        details={"level": level, "username": username},
-    ))
-
-    return {"message": f"Skill '{name}' deleted successfully"}
+    """Moved to agent-runner: use the proxied /api/resource/skills routes."""
+    raise HTTPException(503, "Per-user skill management is served by agent-runner")
 
 
 # --- Admin per-user MCP endpoints ---
@@ -417,16 +381,8 @@ async def delete_user_mcp_server(
 
 @router.get("/users/{username}/scheduler/jobs")
 async def get_user_scheduler_jobs(username: str):
-    """List scheduled jobs for a specific user (read-only)."""
-    store = get_user_store()
-    if store.get_user(username) is None:
-        raise HTTPException(404, f"User '{username}' not found")
-    job_store = get_job_store()
-    jobs = job_store.list_jobs(username)
-    return {
-        "jobs": [j.model_dump(mode="json") for j in jobs],
-        "total": len(jobs),
-    }
+    """Deferred (Phase 4): scheduler is not part of this deployment yet."""
+    raise HTTPException(503, "Scheduler is unavailable in this deployment")
 
 
 # --- Admin per-user hooks endpoints ---
@@ -624,7 +580,7 @@ async def update_risky_tools(
     Claude Code native permission-grammar string (e.g. 'Bash(rm:*)',
     'Write(/etc/**)', 'WebFetch(domain:github.com)', 'mcp__*__delete_*').
     Malformed patterns are rejected with HTTP 422."""
-    from ..services.hooks.risky_matcher import parse_rule_strict
+    from priva_common.risky_matcher import parse_rule_strict
 
     # Validate all patterns before committing any change.
     for raw in request.risky_tool_list:
@@ -666,7 +622,7 @@ async def update_sensitive_patterns(
     ``enable=True`` activates the PostToolUse hook that replaces matched
     substrings before the model sees tool output. The outbound SSE mask path
     runs whenever patterns are non-empty regardless of this flag."""
-    from ..utils.sensitive_mask import parse_pattern_strict
+    from priva_common.sensitive_mask import parse_pattern_strict
 
     for entry in request.patterns:
         try:

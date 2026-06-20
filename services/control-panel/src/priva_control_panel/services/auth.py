@@ -8,10 +8,10 @@ from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
-from ..middleware.logging import get_app_logger
-from ..models.auth import TokenPayload, UserPublic, UserRecord
-from .config import get_settings
-from .user_store import get_user_store
+from priva_common.logging import get_app_logger
+from priva_common.models.auth import TokenPayload, UserPublic, UserRecord
+from priva_common.config import get_settings
+from priva_common.user_store import get_user_store
 
 logger = get_app_logger(__name__)
 

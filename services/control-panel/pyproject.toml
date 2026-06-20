@@ -1,0 +1,32 @@
+[project]
+name = "priva-control-panel"
+version = "0.0.0"
+description = "Priva Cloud control-panel: auth + admin + config faces + user-data + resource; owns data-spine (compose); serves the user & admin SPAs; dev edge reverse-proxying the runtime to agent-runner."
+requires-python = ">=3.11"
+dependencies = [
+    "priva-common",
+    "priva-data-spine",
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "websockets",
+    "python-jose[cryptography]",
+    "python-multipart",
+    "pyyaml",
+    "claude-agent-sdk==0.1.81",
+    "scalar-fastapi",
+]
+
+[project.entry-points."priva_cloud.services"]
+control-panel = "priva_control_panel.entry:main"
+
+[tool.uv.sources]
+priva-common = { workspace = true }
+priva-data-spine = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/priva_control_panel"]

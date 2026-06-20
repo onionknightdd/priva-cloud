@@ -161,7 +161,7 @@ def _make_risky_aware_can_use_tool(
     .claude/{skills,commands,agents}/** continues to work as before.
     """
     from ..hooks.built_in_hooks import require_permission_risky_tools
-    from ..hooks.risky_matcher import matches_any
+    from priva_common.risky_matcher import matches_any
 
     async def wrapped(tool_name, tool_input, context):
         hook_out = await require_permission_risky_tools(
@@ -259,7 +259,7 @@ def _make_unified_can_use_tool(
     instead of hanging the connection. Non-gated tools are unaffected.
     """
     from ..hooks.built_in_hooks import require_permission_risky_tools
-    from ..hooks.risky_matcher import matches_any
+    from priva_common.risky_matcher import matches_any
 
     _disabled = PermissionResultDeny(message="permission feedback disabled")
 

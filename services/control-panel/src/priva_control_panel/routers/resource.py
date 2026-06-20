@@ -6,8 +6,8 @@ import httpx
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..middleware.logging import get_app_logger
-from ..models.resource import (
+from priva_common.logging import get_app_logger
+from priva_common.models.resource import (
     ModelInfo,
     ModelListResponse,
     QuickAction,
@@ -17,9 +17,9 @@ from ..models.resource import (
     VisionModelUpdateRequest,
 )
 from ..services.auth import get_user_workspace, require_user
-from ..services.config import get_settings
-from ..services.user_env import read_user_env
-from ..services.user_store import UserRecord
+from priva_common.config import get_settings
+from priva_common.user_env import read_user_env
+from priva_common.user_store import UserRecord
 
 logger = get_app_logger(__name__)
 

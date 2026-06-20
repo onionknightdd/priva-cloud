@@ -11,8 +11,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
-from ..middleware.logging import get_app_logger
-from ..models.admin_files import DirectoryListResponse, FileEntry, FilePreviewResponse
+from priva_common.logging import get_app_logger
+from priva_common.models.admin_files import DirectoryListResponse, FileEntry, FilePreviewResponse
 from ..services.auth import require_admin
 
 logger = get_app_logger(__name__)

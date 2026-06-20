@@ -8,12 +8,11 @@ from pathlib import Path
 from claude_agent_sdk import list_sessions
 from fastapi import APIRouter, Depends, Query
 
-from ..models.admin import AuditEntryResponse, AuditLogResponse
-from ..services.audit_log import get_audit_logger
+from priva_common.models.admin import AuditEntryResponse, AuditLogResponse
+from priva_common.audit_log import get_audit_logger
 from ..services.auth import require_user
-from ..services.config import get_settings
-from ..services.temp_files import list_temp_files
-from ..services.user_store import UserRecord
+from priva_common.config import get_settings
+from priva_common.user_store import UserRecord
 
 router = APIRouter(prefix="/api/user", tags=["user"])
 
@@ -42,10 +41,10 @@ async def get_user_stats(
         except Exception:
             pass
 
-    # File stats
-    files = list_temp_files(user.username)
-    file_count = len(files)
-    total_file_size = sum(f.get("size", 0) for f in files)
+    # Temp-file stats live in the agent-runner (temp_files moved there); the
+    # count is informational only and dropped for the alpha (Phase 2).
+    file_count = 0
+    total_file_size = 0
 
     return {
         "username": user.username,

@@ -321,7 +321,7 @@ async def require_permission_risky_tools(
         return {}
 
     try:
-        from .risky_matcher import matches_any
+        from priva_common.risky_matcher import matches_any
         matched, matched_rule = matches_any(risky_list, tool_name, tool_input)
     except Exception:
         return {}

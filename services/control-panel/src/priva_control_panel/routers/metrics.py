@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Response
 
-from ..metrics import render
+from priva_common.metrics import render
 
 router = APIRouter()
 
