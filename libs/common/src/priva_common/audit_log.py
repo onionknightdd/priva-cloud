@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from ..middleware.logging import get_app_logger
+from .logging import get_app_logger
 from ._pagination import (
     compute_cursors,
     decode_cursor,

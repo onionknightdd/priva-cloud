@@ -16,7 +16,7 @@ from pathlib import Path
 
 import yaml
 
-from ..middleware.logging import get_app_logger
+from .logging import get_app_logger
 from .paths import priva_home
 
 logger = get_app_logger(__name__)

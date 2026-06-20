@@ -5,7 +5,7 @@ import json
 import threading
 from pathlib import Path
 
-from ..middleware.logging import get_app_logger
+from .logging import get_app_logger
 from .config import get_settings
 
 logger = get_app_logger(__name__)

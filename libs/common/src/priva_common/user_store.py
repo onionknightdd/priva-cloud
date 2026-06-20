@@ -10,10 +10,9 @@ startup by `priva_data_spine.compose()` (main.py lifespan).
 
 from __future__ import annotations
 
-from priva_common.dataplane import get_client
-
-from ..middleware.logging import get_app_logger
-from ..models.auth import UserRecord
+from .dataplane import get_client
+from .logging import get_app_logger
+from .models.auth import UserRecord
 from .runtime_config_store import get_runtime_config_store
 
 logger = get_app_logger(__name__)
