@@ -37,3 +37,9 @@ PyMuPDF
 scalar_fastapi
 prometheus-client
 wecom-aibot-python-sdk
+# Data-plane gRPC contract (Phase 1): runtime + codegen. Keep here so the dev venv
+# (uv pip install -r requirements.txt) carries them — do NOT `uv sync` (it prunes
+# everything not declared by the uv workspace members, i.e. the whole monolith).
+grpcio>=1.60
+grpcio-tools>=1.60
+protobuf

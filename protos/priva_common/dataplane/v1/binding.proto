@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package priva.dataplane.v1;
+
+import "priva_common/dataplane/v1/common.proto";
+
+// channel_binding — feishu identity → live session. Greenfield: no Phase-1 caller.
+message Binding {
+  string binding_id = 1;
+  string account_id = 2;
+  string session_uuid = 3;
+  bool first_run_done = 4;
+  string feishu_chat_id = 5;
+  string bound_at = 6;
+  string rebound_at = 7;
+}
+
+message BindingRef { string binding_id = 1; }
+message BindingList { repeated Binding bindings = 1; }
+
+message BindRequest {
+  string account_id = 1;
+  string session_uuid = 2;
+  string feishu_chat_id = 3;
+}
+
+message RebindRequest {
+  string account_id = 1;
+  string session_uuid = 2; // new session
+  string feishu_chat_id = 3;
+}
+
+service BindingService {
+  rpc Bind(BindRequest) returns (Binding);
+  rpc Rebind(RebindRequest) returns (Binding);
+  rpc ClaimFirstRunIM(BindingRef) returns (BoolValue); // atomic first_run_done 0→1
+  rpc GetBinding(BindingRef) returns (Binding);
+  rpc ListBindings(AccountRef) returns (BindingList);
+}

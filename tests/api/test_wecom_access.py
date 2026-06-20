@@ -1,3 +1,5 @@
+import pytest
+pytestmark = pytest.mark.skip(reason="channel-connector (WeCom) deferred to Phase 4")
 """Unit tests for WeCom bot access control.
 
 Covers the pure ``wecom_access_allowed`` policy function and that

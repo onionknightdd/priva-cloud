@@ -7,7 +7,7 @@ import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from priva.api.middleware.logging import (
+from priva_common.logging import (
     _HourlyRotation,
     _build_archive_path,
     _make_hourly_archive_compression,

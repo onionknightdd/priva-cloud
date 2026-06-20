@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package priva.dataplane.v1;
+
+import "priva_common/dataplane/v1/common.proto";
+
+// quota — per-tenant operational levers (spend deferred to M6).
+message Quota {
+  string account_id = 1;
+  string tier = 2;
+  int32 max_concurrent_sessions = 3;
+  int32 idle_grace_seconds = 4;
+  string updated_at = 5;
+}
+
+message SetQuotaRequest {
+  string account_id = 1;
+  string tier = 2;
+  int32 max_concurrent_sessions = 3;
+  int32 idle_grace_seconds = 4;
+  repeated string update_mask = 5;
+}
+
+service QuotaService {
+  rpc Get(AccountRef) returns (Quota);
+  rpc Set(SetQuotaRequest) returns (Quota);
+}

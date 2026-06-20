@@ -28,7 +28,7 @@ TriggerConfig = IntervalTriggerConfig | CronTriggerConfig
 # --- Job config types (discriminated union on job_type) ---
 
 class AgentRunConfig(BaseModel):
-    job_type: Literal["scheduled_agent"] = "scheduled_agent"
+    job_type: Literal["agent_run"] = "agent_run"
     prompt: str
     model: str | None = None
 
@@ -86,20 +86,20 @@ class ScheduledJobDefinition(BaseModel):
     def _backcompat_prompt_to_config(cls, data):
         """If no job_config but prompt present, synthesize AgentRunConfig."""
         if isinstance(data, dict):
-            # Rewrite legacy job_type "agent_run" -> "scheduled_agent" so
-            # existing YAML keeps loading after the rename.
+            # Rewrite legacy job_type "scheduled_agent" -> "agent_run" so
+            # existing YAML/DB keeps loading after the rename (canonical = agent_run).
             jc = data.get("job_config")
-            if isinstance(jc, dict) and jc.get("job_type") == "agent_run":
-                jc["job_type"] = "scheduled_agent"
+            if isinstance(jc, dict) and jc.get("job_type") == "scheduled_agent":
+                jc["job_type"] = "agent_run"
 
             if not data.get("job_config") and data.get("prompt"):
                 data["job_config"] = {
-                    "job_type": "scheduled_agent",
+                    "job_type": "agent_run",
                     "prompt": data["prompt"],
                     "model": data.get("model"),
                 }
             jc = data.get("job_config")
-            if isinstance(jc, dict) and jc.get("job_type") == "scheduled_agent" and not data.get("prompt"):
+            if isinstance(jc, dict) and jc.get("job_type") == "agent_run" and not data.get("prompt"):
                 data["prompt"] = jc.get("prompt", "")
         return data
 
@@ -120,12 +120,12 @@ class CreateJobRequest(BaseModel):
     def _backcompat(cls, data):
         if isinstance(data, dict):
             jc = data.get("job_config")
-            if isinstance(jc, dict) and jc.get("job_type") == "agent_run":
-                jc["job_type"] = "scheduled_agent"
+            if isinstance(jc, dict) and jc.get("job_type") == "scheduled_agent":
+                jc["job_type"] = "agent_run"
 
             if not data.get("job_config") and data.get("prompt"):
                 data["job_config"] = {
-                    "job_type": "scheduled_agent",
+                    "job_type": "agent_run",
                     "prompt": data["prompt"],
                     "model": data.get("model"),
                 }

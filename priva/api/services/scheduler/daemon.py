@@ -193,7 +193,7 @@ class SchedulerDaemon:
         """Determine the effective job type from config."""
         if job_def.job_config:
             return job_def.job_config.job_type
-        return "scheduled_agent"
+        return "agent_run"
 
     async def _execute_job(self, username: str, job_def: ScheduledJobDefinition) -> None:
         job_key = f"{username}::{job_def.id}"
@@ -242,8 +242,8 @@ class SchedulerDaemon:
                     self._remove_aps_job(job_key)
                     return
 
-                # 2. Verify API credentials (only for scheduled_agent jobs)
-                if job_type == "scheduled_agent":
+                # 2. Verify API credentials (only for agent_run jobs)
+                if job_type == "agent_run":
                     env = read_user_env(username)
                     if not env or not env.get("ANTHROPIC_BASE_URL") or not env.get("ANTHROPIC_AUTH_TOKEN"):
                         self._run_history.append(JobRunRecord(
@@ -295,7 +295,7 @@ class SchedulerDaemon:
                 )
 
                 # 6. Execute by job type
-                if job_type == "scheduled_agent":
+                if job_type == "agent_run":
                     from api.services.claude_sdk.service import agent_run_events
 
                     config = job_def.job_config
@@ -687,6 +687,9 @@ def _atomic_write(path: Path, content: str) -> None:
 
 
 async def main() -> None:
+    # Separate process: compose the in-process data-plane before any store access.
+    from priva_data_spine import compose
+    compose()
     daemon = SchedulerDaemon()
     await daemon.start()
 

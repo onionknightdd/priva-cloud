@@ -2,7 +2,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from priva.api.models.agent import AgentRunRequest, AgentRunResponse
+from priva_common.models.agent import AgentRunRequest, AgentRunResponse
 
 
 class AgentModelTests(unittest.TestCase):

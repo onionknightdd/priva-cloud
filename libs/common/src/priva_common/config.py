@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, YamlConfigSettingsSource
@@ -124,6 +124,21 @@ class AgentSettings(BaseModel):
     permission_timeout_seconds: int = 600
 
 
+class DataspineSettings(BaseModel):
+    """data-spine (durable-state layer) seams. Phase-1 default = in-process + file SQLite.
+
+    transport / backend are config flips; only the in_process + sqlite paths are
+    implemented in Phase 1 (grpc + postgres are structured-but-deferred).
+    """
+
+    transport: Literal["in_process", "grpc"] = "in_process"
+    backend: Literal["sqlite", "postgres"] = "sqlite"
+    sqlite_path: str = "~/priva_workspace/.priva.dataspine.db"
+    grpc_dsn: str | None = None  # only used when transport == "grpc"
+    # HMAC key for the api_key_lookup index. Falls back to auth.jwt_secret when unset.
+    api_key_hmac_secret: str | None = None
+
+
 class Settings(BaseSettings):
     app_name: str = "Priva API Server"
     app_version: str = "1.0.0"
@@ -134,6 +149,7 @@ class Settings(BaseSettings):
     channels: ChannelsSettings = Field(default_factory=ChannelsSettings)
     pty: PtySettings = Field(default_factory=PtySettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
+    dataspine: DataspineSettings = Field(default_factory=DataspineSettings)
 
     # Source of the YAML overlay. This module no longer lives next to the file,
     # so the path comes from PRIVA_CONFIG_FILE (server.sh exports it as an

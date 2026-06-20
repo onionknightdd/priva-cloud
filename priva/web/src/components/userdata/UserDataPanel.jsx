@@ -8,21 +8,17 @@ import SidebarResizer from '../layout/SidebarResizer'
 import SettingsPopover from '../settings/SettingsPopover'
 import UserUsage from './UserUsage'
 import UserAuditLog from './UserAuditLog'
-import AuditLog from '../admin/AuditLog'
 import UserAnalytics from './UserAnalytics'
 import UserFiles from './UserFiles'
-import UserManagement from '../admin/UserManagement'
 import FileManagerTab from '../settings/FileManagerTab'
-import UserEditDrawer from '../admin/UserEditDrawer'
-import useAdminStore from '../../stores/adminStore'
+// Admin management (user list / admin audit) lives in the separate admin SPA
+// at /admin (Phase 2 §D2); it is no longer embedded in the user app.
 
 export default function UserDataPanel() {
   const { t } = useTranslation()
   const activeSection = useUserDataStore((s) => s.activeSection)
   const setActiveSection = useUserDataStore((s) => s.setActiveSection)
   const authUser = useAuthStore((s) => s.user)
-  const isAdmin = authUser?.role === 'admin'
-  const drawerOpen = useAdminStore((s) => s.drawerOpen)
 
   const width = useSidebarStore((s) => s.width)
   const collapsed = useSidebarStore((s) => s.collapsed)
@@ -47,14 +43,6 @@ export default function UserDataPanel() {
         { id: 'fileexplorer', icon: FolderOpen, labelKey: 'userData.fileExplorer' },
       ],
     },
-    ...(isAdmin
-      ? [{
-          title: t('userData.adminGroup'),
-          items: [
-            { id: 'users', icon: Users, labelKey: 'admin.users' },
-          ],
-        }]
-      : []),
   ]
 
   const allItems = sectionGroups.flatMap((g) => g.items)
@@ -282,15 +270,11 @@ export default function UserDataPanel() {
         <div className="flex-1 flex flex-col" style={{ background: 'var(--bg-base)', fontSize: 16, minHeight: 0, overflow: 'hidden' }}>
           {activeSection === 'usage' && <UserUsage />}
           {activeSection === 'analytics' && <UserAnalytics />}
-          {activeSection === 'audit' && (isAdmin ? <AuditLog /> : <UserAuditLog />)}
+          {activeSection === 'audit' && <UserAuditLog />}
           {activeSection === 'files' && <UserFiles />}
           {activeSection === 'fileexplorer' && <FileManagerTab />}
-          {activeSection === 'users' && isAdmin && <UserManagement />}
         </div>
       </div>
-
-      {/* User edit drawer (admin only) */}
-      {drawerOpen && isAdmin && <UserEditDrawer />}
     </>
   )
 }

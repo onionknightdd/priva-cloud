@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite'
+import { resolve } from 'path'
 import react from '@vitejs/plugin-react'
 import { viteStaticCopy } from 'vite-plugin-static-copy'
 
@@ -6,7 +7,12 @@ import { viteStaticCopy } from 'vite-plugin-static-copy'
 // (e.g. to run a second instance against a different port).
 const API_TARGET = process.env.VITE_API_TARGET || 'http://localhost:8081'
 
+// Two build targets (Phase 2 §D2): the user SPA (default, base '/', -> dist) and
+// the admin SPA (ADMIN_BUILD=1, base '/admin/', index-admin.html -> dist-admin).
+const ADMIN = process.env.ADMIN_BUILD === '1'
+
 export default defineConfig({
+  base: ADMIN ? '/admin/' : '/',
   plugins: [
     react(),
     viteStaticCopy({
@@ -39,8 +45,9 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    outDir: ADMIN ? 'dist-admin' : 'dist',
     rollupOptions: {
+      input: ADMIN ? resolve(__dirname, 'index-admin.html') : resolve(__dirname, 'index.html'),
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined

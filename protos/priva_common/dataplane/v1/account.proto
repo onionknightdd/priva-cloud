@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package priva.dataplane.v1;
+
+import "priva_common/dataplane/v1/common.proto";
+
+// Account — the hub entity. password_hash and api_key_lookup are NEVER returned;
+// api_key is the decrypted plaintext on read (empty when unset).
+message Account {
+  string account_id = 1;
+  string username = 2;
+  string role = 3;
+  string status = 4;
+  string api_key = 5;
+  string feishu_user_id = 6;
+  string feishu_display_name = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+message UsernameRef { string username = 1; }
+message FeishuRef { string feishu_user_id = 1; }
+message ApiKeyRequest { string api_key = 1; } // plaintext; server hashes → api_key_lookup
+message AccountList { repeated Account accounts = 1; }
+
+message CreateAccountRequest {
+  string username = 1;
+  string password = 2; // plaintext; server bcrypts
+  string role = 3;
+}
+
+// Partial update: only fields named in update_mask are applied.
+message UpdateAccountRequest {
+  string account_id = 1;
+  string password = 2;            // → rehash
+  string role = 3;
+  string api_key = 4;             // → encrypt + recompute lookup (empty clears)
+  string status = 5;
+  string feishu_user_id = 6;
+  string feishu_display_name = 7;
+  repeated string update_mask = 8;
+}
+
+message VerifyPasswordRequest {
+  string username = 1;
+  string password = 2;
+}
+
+service AccountService {
+  rpc Get(AccountRef) returns (Account);
+  rpc GetByUsername(UsernameRef) returns (Account);
+  rpc List(Empty) returns (AccountList);
+  rpc Create(CreateAccountRequest) returns (Account);
+  rpc Update(UpdateAccountRequest) returns (Account);
+  rpc Delete(AccountRef) returns (Empty);
+  rpc VerifyPassword(VerifyPasswordRequest) returns (BoolValue);
+  rpc FindByApiKey(ApiKeyRequest) returns (Account);
+  rpc CountAdmins(Empty) returns (CountValue);
+  rpc FindByFeishuUserId(FeishuRef) returns (Account);
+}

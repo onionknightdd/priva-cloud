@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from types import SimpleNamespace
 
-from priva.api.services.hooks.built_in_hooks import make_pii_masking_hook
+from priva_agent_runner.services.hooks.built_in_hooks import make_pii_masking_hook
 
 
 def _run(coro):

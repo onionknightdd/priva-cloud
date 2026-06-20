@@ -3,7 +3,7 @@ import unittest
 
 from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 
-from priva.api.services.claude_sdk.permission_coordinator import PermissionCoordinator, registry
+from priva_agent_runner.services.claude_sdk.permission_coordinator import PermissionCoordinator, registry
 
 
 class PermissionCoordinatorTests(unittest.IsolatedAsyncioTestCase):

@@ -8,7 +8,7 @@ const ITEMS = [
   { id: 'api', labelKey: 'settings.apiKey', icon: Key },
   { id: 'models', labelKey: 'settings.llmProvider', icon: Cpu },
   { id: 'quickactions', labelKey: 'settings.quickActions', icon: Zap },
-  { id: 'channels', labelKey: 'settings.channels', icon: Radio },
+  // Channels hidden in Phase 2 (channel-connector deferred).
   { id: 'advanced', labelKey: 'settings.advanced', icon: Settings2 },
 ]
 

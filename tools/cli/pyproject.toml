@@ -1,0 +1,16 @@
+[project]
+name = "priva-cli"
+version = "0.0.0"
+description = "Priva Cloud launcher: the `priva-cloud` console-script. Discovers services via the priva_cloud.services entry-point group and dispatches/supervises them (boundary-safe — imports nothing service-side)."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+priva-cloud = "priva_cli.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/priva_cli"]

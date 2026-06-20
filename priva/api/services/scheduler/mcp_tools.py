@@ -56,7 +56,7 @@ def build_scheduler_mcp_server(username: str):
 
         lines = []
         for j in jobs:
-            jt = j.job_config.job_type if j.job_config else "scheduled_agent"
+            jt = j.job_config.job_type if j.job_config else "agent_run"
             trigger_str = _format_trigger(j.trigger)
             lines.append(
                 f"- **{j.name}** (id: `{j.id}`, type: {jt}, status: {j.status})\n"
@@ -100,7 +100,7 @@ def build_scheduler_mcp_server(username: str):
             return {"content": [{"type": "text", "text": f"Job not found: {job_id}"}], "is_error": True}
 
         jc = job.job_config
-        jt = jc.job_type if jc else "scheduled_agent"
+        jt = jc.job_type if jc else "agent_run"
         trigger_str = _format_trigger(job.trigger)
 
         detail = (
@@ -112,7 +112,7 @@ def build_scheduler_mcp_server(username: str):
             f"- Created: {job.created_at.isoformat()}\n"
         )
 
-        if jt == "scheduled_agent":
+        if jt == "agent_run":
             prompt = jc.prompt if jc else job.prompt
             model = (jc.model if jc else job.model) or "default"
             detail += f"- Model: {model}\n- Prompt: {prompt}\n"
@@ -144,7 +144,7 @@ def build_scheduler_mcp_server(username: str):
             "'run X', 'test X', 'try X', 'execute X now', 'ask the coding agent to do X', "
             "'use a sub agent for X', '让 xxx agent 完成 xxx', or '派一个 agent 处理 xxx'. "
             "Those should use the built-in Agent/sub-agent mechanism or directly call "
-            "the relevant tool. The `scheduled_agent` job type below is an internal "
+            "the relevant tool. The `agent_run` job type below is an internal "
             "scheduler enum for cron/interval automation; it is not the Agent/sub-agent tool.\n"
             "\n"
             "IMPORTANT: Before calling this tool, you MUST use the AskUserQuestion tool to confirm the job configuration with the user. "
@@ -152,7 +152,7 @@ def build_scheduler_mcp_server(username: str):
             "\n"
             "## Job types\n"
             "\n"
-            "### scheduled_agent — Internal scheduler enum for recurring agent automation\n"
+            "### agent_run — Internal scheduler enum for recurring agent automation\n"
             "Required params: prompt\n"
             "Optional params: model (override the default model)\n"
             "Use only when the user wants a saved cron/interval automation that launches "
@@ -191,12 +191,12 @@ def build_scheduler_mcp_server(username: str):
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Human-readable job name. Keep it short and descriptive."},
-                "job_type": {"type": "string", "enum": ["scheduled_agent", "http_call", "user_script"], "description": "The scheduled automation kind. `scheduled_agent` means a saved cron/interval automation that launches an agent later or repeatedly; it must not be used for current sub-agent delegation."},
+                "job_type": {"type": "string", "enum": ["agent_run", "http_call", "user_script"], "description": "The scheduled automation kind. `agent_run` means a saved cron/interval automation that launches an agent later or repeatedly; it must not be used for current sub-agent delegation."},
                 "trigger_type": {"type": "string", "enum": ["cron", "interval"], "description": "Schedule type: 'cron' for cron expressions, 'interval' for fixed repeat intervals."},
                 "cron_expr": {"type": "string", "description": "5-field cron expression. Required when trigger_type=cron. Format: 'minute hour day month day_of_week'. Examples: '0 9 * * *', '*/15 * * * *', '0 0 1 * *'."},
                 "interval_minutes": {"type": "number", "description": "Repeat interval in minutes. Required when trigger_type=interval. Examples: 5, 30, 60, 1440."},
-                "prompt": {"type": "string", "description": "[scheduled_agent] The prompt saved for the recurring scheduled agent automation. Should be a complete, self-contained instruction for future cron/interval runs. Do not use this to ask a sub-agent to perform the current user request."},
-                "model": {"type": "string", "description": "[scheduled_agent] Optional model override. Leave empty to use the system default."},
+                "prompt": {"type": "string", "description": "[agent_run] The prompt saved for the recurring scheduled agent automation. Should be a complete, self-contained instruction for future cron/interval runs. Do not use this to ask a sub-agent to perform the current user request."},
+                "model": {"type": "string", "description": "[agent_run] Optional model override. Leave empty to use the system default."},
                 "url": {"type": "string", "description": "[http_call] The full URL to call. Must include protocol (http:// or https://)."},
                 "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE"], "description": "[http_call] HTTP method. Defaults to GET."},
                 "headers": {"type": "object", "description": "[http_call] HTTP headers as key-value pairs. Example: {\"Authorization\": \"Bearer xxx\", \"Content-Type\": \"application/json\"}"},
@@ -226,7 +226,7 @@ def build_scheduler_mcp_server(username: str):
 
         # Build job_config
         jt = args["job_type"]
-        if jt == "scheduled_agent":
+        if jt == "agent_run":
             job_config = AgentRunConfig(
                 prompt=args.get("prompt", ""),
                 model=args.get("model"),

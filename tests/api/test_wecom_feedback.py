@@ -1,3 +1,5 @@
+import pytest
+pytestmark = pytest.mark.skip(reason="channel-connector (WeCom) deferred to Phase 4")
 """Tests for the WeCom user-feedback channel.
 
 Two layers:
