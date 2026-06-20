@@ -95,9 +95,20 @@ DDL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_run_account_started ON job_run_record(account_id, started_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_run_job_started     ON job_run_record(job_id, started_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_run_status          ON job_run_record(status) WHERE status = 'running'",
+    # 6 ── secret -----------------------------------------------------------
+    # Per-account credential bundle, Fernet-encrypted. The operator reads it at
+    # wake to materialize the per-pod K8s Secret (alpha: single shared key).
+    f"""
+    CREATE TABLE IF NOT EXISTS secret (
+      account_id TEXT PRIMARY KEY REFERENCES account(account_id) ON DELETE CASCADE,
+      bundle     TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT {NOW}
+    ) STRICT
+    """,
 )
 
-TABLES = ("account", "channel_binding", "quota", "scheduled_job", "job_run_record")
+TABLES = ("account", "channel_binding", "quota", "scheduled_job", "job_run_record", "secret")
 
 
 def create_all(conn: sqlite3.Connection) -> None:

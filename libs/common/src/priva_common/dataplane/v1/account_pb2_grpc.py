@@ -85,6 +85,11 @@ class AccountServiceStub:
                 request_serializer=priva__common_dot_dataplane_dot_v1_dot_account__pb2.FeishuRef.SerializeToString,
                 response_deserializer=priva__common_dot_dataplane_dot_v1_dot_account__pb2.Account.FromString,
                 _registered_method=True)
+        self.HasUsers = channel.unary_unary(
+                '/priva.dataplane.v1.AccountService/HasUsers',
+                request_serializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.Empty.SerializeToString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.BoolValue.FromString,
+                _registered_method=True)
 
 
 class AccountServiceServicer:
@@ -150,6 +155,12 @@ class AccountServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def HasUsers(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AccountServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -202,6 +213,11 @@ def add_AccountServiceServicer_to_server(servicer, server):
                     servicer.FindByFeishuUserId,
                     request_deserializer=priva__common_dot_dataplane_dot_v1_dot_account__pb2.FeishuRef.FromString,
                     response_serializer=priva__common_dot_dataplane_dot_v1_dot_account__pb2.Account.SerializeToString,
+            ),
+            'HasUsers': grpc.unary_unary_rpc_method_handler(
+                    servicer.HasUsers,
+                    request_deserializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.Empty.FromString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.BoolValue.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -474,6 +490,33 @@ class AccountService:
             '/priva.dataplane.v1.AccountService/FindByFeishuUserId',
             priva__common_dot_dataplane_dot_v1_dot_account__pb2.FeishuRef.SerializeToString,
             priva__common_dot_dataplane_dot_v1_dot_account__pb2.Account.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def HasUsers(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/priva.dataplane.v1.AccountService/HasUsers',
+            priva__common_dot_dataplane_dot_v1_dot_common__pb2.Empty.SerializeToString,
+            priva__common_dot_dataplane_dot_v1_dot_common__pb2.BoolValue.FromString,
             options,
             channel_credentials,
             insecure,

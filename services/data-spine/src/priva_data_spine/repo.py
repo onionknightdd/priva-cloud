@@ -102,6 +102,13 @@ class Repository(ABC):
     def run_count(self, account_id: str) -> int: ...
     @abstractmethod
     def run_delete_before(self, account_id: str, cutoff_date: str) -> list[str]: ...
+    # secret
+    @abstractmethod
+    def secret_get(self, account_id: str) -> dict | None: ...
+    @abstractmethod
+    def secret_upsert(self, account_id: str, bundle: str) -> dict: ...
+    @abstractmethod
+    def secret_list_account_ids(self) -> list[str]: ...
     # admin
     @abstractmethod
     def table_count(self, table: str) -> int: ...
@@ -365,6 +372,24 @@ class SqliteRepo(Repository):
             )
             self._conn.commit()
             return ids
+
+    # secret ----------------------------------------------------------------
+    def secret_get(self, account_id):
+        return self._one("SELECT * FROM secret WHERE account_id = ?", (account_id,))
+
+    def secret_upsert(self, account_id, bundle):
+        # bundle is already Fernet-encrypted ciphertext; generation bumps per put.
+        self._write(
+            "INSERT INTO secret (account_id, bundle, generation) VALUES (?, ?, 1) "
+            "ON CONFLICT(account_id) DO UPDATE SET "
+            "bundle = excluded.bundle, generation = generation + 1, "
+            "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+            (account_id, bundle),
+        )
+        return self.secret_get(account_id)
+
+    def secret_list_account_ids(self):
+        return [r["account_id"] for r in self._all("SELECT account_id FROM secret ORDER BY account_id")]
 
     # admin -----------------------------------------------------------------
     def table_count(self, table):

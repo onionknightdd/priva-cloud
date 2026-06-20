@@ -7,6 +7,7 @@ This CLI provides the operational commands: init (create schema), stats, migrate
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 
@@ -17,6 +18,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("stats", help="print table row counts")
     mp = sub.add_parser("migrate", help="migrate monolith YAML/JSONL into SQLite")
     mp.add_argument("--dry-run", action="store_true", help="report counts without writing")
+    srv = sub.add_parser("serve", help="run the gRPC server (the data plane)")
+    srv.add_argument("--host", default=os.environ.get("DATA_SPINE_HOST", "0.0.0.0"))
+    srv.add_argument("--port", type=int, default=int(os.environ.get("DATA_SPINE_PORT", "50051")))
     args = parser.parse_args(argv)
 
     from priva_common.config import get_settings
@@ -41,6 +45,14 @@ def main(argv: list[str] | None = None) -> int:
 
         run_migration(settings=settings, dry_run=args.dry_run)
         return 0
+
+    if args.cmd == "serve":
+        from priva_common.logging import configure_logging
+
+        from priva_data_spine.server import serve
+
+        configure_logging(settings)
+        return serve(settings, host=args.host, port=args.port)
 
     return 1
 

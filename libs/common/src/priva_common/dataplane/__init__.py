@@ -26,6 +26,8 @@ from priva_common.dataplane.client import (
     QuotaRecord,
     RunPage,
     SchedulerClient,
+    SecretClient,
+    SecretRecord,
     UNSET,
 )
 from priva_common.dataplane.factory import get_client, set_inprocess_handlers
@@ -39,8 +41,10 @@ __all__ = [
     "QuotaClient",
     "SchedulerClient",
     "AdminClient",
+    "SecretClient",
     "BindingRecord",
     "QuotaRecord",
     "RunPage",
+    "SecretRecord",
     "UNSET",
 ]
