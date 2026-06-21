@@ -23,14 +23,21 @@ As-built status of the vertical slice (branch `feat/agentgateway-operator-epp`).
 
 ## Open (the last mile)
 
-1. **agentgateway → EPP ext_proc transport.** Runtime requests reach the edge and route to the
-   `InferencePool`, but agentgateway's call to the EPP (`control-panel:9000`) fails with
-   `ext_proc ... received corrupt message of type InvalidContentType` (FailClose → 500). The EPP
-   **server is confirmed correct** (a local in-pod gRPC `Process` call returns a proper 401 immediate
-   response). So agentgateway isn't dialing `:9000` as h2c gRPC. Tried: `appProtocol: kubernetes.io/h2c`
-   on the Service port + gateway proxy restart — no change. Next: confirm agentgateway's expected EPP
-   transport (its InferencePool `endpointPickerRef` docs / `spec.appProtocol`), gateway debug logging,
-   or whether the EPP must be a dedicated single-port Service.
+1. **agentgateway → EPP ext_proc transport** (the one blocker). agentgateway's call to the EPP fails
+   `ext_proc ... received corrupt message of type InvalidContentType` (FailClose → 500). Isolated:
+   - Our EPP **server is correct** — a normal gRPC client (in-pod `grpc.insecure_channel` → `Process`)
+     gets a proper 401 immediate response.
+   - agentgateway reaches **control-panel:8080 over HTTP/1.1 fine** (health/login/SPA all 200).
+   - The config dump shows agentgateway recognized the h2c hint: `appProtocols: {"9000":"Http2"}`.
+   - **Both** ext_proc mechanisms fail identically: the InferencePool `endpointPickerRef` AND the
+     documented `AgentgatewayPolicy.traffic.extProc` (so it's not the mechanism).
+   ⇒ It's a transport incompatibility between agentgateway's ext_proc **h2c gRPC client** and our
+   **`grpc.aio`** server (likely an h2c-prior-knowledge vs TLS/ALPN-"Http2" negotiation mismatch — the EPP
+   upstream may be dialed differently from the plain :8080 HTTP backend). Next options:
+   (a) deploy the GIE **reference EPP** and point the InferencePool at it — if agentgateway ext_procs to it
+   successfully, the gap is our grpc.aio server's h2c (fix/replace it); if it also fails, it's an
+   agentgateway-on-minikube setup issue; (b) serve the ext_proc from an agentgateway-proven gRPC stack;
+   (c) capture the bytes agentgateway sends to :9000 to see TLS-vs-cleartext.
 2. **Wake-and-hold vs ext_proc timeout.** The EPP currently blocks up to `wake_timeout_seconds` (90s)
    waiting for a cold pod; agentgateway's ext_proc timeout is much shorter. Once (1) is fixed, shorten
    the EPP hold to a few seconds and return a fast 503 "waking, retry" on cold start (predictive wake on
