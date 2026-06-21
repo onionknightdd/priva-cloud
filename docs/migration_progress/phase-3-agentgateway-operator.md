@@ -21,10 +21,34 @@ As-built status of the vertical slice (branch `feat/agentgateway-operator-epp`).
 - user-create → account via **CP→data-spine gRPC** → CP **provisions AgentTenant CR** → **operator reconciles** → scale-to-zero `ar-<account>` Deployment + Service + Bound PVC.
 - CR **wake** → operator **materializes the 6-key creds Secret** (from the data-spine secret store) → scale 0→1 → **agent-runner pod 1/1 Ready**, `status.podIP` set.
 
-## Open (the last mile)
+## RESOLVED — the runtime path works end-to-end (2026-06-21)
 
-1. **agentgateway → EPP ext_proc transport** (the one blocker). agentgateway's call to the EPP fails
-   `ext_proc ... received corrupt message of type InvalidContentType` (FailClose → 500). Isolated:
+**Root cause:** agentgateway dials the InferencePool EndpointPicker over **TLS** (the GIE reference-EPP
+convention; captured ClientHello bytes `16 03 01…` on the EPP dial), but our EPP served **plaintext** →
+TLS-into-plaintext = `received corrupt message of type InvalidContentType` (the same class as linkerd#13427:
+a Rust proxy's mTLS/TLS vs a plaintext target). **NOT** a Python-vs-Go gRPC issue — both grpc.aio and
+grpclib failed for the same reason (plaintext).
+
+**Fix:** the EPP (`extproc.py`) now serves **TLS** (self-signed, ALPN `h2`; agentgateway skip-verifies
+in-cluster). Verified: `GET /api/agent/sessions` through the edge → **HTTP 200**, gateway log
+`inferencepool.selected_endpoint=10.244.0.43:8091` — agentgateway → InferencePool → EPP (TLS) → control-panel
+resolves the account, wakes the pod, returns its endpoint → agentgateway routes to the **woken agent-runner
+pod**, which trusts the EPP-injected signed runner token. (grpclib stays — a clean pure-Python EPP — but the
+TLS change is the actual fix and would have worked on grpc.aio too.)
+
+## Remaining
+
+1. **Live LLM agent run** needs real `ANTHROPIC_*` creds (set via the SPA Settings → data-spine secret →
+   operator injects into the pod). Routing/auth/wake are proven; only a valid model key is missing.
+2. **Cold-start wake-and-hold vs ext_proc timeout** — validate a request to an idle (scaled-to-zero) account
+   completes the wake within agentgateway's ext_proc deadline (warm path verified; shorten the EPP hold +
+   predictive wake on login if needed).
+3. The `:9000` Service still carries `appProtocol: kubernetes.io/h2c` — harmless (the InferencePool EPP dial
+   is TLS regardless), tidy to `https`/grpc-tls later.
+
+## (historical) the ext_proc transport investigation
+
+1. agentgateway's call to the EPP failed `received corrupt message of type InvalidContentType`. Isolated:
    - Our EPP **server is correct** — a normal gRPC client (in-pod `grpc.insecure_channel` → `Process`)
      gets a proper 401 immediate response.
    - agentgateway reaches **control-panel:8080 over HTTP/1.1 fine** (health/login/SPA all 200).

@@ -15,8 +15,15 @@ the pod verifies. Cold/unauth -> an ext_proc immediate response (401 / "waking, 
 from __future__ import annotations
 
 import asyncio
+import datetime
+import ssl
+import tempfile
 from urllib.parse import parse_qs, urlparse
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 from envoy.config.core.v3.base_pb2 import HeaderValue, HeaderValueOption
 from envoy.service.ext_proc.v3 import external_processor_pb2 as ep
 from envoy.type.v3 import http_status_pb2
@@ -119,9 +126,46 @@ class ExternalProcessor:
         }
 
 
+def _self_signed_ssl_context() -> ssl.SSLContext:
+    """Self-signed h2 server context. agentgateway dials the InferencePool EPP over
+    TLS (GIE convention) and skip-verifies in-cluster, so a self-signed cert suffices.
+    Serving plaintext here is what caused the InvalidContentType (TLS into plaintext)."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "control-panel")])
+    now = datetime.datetime.utcnow()
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=3650))
+        .add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName("control-panel"),
+                x509.DNSName("control-panel.priva-cloud.svc.cluster.local"),
+            ]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+    cf = tempfile.NamedTemporaryFile(delete=False, suffix=".crt")
+    cf.write(cert.public_bytes(serialization.Encoding.PEM))
+    cf.close()
+    kf = tempfile.NamedTemporaryFile(delete=False, suffix=".key")
+    kf.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL,
+                              serialization.NoEncryption()))
+    kf.close()
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(cf.name, kf.name)
+    ctx.set_alpn_protocols(["h2"])  # gRPC over HTTP/2
+    return ctx
+
+
 async def start_extproc_server(settings):
     server = Server([ExternalProcessor()])
     port = settings.edge.extproc_port
-    await server.start("0.0.0.0", port)
-    logger.info("control-panel ext_proc EPP (grpclib) serving on 0.0.0.0:{}", port)
+    await server.start("0.0.0.0", port, ssl=_self_signed_ssl_context())
+    logger.info("control-panel ext_proc EPP (grpclib, TLS) serving on 0.0.0.0:{}", port)
     return server
