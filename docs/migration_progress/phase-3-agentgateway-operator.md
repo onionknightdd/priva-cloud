@@ -40,9 +40,10 @@ TLS change is the actual fix and would have worked on grpc.aio too.)
 
 1. **Live LLM agent run** needs real `ANTHROPIC_*` creds (set via the SPA Settings → data-spine secret →
    operator injects into the pod). Routing/auth/wake are proven; only a valid model key is missing.
-2. **Cold-start wake-and-hold vs ext_proc timeout** — validate a request to an idle (scaled-to-zero) account
-   completes the wake within agentgateway's ext_proc deadline (warm path verified; shorten the EPP hold +
-   predictive wake on login if needed).
+2. ~~Cold-start wake-and-hold vs ext_proc timeout~~ **VALIDATED**: from `replicas=0, phase=Zero`, a runtime
+   request through the edge returned **HTTP 200 in 4.1s** — the EPP patched `spec.wake`, the operator scaled
+   0→1 + injected the Secret, the pod went Ready, and agentgateway routed to the freshly-woken pod (well
+   within the ext_proc deadline; the AR image is node-cached). Scale-from-zero on demand works.
 3. The `:9000` Service still carries `appProtocol: kubernetes.io/h2c` — harmless (the InferencePool EPP dial
    is TLS regardless), tidy to `https`/grpc-tls later.
 
