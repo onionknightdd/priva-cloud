@@ -73,7 +73,13 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
   const connect = () => {
     reconnectTimer = null
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/api/agent/ws/run`
+    // The edge (agentgateway ext_proc EPP) authenticates the WS on the UPGRADE
+    // request, which carries no body — so the token must ride the URL; the
+    // init-frame token alone is too late and the upgrade is rejected (401).
+    // See docs/architecture/byte-path.md (WS auth caveat).
+    const token = safeStorage.getItem('priva-token')
+    const auth = token ? `?token=${encodeURIComponent(token)}` : ''
+    const wsUrl = `${protocol}//${window.location.host}/api/agent/ws/run${auth}`
     ws = new WebSocket(wsUrl)
 
     ws.onopen = () => {
