@@ -36,10 +36,20 @@ resolves the account, wakes the pod, returns its endpoint → agentgateway route
 pod**, which trusts the EPP-injected signed runner token. (grpclib stays — a clean pure-Python EPP — but the
 TLS change is the actual fix and would have worked on grpc.aio too.)
 
-## Remaining
+## Live agent run — WORKS (2026-06-21)
 
-1. **Live LLM agent run** needs real `ANTHROPIC_*` creds (set via the SPA Settings → data-spine secret →
-   operator injects into the pod). Routing/auth/wake are proven; only a valid model key is missing.
+A real turn ran end-to-end through the edge against a local OpenAI/Anthropic-compatible LLM proxy
+(`host.minikube.internal:8000`, model `Qwen3.6-...`): BYOK creds set via `PUT /api/auth/me/env` →
+data-spine secret store → operator injected them at wake → `POST /api/agent/run` through the gateway →
+**HTTP 200**, `result: "hello from priva-cloud"`, `is_error:false`.
+
+**Second crack — the EPP was dropping bodies.** agentgateway sends request/response **body** chunks to the
+InferencePool EPP (it ignores `mode_override`; `allow_mode_override` is off), and our empty `BodyResponse`
+**dropped** them → POST runs reached the pod with an empty body → 422. Fix: the EPP **echoes** the bytes back
+via `body_mutation` for `request_body`/`response_body` (`extproc.py:_passthrough_body`). (A `mode_override`
+hint is also sent for gateways that honor it.)
+
+## Remaining
 2. ~~Cold-start wake-and-hold vs ext_proc timeout~~ **VALIDATED**: from `replicas=0, phase=Zero`, a runtime
    request through the edge returned **HTTP 200 in 4.1s** — the EPP patched `spec.wake`, the operator scaled
    0→1 + injected the Secret, the pod went Ready, and agentgateway routed to the freshly-woken pod (well
