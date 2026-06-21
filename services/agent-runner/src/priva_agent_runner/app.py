@@ -17,7 +17,27 @@ from fastapi import FastAPI
 from priva_common.config import get_settings
 from priva_common.logging import AccessLogMiddleware, configure_logging, get_app_logger, shutdown_logging
 
+from . import activity
+
 logger = get_app_logger(__name__)
+
+
+class ActivityMiddleware:
+    """Track in-flight requests + last-activity for the operator's idle sweep.
+    Excludes /health so the operator's own probes don't keep the pod awake."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket") or scope.get("path", "").startswith("/health"):
+            await self.app(scope, receive, send)
+            return
+        activity.enter()
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            activity.leave()
 
 
 def create_app() -> FastAPI:
@@ -68,14 +88,18 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.add_middleware(AccessLogMiddleware)
+    app.add_middleware(ActivityMiddleware)
 
     @app.get("/health", include_in_schema=False)
     async def health():
         import os
+        active, last = activity.snapshot()
         return {
             "status": "ok",
             "service": "agent-runner",
             "account_id": os.environ.get("ACCOUNT_ID"),
+            "active_runs": active,
+            "last_activity_ts": last,
             "time": datetime.now(timezone.utc).isoformat(),
         }
 

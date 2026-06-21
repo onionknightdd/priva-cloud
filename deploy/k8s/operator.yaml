@@ -1,0 +1,25 @@
+# operator — kopf AgentTenant controller (sole scaler 0<->1). SA + RBAC in
+# deploy/rbac/operator-rbac.yaml. Logs to stderr (kubectl logs).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: operator
+  namespace: priva-cloud
+  labels: {app: operator}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # a single active controller (no peering)
+  selector:
+    matchLabels: {app: operator}
+  template:
+    metadata:
+      labels: {app: operator}
+    spec:
+      serviceAccountName: priva-operator
+      containers:
+        - name: operator
+          image: priva/operator:dev
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "priva_operator"]
+          envFrom:
+            - configMapRef: {name: priva-config}

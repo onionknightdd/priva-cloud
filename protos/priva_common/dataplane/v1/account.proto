@@ -57,4 +57,5 @@ service AccountService {
   rpc FindByApiKey(ApiKeyRequest) returns (Account);
   rpc CountAdmins(Empty) returns (CountValue);
   rpc FindByFeishuUserId(FeishuRef) returns (Account);
+  rpc HasUsers(Empty) returns (BoolValue);
 }

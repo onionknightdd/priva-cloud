@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, YamlConfigSettingsSource
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    YamlConfigSettingsSource,
+)
 
 
 class ServerSettings(BaseModel):
@@ -134,12 +139,54 @@ class DataspineSettings(BaseModel):
     transport: Literal["in_process", "grpc"] = "in_process"
     backend: Literal["sqlite", "postgres"] = "sqlite"
     sqlite_path: str = "~/priva_workspace/.priva.dataspine.db"
-    grpc_dsn: str | None = None  # only used when transport == "grpc"
+    grpc_dsn: str | None = None  # gRPC target (host:port) when transport == "grpc"
     # HMAC key for the api_key_lookup index. Falls back to auth.jwt_secret when unset.
     api_key_hmac_secret: str | None = None
 
 
+class KubernetesSettings(BaseModel):
+    """control-panel (provisioner/EPP) + operator: how to reach the cluster and the
+    cluster-wide defaults the control-panel stamps into each ``AgentTenant`` CR.
+
+    The per-tenant authoritative values live on the CR; the operator reads the CR and
+    falls back to these defaults. Only consulted when running in the K8s deployment.
+    """
+
+    provisioner: Literal["kubernetes"] = "kubernetes"
+    in_cluster: bool = True  # build the kube client from the in-cluster ServiceAccount
+    kubeconfig: str | None = None  # path when running off-cluster (e.g. minikube from host)
+    # Alpha: a single namespace holds the control plane AND the per-account pods/CRs
+    # (locked 2026-06-21). Split into system/tenants namespaces later via env override.
+    namespace_system: str = "priva-cloud"  # control-panel / data-spine / operator
+    namespace_tenants: str = "priva-cloud"  # per-account agent-runner pods + CRs
+    runner_image: str = "priva/agent-runner:dev"  # stamped into AgentTenant spec.image
+    runner_image_pull_policy: str = "IfNotPresent"  # so minikube uses locally-loaded images
+    runner_service_port: int = 8091  # per-account Service / pod runtime port
+    idle_grace_seconds: int = 1800  # default spec.idle.graceSeconds (scale-to-zero)
+    min_alive_after_wake_seconds: int = 1800  # anti-thrash floor
+    max_concurrent_sessions: int = 3  # default spec.concurrency.maxConcurrentSessions
+    wake_timeout_seconds: int = 60  # control-panel wake-and-hold bound before "waking, retry"
+
+
+class EdgeSettings(BaseModel):
+    """agentgateway edge knobs. The platform JWT the edge verifies; the control-panel
+    mints it and the ext_proc brain reads the already-verified claims.
+    """
+
+    jwt_issuer: str = "priva-cp"
+    jwt_audience: str | None = None
+    jwks_url: str | None = None  # remote JWKS for the agentgateway provider (prod)
+    extproc_port: int = 9000  # control-panel gRPC ext_proc (EPP) listener agentgateway calls
+
+
 class Settings(BaseSettings):
+    # Env override for every (nested) key: ``PRIVA_DATASPINE__GRPC_DSN``,
+    # ``PRIVA_AUTH__JWT_SECRET``, ``PRIVA_SERVER__PORT`` … This is what lets a
+    # containerized service run from ConfigMap/Secret env with no config.yaml.
+    # Bespoke ``os.environ`` vars (ACCOUNT_ID, PRIVA_CONFIG_FILE, …) are not
+    # pydantic fields, so the prefix does not touch them.
+    model_config = SettingsConfigDict(env_prefix="PRIVA_", env_nested_delimiter="__", extra="ignore")
+
     app_name: str = "Priva API Server"
     app_version: str = "1.0.0"
     server: ServerSettings = Field(default_factory=ServerSettings)
@@ -150,6 +197,8 @@ class Settings(BaseSettings):
     pty: PtySettings = Field(default_factory=PtySettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
     dataspine: DataspineSettings = Field(default_factory=DataspineSettings)
+    kubernetes: KubernetesSettings = Field(default_factory=KubernetesSettings)
+    edge: EdgeSettings = Field(default_factory=EdgeSettings)
 
     # Source of the YAML overlay. This module no longer lives next to the file,
     # so the path comes from PRIVA_CONFIG_FILE (server.sh exports it as an

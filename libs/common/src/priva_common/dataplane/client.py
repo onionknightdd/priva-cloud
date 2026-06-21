@@ -25,11 +25,13 @@ __all__ = [
     "BindingRecord",
     "QuotaRecord",
     "RunPage",
+    "SecretRecord",
     "AccountClient",
     "BindingClient",
     "QuotaClient",
     "SchedulerClient",
     "AdminClient",
+    "SecretClient",
     "DataplaneClient",
 ]
 
@@ -61,6 +63,13 @@ class RunPage(BaseModel):
     next_cursor: str | None = None
     prev_cursor: str | None = None
     total: int | None = None  # None when a filter is active (total unknown)
+
+
+class SecretRecord(BaseModel):
+    account_id: str
+    bundle: dict[str, str] = {}  # decrypted env bundle, e.g. {ANTHROPIC_AUTH_TOKEN: ...}
+    generation: int = 1
+    updated_at: str | None = None
 
 
 class AccountClient(Protocol):
@@ -141,6 +150,12 @@ class AdminClient(Protocol):
     def stats(self) -> dict[str, int]: ...
 
 
+class SecretClient(Protocol):
+    def put(self, account_id: str, bundle: dict[str, str]) -> SecretRecord: ...
+    def get(self, account_id: str) -> SecretRecord | None: ...
+    def list_account_ids(self) -> list[str]: ...
+
+
 @dataclass
 class DataplaneClient:
     """Aggregate handle — one per process. `get_client()` returns this."""
@@ -150,3 +165,4 @@ class DataplaneClient:
     quota: QuotaClient
     scheduler: SchedulerClient
     admin: AdminClient
+    secrets: SecretClient

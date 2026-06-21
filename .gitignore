@@ -19,6 +19,10 @@ venv/
 env/
 ENV/
 
+# uv lock — the dev venv uses requirements.txt + editable installs, not uv sync
+# (uv sync prunes the monolith deps); uv.lock is not the source of truth here.
+uv.lock
+
 # ---- Node / Web (priva/web) ----
 node_modules/
 priva/web/dist/
@@ -36,6 +40,8 @@ dist/*.tar.gz
 
 # Application logs
 priva/logs/
+# root-level logs dir (PRIVA_LOG_DIR default when running services from the repo root)
+/logs/
 
 # Process id files
 *.pid

@@ -1,0 +1,22 @@
+# operator — example bootstrap config (kopf AgentTenant controller, sole scaler 0<->1).
+#
+# Reads per-account credential bundles from data-spine (gRPC) to materialize the
+# per-pod K8s Secret at wake. Env form: PRIVA_KUBERNETES__NAMESPACE_TENANTS, …
+
+app_name: "Priva operator"
+
+dataspine:
+  transport: "grpc"     # fetch wrapped credential bundles to inject at wake
+  grpc_dsn: "data-spine.priva-cloud.svc.cluster.local:50051"
+
+kubernetes:
+  in_cluster: true
+  namespace_system: "priva-cloud"
+  namespace_tenants: "priva-cloud"   # alpha: control plane + tenant pods share one ns
+  runner_image: "priva/agent-runner:dev"
+  runner_image_pull_policy: "IfNotPresent"
+  runner_service_port: 8091
+  idle_grace_seconds: 1800
+  min_alive_after_wake_seconds: 1800
+
+# logging.* defaults are fine.

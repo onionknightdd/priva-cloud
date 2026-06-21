@@ -53,25 +53,37 @@ def create_app() -> FastAPI:
     async def lifespan(_: FastAPI):
         configure_logging(settings)
 
-        from priva_data_spine import compose
-        compose()
+        # gRPC transport: CP is a data-plane *client* (data-spine runs as its own
+        # pod). Only compose in-process when explicitly configured for it.
+        if settings.dataspine.transport == "in_process":
+            from priva_data_spine import compose
+            compose()
         logger.info(
-            "data-plane composed: transport={}, backend={}, sqlite={}",
+            "data-plane transport={}, backend={}, dsn={}",
             settings.dataspine.transport,
             settings.dataspine.backend,
-            settings.dataspine.sqlite_path,
+            settings.dataspine.grpc_dsn,
         )
+
+        # Start the ext_proc EPP server (the routing brain agentgateway calls).
+        from .extproc import start_extproc_server
+        extproc_server = await start_extproc_server(settings)
 
         from priva_common.user_store import get_user_store
         try:
             users = get_user_store().list_users()
-            logger.info("control-panel ready: users={}, agent_runner={}", len(users), os.environ.get("AGENT_RUNNER_URL"))
+            logger.info("control-panel ready: users={}, extproc={}", len(users), settings.edge.extproc_port)
         except Exception as exc:
             logger.warning("user listing failed at boot: {}", exc)
 
         try:
             yield
         finally:
+            try:
+                extproc_server.close()
+                await extproc_server.wait_closed()
+            except Exception:
+                pass
             logger.info("control-panel shutdown complete")
             shutdown_logging()
 
@@ -104,9 +116,9 @@ def create_app() -> FastAPI:
     for r in (auth_router, admin_router, admin_files_router, user_data_router, resource_router, metrics_router):
         app.include_router(r)
 
-    # --- Reverse-proxy to agent-runner (runtime + agent-coupled routers) ---
-    from .proxy import router as proxy_router
-    app.include_router(proxy_router)
+    # Runtime routes (/api/agent, /api/files, /api/pty, ...) are NOT served or
+    # proxied by CP anymore: agentgateway routes them to the per-account pod via
+    # the InferencePool, steered by CP's ext_proc EPP (extproc.py). proxy.py is gone.
 
     # --- SPA static serving: admin at /admin first, then user catch-all at / ---
     admin_dist = _dist_dir("PRIVA_WEB_DIST_ADMIN", "dist-admin")

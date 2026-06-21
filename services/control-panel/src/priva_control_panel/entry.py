@@ -8,16 +8,14 @@ import os
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="priva-cloud control-panel")
-    parser.add_argument("--host", default=os.environ.get("CONTROL_PANEL_HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("CONTROL_PANEL_PORT", "8081")))
-    parser.add_argument("--agent-runner-url", default=os.environ.get("AGENT_RUNNER_URL", "http://127.0.0.1:8091"))
+    parser.add_argument("--host", default=os.environ.get("CONTROL_PANEL_HOST", "0.0.0.0"))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("CONTROL_PANEL_PORT", "8080")))
     parser.add_argument("--config", default=os.environ.get("PRIVA_CONFIG_FILE"))
     parser.add_argument("--reload", action="store_true")
     args = parser.parse_args(argv)
 
     if args.config:
         os.environ["PRIVA_CONFIG_FILE"] = os.path.abspath(os.path.expanduser(args.config))
-    os.environ["AGENT_RUNNER_URL"] = args.agent_runner_url
 
     import uvicorn
 

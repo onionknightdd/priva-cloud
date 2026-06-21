@@ -14,12 +14,24 @@
 
 ## 0. Current state (update this whenever it changes)
 
-- **Phase:** 0 — *Monorepo skeleton + in-place boundary refactor.* **Done (2026-06-20).** Phase 1 next.
-- **Branch:** `main` — this is a fresh repo (cut from a prior Priva branch), so migration work lands directly on `main`; there are **no** per-phase `split/phase-N` branches (§4). Skeleton commit: `92470c2` (uv workspace + `libs/common` + dev-mode doc).
-- **Done:** **All of Phase 0.** increment-1 skeleton (`92470c2`); then increments 2–7 (2026-06-20) extracted the shared contract layer into `priva_common` via re-export shims — `config`/`metrics`/`logging`/`crypto`/`_pagination`/`models/*`/`serialization`/`wire` + the new `redis_catalog` — dependency-ordered, **boot-green after every step**, no importer changed, monolith still one process. §6 import boundary verified CLEAN. Commits `f4300b8`→`c3dd922`. **Also (2026-06-19):** docs reconciled (`agent-pod`→`agent-runner`, `priva-cloud` CLI/layout `code-split.md` §3.1/§3.2/§14, branch-model fix) + pre-migration doc-refinement.
-- **Next:** Phase 1 — `protos/` + **data-spine** (gRPC contracts + data-plane client; swap store call-sites §8). Infra = none, so it proceeds against a stubbed client with the live gate flagged. Create/open `phase-1.md`.
-- **Not pushed yet:** Phase 0 increments 2–7 are local commits on `main`. Push when the user OKs (§4 push policy; phase is boot-green).
-- **Last updated:** 2026-06-20.
+- **Phase:** Phases 0–2 done earlier; a **vertical slice across Phases 1/3/5/6 now runs end-to-end on
+  minikube** — per-account agent-runner pods provisioned on user-add, scaled 0↔1 by a kopf operator, and
+  routed to via agentgateway + an ext_proc EndpointPicker. As-built: [`phase-3-agentgateway-operator.md`](phase-3-agentgateway-operator.md).
+- **Branch:** the slice landed on `feat/agentgateway-operator-epp` and is **merged to `main`** (2026-06-21).
+- **Done (the slice):** config (`PRIVA_` env override + K8s/Edge settings); **data-spine** real gRPC server +
+  client + Fernet **secret store** (Phase 1's live transport); **operator** (kopf `AgentTenant` CRD, sole
+  scaler 0↔1, wake → secret-inject → scale, idle sweep — Phase 5); **control-panel** ext_proc **EPP** brain +
+  K8s provisioner + secret-store creds (Phase 3); **agentgateway edge** + InferencePool + HTTPRoute (Phase 6);
+  Dockerfiles for all 4 services. **Verified on minikube:** add user → AgentTenant CR → scale-to-zero pod →
+  runtime request through agentgateway → EPP wakes the pod → routes (warm + cold, 4.1s from zero); idle → 0.
+- **The crack:** the runtime path was blocked for a long debug session by `InvalidContentType` — root cause:
+  agentgateway dials the InferencePool EPP over **TLS** (GIE convention; captured ClientHello), our EPP was
+  plaintext. Fix: EPP serves TLS (self-signed, skip-verify). See [agentgateway-epp-tls memory] + the phase doc.
+- **Transport (alpha):** everything is **HTTP/plaintext** except that one forced EPP hop (agentgateway→EPP
+  TLS, self-signed). Real HTTPS/mTLS/JWKS/edge-TLS are deferred.
+- **Next:** a live LLM run (needs real `ANTHROPIC_*` creds); Phase 4 (scheduler + channel-connector); prod
+  hardening (Redis coordination, mTLS, NetworkPolicies, per-account DEK/KMS).
+- **Last updated:** 2026-06-21.
 
 ---
 
@@ -123,12 +135,12 @@ Status legend: `not started` · `in progress` · `blocked` · `done`. Update the
 | Phase | Doc | Status | Branch | Last updated |
 |-------|-----|--------|--------|--------------|
 | 0 — skeleton + boundary refactor | [phase-0.md](phase-0.md) | done | `main` | 2026-06-20 |
-| 1 — protos + data-spine | [phase-1.md](phase-1.md) | not started | — | 2026-06-19 |
-| 2 — agent-runner | [phase-2.md](phase-2.md) | not started | — | 2026-06-19 |
-| 3 — control-panel / brain | [phase-3.md](phase-3.md) | not started | — | 2026-06-19 |
+| 1 — protos + data-spine | [phase-1.md](phase-1.md) | done (in-process earlier; **gRPC live** in the slice) | `main` | 2026-06-21 |
+| 2 — agent-runner | [phase-2.md](phase-2.md) | done | `main` | 2026-06-21 |
+| 3 — control-panel / brain (EPP) | [phase-3-agentgateway-operator.md](phase-3-agentgateway-operator.md) | done (minikube alpha) | `main` | 2026-06-21 |
 | 4 — lift connector + scheduler | [phase-4.md](phase-4.md) | not started | — | 2026-06-19 |
-| 5 — operator + state-reader | [phase-5.md](phase-5.md) | not started | — | 2026-06-19 |
-| 6 — K8s wiring | [phase-6.md](phase-6.md) | not started | — | 2026-06-19 |
+| 5 — operator + state-reader | [phase-3-agentgateway-operator.md](phase-3-agentgateway-operator.md) | done (operator; state-reader deferred) | `main` | 2026-06-21 |
+| 6 — K8s wiring (agentgateway) | [phase-3-agentgateway-operator.md](phase-3-agentgateway-operator.md) | done (minikube alpha) | `main` | 2026-06-21 |
 
 ---
 

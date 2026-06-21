@@ -1,7 +1,7 @@
 [project]
 name = "priva-control-panel"
 version = "0.0.0"
-description = "Priva Cloud control-panel: auth + admin + config faces + user-data + resource; owns data-spine (compose); serves the user & admin SPAs; dev edge reverse-proxying the runtime to agent-runner."
+description = "Priva Cloud control-panel: brain/EPP (ext_proc) + auth/admin/config faces + user-data + resource; serves the user & admin SPAs; provisions per-account agent-runner pods (AgentTenant CRs)."
 requires-python = ">=3.11"
 dependencies = [
     "priva-common",
@@ -15,6 +15,9 @@ dependencies = [
     "pyyaml",
     "claude-agent-sdk==0.1.81",
     "scalar-fastapi",
+    "kubernetes>=29",
+    "xds-protos",
+    "grpclib",
 ]
 
 [project.entry-points."priva_cloud.services"]

@@ -16,7 +16,7 @@ from typing import TextIO
 from fastapi import Request
 from loguru import logger
 
-from priva_common.config import LoggingTargetSettings, Settings
+from priva_common.config import LoggingTargetSettings
 
 APP_LOGGER_PREFIXES = ("api.", "priva.api.")
 ROTATED_LOG_RE = re.compile(
@@ -179,11 +179,12 @@ def configure_logging(settings) -> None:
         logger.remove()
         logger.configure(extra={"channel": "server"})
 
-        _add_sink("server", settings.logging.server)
-        _add_sink("app", settings.logging.app)
-        _add_sink("access", settings.logging.access)
-        _add_sink("scheduler", settings.logging.scheduler)
-        _add_sink("channels", settings.logging.channels)
+        base_dir = _log_base_dir(settings)
+        _add_sink("server", settings.logging.server, base_dir)
+        _add_sink("app", settings.logging.app, base_dir)
+        _add_sink("access", settings.logging.access, base_dir)
+        _add_sink("scheduler", settings.logging.scheduler, base_dir)
+        _add_sink("channels", settings.logging.channels, base_dir)
 
         intercept_handler = _InterceptHandler()
         root_logger = logging.getLogger()
@@ -294,8 +295,8 @@ class AccessLogMiddleware:
         ).info("")
 
 
-def _add_sink(channel: str, config: LoggingTargetSettings) -> None:
-    log_path = _resolve_log_path(config.path)
+def _add_sink(channel: str, config: LoggingTargetSettings, base_dir: Path) -> None:
+    log_path = _resolve_log_path(config.path, base_dir)
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger.add(
@@ -312,11 +313,25 @@ def _add_sink(channel: str, config: LoggingTargetSettings) -> None:
     )
 
 
-def _resolve_log_path(raw_path: str) -> Path:
+def _log_base_dir(settings) -> Path:
+    """Base for relative log paths. Decoupled from the (now optional) config file:
+    ``PRIVA_LOG_DIR`` → ``server.work_dir`` → CWD. So a file-free / ConfigMap-env
+    boot still writes logs to a sensible, writable place.
+    """
+    raw = os.environ.get("PRIVA_LOG_DIR")
+    if raw:
+        return Path(raw).expanduser()
+    work_dir = getattr(getattr(settings, "server", None), "work_dir", None)
+    if work_dir:
+        return Path(work_dir).expanduser()
+    return Path.cwd()
+
+
+def _resolve_log_path(raw_path: str, base_dir: Path) -> Path:
     path = Path(raw_path).expanduser()
     if path.is_absolute():
         return path
-    return Settings.yaml_file.parent.parent / path
+    return base_dir / path
 
 
 def _parse_rotation_time(value: str) -> dt_time:
