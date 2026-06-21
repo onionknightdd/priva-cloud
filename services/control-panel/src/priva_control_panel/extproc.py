@@ -25,8 +25,22 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from envoy.config.core.v3.base_pb2 import HeaderValue, HeaderValueOption
+from envoy.extensions.filters.http.ext_proc.v3 import processing_mode_pb2 as pm
 from envoy.service.ext_proc.v3 import external_processor_pb2 as ep
 from envoy.type.v3 import http_status_pb2
+
+# Tell agentgateway, in our headers response, to stop sending us the body/trailers
+# (the GIE EPP path buffers the request body for ext_proc; we only need headers, and
+# not consuming the body was dropping it -> the pod saw an empty body -> 422). Header
+# modes are set non-default so the override serializes (NONE=0 alone would be empty).
+_MODE_OVERRIDE = pm.ProcessingMode(
+    request_header_mode=pm.ProcessingMode.SEND,
+    response_header_mode=pm.ProcessingMode.SKIP,
+    request_body_mode=pm.ProcessingMode.NONE,
+    response_body_mode=pm.ProcessingMode.NONE,
+    request_trailer_mode=pm.ProcessingMode.SKIP,
+    response_trailer_mode=pm.ProcessingMode.SKIP,
+)
 from grpclib.const import Cardinality, Handler
 from grpclib.server import Server
 
@@ -64,21 +78,30 @@ def _immediate(code: int, message: str) -> "ep.ProcessingResponse":
 
 
 def _steer(endpoint: str, runner_token: str) -> "ep.ProcessingResponse":
-    return ep.ProcessingResponse(request_headers=ep.HeadersResponse(response=ep.CommonResponse(
-        header_mutation=ep.HeaderMutation(set_headers=[
-            HeaderValueOption(header=HeaderValue(key=DEST_HEADER, raw_value=endpoint.encode())),
-            HeaderValueOption(header=HeaderValue(key=RUNNER_TOKEN_HEADER, raw_value=runner_token.encode())),
-        ]))))
+    return ep.ProcessingResponse(
+        mode_override=_MODE_OVERRIDE,  # stop the gateway from routing the body through us
+        request_headers=ep.HeadersResponse(response=ep.CommonResponse(
+            header_mutation=ep.HeaderMutation(set_headers=[
+                HeaderValueOption(header=HeaderValue(key=DEST_HEADER, raw_value=endpoint.encode())),
+                HeaderValueOption(header=HeaderValue(key=RUNNER_TOKEN_HEADER, raw_value=runner_token.encode())),
+            ]))))
 
 
 _EMPTY = {
     "request_headers": lambda: ep.ProcessingResponse(request_headers=ep.HeadersResponse()),
     "response_headers": lambda: ep.ProcessingResponse(response_headers=ep.HeadersResponse()),
-    "request_body": lambda: ep.ProcessingResponse(request_body=ep.BodyResponse()),
-    "response_body": lambda: ep.ProcessingResponse(response_body=ep.BodyResponse()),
     "request_trailers": lambda: ep.ProcessingResponse(request_trailers=ep.TrailersResponse()),
     "response_trailers": lambda: ep.ProcessingResponse(response_trailers=ep.TrailersResponse()),
 }
+
+
+def _passthrough_body(field: str, http_body) -> "ep.ProcessingResponse":
+    """agentgateway sends body chunks to the EPP (mode_override is ignored). An empty
+    BodyResponse drops the body, so echo the bytes back via body_mutation to forward
+    them unchanged (covers both request and response bodies, buffered or streamed)."""
+    resp = ep.BodyResponse(response=ep.CommonResponse(
+        body_mutation=ep.BodyMutation(body=http_body.body)))
+    return ep.ProcessingResponse(**{field: resp})
 
 
 async def handle_request_headers(http_headers) -> "ep.ProcessingResponse":
@@ -115,6 +138,10 @@ class ExternalProcessor:
             kind = req.WhichOneof("request")
             if kind == "request_headers":
                 await stream.send_message(await handle_request_headers(req.request_headers))
+            elif kind == "request_body":
+                await stream.send_message(_passthrough_body("request_body", req.request_body))
+            elif kind == "response_body":
+                await stream.send_message(_passthrough_body("response_body", req.response_body))
             else:
                 await stream.send_message(_EMPTY.get(kind, _EMPTY["request_headers"])())
 
