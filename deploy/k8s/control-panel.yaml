@@ -43,5 +43,8 @@ spec:
   selector: {app: control-panel}
   ports:
     - {port: 8080, targetPort: 8080, name: http}
-    # h2c so agentgateway dials the ext_proc EPP as gRPC (HTTP/2 cleartext).
+    # ext_proc EPP. NOTE: agentgateway dials the InferencePool EndpointPicker over
+    # TLS (GIE convention) regardless of appProtocol, so the EPP server (extproc.py)
+    # serves TLS (self-signed, ALPN h2; gateway skip-verifies in-cluster). appProtocol
+    # is left as a hint and is effectively ignored for the EPP dial.
     - {port: 9000, targetPort: 9000, name: extproc, appProtocol: kubernetes.io/h2c}
