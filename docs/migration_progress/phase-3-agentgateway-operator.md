@@ -31,13 +31,24 @@ As-built status of the vertical slice (branch `feat/agentgateway-operator-epp`).
    - The config dump shows agentgateway recognized the h2c hint: `appProtocols: {"9000":"Http2"}`.
    - **Both** ext_proc mechanisms fail identically: the InferencePool `endpointPickerRef` AND the
      documented `AgentgatewayPolicy.traffic.extProc` (so it's not the mechanism).
-   ⇒ It's a transport incompatibility between agentgateway's ext_proc **h2c gRPC client** and our
-   **`grpc.aio`** server (likely an h2c-prior-knowledge vs TLS/ALPN-"Http2" negotiation mismatch — the EPP
-   upstream may be dialed differently from the plain :8080 HTTP backend). Next options:
-   (a) deploy the GIE **reference EPP** and point the InferencePool at it — if agentgateway ext_procs to it
-   successfully, the gap is our grpc.aio server's h2c (fix/replace it); if it also fails, it's an
-   agentgateway-on-minikube setup issue; (b) serve the ext_proc from an agentgateway-proven gRPC stack;
-   (c) capture the bytes agentgateway sends to :9000 to see TLS-vs-cleartext.
+   **Byte capture + ~13 experiments (2026-06-21):**
+   - agentgateway dials the EPP as **clean h2c prior-knowledge** (captured preface `PRI * HTTP/2.0…`) —
+     NOT TLS, NOT HTTP/1.1. Transport is correct.
+   - Not ServiceAccount/mesh-identity (default-SA EPP also fails); not workload-conflation (dedicated EPP
+     deployment also fails); the config dump shows the port correctly classified `appProtocols {9000: Http2}`.
+   - **InferencePool `endpointPickerRef` dial is broken** even to a plain TCP relay (always InvalidContentType).
+   - **`AgentgatewayPolicy.traffic.extProc` → a separate relay pod → grpc.aio returned a real EPP 401 once**,
+     but the identical relay did NOT reproduce it later → the agentgateway ext_proc↔grpc.aio path is
+     **flaky/broken on v1.3.0**, not config-fixable from our side.
+   ⇒ Root cause is an **agentgateway v1.3.0 ext_proc interop problem** (its h2c gRPC ext_proc client vs a
+   C-core `grpc.aio` server, plus a separate InferencePool-EPP-dial bug). Our EPP server is correct
+   (normal gRPC clients, in-pod and cross-pod, get proper responses).
+   **Real fix paths (need a different approach, not more YAML tweaks):**
+   (a) serve the ext_proc EPP from an **agentgateway-proven stack** (a small Go/Rust ext_proc, or the GIE
+   reference EPP shape) instead of grpc.aio;
+   (b) try a **different agentgateway version** (e.g. ≥ the one validated against GIE v1.5.0 InferencePool v1);
+   (c) **file an agentgateway issue** with this repro (clean h2c, grpc.aio EPP, InvalidContentType);
+   (d) fall back to the **CP byte-path edge** (Phase-2 reverse-proxy, no agentgateway) for a working E2E now.
 2. **Wake-and-hold vs ext_proc timeout.** The EPP currently blocks up to `wake_timeout_seconds` (90s)
    waiting for a cold pod; agentgateway's ext_proc timeout is much shorter. Once (1) is fixed, shorten
    the EPP hold to a few seconds and return a fast 503 "waking, retry" on cold start (predictive wake on
