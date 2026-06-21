@@ -29,21 +29,41 @@ from priva_common.logging import AccessLogMiddleware, configure_logging, get_app
 logger = get_app_logger(__name__)
 
 
-def _repo_web() -> Path:
-    """Locate priva/web relative to this file (…/services/control-panel/src/…)."""
+def _repo_root() -> Path | None:
+    """Locate the monorepo root relative to this file (dev checkout only)."""
     here = Path(__file__).resolve()
     for parent in here.parents:
-        cand = parent / "priva" / "web"
-        if cand.exists():
-            return cand
-    return Path.cwd() / "priva" / "web"
+        if (parent / "web" / "user").exists() or (parent / "priva" / "web").exists():
+            return parent
+    return None
 
 
-def _dist_dir(env_var: str, subdir: str) -> Path:
+def _dist_dir(env_var: str, bundled_subdir: str, *repo_candidates: str) -> Path:
+    """Resolve a built SPA dist dir.
+
+    Order: explicit env override -> bundled package data (``_web/<subdir>``, present in
+    the installed wheel) -> dev repo checkout (the first existing ``repo_candidates``).
+    The package-data hop is what makes ``priva-cloud control-panel`` self-contained
+    outside the repo.
+    """
     raw = os.environ.get(env_var)
     if raw:
         return Path(raw).expanduser()
-    return _repo_web() / subdir
+
+    bundled = Path(__file__).resolve().parent / "_web" / bundled_subdir
+    if bundled.exists():
+        return bundled
+
+    root = _repo_root()
+    if root is not None:
+        for rel in repo_candidates:
+            cand = root / rel
+            if cand.exists():
+                return cand
+
+    # Nothing found; return the bundled path so the caller's existence check logs a
+    # clear "dist not found" warning pointing at the package-data location.
+    return bundled
 
 
 def create_app() -> FastAPI:
@@ -121,8 +141,8 @@ def create_app() -> FastAPI:
     # the InferencePool, steered by CP's ext_proc EPP (extproc.py). proxy.py is gone.
 
     # --- SPA static serving: admin at /admin first, then user catch-all at / ---
-    admin_dist = _dist_dir("PRIVA_WEB_DIST_ADMIN", "dist-admin")
-    user_dist = _dist_dir("PRIVA_WEB_DIST", "dist")
+    admin_dist = _dist_dir("PRIVA_WEB_DIST_ADMIN", "dist-admin", "web/admin/dist", "priva/web/dist-admin")
+    user_dist = _dist_dir("PRIVA_WEB_DIST", "dist", "web/user/dist", "priva/web/dist")
     if admin_dist.exists():
         app.mount("/admin", StaticFiles(directory=admin_dist, html=True), name="admin-spa")
         logger.info("admin SPA mounted at /admin from {}", admin_dist)

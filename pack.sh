@@ -25,6 +25,12 @@
 #   ./pack.sh --skip-build --include-dependency        # skip frontend build, pack with deps
 #   ./pack.sh --include-dependency --python-version 3.13  # use Python 3.13 wheels
 #   ./pack.sh --include-dependency --no-deps           # only direct deps, no transitive
+#   ./pack.sh --wheel                                  # build the single priva_cloud-*.whl (new path)
+#
+# NOTE: --wheel delegates to scripts/build-wheel.sh, which produces the modern
+# single-artifact distribution (CLI + all services + bundled web SPAs) installable via
+# `pip install dist/priva_cloud-*.whl` and run via `priva-cloud control-panel`. The rest
+# of this script is the legacy monolith tarball flow (api/ + bin/server.sh).
 #
 # Install (on target server):
 #   tar xzf priva-1.0.0-linux-glibc2_17.tar.gz
@@ -44,6 +50,14 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
+
+# --wheel: build the single priva_cloud-*.whl and exit (modern distribution path).
+# Handled before the legacy arg parser so it stays self-contained.
+for _arg in "$@"; do
+    if [ "${_arg}" = "--wheel" ]; then
+        exec "${SCRIPT_DIR}/scripts/build-wheel.sh" "${@/--wheel/}"
+    fi
+done
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -164,21 +178,21 @@ BUILD_TS="$(date +%Y%m%d_%H%M%S)"
 ARCHIVE_NAME="priva-${VERSION}-${PLATFORM_SUFFIX}-${BUILD_TS}"
 DIST_DIR="${SCRIPT_DIR}/dist"
 
-# Step 1: Build frontend
+# Step 1: Build frontend (user SPA — the legacy tarball serves a single SPA)
 if [ "${SKIP_BUILD}" = "false" ]; then
-    log_info "Building frontend..."
-    if [ ! -d "priva/web/node_modules" ]; then
+    log_info "Building frontend (web/user)..."
+    if [ ! -d "web/node_modules" ]; then
         log_info "Installing frontend dependencies..."
-        (cd priva/web && npm install)
+        npm --prefix web install
     fi
-    (cd priva/web && npm run build)
+    npm --prefix web run build:user
     log_info "Frontend build complete"
 else
     log_warn "Skipping frontend build (--skip-build)"
 fi
 
 # Verify frontend dist exists
-if [ ! -f "priva/web/dist/index.html" ]; then
+if [ ! -f "web/user/dist/index.html" ]; then
     log_error "Frontend dist not found. Run without --skip-build first."
     exit 1
 fi
@@ -192,7 +206,7 @@ mkdir -p "${DIST_DIR}/${ARCHIVE_NAME}"
 cp -r priva/api    "${DIST_DIR}/${ARCHIVE_NAME}/api"
 cp -r priva/bin    "${DIST_DIR}/${ARCHIVE_NAME}/bin"
 mkdir -p "${DIST_DIR}/${ARCHIVE_NAME}/web"
-cp -r priva/web/dist "${DIST_DIR}/${ARCHIVE_NAME}/web/dist"
+cp -r web/user/dist "${DIST_DIR}/${ARCHIVE_NAME}/web/dist"
 cp    requirements.txt "${DIST_DIR}/${ARCHIVE_NAME}/requirements.txt"
 
 # Vite's vite-plugin-static-copy already copies public/fonts into dist/fonts
@@ -200,9 +214,9 @@ cp    requirements.txt "${DIST_DIR}/${ARCHIVE_NAME}/requirements.txt"
 # output is missing the fonts directory entirely (e.g. --skip-build over a
 # stale dist). Use `cp -r src/. dst` so files merge into dst rather than
 # nesting under dst/fonts/fonts (BSD cp behavior on macOS).
-if [ -d "priva/web/public/fonts" ] && [ ! -d "${DIST_DIR}/${ARCHIVE_NAME}/web/dist/fonts" ]; then
+if [ -d "web/shared/public/fonts" ] && [ ! -d "${DIST_DIR}/${ARCHIVE_NAME}/web/dist/fonts" ]; then
     mkdir -p "${DIST_DIR}/${ARCHIVE_NAME}/web/dist/fonts"
-    cp -r priva/web/public/fonts/. "${DIST_DIR}/${ARCHIVE_NAME}/web/dist/fonts/"
+    cp -r web/shared/public/fonts/. "${DIST_DIR}/${ARCHIVE_NAME}/web/dist/fonts/"
 fi
 
 # Step 3: Download dependencies

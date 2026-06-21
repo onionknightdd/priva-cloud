@@ -9,9 +9,11 @@ logs/
 .claude
 .idea
 .vscode
-# web: keep the built SPAs (priva/web/dist, dist-admin); drop sources/deps
-priva/web/node_modules
-priva/web/.vite
-priva/web/src
+# web: keep the built SPAs (web/{user,admin}/dist); drop deps/sources
+web/node_modules
+**/.vite
+web/shared
+web/user/src
+web/admin/src
 # tests aren't needed in runtime images
 tests/

@@ -384,4 +384,76 @@ The dashboard reconstructs everything from **Prometheus + OTLP + ledger + data-s
 8. **Dashboard reconstructs state from Prometheus + OTLP + ledger + data-spine.** agentgateway has no config/budget read API and emits no `$`; the Control Panel computes cost from a price card and drives config via K8s CRDs (§7/§9).
 9. **Pod terminate (and stop-turn) = Control Panel UI → Operator.** Confirm-dialog + type-to-arm + audit-before-return; Operator is the sole scaler; gateway/edge impact is none new (mid-stream-death handling) (§6.2/§7.4, agent-gateway §9.4).
 
+> **As-built note (2026-06-21):** the design above (`/ui`, `priva/api`, `priva/web`) predates the extraction. The current implementation is captured in **Appendix A** below — that appendix is the authority for the **as-built code map** and **config inventory**; §0–§12 remain the design rationale.
+
+---
+
+## Appendix A — As-built code map & config inventory (2026-06-21)
+
+The control-panel now ships as the Python package **`priva_control_panel`** (`services/control-panel/`), serves the user SPA at **`/`** and the admin SPA at **`/admin`**, runs the `ext_proc` brain, and is launched by the `priva-cloud` CLI (`tools/cli`). It is installable as one **`priva_cloud-*.whl`** that bundles every service + both built SPAs.
+
+### A.1 Code map (P1)
+
+The control-panel depends on the shared `priva_common` lib (hard) and `priva_data_spine` (optional, only when `dataspine.transport == in_process`). It does **not** import `priva/api/*`, `services/operator`, or `services/agent-runner`.
+
+```
+services/control-panel/
+├── pyproject.toml                      # pkg priva-control-panel; entry-point control-panel→entry:main; _web/** artifact
+└── src/priva_control_panel/
+    ├── __main__.py                      # python -m → entry.main()
+    ├── entry.py                         # CLI: argparse flags → env → uvicorn.run (A.2)
+    ├── app.py                           # FastAPI factory; lifespan (extproc + optional data-plane); SPA mounts (env→_web→repo)
+    ├── extproc.py                       # gRPC ext_proc EPP (the agentgateway routing brain)
+    ├── provisioner.py                   # k8s AgentTenant CR create/wake/terminate
+    ├── routers/{auth,admin,admin_files,user_data,resource,metrics}.py
+    │     # /api/auth · /api/admin · /api/admin/files · /api/user · /api/resource · /metrics
+    │     # (admin.py mcp/hooks/plugin endpoints return 503 — moved to agent-runner / deferred)
+    └── services/{auth,compute_user_stats,secret_env}.py
+          # JWT + require_user/admin · /me usage aggregation · per-user ANTHROPIC_* creds in data-spine
+
+web/                                     # the two SPAs CP serves (split into 3 projects; isolated login)
+├── package.json                         # scripts: build:user / build:admin (build → web/{user,admin}/dist)
+├── shared/                              # @shared alias — dumb components + cross-cutting infra (24 modules)
+│   ├── api/{client,auth,admin,tokenStore,…}.js   # tokenStore: per-SPA localStorage key (build-time define)
+│   ├── stores/{authStore,toastStore,uiStore}.js  # authStore: setResetStores() injected per SPA (no feature-store imports)
+│   ├── components/{auth/LoginPage, shared/*, admin/charts/*}
+│   ├── hooks/{useChartData,useResizable}, i18n.js, index.css, locales/, public/{fonts,favicon}
+├── user/  {index.html, vite.config.js (base /, token=priva-user-token), src/ (188 files)}
+└── admin/ {index.html, vite.config.js (base /admin/, token=priva-admin-token), src/ (AdminApp + components/admin + adminStore)}
+
+packaging/priva-cloud/pyproject.toml     # mega-wheel: force-includes all services + bundled _web; priva-cloud console script
+scripts/build-wheel.sh                   # build both SPAs → stage into priva_control_panel/_web → build the wheel
+libs/common/  services/data-spine/  tools/cli/   # shared lib · optional data-plane · the launcher
+```
+
+**Login isolation:** the user and admin SPAs persist their JWT under **different** localStorage keys (`priva-user-token` / `priva-admin-token`, injected at build time via Vite `define __PRIVA_TOKEN_KEY__`). A login in one SPA does not authenticate the other. The backend (`/api/auth/login`, `/api/auth/me`, Bearer token) is unchanged. `authStore` no longer imports feature stores — each SPA injects its logout reset-list via `setResetStores()`, keeping the user stores out of the admin bundle.
+
+### A.2 Config inventory (P4)
+
+Config resolves from `priva_common.config.Settings` (pydantic; prefix `PRIVA_`, nested `__`; sourced from **env → YAML** at `$PRIVA_CONFIG_FILE` or `./api/config.yaml`) plus a few direct `os.environ` reads. CLI flags are **additive overrides** — each sets the matching env var before app import, so the k8s ConfigMap/Secret env path is unchanged.
+
+**CLI flags** (`priva-cloud control-panel …`):
+
+| Flag | Env var set |
+|---|---|
+| `--host` / `--port` | `CONTROL_PANEL_HOST` / `CONTROL_PANEL_PORT` |
+| `--config` | `PRIVA_CONFIG_FILE` |
+| `--reload` | (uvicorn reload) |
+| `--web-dist` / `--web-dist-admin` | `PRIVA_WEB_DIST` / `PRIVA_WEB_DIST_ADMIN` |
+| `--extproc-port` | `PRIVA_EDGE__EXTPROC_PORT` |
+| `--work-dir` | `PRIVA_SERVER__WORK_DIR` |
+| `--log-dir` | `PRIVA_LOG_DIR` |
+| `--dataspine-transport` / `--dataspine-grpc-dsn` | `PRIVA_DATASPINE__TRANSPORT` / `PRIVA_DATASPINE__GRPC_DSN` |
+| `--kubeconfig` / `--in-cluster` / `--no-in-cluster` | `PRIVA_KUBERNETES__KUBECONFIG` / `PRIVA_KUBERNETES__IN_CLUSTER` |
+
+**File/env only — never CLI flags:**
+- **Secrets:** `PRIVA_AUTH__JWT_SECRET`, `PRIVA_AUTH__GLOBAL_API_KEY`, `PRIVA_DATASPINE__API_KEY_HMAC_SECRET`.
+- **Structured / rarely-changed:** all `logging.*`; the rest of `kubernetes.*` (runner image / namespaces / idle-grace / timeouts); `auth.admins`; `pty.*`; `scheduler.*`; `channels.*`.
+
+**Web-asset resolution (`app.py`):** `PRIVA_WEB_DIST(_ADMIN)` env → bundled package data (`priva_control_panel/_web/{dist,dist-admin}`, present in the wheel) → dev repo (`web/{user,admin}/dist`). The package-data hop makes `priva-cloud control-panel` self-contained outside a checkout.
+
+**k8s deployment (unchanged path):** `deploy/k8s/control-panel.yaml` keeps injecting config via `env` + `envFrom(ConfigMap/Secret)`; command stays `python -m priva_control_panel` (equivalently `priva-cloud control-panel`). Flags are for local/standalone use; the `deploy/docker/control-panel.Dockerfile` sets `PRIVA_WEB_DIST(_ADMIN)` to `/app/web/{user,admin}/dist`.
+
+---
+
 > **Owed next (revised):** the **`agent-gateway.md` reconciliation pass** (§0.3) is **done** (2026-06-18). The **Operator** drill is **done** (`operator.md`). The **central scheduler** drill is **done** (`scheduler.md` — the admin `/scheduler/*` re-point in §7.2/§10 lands there; `PushToChannel` resolved). The **metering proxy is DROPPED** (blueprint **M6** — BYOK + token-count-only). The `data-spine §2.7` idle-default fix is **done** (180→1800). **All components are now drilled.** The **deep M6 body cleanup is DONE (2026-06-18)** — agent-runner, data-spine, agent-gateway, and blueprint §3/§4 are rewritten M6-correct (the blueprint §2 decisions table / system diagram / §5-7 remain under the supersession banner, as with M1/M2/M5). The **channel-connector sub-pass is DONE (2026-06-19)** — agent-gateway §4.4 locks the connector→brain call as an **internal RPC** (option A; not a synthetic `/v1` re-inject), with the brain's `resolve·mint·wake·steer` factored into one function shared by `ext_proc` (browser) and the internal RPC (IM). **No platform work remains.**

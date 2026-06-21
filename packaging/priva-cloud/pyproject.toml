@@ -1,0 +1,79 @@
+# priva-cloud — the single distributable wheel.
+#
+# This is NOT a uv workspace member (it lives under packaging/, outside libs|services|tools).
+# It is a build-only package that force-includes every service's source tree into ONE wheel:
+#   pip install priva_cloud-<ver>-py3-none-any.whl   ->   `priva-cloud <service>` for all services.
+#
+# The force-included package dirs pull in their bundled assets automatically:
+#   - priva_control_panel/_web/{dist,dist-admin}   (staged by pack.sh from the web build)
+#   - priva_agent_runner/bundled                    (already in-tree)
+#
+# Build (wheel only — sdist can't capture the ../../ force-include paths):
+#   python -m build --wheel packaging/priva-cloud
+#
+[project]
+name = "priva-cloud"
+version = "0.1.0"
+description = "Priva Cloud — single-wheel distribution: the `priva-cloud` launcher + all services (control-panel, data-spine, operator, agent-runner) + bundled web SPAs."
+requires-python = ">=3.11"
+
+# Union of every member service's third-party dependencies. Workspace packages
+# (priva-common, etc.) are NOT listed — their source is bundled into this wheel.
+dependencies = [
+    # priva-common
+    "pydantic>=2.10",
+    "pydantic-settings",
+    "pyyaml",
+    "prometheus-client",
+    "fastapi",
+    "loguru",
+    "cryptography",
+    "claude-agent-sdk==0.1.81",
+    "redis>=5",
+    "grpcio>=1.60",
+    "protobuf",
+    # data-spine
+    "bcrypt",
+    # operator
+    "kopf>=1.37",
+    "kubernetes>=29",
+    "httpx",
+    # agent-runner
+    "uvicorn[standard]",
+    "websockets",
+    "python-jose[cryptography]",
+    "python-multipart",
+    "mcp>=1.19.0",
+    # control-panel
+    "scalar-fastapi",
+    "xds-protos",
+    "grpclib",
+]
+
+# The `priva-cloud` console script (from tools/cli) lands on PATH after install.
+[project.scripts]
+priva-cloud = "priva_cli.__main__:main"
+
+# All service entry points so the launcher discovers them via the same group the
+# individual service wheels register (priva_cloud.services).
+[project.entry-points."priva_cloud.services"]
+control-panel = "priva_control_panel.entry:main"
+data-spine = "priva_data_spine.entry:main"
+operator = "priva_operator.entry:main"
+agent-runner = "priva_agent_runner.entry:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# No auto package discovery — everything ships via force-include below.
+bypass-selection = true
+
+[tool.hatch.build.targets.wheel.force-include]
+"../../libs/common/src/priva_common" = "priva_common"
+"../../services/data-spine/src/priva_data_spine" = "priva_data_spine"
+"../../services/operator/src/priva_operator" = "priva_operator"
+"../../services/agent-runner/src/priva_agent_runner" = "priva_agent_runner"
+"../../services/control-panel/src/priva_control_panel" = "priva_control_panel"
+"../../tools/cli/src/priva_cli" = "priva_cli"

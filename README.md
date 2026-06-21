@@ -68,10 +68,10 @@ The API listens on `http://localhost:8001` by default (override via
 ### 2. Web console
 
 ```bash
-cd priva/web
+cd web
 npm install
-npm run dev        # development
-# or: npm run build   # production bundle into priva/web/dist
+npm run dev:user     # user SPA (dev)   ·  npm run dev:admin for the admin SPA
+# or: npm run build  # production bundles into web/{user,admin}/dist
 ```
 
 ## Configuration

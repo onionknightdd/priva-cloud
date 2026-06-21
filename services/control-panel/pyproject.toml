@@ -33,3 +33,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/priva_control_panel"]
+# Built SPA assets are staged into the package by pack.sh and are gitignored;
+# list them as artifacts so hatch includes them in the wheel despite VCS exclusion.
+artifacts = ["src/priva_control_panel/_web/**"]

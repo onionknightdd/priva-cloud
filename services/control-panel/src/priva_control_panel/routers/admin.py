@@ -30,7 +30,7 @@ from priva_common.models.admin import (
 )
 from priva_common.models.plugin import PluginConfigUpdate, PluginInfo, PluginListResponse
 from priva_common.models.auth import UserCreate, UserPublic, UserUpdate
-from priva_common.models.mcp import McpLevel, McpServerListResponse, McpServerSummary
+from priva_common.models.mcp import McpLevel, McpServerListResponse
 from priva_common.models.skills import SkillLevel, SkillListResponse
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from ..services.auth import require_admin, user_record_to_public
@@ -335,23 +335,8 @@ async def delete_user_skill(
 
 @router.get("/users/{username}/mcp", response_model=McpServerListResponse)
 async def get_user_mcp_servers(username: str):
-    """List all MCP servers for a specific user."""
-    store = get_user_store()
-    if store.get_user(username) is None:
-        raise HTTPException(404, f"User '{username}' not found")
-    from ..services.mcp.config_manager import McpConfigManager
-    mgr = McpConfigManager(username)
-    all_servers = mgr.read_all_servers()
-    return McpServerListResponse(
-        servers=[
-            McpServerSummary(
-                name=name, type=config.get("type", "http"), url=config.get("url", ""),
-                level=level, header_count=len(config.get("headers", {})),
-                timeout=config.get("timeout", 60),
-            )
-            for name, config, level in all_servers
-        ]
-    )
+    """Moved to agent-runner: per-user MCP config lives in the per-account pod."""
+    raise HTTPException(503, "Per-user MCP management is served by agent-runner")
 
 
 @router.delete("/users/{username}/mcp/{level}/{name}")
@@ -361,29 +346,8 @@ async def delete_user_mcp_server(
     name: str,
     current_user: UserRecord = Depends(require_admin),
 ):
-    """Delete an MCP server for a specific user."""
-    store = get_user_store()
-    if store.get_user(username) is None:
-        raise HTTPException(404, f"User '{username}' not found")
-
-    from ..services.mcp.config_manager import McpConfigManager
-    mgr = McpConfigManager(username)
-    if level == "project":
-        deleted = mgr.delete_project_server(name)
-    else:
-        deleted = mgr.delete_global_server(name)
-    if not deleted:
-        raise HTTPException(404, f"MCP server '{name}' not found at {level} level")
-
-    audit = get_audit_logger()
-    audit.append(AuditEntry(
-        actor=current_user.username,
-        action="mcp.deleted",
-        target=name,
-        details={"level": level, "username": username},
-    ))
-
-    return {"message": f"MCP server '{name}' deleted successfully"}
+    """Moved to agent-runner: per-user MCP config lives in the per-account pod."""
+    raise HTTPException(503, "Per-user MCP management is served by agent-runner")
 
 
 # --- Admin per-user scheduler endpoints ---
@@ -400,47 +364,8 @@ async def get_user_scheduler_jobs(username: str):
 
 @router.get("/users/{username}/hooks/active")
 async def get_user_active_hooks(username: str):
-    """List only the hooks currently active/enabled for a specific user."""
-    from ..services.auth import get_user_workspace
-    from ..services.hooks.config_manager import HookConfigManager
-    from ..services.hooks.prefs import get_enabled_builtin_hooks
-
-    store = get_user_store()
-    user = store.get_user(username)
-    if user is None:
-        raise HTTPException(404, f"User '{username}' not found")
-
-    # 1. Built-in hooks currently enabled for this user.
-    enabled_builtins = get_enabled_builtin_hooks(username)
-
-    # 2. Custom hook handlers from the user's settings files.
-    cwd = get_user_workspace(user)
-    merged = HookConfigManager(cwd).read_merged()
-    custom: list[dict] = []
-    for event, entries in merged.items():
-        if not isinstance(entries, list):
-            continue
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            matcher = entry.get("matcher", "*")
-            for handler in entry.get("hooks", []) or []:
-                if not isinstance(handler, dict):
-                    continue
-                custom.append({
-                    "kind": "custom",
-                    "event": event,
-                    "matcher": matcher,
-                    "type": handler.get("type", "command"),
-                    "command": handler.get("command"),
-                    "url": handler.get("url"),
-                })
-
-    return {
-        "builtins": enabled_builtins,
-        "custom": custom,
-        "total": len(enabled_builtins) + len(custom),
-    }
+    """Moved to agent-runner: per-user hook config lives in the per-account pod."""
+    raise HTTPException(503, "Per-user hook management is served by agent-runner")
 
 
 @router.get("/presetprompt", response_model=PresetPromptResponse)
@@ -666,12 +591,8 @@ async def update_sensitive_patterns(
 
 @router.get("/system/plugin", response_model=PluginListResponse)
 async def list_plugins():
-    from ..services.priva_plugin import get_plugin_manager
-    store = get_user_store()
-    runtime = store.get_runtime_config()
-    mgr = get_plugin_manager()
-    plugins = mgr.list_plugins(runtime)
-    return PluginListResponse(plugins=[PluginInfo(**p) for p in plugins])
+    """Deferred (Phase 4): the plugin manager is not part of this deployment yet."""
+    raise HTTPException(503, "Plugin management is unavailable in this deployment")
 
 
 @router.put("/system/plugin/{plugin_id}", response_model=PluginInfo)
@@ -680,32 +601,5 @@ async def update_plugin(
     request: PluginConfigUpdate,
     current_user: UserRecord = Depends(require_admin),
 ):
-    from ..services.priva_plugin import get_plugin_manager
-    mgr = get_plugin_manager()
-    plugin = mgr.get_plugin(plugin_id)
-    if plugin is None:
-        raise HTTPException(404, f"Plugin '{plugin_id}' not found")
-
-    store = get_user_store()
-    plugin_data = {"enable": request.enable, **request.config}
-    store.update_runtime_config("plugins", {
-        **store.get_runtime_config().get("plugins", {}),
-        plugin_id: plugin_data,
-    })
-
-    audit = get_audit_logger()
-    audit.append(AuditEntry(
-        actor=current_user.username,
-        action="runtime.plugin_updated",
-        target=plugin_id,
-        details={"enable": request.enable},
-    ))
-
-    merged = {**plugin.default_config, **request.config}
-    return PluginInfo(
-        id=plugin.id,
-        name=plugin.name,
-        description=plugin.description,
-        enabled=request.enable,
-        config=merged,
-    )
+    """Deferred (Phase 4): the plugin manager is not part of this deployment yet."""
+    raise HTTPException(503, "Plugin management is unavailable in this deployment")

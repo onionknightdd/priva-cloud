@@ -23,16 +23,21 @@ ENV/
 # (uv sync prunes the monolith deps); uv.lock is not the source of truth here.
 uv.lock
 
-# ---- Node / Web (priva/web) ----
+# ---- Node / Web (priva/web + split web/{user,admin,shared}) ----
 node_modules/
 priva/web/dist/
 priva/web/dist-admin/
 priva/web/nohup.out
+web/user/dist/
+web/admin/dist/
 npm-debug.log*
 yarn-error.log*
 
 # ---- Build artifacts / packaged releases ----
 dist/*.tar.gz
+dist/*.whl
+# SPA assets staged into the control-panel package for the wheel build
+services/control-panel/src/priva_control_panel/_web/
 
 # ---- Runtime data ----
 # Agent gateway runtime queues, locks and auth token (machine-local, may hold secrets)
