@@ -68,6 +68,23 @@ EndpointPicker (`control-panel:9000`) over **TLS** (GIE convention; it skip-veri
 serves TLS (self-signed, ALPN `h2`). This is forced by agentgateway, not a choice — a plaintext EPP fails
 with `InvalidContentType`. Real HTTPS / mTLS / JWKS / edge-TLS are **deferred** (plan §L).
 
+## WebSocket auth (chat `/api/agent/ws/run`, terminal `/api/pty/ws`)
+
+The edge authenticates a WS on the **upgrade** request, which has no body and no
+`Authorization` header. The SPA passes the JWT as a **subprotocol**:
+`new WebSocket(url, ['priva.ws.v1', 'priva.token.<jwt>'])`. The EPP reads the
+`priva.token.` entry off `Sec-WebSocket-Protocol`; the agent-runner echoes back
+only `priva.ws.v1` in `accept()` so the browser handshake completes. This keeps
+the token out of the URL and gateway access logs. (The EPP still accepts a legacy
+`?token=` query param as a fallback for stale cached bundles.)
+
+## Agent-runner runs as root → `IS_SANDBOX=1`
+
+The runtime drives the `claude` CLI with `bypassPermissions`
+(`--dangerously-skip-permissions`), which the CLI refuses as root. The per-account
+pod is an isolated sandbox, so the operator sets `IS_SANDBOX=1` in the AR pod env
+(the CLI's escape) — otherwise the CLI exits 1 and every run fails.
+
 ## Runtime request walkthrough
 
 1. Browser → agentgateway (`:80`).

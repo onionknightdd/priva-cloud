@@ -69,3 +69,26 @@ def test_epp_reads_token_from_query(monkeypatch):
     monkeypatch.setattr(X.provisioner, "wake_and_wait", lambda aid: "10.1.2.3:8091")
     _run(X.handle_request_headers(_hh({":path": "/api/agent/ws/run?token=abc123"})))
     assert seen["token"] == "abc123"
+
+
+def test_epp_reads_token_from_subprotocol(monkeypatch):
+    """WS upgrade: the JWT rides the Sec-WebSocket-Protocol handshake header
+    (`priva.ws.v1, priva.token.<jwt>`), not the URL or an Authorization header."""
+    seen = {}
+
+    async def fake_auth(token, xuser):
+        seen["token"] = token
+        return _User()
+    monkeypatch.setattr(X, "authenticate_raw_token", fake_auth)
+    monkeypatch.setattr(X.provisioner, "wake_and_wait", lambda aid: "10.1.2.3:8091")
+    _run(X.handle_request_headers(_hh({
+        ":path": "/api/agent/ws/run",
+        "sec-websocket-protocol": "priva.ws.v1, priva.token.jwt.payload.sig",
+    })))
+    assert seen["token"] == "jwt.payload.sig"
+
+
+def test_token_from_subprotocol_helper():
+    assert X._token_from_subprotocol("priva.ws.v1, priva.token.aaa.bbb.ccc") == "aaa.bbb.ccc"
+    assert X._token_from_subprotocol("priva.ws.v1") is None
+    assert X._token_from_subprotocol("") is None

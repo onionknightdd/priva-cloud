@@ -44,7 +44,7 @@ from ..services.claude_sdk.options import build_agent_options
 
 _ws_frame_adapter = TypeAdapter(WsClientFrame)
 from priva_common.audit_log import AuditEntry, get_audit_logger
-from ..deps import account_from_ws, get_current_user, get_user_workspace
+from ..deps import account_from_ws, get_current_user, get_user_workspace, negotiated_subprotocol
 from ..services.claude_sdk.client import agent_run, agent_run_events, agent_run_stream
 from ..services.claude_sdk.permission_coordinator import registry
 from priva_common.user_store import UserRecord
@@ -621,7 +621,9 @@ async def ws_run(websocket: WebSocket):
     import uuid as _uuid
     ws_id = str(_uuid.uuid4())[:8]  # short connection tag
     logger.info("[WS:%s] Connection accepted", ws_id)
-    await websocket.accept()
+    # Echo the SPA's `priva.ws.v1` subprotocol (the token rode a sibling
+    # `priva.token.<jwt>` offer) so the browser handshake completes.
+    await websocket.accept(subprotocol=negotiated_subprotocol(websocket))
 
     # --- Read first message: init frame with auth ---
     try:

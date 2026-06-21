@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from priva_common.logging import get_app_logger
 from priva_common.audit_log import AuditEntry, get_audit_logger
-from ..deps import account_from_ws, get_user_workspace, require_admin, require_user
+from ..deps import account_from_ws, get_user_workspace, negotiated_subprotocol, require_admin, require_user
 from priva_common.config import PtySettings
 from ..services.pty_session import (
     PtySession,
@@ -101,7 +101,9 @@ async def _send_close(websocket: WebSocket, reason: str, code: int) -> None:
 
 @router.websocket("/api/pty/ws")
 async def pty_ws(websocket: WebSocket):
-    await websocket.accept()
+    # Echo the SPA's `priva.ws.v1` subprotocol so the browser handshake completes
+    # (the JWT rode a sibling `priva.token.<jwt>` offer; the edge already authed it).
+    await websocket.accept(subprotocol=negotiated_subprotocol(websocket))
 
     # 1) Read init frame.
     try:

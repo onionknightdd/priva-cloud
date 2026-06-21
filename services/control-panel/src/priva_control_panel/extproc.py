@@ -72,6 +72,21 @@ def _query_param(path: str, key: str) -> str | None:
         return None
 
 
+WS_TOKEN_PREFIX = "priva.token."
+
+
+def _token_from_subprotocol(header_value: str) -> str | None:
+    """Pull the JWT out of the ``Sec-WebSocket-Protocol`` handshake header. The
+    SPA offers ``priva.ws.v1, priva.token.<jwt>`` because a WS upgrade carries no
+    body and no Authorization header for the edge to read — the token rides the
+    subprotocol list instead. Returns the token, or None if absent."""
+    for proto in header_value.split(","):
+        proto = proto.strip()
+        if proto.startswith(WS_TOKEN_PREFIX):
+            return proto[len(WS_TOKEN_PREFIX):] or None
+    return None
+
+
 def _immediate(code: int, message: str) -> "ep.ProcessingResponse":
     return ep.ProcessingResponse(immediate_response=ep.ImmediateResponse(
         status=http_status_pb2.HttpStatus(code=code), body=message.encode()))
@@ -109,7 +124,9 @@ async def handle_request_headers(http_headers) -> "ep.ProcessingResponse":
     headers = _headers_to_dict(http_headers)
     auth = headers.get("authorization", "")
     token = auth[7:] if auth.lower().startswith("bearer ") else None
-    if not token:
+    if not token:  # WS upgrade: token rides the Sec-WebSocket-Protocol header
+        token = _token_from_subprotocol(headers.get("sec-websocket-protocol", ""))
+    if not token:  # legacy fallback (older cached SPA bundles)
         token = _query_param(headers.get(":path", ""), "token")
     try:
         user = await authenticate_raw_token(token, headers.get("x-user-name"))

@@ -64,6 +64,20 @@ def account_from_ws(websocket: WebSocket) -> UserRecord:
     return _resolve(token)
 
 
+WS_SUBPROTOCOL = "priva.ws.v1"
+
+
+def negotiated_subprotocol(websocket: WebSocket) -> str | None:
+    """The SPA offers ``priva.ws.v1`` + ``priva.token.<jwt>`` on the handshake
+    (the JWT rides the subprotocol so the edge can auth a body-less upgrade). If
+    the client offered our sentinel, echo it back in ``accept()`` — otherwise the
+    browser fails the connection (a server must select one of the offered
+    subprotocols). Returns the sentinel, or None when nothing was offered."""
+    offered = websocket.headers.get("sec-websocket-protocol", "")
+    parts = [p.strip() for p in offered.split(",")]
+    return WS_SUBPROTOCOL if WS_SUBPROTOCOL in parts else None
+
+
 # --- Back-compat aliases so moved route signatures keep working (single-account) ---
 require_user = require_account
 require_admin = require_account
@@ -75,6 +89,8 @@ __all__ = [
     "require_admin",
     "get_current_user",
     "account_from_ws",
+    "negotiated_subprotocol",
+    "WS_SUBPROTOCOL",
     "get_user_workspace",
     "pinned_account_id",
     "RUNNER_TOKEN_HEADER",

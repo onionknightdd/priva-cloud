@@ -49,6 +49,37 @@ InferencePool EPP (it ignores `mode_override`; `allow_mode_override` is off), an
 via `body_mutation` for `request_body`/`response_body` (`extproc.py:_passthrough_body`). (A `mode_override`
 hint is also sent for gateways that honor it.)
 
+## WebUI chat — WORKS end-to-end (2026-06-21)
+
+The browser chat (WebSocket `/api/agent/ws/run`) now runs a real turn through the
+edge. Two more cracks surfaced and were fixed:
+
+**Third crack — WS auth on the body-less upgrade.** The edge (ext_proc EPP)
+authenticates a WS on the **upgrade** request, which carries no body and no
+`Authorization` header — so the SPA's init-frame token was too late and the
+upgrade 401'd. Fix: the token rides the **`Sec-WebSocket-Protocol` handshake
+header**. The SPA offers `priva.ws.v1, priva.token.<jwt>`; the EPP reads the
+`priva.token.` entry (`extproc.py:_token_from_subprotocol`); the agent-runner
+echoes back only `priva.ws.v1` in `accept()` (`deps.py:negotiated_subprotocol`,
+applied in both `ws_run` and `pty_ws`) so the browser handshake completes.
+agentgateway relays both the request and the 101 response subprotocol headers
+through unchanged. This keeps the JWT out of the URL / gateway access logs (an
+earlier interim fix put it in `?token=`; the EPP still accepts that as a legacy
+fallback). Verified: a subprotocol WS turn through the gateway →
+`negotiated subprotocol=priva.ws.v1`, `is_error:false`, and the gateway log shows
+`http.path=/api/agent/ws/run` with **no token in the path**.
+
+**Fourth crack — claude CLI refuses `--dangerously-skip-permissions` as root.**
+The AR pod runs as `uid=0`; the runtime drives the CLI with
+`permission_mode=bypassPermissions` (→ `--dangerously-skip-permissions`), which
+the CLI **refuses as root** and exits 1 → `ProcessError` → the WebUI's
+"Command failed / Retrying" loop. Plain `claude -p` worked (no bypass flag),
+masking it; the CLI's stderr was also swallowed by a log filter. Fix: set
+`IS_SANDBOX=1` in the AR pod env (`operator/kube.py` `_deployment_body`) — the
+CLI's sanctioned escape for isolated containers; the per-account pod is the
+sandbox. (Non-root-UID hardening deferred.) See memory
+`agent-runner-root-is-sandbox`.
+
 ## Remaining
 2. ~~Cold-start wake-and-hold vs ext_proc timeout~~ **VALIDATED**: from `replicas=0, phase=Zero`, a runtime
    request through the edge returned **HTTP 200 in 4.1s** — the EPP patched `spec.wake`, the operator scaled

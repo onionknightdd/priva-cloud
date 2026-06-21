@@ -1,15 +1,19 @@
 /**
-import safeStorage from '../utils/safeStorage'
  * WebSocket-based PTY terminal client.
  *
  * One connection = one shell session (the server caps users at 1 concurrent).
  * No auto-reconnect — if the WS drops or the server kills the session,
  * the user must manually reopen.
  */
+import safeStorage from '../utils/safeStorage'
+import { wsProtocols } from './wsAuth'
+
 export function connectTerminal({ cols, rows, onReady, onOutput, onClosed, onError, onPong }) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  // Token rides the `Sec-WebSocket-Protocol` handshake header (the edge auths
+  // the upgrade, which carries no init frame yet). See wsAuth.js.
   const wsUrl = `${protocol}//${window.location.host}/api/pty/ws`
-  const ws = new WebSocket(wsUrl)
+  const ws = new WebSocket(wsUrl, wsProtocols())
   let closed = false
 
   ws.onopen = () => {

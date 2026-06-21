@@ -78,6 +78,14 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                             {"name": "WORKSPACE_DIR", "value": "/workspace"},
                             {"name": "PRIVA_HOME", "value": "/workspace/.priva"},
                             {"name": "CLAUDE_CONFIG_DIR", "value": "/workspace/.claude"},
+                            # The runtime drives the claude CLI with
+                            # permission_mode=bypassPermissions (= --dangerously-skip-permissions).
+                            # The CLI refuses that flag when running as root ("cannot be used
+                            # with root/sudo privileges") and exits 1 → the agent run fails.
+                            # This per-account pod IS an isolated sandbox, so assert it: the
+                            # CLI's IS_SANDBOX escape allows the flag as root. (Hardening to a
+                            # non-root UID is deferred — would need PVC/PRIVA_HOME ownership.)
+                            {"name": "IS_SANDBOX", "value": "1"},
                         ],
                         "envFrom": [
                             {"configMapRef": {"name": "priva-config"}},

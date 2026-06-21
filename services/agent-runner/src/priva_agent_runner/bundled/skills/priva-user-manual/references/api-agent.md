@@ -111,9 +111,14 @@ WebSocket 端点支持双向通信，适合需要权限交互的场景。
 
 ### 连接
 
+JWT 通过 WebSocket 子协议（`Sec-WebSocket-Protocol`）传递，不放在 URL 上
+（边缘网关在握手时鉴权，URL token 会泄漏到访问日志）：
+
+```js
+new WebSocket("ws://<host>/api/agent/ws/run", ["priva.ws.v1", `priva.token.${jwt_token}`])
 ```
-ws://<host>/api/agent/ws/run?token=<jwt_token>
-```
+
+服务端只回显 `priva.ws.v1` 子协议以完成握手。
 
 ### 发送消息
 
