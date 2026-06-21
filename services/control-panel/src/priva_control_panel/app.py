@@ -80,7 +80,8 @@ def create_app() -> FastAPI:
             yield
         finally:
             try:
-                await extproc_server.stop(None)
+                extproc_server.close()
+                await extproc_server.wait_closed()
             except Exception:
                 pass
             logger.info("control-panel shutdown complete")

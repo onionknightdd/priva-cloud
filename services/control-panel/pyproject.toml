@@ -17,6 +17,7 @@ dependencies = [
     "scalar-fastapi",
     "kubernetes>=29",
     "xds-protos",
+    "grpclib",
 ]
 
 [project.entry-points."priva_cloud.services"]

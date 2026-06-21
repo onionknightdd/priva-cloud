@@ -1,11 +1,15 @@
 """control-panel ext_proc EPP — the routing brain agentgateway calls per runtime
 request (Envoy External Processing, gRPC :9000).
 
-On request headers: resolve the account from the platform JWT, wake the account's
-pod (provisioner -> AgentTenant CR), and steer agentgateway to it by setting
-``x-gateway-destination-endpoint`` = podIP:port (the GIE EndpointPicker contract)
-plus the signed ``x-priva-runner-token`` the pod verifies. Cold/unauth -> an
-ext_proc immediate response (401 / "waking, retry"). CP never carries the bytes.
+Served with **grpclib** (pure-Python HTTP/2), not grpc.aio (C-core): agentgateway's
+Rust ext_proc client did not interoperate with the C-core server (InvalidContentType);
+grpclib's h2 stack is the workaround. The decision logic (handle_request_headers) and
+the proto messages are unchanged.
+
+On request headers: resolve the account from the platform JWT, wake the account's pod
+(provisioner -> AgentTenant CR), and steer agentgateway to it by setting
+``x-gateway-destination-endpoint`` = podIP:port plus the signed ``x-priva-runner-token``
+the pod verifies. Cold/unauth -> an ext_proc immediate response (401 / "waking, retry").
 """
 
 from __future__ import annotations
@@ -13,11 +17,11 @@ from __future__ import annotations
 import asyncio
 from urllib.parse import parse_qs, urlparse
 
-import grpc
 from envoy.config.core.v3.base_pb2 import HeaderValue, HeaderValueOption
 from envoy.service.ext_proc.v3 import external_processor_pb2 as ep
-from envoy.service.ext_proc.v3 import external_processor_pb2_grpc as epg
 from envoy.type.v3 import http_status_pb2
+from grpclib.const import Cardinality, Handler
+from grpclib.server import Server
 
 from priva_common.logging import get_app_logger
 from priva_common.runner_token import mint
@@ -29,6 +33,7 @@ logger = get_app_logger(__name__)
 
 DEST_HEADER = "x-gateway-destination-endpoint"
 RUNNER_TOKEN_HEADER = "x-priva-runner-token"
+PROCESS_PATH = "/envoy.service.ext_proc.v3.ExternalProcessor/Process"
 
 
 def _headers_to_dict(http_headers) -> dict[str, str]:
@@ -92,21 +97,31 @@ async def handle_request_headers(http_headers) -> "ep.ProcessingResponse":
     return _steer(endpoint, mint(user.account_id, user.username))
 
 
-class ExternalProcessor(epg.ExternalProcessorServicer):
-    async def Process(self, request_iterator, context):
-        async for req in request_iterator:
+class ExternalProcessor:
+    """grpclib service implementing envoy.service.ext_proc.v3.ExternalProcessor/Process."""
+
+    async def _process(self, stream) -> None:
+        while True:
+            req = await stream.recv_message()
+            if req is None:
+                break
             kind = req.WhichOneof("request")
             if kind == "request_headers":
-                yield await handle_request_headers(req.request_headers)
+                await stream.send_message(await handle_request_headers(req.request_headers))
             else:
-                yield _EMPTY.get(kind, _EMPTY["request_headers"])()
+                await stream.send_message(_EMPTY.get(kind, _EMPTY["request_headers"])())
+
+    def __mapping__(self) -> dict:
+        return {
+            PROCESS_PATH: Handler(
+                self._process, Cardinality.STREAM_STREAM, ep.ProcessingRequest, ep.ProcessingResponse
+            )
+        }
 
 
 async def start_extproc_server(settings):
-    server = grpc.aio.server()
-    epg.add_ExternalProcessorServicer_to_server(ExternalProcessor(), server)
-    addr = f"0.0.0.0:{settings.edge.extproc_port}"
-    server.add_insecure_port(addr)
-    await server.start()
-    logger.info("control-panel ext_proc EPP serving on {}", addr)
+    server = Server([ExternalProcessor()])
+    port = settings.edge.extproc_port
+    await server.start("0.0.0.0", port)
+    logger.info("control-panel ext_proc EPP (grpclib) serving on 0.0.0.0:{}", port)
     return server

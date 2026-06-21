@@ -48,3 +48,6 @@ protobuf
 kopf>=1.37
 kubernetes>=29
 xds-protos
+# control-panel ext_proc EPP served via grpclib (pure-Python h2) — agentgateway's
+# ext_proc client did not interop with the C-core grpc.aio server.
+grpclib
