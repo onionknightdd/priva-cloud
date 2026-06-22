@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Priva Cloud — 架构报告</title>
+<style>
+  :root{
+    /* GitHub Light Default */
+    --bg-base:#ffffff; --bg-surface:#f6f8fa; --bg-elevated:#eaeef2; --bg-overlay:#ffffffe6;
+    --border-subtle:#eaeef2; --border:#d0d7de; --border-strong:#afb8c1;
+    --text-primary:#1f2328; --text-secondary:#656d76; --text-dim:#8c959f; --text-inverse:#ffffff;
+    --blue:#0969da; --green:#1a7f37; --yellow:#9a6700; --red:#cf222e;
+    --purple:#8250df; --cyan:#0e7490; --orange:#bc4c00;
+    --mono:'JetBrains Mono','SF Mono','Cascadia Code',ui-monospace,Consolas,monospace;
+    --ui:'Noto Sans','PingFang SC','Hiragino Sans GB','Microsoft YaHei',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+    --sidebar:264px;
+  }
+  *{box-sizing:border-box;min-width:0}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg-base);color:var(--text-primary);
+    font-family:var(--ui);font-size:14px;line-height:1.7;-webkit-font-smoothing:antialiased;}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:var(--mono);font-size:.86em}
+  p code,li code,td code{background:#eef1f4;padding:1px 5px;border-radius:3px;color:#0550ae;
+    border:1px solid var(--border-subtle);white-space:nowrap}
+  h1,h2,h3,h4{line-height:1.3;font-weight:700;letter-spacing:-.01em}
+  h2{font-size:24px;margin:0 0 4px;padding-top:8px}
+  h3{font-size:17px;margin:32px 0 10px;color:var(--text-primary);font-weight:600}
+  h4{font-size:13px;margin:20px 0 8px;color:var(--text-secondary);font-weight:600;
+    letter-spacing:.02em}
+  .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+    color:var(--text-dim);margin-bottom:6px}
+
+  /* layout */
+  .layout{display:flex;align-items:flex-start}
+  nav.toc{position:sticky;top:0;height:100vh;width:var(--sidebar);flex-shrink:0;
+    border-right:1px solid var(--border);background:var(--bg-surface);overflow-y:auto;padding:22px 0}
+  nav.toc .brand{padding:0 22px 18px;border-bottom:1px solid var(--border-subtle);margin-bottom:10px}
+  nav.toc .brand .logo{font-weight:700;font-size:16px;letter-spacing:-.02em}
+  nav.toc .brand .logo span{color:var(--purple)}
+  nav.toc .brand .sub{font-size:11px;color:var(--text-dim);font-family:var(--mono);margin-top:3px}
+  nav.toc a{display:block;color:var(--text-secondary);padding:6px 22px 6px 19px;font-size:13px;
+    border-left:2px solid transparent;transition:color .15s ease,background .15s ease}
+  nav.toc a:hover{color:var(--text-primary);background:var(--bg-elevated);text-decoration:none}
+  nav.toc .num{font-family:var(--mono);font-size:11px;color:var(--blue);margin-right:7px;font-weight:600}
+  nav.toc a.sub2{padding-left:38px;font-size:12px;color:var(--text-dim)}
+  main{flex:1;max-width:1080px;margin:0 auto;padding:0 48px 120px}
+
+  /* hero */
+  header.hero{padding:64px 0 36px;border-bottom:1px solid var(--border)}
+  header.hero h1{font-size:42px;margin:0;letter-spacing:-.03em;font-weight:700}
+  header.hero h1 .dim{color:var(--purple)}
+  header.hero .tag{font-size:16px;color:var(--text-secondary);margin-top:12px;max-width:720px;font-weight:400}
+  .badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+  .badge{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:3px;
+    border:1px solid var(--border);background:var(--bg-base);color:var(--text-secondary)}
+  .badge b{color:var(--text-primary);font-weight:600}
+  .badge.g{border-left:2px solid var(--green)} .badge.b{border-left:2px solid var(--blue)}
+  .badge.p{border-left:2px solid var(--purple)} .badge.o{border-left:2px solid var(--orange)}
+  .badge.c{border-left:2px solid var(--cyan)}
+
+  /* stat grid */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:30px 0}
+  .stat{background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;padding:16px 18px}
+  .stat .n{font-size:28px;font-weight:700;font-family:var(--mono);letter-spacing:-.02em}
+  .stat .l{font-size:12px;color:var(--text-secondary);margin-top:2px}
+  .stat.green .n{color:var(--green)} .stat.blue .n{color:var(--blue)}
+  .stat.purple .n{color:var(--purple)} .stat.cyan .n{color:var(--cyan)}
+  .stat.orange .n{color:var(--orange)}
+
+  section{padding-top:54px;scroll-margin-top:20px}
+  section>.lead{color:var(--text-secondary);font-size:15px;max-width:780px;margin:8px 0 6px}
+
+  /* cards / callouts */
+  .card{background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;padding:20px 22px;margin:18px 0}
+  .note{border-left:2px solid var(--blue);background:var(--bg-surface);padding:14px 18px;margin:18px 0;border-radius:0 4px 4px 0}
+  .note.warn{border-left-color:var(--orange)} .note.crit{border-left-color:var(--red)}
+  .note.ok{border-left-color:var(--green)} .note .h{font-weight:600;font-size:12px;
+    letter-spacing:.02em;color:var(--text-secondary);margin-bottom:4px}
+  .note.warn .h{color:var(--orange)} .note.crit .h{color:var(--red)} .note.ok .h{color:var(--green)}
+
+  /* tables */
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border-subtle);vertical-align:top}
+  th{font-size:12px;letter-spacing:.02em;color:var(--text-secondary);
+    border-bottom:1px solid var(--border);font-weight:600;background:var(--bg-surface)}
+  tr:hover td{background:var(--bg-surface)}
+  td b{color:var(--text-primary);font-weight:600}
+  .pill{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:10px;white-space:nowrap;display:inline-block;font-weight:600}
+  .pill.done{background:rgba(26,127,55,.12);color:var(--green);border:1px solid rgba(26,127,55,.32)}
+  .pill.part{background:rgba(154,103,0,.12);color:var(--yellow);border:1px solid rgba(154,103,0,.32)}
+  .pill.plan{background:rgba(140,149,159,.16);color:var(--text-secondary);border:1px solid var(--border)}
+  .pill.ext{background:rgba(130,80,223,.12);color:var(--purple);border:1px solid rgba(130,80,223,.32)}
+
+  /* diagram frame */
+  figure{margin:24px 0;background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;padding:8px}
+  figure svg{display:block;width:100%;height:auto}
+  figcaption{font-size:12px;color:var(--text-dim);padding:8px 12px 4px;font-family:var(--mono)}
+  .legend{display:flex;flex-wrap:wrap;gap:18px;padding:6px 12px 10px;font-size:11px;color:var(--text-secondary);font-family:var(--mono)}
+  .legend i{display:inline-block;width:22px;height:0;vertical-align:middle;margin-right:6px}
+
+  /* svg text defaults */
+  svg text{font-family:var(--mono);fill:var(--text-secondary)}
+  .b-title{fill:var(--text-primary);font-weight:700;font-family:var(--ui)}
+  .b-sub{fill:var(--text-dim);font-size:10px}
+
+  ul.tight{margin:8px 0;padding-left:20px} ul.tight li{margin:5px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .mini{background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;padding:14px 16px}
+  .mini h4{margin:0 0 6px}
+  .mini .accent{font-family:var(--mono);font-size:11px;color:var(--text-secondary)}
+
+  /* scorecard */
+  .overall{display:flex;align-items:center;gap:24px;background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;padding:22px 26px;margin:18px 0}
+  .overall .big{font-family:var(--mono);font-size:46px;font-weight:700;letter-spacing:-.02em;color:var(--green);line-height:1;white-space:nowrap}
+  .overall .big small{font-size:18px;color:var(--text-dim);font-weight:400}
+  .overall .desc .t{font-weight:700;font-size:16px;margin-bottom:3px}
+  .bar{display:flex;align-items:center;gap:10px;min-width:150px}
+  .bar .track{flex:1;height:6px;border-radius:2px;background:var(--bg-elevated);min-width:70px;overflow:hidden}
+  .bar .track i{display:block;height:100%;border-radius:2px}
+  .bar b{font-family:var(--mono);font-size:12px;min-width:30px;text-align:right}
+  .prio{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;white-space:nowrap}
+  .prio.p0{background:rgba(207,34,46,.12);color:var(--red);border:1px solid rgba(207,34,46,.32)}
+  .prio.p1{background:rgba(154,103,0,.12);color:var(--yellow);border:1px solid rgba(154,103,0,.32)}
+  .prio.p2{background:rgba(9,105,218,.10);color:var(--blue);border:1px solid rgba(9,105,218,.3)}
+
+  hr{border:0;border-top:1px solid var(--border-subtle);margin:36px 0}
+  .footer{padding:30px 0 0;border-top:1px solid var(--border);margin-top:60px;color:var(--text-dim);font-size:12px;font-family:var(--mono);line-height:1.9}
+  .path{color:var(--cyan);font-family:var(--mono)}
+
+  @media (max-width:1080px){
+    nav.toc{display:none}
+    main{padding:0 22px 80px}
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .grid2,.grid3{grid-template-columns:1fr}
+    header.hero h1{font-size:32px}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc">
+  <div class="brand">
+    <div class="logo">Priva<span>·</span>Cloud</div>
+    <div class="sub">架构报告 · architecture report</div>
+  </div>
+  <a href="#summary"><span class="num">1.</span>概述</a>
+  <a href="#thesis"><span class="num">2.</span>核心设计思想</a>
+  <a href="#topology"><span class="num">3.</span>拓扑与平面</a>
+  <a href="#deployables"><span class="num">4.</span>可部署单元</a>
+  <a href="#bytepath"><span class="num">5.</span>Byte path</a>
+  <a href="#bytepath" class="sub2">→ 运行时全流程</a>
+  <a href="#discovery" class="sub2">→ 端点发现：如何定位 Pod</a>
+  <a href="#epp" class="sub2">→ Agent-runtime EndPoint Picker</a>
+  <a href="#cracks" class="sub2">→ 四个关键坑</a>
+  <a href="#trust" class="sub2">→ 信任链</a>
+  <a href="#state"><span class="num">6.</span>状态存储在哪</a>
+  <a href="#codemap"><span class="num">7.</span>代码映射</a>
+  <a href="#inversion" class="sub2">→ 反转（the inversion）</a>
+  <a href="#status"><span class="num">8.</span>迁移状态</a>
+  <a href="#insights"><span class="num">9.</span>关键洞察</a>
+  <a href="#assessment"><span class="num">10.</span>实现评估与改进</a>
+  <a href="#scorecard" class="sub2">→ 维度评分</a>
+  <a href="#roadmap" class="sub2">→ 改进路线</a>
+</nav>
+
+<main>
+<header class="hero" id="top">
+  <div class="kicker">自托管个人 AI 助手 · 基于 Claude Agent SDK · Kubernetes 多租户分支</div>
+  <h1>Priva <span class="dim">Cloud</span></h1>
+  <div class="tag">一个可缩容至零、每用户独享的 Agent 平台：无状态边缘负责传输字节，Agent-runtime EndPoint Picker（EPP）按请求做路由决策，
+    每个租户独占一个 Pod 运行 <code>claude</code> CLI——全部跑在你自己掌控的基础设施上。</div>
+  <div class="badges">
+    <span class="badge g"><b>后端</b> Python 3.12 · FastAPI · gRPC · kopf</span>
+    <span class="badge b"><b>边缘</b> agentgateway（Rust, Gateway API）</span>
+    <span class="badge p"><b>前端</b> React 18 · Vite · Zustand</span>
+    <span class="badge o"><b>运行时</b> Claude Agent SDK</span>
+    <span class="badge c"><b>状态</b> SQLite · Redis · 每用户 PVC</span>
+  </div>
+  <div class="stats">
+    <div class="stat green"><div class="n">8</div><div class="l">可部署单元（已建 6 个）</div></div>
+    <div class="stat blue"><div class="n">4</div><div class="l">网络平面</div></div>
+    <div class="stat purple"><div class="n">~4.1s</div><div class="l">冷启动唤醒</div></div>
+    <div class="stat cyan"><div class="n">~2.1万</div><div class="l">Python 行数（不含 skills）</div></div>
+  </div>
+</header>
+
+<!-- ============================ 1 概述 ============================ -->
+<section id="summary">
+  <div class="kicker">第 1 部分</div>
+  <h2>1. 概述</h2>
+  <p class="lead">Priva 最初是一个基于 Claude Agent SDK 的单机个人助手单体应用。<b>Priva&nbsp;Cloud</b> 是对它的一次
+  有意「分支」（fork）——把单体改造成面向数百名半可信内部用户的 Kubernetes 多租户平台：每个用户一个可缩容至零的
+  Agent Pod，统一藏在一个无状态前门之后。</p>
+
+  <div class="card">
+    <p style="margin-top:0">整套设计都围绕一个来之不易的「分离」，而代码库里到处都在重复它：</p>
+    <p style="font-size:16px;color:var(--text-primary);margin:0">
+      一次 Agent 交互的 <b style="color:var(--green)">字节</b> 沿
+      <code>browser ═ agentgateway ═ agent-runner&nbsp;pod</code> 流动，从不经过控制面。
+      <b style="color:var(--blue)">决策</b>——你是谁、用哪个 Pod、唤醒它、给你令牌——则由边缘每请求咨询一次的
+      <b style="color:var(--purple)">Agent-runtime EndPoint Picker（EPP）</b> 在带外完成。</p>
+  </div>
+
+  <p>这次迁移是教科书式的 <b>绞杀者模式（strangler-fig）</b>：一个约 6.9K 行的单体（<code>priva/api</code>，
+  3 个 OS 进程）被逐步切分为多个可独立部署、独立伸缩的服务，彼此只通过 gRPC / HTTP / Redis 通信——绝不进程内
+  import。截至当前 <code>main</code>，<b>4 个后端服务 + 一个共享契约库 + 一个启动器已构建并跑在 minikube 上</b>，
+  并已端到端验证过一次完整的 Agent 交互穿过真实边缘。两个服务（channel-connector、scheduler）和一个
+  （state-reader）仍在路线图上。</p>
+
+  <table>
+    <tr><th style="width:120px">维度</th><th>说明</th></tr>
+    <tr><td><b>目标</b></td><td>把单机 Priva fork 成 K8s 多租户；开源版 Priva 保持不动（决策 14）。</td></tr>
+    <tr><td><b>租户模型</b></td><td>每用户一个 Pod + PVC + RBAC + NetworkPolicy；空闲时 <b>缩容至零</b>（决策 2）。</td></tr>
+    <tr><td><b>前门</b></td><td>面向所有入口的无状态边缘（agentgateway）；<em>不</em>持有任何 Agent 状态。</td></tr>
+    <tr><td><b>核心单元</b></td><td><b>会话（session）</b>——用户卷上的一个 JSONL 转录文件，由不可变的 <code>session_uuid</code> 标识。</td></tr>
+    <tr><td><b>身份</b></td><td>一个中心账户；浏览器 / WeCom / Feishu 是关联身份（每用户自带 LLM 密钥，BYOK）。</td></tr>
+    <tr><td><b>方法论</b></td><td>26 条锁定决策 → 6 份组件深潜 → 逐文件切分图 → 7 个渐进阶段。</td></tr>
+  </table>
+</section>
+
+<!-- ============================ 2 核心设计思想 ============================ -->
+<section id="thesis">
+  <div class="kicker">第 2 部分</div>
+  <h2>2. 核心设计思想</h2>
+  <p class="lead">两个想法撑起了整个架构。理解了它们，其余部分都读作推论。</p>
+
+  <h3>2.1 · Byte path ≠ 控制路径</h3>
+  <p>天真的网关会把一切都代理穿过自己，于是变成有状态瓶颈。Priva 的边缘改为 <em>转发</em>：对每个运行时请求，
+  它向 EPP 做一次旁路调用，询问 <span class="path">「用哪个 Pod，并唤醒它」</span>，拿回目标地址 + 一个签名令牌，
+  然后把请求直接流式发往那个 Pod。边缘 <b>永远不在Byte path的远端</b>——它传字节但不决策；EPP 决策但不碰字节。</p>
+
+  <h3>2.2 · 唯一不可变的 <code>session_uuid</code>，绝不用 CLI 派生的 id</h3>
+  <p>相较天真 fork 的那个最关键修正：每个 key、锁、路由、绑定都以 <b>平台生成的稳定 <code>session_uuid</code></b>
+  为键。曾以为 <code>claude</code> CLI 会在运行途中改写自己的 session id——那将让所有锁和路由变成孤儿。修法
+  （决策 M2）：<code>session_uuid</code> <em>就是</em> CLI 的 <code>--session-id</code>，在会话生命周期内不可变——
+  CREATE 传 <code>--session-id&lt;uuid&gt;</code>，RESUME 传 <code>--resume&lt;uuid&gt;</code>，两者绝不混用。
+  <b>无 remap，无可变的 <code>cli_session_id</code> 列。</b></p>
+
+  <div class="note ok">
+    <div class="h">为什么重要</div>
+    这两个不变量把原单体的脑裂（各自独立的 channel-daemon 与 API-bridge 注册表 + 协调器）化解为 <em>一个</em>
+    路由层，其唯一持久状态在 SQLite + Redis；并让每个协调结构都能用单一稳定 key 寻址。
+  </div>
+
+  <h3>有意延后（且可逆）</h3>
+  <div class="grid2">
+    <div class="mini">
+      <h4 style="color:var(--orange)">M6 — BYOK + 不计量</h4>
+      <p style="margin:0;font-size:13px">每个用户自带 <b>真实的 LLM 密钥</b>；没有共享组织密钥、没有虚拟密钥代理、
+      没有预算账本。计量代理组件被 <b>移除</b>——密钥变成一个由 operator 注入的普通 Secret。token 用量由 Pod
+      自报（仅用于观测）。</p>
+    </div>
+    <div class="mini">
+      <h4 style="color:var(--orange)">出口网关延后</h4>
+      <p style="margin:0;font-size:13px">Pod 直连 LLM / MCP / 网络——无白名单、无强制代理穿透。<b>Pod 到 Pod</b>
+      的默认拒绝仍然保留。可逆：日后重新加回正向代理即可恢复受控出口与计量。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 3 拓扑 ============================ -->
+<section id="topology">
+  <div class="kicker">第 3 部分</div>
+  <h2>3. 拓扑与平面</h2>
+  <p class="lead">per-account-pod 切片的实际构建拓扑。四个平面，按色编码：
+  <span style="color:var(--orange)">边缘</span>、<span style="color:var(--purple)">控制</span>、
+  <span style="color:var(--cyan)">数据</span>、<span style="color:var(--green)">租户</span>。</p>
+
+  <figure>
+    <svg viewBox="0 0 1000 760" role="img" aria-label="Priva Cloud 拓扑">
+      <defs>
+        <marker id="ah-green" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#1a7f37"/></marker>
+        <marker id="ah-blue" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0969da"/></marker>
+        <marker id="ah-orange" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#bc4c00"/></marker>
+        <marker id="ah-purple" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#8250df"/></marker>
+        <marker id="ah-cyan" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0e7490"/></marker>
+      </defs>
+
+      <!-- BROWSER -->
+      <rect x="410" y="16" width="180" height="46" rx="4" fill="#f6f8fa" stroke="#d0d7de"/>
+      <text x="500" y="38" text-anchor="middle" class="b-title" font-size="14">浏览器</text>
+      <text x="500" y="53" text-anchor="middle" class="b-sub">SPA · JWT/WS · WeCom · Feishu</text>
+
+      <line x1="500" y1="62" x2="500" y2="98" stroke="#1a7f37" stroke-width="3" marker-end="url(#ah-green)"/>
+      <text x="512" y="84" class="b-sub" fill="#656d76">(P) HTTP :80</text>
+
+      <!-- AGENTGATEWAY -->
+      <rect x="90" y="100" width="820" height="62" rx="4" fill="#ffffff" stroke="#bc4c00" stroke-width="1"/>
+      <rect x="90" y="100" width="4" height="62" fill="#bc4c00"/>
+      <text x="110" y="126" class="b-title" font-size="15">agentgateway</text>
+      <text x="110" y="146" class="b-sub" font-size="11">pod: priva-gateway · Gateway API 数据面（Rust, v1.3.0）· 边缘——只传输运行时字节，不做决策</text>
+      <text x="888" y="126" text-anchor="end" class="b-sub" fill="#bc4c00">边缘</text>
+
+      <path d="M620,162 C620,200 660,200 660,236" fill="none" stroke="#bc4c00" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ah-orange)"/>
+      <text x="668" y="200" class="b-sub" fill="#bc4c00">(T) ext_proc：选哪个 Pod？+ 唤醒</text>
+
+      <path d="M300,162 C300,195 240,195 240,236" fill="none" stroke="#0969da" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#ah-blue)"/>
+      <text x="60" y="200" class="b-sub" fill="#0969da">(P) / · /admin · /api/auth · /api/admin</text>
+
+      <path d="M845,162 C845,260 845,260 845,316" fill="none" stroke="#1a7f37" stroke-width="3" marker-end="url(#ah-green)"/>
+      <text x="700" y="290" text-anchor="end" class="b-sub" fill="#1a7f37">运行时字节 ═ /api/agent /files /pty /hooks</text>
+
+      <path d="M560,238 C560,205 540,195 520,164" fill="none" stroke="#bc4c00" stroke-width="1" stroke-dasharray="2 3" marker-end="url(#ah-orange)"/>
+      <text x="395" y="225" class="b-sub" fill="#bc4c00" font-size="9">返回 podIP + 签名令牌</text>
+
+      <!-- CONTROL-PANEL -->
+      <rect x="150" y="238" width="380" height="120" rx="4" fill="#ffffff" stroke="#8250df"/>
+      <rect x="150" y="238" width="4" height="120" fill="#8250df"/>
+      <text x="170" y="262" class="b-title" font-size="14">control-panel</text>
+      <text x="514" y="262" text-anchor="end" class="b-sub" fill="#8250df">控制 · N 个无状态副本</text>
+      <rect x="170" y="276" width="340" height="32" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+      <text x="182" y="296" class="b-sub" fill="#656d76">:8080 HTTP — 用户/管理 SPA · 鉴权 · 管理 · 配置</text>
+      <rect x="170" y="314" width="340" height="32" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+      <text x="182" y="334" class="b-sub" fill="#0e7490">:9000 gRPC ext_proc · EndPoint Picker (EPP) · TLS</text>
+
+      <!-- AGENT-RUNNER pods -->
+      <rect x="690" y="316" width="230" height="54" rx="4" fill="#ffffff" stroke="#d0d7de"/>
+      <rect x="678" y="328" width="230" height="54" rx="4" fill="#ffffff" stroke="#1a7f37"/>
+      <rect x="678" y="328" width="4" height="54" fill="#1a7f37"/>
+      <text x="696" y="350" class="b-title" font-size="13">agent-runner · ar-&lt;account&gt;</text>
+      <text x="696" y="368" class="b-sub" font-size="10">:8091 HTTP · 启动 claude CLI · 信任 EPP 令牌</text>
+      <text x="900" y="312" text-anchor="end" class="b-sub" fill="#1a7f37">租户 · 每用户 0↔1</text>
+
+      <path d="M250,358 C250,400 250,400 250,438" fill="none" stroke="#8250df" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#ah-purple)"/>
+      <text x="262" y="402" class="b-sub" fill="#8250df">(K) 修改 AgentTenant CR</text>
+
+      <!-- OPERATOR -->
+      <rect x="150" y="440" width="300" height="62" rx="4" fill="#ffffff" stroke="#8250df"/>
+      <rect x="150" y="440" width="4" height="62" fill="#8250df"/>
+      <text x="170" y="464" class="b-title" font-size="14">operator (kopf)</text>
+      <text x="170" y="484" class="b-sub" font-size="11">协调 AgentTenant CRD · 唯一伸缩者 0↔1 · 注入凭据 Secret · 空闲回收</text>
+
+      <path d="M450,470 C600,470 620,400 760,386" fill="none" stroke="#8250df" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#ah-purple)"/>
+      <text x="470" y="455" class="b-sub" fill="#8250df">(K) 伸缩 0↔1 + 注入 Secret + IS_SANDBOX=1</text>
+
+      <!-- DATA-SPINE -->
+      <rect x="90" y="610" width="820" height="74" rx="4" fill="#ffffff" stroke="#0e7490"/>
+      <rect x="90" y="610" width="4" height="74" fill="#0e7490"/>
+      <text x="110" y="636" class="b-title" font-size="14">data-spine</text>
+      <text x="110" y="657" class="b-sub" font-size="11">:50051 gRPC（明文）· 账户 · 配额 · 密钥（Fernet）· 定时任务 + 运行记录</text>
+      <text x="110" y="673" class="b-sub" font-size="11">SQLite 存于 RWO PVC · 单写入者（replicas:1, Recreate）</text>
+      <text x="888" y="636" text-anchor="end" class="b-sub" fill="#0e7490">数据 · 真相源</text>
+
+      <path d="M330,358 C330,560 320,560 320,608" fill="none" stroke="#0e7490" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#ah-cyan)"/>
+      <text x="340" y="560" class="b-sub" fill="#0e7490">(G) 账户 / 密钥</text>
+
+      <path d="M250,502 C250,545 250,545 250,608" fill="none" stroke="#0e7490" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#ah-cyan)"/>
+      <text x="120" y="560" class="b-sub" fill="#0e7490">(G) 读取凭据</text>
+
+      <path d="M793,382 C793,500 700,500 660,608" fill="none" stroke="#0e7490" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#ah-cyan)"/>
+      <text x="700" y="520" class="b-sub" fill="#0e7490">(G) 状态 + 活跃心跳</text>
+    </svg>
+    <div class="legend">
+      <span><i style="border-top:3px solid #1a7f37"></i>运行时Byte path（流式数据）</span>
+      <span><i style="border-top:2px dashed #bc4c00"></i>(T) 经 TLS 的 ext_proc</span>
+      <span><i style="border-top:1.5px dashed #0969da"></i>(P) 控制面 HTTP</span>
+      <span><i style="border-top:1.5px dashed #8250df"></i>(K) Kubernetes API</span>
+      <span><i style="border-top:1.5px dashed #0e7490"></i>(G) 到 data-spine 的 gRPC</span>
+    </div>
+    <figcaption>实际构建拓扑 · 命名空间 priva-cloud · 来源：docs/architecture/byte-path.md，并经服务代码核对</figcaption>
+  </figure>
+
+  <h3>四个平面</h3>
+  <table>
+    <tr><th style="width:90px">平面</th><th>成员</th><th>持有</th><th>性质</th></tr>
+    <tr><td><b style="color:var(--orange)">边缘</b></td><td>agentgateway</td><td>不持久任何东西</td><td>传字节、做转发；唯一对外组件。</td></tr>
+    <tr><td><b style="color:var(--purple)">控制</b></td><td>control-panel（EPP + 管理）、operator、<span class="pill plan">scheduler</span></td><td>路由决策、CRD、任务</td><td>只决策，从不上Byte path。operator 是 <em>唯一</em> 伸缩者。</td></tr>
+    <tr><td><b style="color:var(--cyan)">数据</b></td><td>data-spine（SQLite）、Redis*、每用户 PVC</td><td>真相源 + 协调</td><td>SQLite 单写入；Redis 是公告板；PVC 是每个 Pod 的桌面。</td></tr>
+    <tr><td><b style="color:var(--green)">租户</b></td><td>agent-runner <code>ar-&lt;account&gt;</code></td><td>活跃 Agent + JSONL</td><td>每用户一个 Pod，缩容至零；唯一触碰用户转录的进程。</td></tr>
+  </table>
+  <p style="font-size:12px;color:var(--text-dim)">* Redis key 目录定义在 <code>libs/common</code> 里；协调分层随 connector/scheduler 在第 4 阶段落地。</p>
+</section>
+
+<!-- ============================ 4 可部署单元 ============================ -->
+<section id="deployables">
+  <div class="kicker">第 4 部分</div>
+  <h2>4. 可部署单元</h2>
+  <p class="lead">目标 monorepo 有 8 个可部署单元。每个 <code>services/&lt;name&gt;</code> 是一个 <code>uv</code>
+  工作区成员，统一的 <code>entry.py → app.py</code> 形态，仅依赖 <code>priva-common</code>。</p>
+
+  <table>
+    <tr><th>可部署单元</th><th>语言</th><th>端口</th><th>副本</th><th>职责</th><th>状态</th></tr>
+    <tr><td><b>agent-runner</b></td><td>Py</td><td>:8091 HTTP</td><td>每租户 1（0↔1）</td><td>每租户运行时；启动 <code>claude</code> CLI；SDK + 内置 skills 烤进镜像</td><td><span class="pill done">已建</span></td></tr>
+    <tr><td><b>control-panel</b></td><td>Py</td><td>:8080 HTTP · :9000 ext_proc</td><td>N 无状态</td><td>Agent-runtime EndPoint Picker（EPP）+ 鉴权/管理/配置 + 同时服务两个 SPA + K8s provisioner</td><td><span class="pill done">已建</span></td></tr>
+    <tr><td><b>data-spine</b></td><td>Py/gRPC</td><td>:50051 gRPC</td><td>1（Recreate）</td><td>账户 · 绑定 · 配额 · 任务 · 密钥；SQLite 真相源</td><td><span class="pill done">已建</span></td></tr>
+    <tr><td><b>operator</b></td><td>Py/kopf</td><td>—</td><td>1 活跃</td><td><code>AgentTenant</code> CRD 协调；唯一伸缩者 0↔1；密钥注入；空闲回收</td><td><span class="pill done">已建</span></td></tr>
+    <tr><td><b>agentgateway</b></td><td>Rust</td><td>:80</td><td>N</td><td>边缘/数据面；第三方，经 Gateway API CRD 接入</td><td><span class="pill ext">已接入</span></td></tr>
+    <tr><td><b>channel-connector</b></td><td>Py</td><td>—</td><td>N（租约）</td><td>WeCom/Feishu 长连接 + IM 扇出；把交互派发给 Pod</td><td><span class="pill plan">第4阶段</span></td></tr>
+    <tr><td><b>scheduler</b></td><td>Py</td><td>—</td><td>N 无主</td><td>触发 → 抢占 → 唤醒 → 派发；自身不执行</td><td><span class="pill plan">第4阶段</span></td></tr>
+    <tr><td><b>state-reader</b></td><td>Py</td><td>—</td><td>N / 内嵌</td><td>Pod 休眠时只读 JSONL 转录（免唤醒）</td><td><span class="pill plan">第5阶段</span></td></tr>
+  </table>
+
+  <div class="note">
+    <div class="h">控制面 = 一个进程、三个监听器——不是三个可部署单元</div>
+    单镜像绑定 <code>:9000</code> gRPC ext_proc（EPP——不同 <em>协议</em>，故独立监听器）、<code>:8080</code> HTTP
+    faces（边缘可达）、以及规划中的 <code>:8081</code> 内部 HTTP（仅集群内）。faces / 内部 之分是 NetworkPolicy
+    边界；gRPC 之分由协议强制。
+  </div>
+
+  <h3>共享契约 —— <code>libs/common</code>（priva_common，约 6.8K 行）</h3>
+  <p>每个服务都依赖、而它不依赖任何服务的那个包。正是这条 import 边界让切分保持干净（自第 0 阶段起强制）。</p>
+  <div class="grid3">
+    <div class="mini"><h4>线格式与模型</h4><div class="accent">serialization · wire · models/*</div><p style="font-size:12px;margin:6px 0 0">穿越每一跳的 DTO 与流式格式。</p></div>
+    <div class="mini"><h4>数据面客户端</h4><div class="accent">dataplane/*（gRPC 桩）</div><p style="font-size:12px;margin:6px 0 0">一个客户端；进程内 <em>或</em> gRPC，由 <code>transport</code> 切换。</p></div>
+    <div class="mini"><h4>加密与鉴权</h4><div class="accent">crypto · runner_token</div><p style="font-size:12px;margin:6px 0 0">Fernet 信封 + mint/verify 令牌接口。</p></div>
+    <div class="mini"><h4>Redis 目录</h4><div class="accent">redis_catalog</div><p style="font-size:12px;margin:6px 0 0">key 名称只定义一次，跨服务永不漂移。</p></div>
+    <div class="mini"><h4>配置与观测</h4><div class="accent">config · logging · metrics</div><p style="font-size:12px;margin:6px 0 0"><code>PRIVA_*</code> 环境变量覆盖；每个服务暴露 <code>/metrics</code>。</p></div>
+    <div class="mini"><h4>存储（过渡期）</h4><div class="accent">user_store · user_env · workspace</div><p style="font-size:12px;margin:6px 0 0">切分期间对数据面客户端的门面（façade）。</p></div>
+  </div>
+</section>
+
+<!-- ============================ 5 Byte path ============================ -->
+<section id="bytepath">
+  <div class="kicker">第 5 部分</div>
+  <h2>5. Byte path</h2>
+  <p class="lead">追踪一次 Agent 交互，从按键到流式 token。下面编号的每一跳都在所引文件中实现——这是实际构建的路径，
+  不是计划。</p>
+
+  <figure>
+    <svg viewBox="0 0 1000 540" role="img" aria-label="Byte path时序">
+      <defs>
+        <marker id="s-green" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#1a7f37"/></marker>
+        <marker id="s-orange" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#bc4c00"/></marker>
+        <marker id="s-purple" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#8250df"/></marker>
+        <marker id="s-cyan" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0e7490"/></marker>
+      </defs>
+      <g font-size="11">
+        <rect x="40"  y="14" width="120" height="34" rx="3" fill="#f6f8fa" stroke="#d0d7de"/><text x="100" y="36" text-anchor="middle" class="b-title" font-size="12">浏览器</text>
+        <rect x="220" y="14" width="120" height="34" rx="3" fill="#f6f8fa" stroke="#bc4c00"/><text x="280" y="36" text-anchor="middle" class="b-title" font-size="12">agentgateway</text>
+        <rect x="400" y="14" width="120" height="34" rx="3" fill="#f6f8fa" stroke="#8250df"/><text x="460" y="32" text-anchor="middle" class="b-title" font-size="11">EndPoint Picker</text><text x="460" y="44" text-anchor="middle" class="b-sub">EPP · cp :9000</text>
+        <rect x="580" y="14" width="120" height="34" rx="3" fill="#f6f8fa" stroke="#8250df"/><text x="640" y="36" text-anchor="middle" class="b-title" font-size="12">operator</text>
+        <rect x="760" y="14" width="120" height="34" rx="3" fill="#f6f8fa" stroke="#1a7f37"/><text x="820" y="32" text-anchor="middle" class="b-title" font-size="11">agent-runner</text><text x="820" y="44" text-anchor="middle" class="b-sub">:8091</text>
+        <rect x="890" y="14" width="100" height="34" rx="3" fill="#f6f8fa" stroke="#0e7490"/><text x="940" y="32" text-anchor="middle" class="b-title" font-size="11">data-</text><text x="940" y="44" text-anchor="middle" class="b-title" font-size="11">spine</text>
+      </g>
+      <g stroke="#d0d7de" stroke-dasharray="3 4">
+        <line x1="100" y1="48" x2="100" y2="520"/><line x1="280" y1="48" x2="280" y2="520"/>
+        <line x1="460" y1="48" x2="460" y2="520"/><line x1="640" y1="48" x2="640" y2="520"/>
+        <line x1="820" y1="48" x2="820" y2="520"/><line x1="940" y1="48" x2="940" y2="520"/>
+      </g>
+      <g font-size="10.5">
+        <line x1="100" y1="78" x2="278" y2="78" stroke="#1a7f37" stroke-width="2.5" marker-end="url(#s-green)"/>
+        <text x="104" y="72" fill="#1f2328">① POST /api/agent + JWT（WS：令牌随 Sec-WebSocket-Protocol 携带）</text>
+
+        <line x1="280" y1="112" x2="458" y2="112" stroke="#bc4c00" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#s-orange)"/>
+        <text x="284" y="106" fill="#bc4c00">② ext_proc request_headers（TLS，每请求一次）</text>
+
+        <rect x="384" y="138" width="152" height="20" rx="3" fill="#ffffff" stroke="#8250df"/>
+        <text x="460" y="152" text-anchor="middle" fill="#8250df">③ 校验 JWT → account_id</text>
+
+        <line x1="460" y1="186" x2="638" y2="186" stroke="#8250df" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#s-purple)"/>
+        <text x="464" y="180" fill="#8250df">④ wake_and_wait → 修改 AgentTenant.spec.wake</text>
+
+        <line x1="640" y1="220" x2="818" y2="220" stroke="#8250df" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#s-purple)"/>
+        <text x="600" y="214" fill="#8250df">⑤ 伸缩 0→1 + 注入 Secret</text>
+
+        <line x1="660" y1="252" x2="938" y2="252" stroke="#0e7490" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#s-cyan)"/>
+        <text x="664" y="246" fill="#0e7490">读取凭据包（Fernet → 明文 Secret）</text>
+
+        <line x1="818" y1="286" x2="642" y2="286" stroke="#8250df" stroke-width="1.2" stroke-dasharray="2 3" marker-end="url(#s-purple)"/>
+        <text x="648" y="280" fill="#656d76">Pod 就绪 → status.podIP</text>
+
+        <line x1="458" y1="320" x2="282" y2="320" stroke="#bc4c00" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#s-orange)"/>
+        <text x="290" y="314" fill="#bc4c00">⑥ 引导：设置 x-gateway-destination-endpoint + x-priva-runner-token</text>
+
+        <line x1="280" y1="356" x2="818" y2="356" stroke="#1a7f37" stroke-width="3" marker-end="url(#s-green)"/>
+        <text x="300" y="350" fill="#1a7f37">⑦ 将请求直接流式发往唤醒的 Pod ═══（边缘只转发，不缓冲）</text>
+
+        <rect x="744" y="372" width="152" height="34" rx="3" fill="#ffffff" stroke="#1a7f37"/>
+        <text x="820" y="386" text-anchor="middle" fill="#1a7f37">⑧ 校验令牌 → ACCOUNT_ID</text>
+        <text x="820" y="400" text-anchor="middle" fill="#656d76">启动 claude CLI</text>
+
+        <line x1="818" y1="430" x2="102" y2="430" stroke="#1a7f37" stroke-width="3" marker-end="url(#s-green)"/>
+        <text x="300" y="424" fill="#1a7f37">⑨ 将 token 流式回传浏览器 ═══（SSE / WebSocket）</text>
+
+        <line x1="640" y1="474" x2="818" y2="474" stroke="#8250df" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#s-purple)"/>
+        <text x="446" y="468" fill="#8250df">⑩ 空闲超过宽限期 → operator 伸缩 1→0，删除 Secret</text>
+        <line x1="818" y1="500" x2="642" y2="500" stroke="#0e7490" stroke-width="1.2" stroke-dasharray="2 3" marker-end="url(#s-cyan)"/>
+        <text x="648" y="494" fill="#656d76">/health: active_runs, last_activity_ts</text>
+      </g>
+    </svg>
+    <figcaption>一次 Agent 交互 · 冷启动从零约 4.1s，热态瞬时</figcaption>
+  </figure>
+
+  <h3>运行时全流程——逐跳</h3>
+  <table>
+    <tr><th style="width:42px">#</th><th>跳</th><th>发生了什么</th><th>代码</th></tr>
+    <tr><td>①</td><td>浏览器 → 边缘</td><td>SPA 发送 <code>POST /api/agent/...</code> 携带平台 JWT。WebSocket 的升级请求把令牌作为子协议携带：<code>['priva.ws.v1','priva.token.&lt;jwt&gt;']</code>。</td><td class="path">web/user/src</td></tr>
+    <tr><td>②</td><td>边缘 → EPP</td><td>路径匹配运行时 <code>HTTPRoute</code> → <code>InferencePool agent-runners</code>。网关经 <b>ext_proc</b> 做一次 TLS 旁路调用，请 EndpointPicker 选一个 Pod。</td><td class="path">deploy/gateway/*</td></tr>
+    <tr><td>③</td><td>解析</td><td>EPP 从 <code>Authorization</code> / WS 子协议 / 旧版 <code>?token=</code> 取出令牌，校验后解出 <code>account_id</code>。</td><td class="path">extproc.py:122</td></tr>
+    <tr><td>④–⑤</td><td>唤醒</td><td><code>wake_and_wait</code> 修改 <code>AgentTenant.spec.wake.requestedAt</code>——<em>唯一</em>的扩容触发器。operator 从 data-spine 物化出每 Pod 凭据 Secret，把 Deployment 伸缩 0→1，并等待就绪。</td><td class="path">provisioner.py:98 · reconcile.py:41</td></tr>
+    <tr><td>⑥</td><td>引导</td><td>EPP 返回一个头部变更：<code>x-gateway-destination-endpoint = podIP:8091</code>，外加一个新签发的 <code>x-priva-runner-token</code>。</td><td class="path">extproc.py:95</td></tr>
+    <tr><td>⑦</td><td>边缘 → Pod</td><td>网关把请求 <b>直接流式发往该 Pod</b>——边缘只做转发，永远不是远端。</td><td class="path">agentgateway</td></tr>
+    <tr><td>⑧–⑨</td><td>运行与流式</td><td>Pod 校验签名令牌，将其绑定到自己唯一的 <code>ACCOUNT_ID</code>，构建 <code>ClaudeAgentOptions</code>（BYOK 凭据、skills、MCP、hooks），启动 <code>claude</code> CLI，并把事件流式回传。</td><td class="path">deps.py · service.py · options.py</td></tr>
+    <tr><td>⑩</td><td>休眠</td><td>operator 的 30s 定时器轮询 Pod 的 <code>/health</code>；当 <code>active_runs==0</code> 且空闲超过宽限期，便伸缩 1→0 并删除 Secret。</td><td class="path">activity.py · reconcile.py:67</td></tr>
+  </table>
+
+  <h3 id="discovery">EPP 如何定位到对应的 Pod —— 端点发现的 Byte path</h3>
+  <p class="lead">承上：上面第 ②–⑥ 步「解析 → 唤醒 → 引导」里最关键的问题是——EPP 究竟 <em>怎么</em> 知道账户 X 的请求
+  该发往哪个 agent-runner Pod？答案不靠注册表、也不靠每账户 DNS，而靠 <b>确定性身份</b> 加一个写在 CR 上的
+  <b>会合点</b>。下面单独把这条「端点发现」路径画出来。</p>
+
+  <figure>
+    <svg viewBox="0 0 1000 660" role="img" aria-label="EPP 端点发现 Byte path">
+      <defs>
+        <marker id="d-green" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#1a7f37"/></marker>
+        <marker id="d-orange" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#bc4c00"/></marker>
+        <marker id="d-purple" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#8250df"/></marker>
+        <marker id="d-cyan" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0e7490"/></marker>
+        <marker id="d-grey" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#8c959f"/></marker>
+      </defs>
+
+      <!-- TOP ROW: consult -->
+      <rect x="40" y="24" width="240" height="52" rx="4" fill="#ffffff" stroke="#bc4c00"/><rect x="40" y="24" width="4" height="52" fill="#bc4c00"/>
+      <text x="58" y="46" class="b-title" font-size="13">agentgateway</text>
+      <text x="58" y="64" class="b-sub">收到 /api/agent · 账户 X 的 JWT</text>
+
+      <line x1="280" y1="50" x2="358" y2="50" stroke="#bc4c00" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#d-orange)"/>
+      <text x="284" y="44" class="b-sub" fill="#bc4c00" font-size="9">① ext_proc (TLS)</text>
+
+      <rect x="360" y="24" width="300" height="52" rx="4" fill="#ffffff" stroke="#8250df"/><rect x="360" y="24" width="4" height="52" fill="#8250df"/>
+      <text x="378" y="44" class="b-title" font-size="13">EndPoint Picker (EPP)</text>
+      <text x="378" y="62" class="b-sub">control-panel :9000 · 校验 JWT → account_id = X</text>
+
+      <rect x="700" y="24" width="260" height="52" rx="4" fill="#f6f8fa" stroke="#d0d7de" stroke-dasharray="4 3"/>
+      <text x="714" y="44" class="b-sub" fill="#656d76">InferencePool agent-runners</text>
+      <text x="714" y="60" class="b-sub" fill="#656d76">selector app=agent-runner · FailClose</text>
+
+      <!-- IDENTITY BANNER -->
+      <rect x="40" y="92" width="920" height="48" rx="4" fill="#eaeef2" stroke="#afb8c1" stroke-dasharray="5 4"/>
+      <text x="58" y="111" fill="#1f2328" font-size="11">② 确定性身份 —— 无需注册表 / 无每账户 DNS：</text>
+      <text x="58" y="130" font-size="11" fill="#0550ae">account_id = X   ≡   AgentTenant.name = X   ≡   Deployment/Service = ar-X   ≡   Pod 标签 priva.io/account-id = X</text>
+
+      <!-- DECISION: read status -->
+      <rect x="360" y="160" width="300" height="46" rx="4" fill="#ffffff" stroke="#8250df" stroke-dasharray="5 3"/>
+      <text x="510" y="180" text-anchor="middle" fill="#8250df" font-size="11">③ 读 AgentTenant『X』.status</text>
+      <text x="510" y="196" text-anchor="middle" class="b-sub">热：phase=Running 且有 podIP → 直接用，跳到 ⑨</text>
+
+      <!-- cold arrow to operator -->
+      <path d="M390,206 C310,250 250,272 250,316" fill="none" stroke="#8250df" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#d-purple)"/>
+      <text x="128" y="256" class="b-sub" fill="#8250df">④ 冷：patch spec.wake.requestedAt</text>
+
+      <!-- RENDEZVOUS -->
+      <rect x="360" y="232" width="300" height="62" rx="4" fill="#ffffff" stroke="#0e7490" stroke-width="2"/>
+      <text x="510" y="256" text-anchor="middle" class="b-title" font-size="13" fill="#0e7490">AgentTenant『X』.status.podIP</text>
+      <text x="510" y="275" text-anchor="middle" class="b-sub">★ 会合点 RENDEZVOUS</text>
+      <text x="510" y="288" text-anchor="middle" class="b-sub">operator 写入 ↓   ·   EPP 读取 ↑</text>
+
+      <line x1="640" y1="232" x2="640" y2="208" stroke="#0e7490" stroke-width="1.5" marker-end="url(#d-cyan)"/>
+      <text x="646" y="223" class="b-sub" fill="#0e7490">读</text>
+      <line x1="510" y1="316" x2="510" y2="296" stroke="#0e7490" stroke-width="1.5" marker-end="url(#d-cyan)"/>
+      <text x="516" y="311" class="b-sub" fill="#0e7490">写</text>
+
+      <!-- OPERATOR -->
+      <rect x="120" y="318" width="760" height="130" rx="4" fill="#ffffff" stroke="#8250df"/><rect x="120" y="318" width="4" height="130" fill="#8250df"/>
+      <text x="138" y="340" class="b-title" font-size="13">operator · @kopf.on.field(field="spec.wake.requestedAt") — 唯一伸缩者</text>
+      <text x="138" y="362" font-size="10.5" fill="#656d76">⑤ 物化凭据 Secret ar-X-creds   ←(gRPC) data-spine（Fernet 解密 → K8s Secret）</text>
+      <text x="138" y="381" font-size="10.5" fill="#656d76">⑥ scale Deployment ar-X：0 → 1   （Recreate；RWO PVC 同一时刻仅一个 Pod）</text>
+      <text x="138" y="400" font-size="10.5" fill="#656d76">⑦ wait_pod_ready：list pods label_selector = priva.io/account-id=X → 取 Ready 的 pod.status.podIP</text>
+      <text x="138" y="419" font-size="10.5" fill="#656d76">⑧ patch status.podIP = &lt;podIP&gt; · phase=Running   →   写入会合点 ↑</text>
+      <text x="138" y="437" font-size="9.5" fill="#8c959f">（真正按标签查 K8s API 的是 operator；EPP 只读已解析好的 status.podIP）</text>
+
+      <!-- STEER -->
+      <rect x="360" y="470" width="470" height="46" rx="4" fill="#ffffff" stroke="#1a7f37"/><rect x="360" y="470" width="4" height="46" fill="#1a7f37"/>
+      <text x="378" y="489" fill="#1a7f37" font-size="11">⑨ EPP 返回 steer 头</text>
+      <text x="378" y="506" class="b-sub" font-size="10">x-gateway-destination-endpoint = podIP:8091   +   x-priva-runner-token</text>
+
+      <path d="M360,502 C220,502 162,524 162,556" fill="none" stroke="#8c959f" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#d-grey)"/>
+      <text x="186" y="540" class="b-sub" fill="#8c959f">返回给 agentgateway</text>
+
+      <!-- BOTTOM: the byte hop -->
+      <rect x="40" y="556" width="240" height="64" rx="4" fill="#ffffff" stroke="#bc4c00"/><rect x="40" y="556" width="4" height="64" fill="#bc4c00"/>
+      <text x="58" y="582" class="b-title" font-size="12">agentgateway</text>
+      <text x="58" y="600" class="b-sub">（同一实例）</text>
+
+      <line x1="280" y1="588" x2="698" y2="588" stroke="#1a7f37" stroke-width="3" marker-end="url(#d-green)"/>
+      <text x="296" y="580" fill="#1a7f37" font-size="11">⑩ Byte path：依据 destination 头直连 podIP:8091（绕过 Service，直达 Pod）</text>
+
+      <rect x="700" y="556" width="240" height="64" rx="4" fill="#ffffff" stroke="#1a7f37"/><rect x="700" y="556" width="4" height="64" fill="#1a7f37"/>
+      <text x="718" y="582" class="b-title" font-size="12">pod ar-X @ podIP:8091</text>
+      <text x="718" y="600" class="b-sub">agent-runner（账户 X 专属）· 校验 runner token</text>
+    </svg>
+    <div class="legend">
+      <span><i style="border-top:3px solid #1a7f37"></i>Byte path（直达 Pod 的字节流）</span>
+      <span><i style="border-top:2px dashed #bc4c00"></i>ext_proc (TLS)</span>
+      <span><i style="border-top:1.5px dashed #8250df"></i>K8s 控制（CR patch / watch）</span>
+      <span><i style="border-top:1.5px solid #0e7490"></i>读/写会合点 status.podIP</span>
+    </div>
+    <figcaption>端点发现：account_id ≡ CR名 ≡ Pod 标签；operator 写 status.podIP，EPP 读 · 来源：extproc.py · provisioner.py · operator/{reconcile,kube,names}.py · deploy/gateway/*</figcaption>
+  </figure>
+
+  <h4>端点发现 —— 逐步</h4>
+  <table>
+    <tr><th style="width:36px">#</th><th style="width:110px">主体</th><th>动作</th><th>机制 / 代码</th></tr>
+    <tr><td>①</td><td>agentgateway</td><td>每请求向 EPP 发一次 ext_proc(TLS) 旁路调用</td><td><span class="path">HTTPRoute → InferencePool → endpointPickerRef control-panel:9000（FailClose）</span></td></tr>
+    <tr><td>②</td><td>EPP</td><td>校验平台 JWT，解出 <code>account_id = X</code></td><td><span class="path">extproc.py · authenticate_raw_token</span></td></tr>
+    <tr><td>—</td><td>恒等（关键）</td><td><code>account_id</code> 同时是 CR 名、对象名 <code>ar-X</code>、Pod 标签 <code>priva.io/account-id=X</code>——这就是「找到 Pod」的索引，无需注册表</td><td><span class="path">provisioner.ensure_tenant(name=account_id) · names.py</span></td></tr>
+    <tr><td>③</td><td>EPP</td><td>读 <code>AgentTenant『X』.status</code>；<b>热</b>：<code>phase=Running</code> 且有 <code>podIP</code> → 立即返回，跳到 ⑨</td><td><span class="path">provisioner.wake_and_wait → _status</span></td></tr>
+    <tr><td>④</td><td>EPP</td><td><b>冷</b>：patch <code>spec.wake.requestedAt = now</code>（唯一扩容触发），随后每 1s 轮询 status</td><td><span class="path">provisioner.wake_and_wait（wake_timeout 内）</span></td></tr>
+    <tr><td>⑤</td><td>operator</td><td>watch 到 <code>spec.wake</code> 变化 → 从 data-spine 物化凭据 Secret <code>ar-X-creds</code></td><td><span class="path">reconcile.on_wake · secrets.materialize</span></td></tr>
+    <tr><td>⑥</td><td>operator</td><td><code>scale Deployment ar-X：0 → 1</code></td><td><span class="path">kube.scale</span></td></tr>
+    <tr><td>⑦</td><td>operator</td><td><b>按标签定位 Pod</b>：<code>list pods label_selector=priva.io/account-id=X</code> → 取 Ready 的 <code>pod.status.podIP</code></td><td><span class="path">kube.wait_pod_ready</span></td></tr>
+    <tr><td>⑧</td><td>operator</td><td>把活的 IP 写回 <b>会合点</b>：<code>status.podIP=&lt;ip&gt; · phase=Running</code></td><td><span class="path">reconcile.on_wake · patch.status</span></td></tr>
+    <tr><td>⑨</td><td>EPP</td><td>轮询读到 <code>podIP</code> → 返回 steer 头 + 签名 runner token</td><td><span class="path">extproc._steer · runner_token.mint</span></td></tr>
+    <tr><td>⑩</td><td>agentgateway</td><td>依据 <code>x-gateway-destination-endpoint</code> <b>直连 <code>podIP:8091</code></b>（绕过 Service，直达 Pod）</td><td><span class="path">Byte path</span></td></tr>
+  </table>
+
+  <div class="note ok">
+    <div class="h">关键：靠「确定性身份 + 会合点」定位，而非注册表</div>
+    EPP 不查服务注册表、也不做每账户 DNS 解析。Pod 的定位只靠两点：<b>(1) 确定性身份</b>——<code>account_id</code>
+    同时是 AgentTenant CR 名、对象名 <code>ar-&lt;account&gt;</code>、以及 Pod 标签 <code>priva.io/account-id</code>；
+    <b>(2) 会合点</b>——operator 把活的 <code>podIP</code> 写进 CR 的 <code>status.podIP</code>，EPP 只读它。真正按
+    标签查询 K8s API 的是 <b>operator</b>（<code>wait_pod_ready</code>），EPP 拿到的是已解析好的结果。InferencePool
+    的 <code>app=agent-runner</code> 选择器只圈定 <em>候选集</em>；最终唯一终点完全由 EPP 返回的 destination 头
+    决定（<code>FailClose</code>：EPP 不给端点，请求即失败，绝不乱投）。返回的是 <b>Pod IP 而非 Service ClusterIP</b>
+    ——一次直达 Pod 的跳转。
+  </div>
+
+  <h3 id="epp">Agent-runtime EndPoint Picker（EPP）——整个决策浓缩成一个函数</h3>
+  <p>EPP 就是 GIE InferencePool 的端点选择器（EndPoint Picker），经 gRPC 以 Envoy 外部处理（ext_proc）形态提供。引人注目的是，它的核心决策只有约 25 行——
+  <code>control-panel/extproc.py</code> 里的 <code>handle_request_headers</code>——恰好就是设计所要的
+  <code>resolve · mint · wake · steer</code>：</p>
+  <div class="card mono" style="font-size:12.5px;line-height:1.8;color:var(--text-secondary)">
+    <span style="color:var(--purple)">async def</span> <span style="color:var(--blue)">handle_request_headers</span>(http_headers):<br>
+    &nbsp;&nbsp;token = bearer <span style="color:var(--text-dim)">or</span> subprotocol(<span style="color:var(--green)">"priva.token."</span>) <span style="color:var(--text-dim)">or</span> ?token=  &nbsp;<span style="color:var(--text-dim)"># 3 个来源</span><br>
+    &nbsp;&nbsp;user = <span style="color:var(--blue)">await</span> authenticate_raw_token(token)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text-dim)"># 解析</span><br>
+    &nbsp;&nbsp;<span style="color:var(--purple)">if</span> user <span style="color:var(--text-dim)">is</span> <span style="color:var(--orange)">None</span>: <span style="color:var(--purple)">return</span> _immediate(<span style="color:var(--orange)">401</span>)<br>
+    &nbsp;&nbsp;endpoint = <span style="color:var(--blue)">await</span> to_thread(provisioner.wake_and_wait, account_id)&nbsp;<span style="color:var(--text-dim)"># 唤醒</span><br>
+    &nbsp;&nbsp;<span style="color:var(--purple)">if</span> <span style="color:var(--text-dim)">not</span> endpoint: <span style="color:var(--purple)">return</span> _immediate(<span style="color:var(--orange)">503</span>, <span style="color:var(--green)">"waking, retry"</span>)<br>
+    &nbsp;&nbsp;<span style="color:var(--purple)">return</span> _steer(endpoint, <span style="color:var(--blue)">mint</span>(account_id, username))&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text-dim)"># 签发 + 引导</span>
+  </div>
+
+  <h3 id="cracks">四个关键坑——让路径真正跑通的东西</h3>
+  <p>要把字节穿过一个第三方 Rust 边缘、送达一个从零伸缩的 Pod，暴露出四个非显然的互通 bug。每个都作为实际构建的
+  「坑」被记录，并在代码中修复：</p>
+  <div class="grid2">
+    <div class="note warn"><div class="h">1 · EPP 必须用 TLS</div>
+      agentgateway 经 <b>TLS</b> 拨号 InferencePool 的 EndpointPicker（GIE 约定，集群内 skip-verify）。
+      明文 EPP 会以 <code>InvalidContentType</code> 失败。修法：自签名 h2 上下文（ALPN <code>h2</code>），用
+      <b>grpclib</b>（纯 Python HTTP/2）提供——因为 C-core 的 <code>grpc.aio</code> 服务端与该 Rust 客户端不互通。
+      <span class="path">extproc.py:173</span></div>
+    <div class="note warn"><div class="h">2 · 把 body 原样回传</div>
+      GIE ext_proc 路径会为 EPP 缓冲请求 body。一个空的 <code>BodyResponse</code> 会 <b>丢掉 body</b>
+      → Pod 收到空 body → 422。修法：尽量用 <code>mode_override</code> 跳过 body；仍有分片到来时，用
+      <code>body_mutation</code> 把字节原样回传。<span class="path">extproc.py:113</span></div>
+    <div class="note warn"><div class="h">3 · 在升级请求上做 WS 鉴权</div>
+      WebSocket 升级请求没有 body、也没有 <code>Authorization</code> 头。JWT 改为随
+      <code>Sec-WebSocket-Protocol</code> 列表作为 <code>priva.token.&lt;jwt&gt;</code> 携带；runner 在握手时只回显
+      <code>priva.ws.v1</code>——令牌不进 URL、不进网关访问日志。<span class="path">extproc.py:78 · deps.py</span></div>
+    <div class="note warn"><div class="h">4 · IS_SANDBOX=1</div>
+      运行时以 <code>--dangerously-skip-permissions</code> 驱动 CLI，而 CLI 在 root 下会拒绝该参数。每账户 Pod
+      <em>本身</em>就是沙箱，于是 operator 在 Pod 环境里设 <code>IS_SANDBOX=1</code>——这是 CLI 认可的逃生口——
+      否则每次运行都会以 1 退出。<span class="path">operator/kube.py</span></div>
+  </div>
+
+  <h3 id="trust">信任链</h3>
+  <p>Pod 只信任 EPP、且仅信任 EPP，靠一个短 TTL 的签名令牌。这是开发模式的接缝；<code>mint</code>/<code>verify</code>
+  这套接口设计成可在生产换成 JWKS / mTLS 而不动调用方。</p>
+  <table>
+    <tr><th style="width:120px">步骤</th><th>机制</th></tr>
+    <tr><td><b>签发（EPP）</b></td><td>HS256 JWT <code>{account_id, username, exp:+60s}</code>，用 <code>dataspine.api_key_hmac_secret</code>（回退 <code>auth.jwt_secret</code>）签名。<span class="path">runner_token.py:31</span></td></tr>
+    <tr><td><b>携带</b></td><td>在 EPP 引导响应里设为 <code>x-priva-runner-token</code> 头；随请求一同到达 Pod。</td></tr>
+    <tr><td><b>校验（Pod）</b></td><td>runner 解码并校验签名/过期；要求带 <code>account_id</code> + <code>username</code> 声明。<span class="path">signed_header.py → runner_token.verify</span></td></tr>
+    <tr><td><b>绑定</b></td><td>声明里的 <code>account_id</code> 必须与 Pod 固定的 <code>ACCOUNT_ID</code> 环境变量一致——一个 Pod 永远只能为它那一个租户行动。<span class="path">deps.py:42</span></td></tr>
+  </table>
+</section>
+
+<!-- ============================ 6 状态 ============================ -->
+<section id="state">
+  <div class="kicker">第 6 部分</div>
+  <h2>6. 状态存储在哪</h2>
+  <p class="lead">三个存储，三种持久性契约。来自设计文档的心智模型：
+  <b>data-spine = 由图书管理员看守的唯一账本 · Redis = 人人直接张贴的公告板 · PVC = 每个 Pod 的私人抽屉。</b></p>
+
+  <div class="grid3">
+    <div class="mini" style="border-left:2px solid var(--cyan)">
+      <h4 style="color:var(--cyan)">① data-spine — SQLite</h4>
+      <p style="font-size:12.5px">持久、共享、单写入。<em>只</em>通过数据面客户端访问（当前进程内 → 集群内 gRPC）。
+      WAL、<code>foreign_keys=ON</code>、<code>STRICT</code>、RWO PVC、<code>Recreate</code>。</p>
+    </div>
+    <div class="mini" style="border-left:2px solid var(--purple)">
+      <h4 style="color:var(--purple)">② Redis — 协调</h4>
+      <p style="font-size:12.5px">网络化、多客户端、临时/AOF 分层。锁、权限索引、路由、在线状态。由每个服务 <em>直接</em>
+      访问；key 名称经 <code>redis_catalog</code> 共享。<span class="pill plan">第4阶段</span></p>
+    </div>
+    <div class="mini" style="border-left:2px solid var(--green)">
+      <h4 style="color:var(--green)">③ PVC — Pod 自有文件</h4>
+      <p style="font-size:12.5px">每 Pod RWO。会话 JSONL 转录、CLI 原生读取的运行时/MCP/hook 配置、临时上传、审计
+      JSONL。只在 Pod 存活时编辑。</p>
+    </div>
+  </div>
+
+  <h3>关系核心——<code>account</code> 是枢纽</h3>
+  <p>最初的 16 表设计被有意收敛到 <b>5 张锁定的第 1 阶段表</b>；随后在 minikube 切片中又加回一张 <code>secret</code>
+  表以承载 BYOK 凭据供 operator 注入（<b>实际为 6 张</b>）。一切都挂在 <code>account_id</code> 上、
+  <code>ON DELETE CASCADE</code>——一个干净的爆炸半径。</p>
+  <table>
+    <tr><th>表</th><th>基数</th><th>持有</th><th>备注</th></tr>
+    <tr><td><b>account</b> ★</td><td>枢纽</td><td>username、password（bcrypt）、api_key（Fernet）、role、status、feishu 关联</td><td><code>api_key_lookup</code> = HMAC，免解密即可 O(1) 查找</td></tr>
+    <tr><td>quota</td><td>1 : 1</td><td>tier、max_concurrent_sessions、idle_grace</td><td>运营杠杆</td></tr>
+    <tr><td>channel_binding</td><td>1 : 0..1</td><td>session_uuid（UNIQUE）、first_run_done</td><td>全新；<code>session_uuid</code> ⇄ 会话的纽带</td></tr>
+    <tr><td>scheduled_job</td><td>1 : N</td><td>trigger（JSON）、job_type、job_config</td><td>cron / interval / 一次性</td></tr>
+    <tr><td>job_run_record</td><td>1 : N</td><td>status、duration、num_turns、result_summary</td><td>仅元数据——转录留在 PV；删除任务时 <code>job_id</code> SET NULL</td></tr>
+    <tr><td>secret <span class="pill done" style="margin-left:4px">切片</span></td><td>1 : 1</td><td>bundle（Fernet 密文）、generation</td><td>读取时解密；唤醒时物化为一个 K8s Secret</td></tr>
+  </table>
+  <div class="note">
+    <div class="h">为什么不把转录放进数据库？</div>
+    会话 JSONL 是追加密集、按用户、且 CLI/SDK 原生读取这些文件——数据库副本会冗余且可能漂移。Postgres 持有
+    <em>跨用户查询的事实</em>；PV 持有 <em>Agent 读写的字节</em>。转录内容绝不复制进关系存储（决策 M5：文件系统
+    就是会话存储；没有 <code>session_index</code> 表）。
+  </div>
+</section>
+
+<!-- ============================ 7 代码映射 ============================ -->
+<section id="codemap">
+  <div class="kicker">第 7 部分</div>
+  <h2>7. 代码映射 —— 从单体到 Monorepo</h2>
+  <p class="lead">切分是可逆的绞杀者。每个现有应用文件都被赋予一个目标可部署单元和一个改造动词；单体会一直可启动，
+  直到第 4 阶段 connector/scheduler 抽离。</p>
+
+  <figure>
+    <svg viewBox="0 0 1000 430" role="img" aria-label="绞杀者迁移图">
+      <defs>
+        <marker id="m-a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#8c959f"/></marker>
+      </defs>
+      <rect x="40" y="40" width="250" height="340" rx="4" fill="#ffffff" stroke="#d0d7de"/>
+      <text x="60" y="66" class="b-title" font-size="13">priva/api — 单体</text>
+      <text x="60" y="82" class="b-sub">3 个 OS 进程 · 约 6.9K 行</text>
+      <g font-size="11" fill="#656d76">
+        <rect x="58" y="96"  width="214" height="26" rx="3" fill="#f6f8fa" stroke="#d0d7de"/><text x="68" y="113">claude_sdk/service.py（运行循环）</text>
+        <rect x="58" y="128" width="214" height="26" rx="3" fill="#f6f8fa" stroke="#d0d7de"/><text x="68" y="145">routers/ (17) · hooks · mcp · skills</text>
+        <rect x="58" y="160" width="214" height="26" rx="3" fill="#f6f8fa" stroke="#d0d7de"/><text x="68" y="177">scheduler/daemon.py（APScheduler）</text>
+        <rect x="58" y="192" width="214" height="26" rx="3" fill="#f6f8fa" stroke="#d0d7de"/><text x="68" y="209">channels/daemon.py（WeCom）</text>
+        <rect x="58" y="224" width="214" height="26" rx="3" fill="#f6f8fa" stroke="#d0d7de"/><text x="68" y="241">user_store · job_store（YAML）</text>
+        <rect x="58" y="256" width="214" height="26" rx="3" fill="#f6f8fa" stroke="#d0d7de"/><text x="68" y="273">models/* · serialization · crypto</text>
+        <rect x="58" y="288" width="214" height="26" rx="3" fill="#f6f8fa" stroke="#d0d7de"/><text x="68" y="305">auth.py · config.py</text>
+        <rect x="58" y="320" width="214" height="26" rx="3" fill="#f6f8fa" stroke="#d0d7de"/><text x="68" y="337">web/（React，单构建）· bundled/skills</text>
+      </g>
+      <g stroke="#8c959f" stroke-width="1.2" stroke-dasharray="4 4">
+        <line x1="290" y1="109" x2="700" y2="80"  marker-end="url(#m-a)"/>
+        <line x1="290" y1="145" x2="700" y2="120" marker-end="url(#m-a)"/>
+        <line x1="290" y1="173" x2="700" y2="172" marker-end="url(#m-a)"/>
+        <line x1="290" y1="205" x2="700" y2="216" marker-end="url(#m-a)"/>
+        <line x1="290" y1="241" x2="700" y2="262" marker-end="url(#m-a)"/>
+        <line x1="290" y1="273" x2="700" y2="306" marker-end="url(#m-a)"/>
+        <line x1="290" y1="337" x2="700" y2="352" marker-end="url(#m-a)"/>
+      </g>
+      <text x="430" y="34" class="b-sub" text-anchor="middle">LIFT · RESHAPE · SPLIT · RELOCATE</text>
+      <g font-size="11">
+        <rect x="700" y="64"  width="258" height="32" rx="3" fill="#ffffff" stroke="#1a7f37"/><rect x="700" y="64" width="3" height="32" fill="#1a7f37"/><text x="714" y="84" fill="#1f2328">agent-runner &nbsp;<tspan fill="#656d76">service.py + routers + skills</tspan></text>
+        <rect x="700" y="104" width="258" height="32" rx="3" fill="#ffffff" stroke="#8250df"/><rect x="700" y="104" width="3" height="32" fill="#8250df"/><text x="714" y="124" fill="#1f2328">control-panel &nbsp;<tspan fill="#656d76">EPP + 管理 + faces</tspan></text>
+        <rect x="700" y="156" width="258" height="32" rx="3" fill="#ffffff" stroke="#9a6700"/><rect x="700" y="156" width="3" height="32" fill="#9a6700"/><text x="714" y="176" fill="#1f2328">scheduler &nbsp;<tspan fill="#656d76">触发→派发（P4）</tspan></text>
+        <rect x="700" y="200" width="258" height="32" rx="3" fill="#ffffff" stroke="#9a6700"/><rect x="700" y="200" width="3" height="32" fill="#9a6700"/><text x="714" y="220" fill="#1f2328">channel-connector &nbsp;<tspan fill="#656d76">租约 + 扇出（P4）</tspan></text>
+        <rect x="700" y="246" width="258" height="32" rx="3" fill="#ffffff" stroke="#0e7490"/><rect x="700" y="246" width="3" height="32" fill="#0e7490"/><text x="714" y="266" fill="#1f2328">data-spine &nbsp;<tspan fill="#656d76">存储 → gRPC</tspan></text>
+        <rect x="700" y="290" width="258" height="32" rx="3" fill="#ffffff" stroke="#0969da"/><rect x="700" y="290" width="3" height="32" fill="#0969da"/><text x="714" y="310" fill="#1f2328">libs/common &nbsp;<tspan fill="#656d76">models · wire · crypto</tspan></text>
+        <rect x="700" y="336" width="258" height="32" rx="3" fill="#ffffff" stroke="#8250df"/><rect x="700" y="336" width="3" height="32" fill="#8250df"/><text x="714" y="356" fill="#1f2328">web &nbsp;<tspan fill="#656d76">2 个构建目标 → CP</tspan></text>
+      </g>
+    </svg>
+    <figcaption>来源：docs/architecture/code-split.md —— 从单体到可部署单元的逐文件桥接</figcaption>
+  </figure>
+
+  <h3 id="inversion">反转——一切赖以悬挂的接缝</h3>
+  <p>在单体里，进程内的运行循环 <code>agent_run_events</code>（<code>claude_sdk/service.py</code>）有
+  <b>三个进程内调用方</b>：WebUI agent 路由、scheduler 守护进程、channels 守护进程。切分 <b>砍掉其中两个</b>：</p>
+  <div class="card">
+    <div class="grid2" style="gap:24px">
+      <div>
+        <h4 style="color:var(--red)">现在（耦合）</h4>
+        <div class="mono" style="font-size:12px;line-height:1.9;color:var(--text-secondary)">
+          agent router&nbsp;&nbsp;&nbsp;─┐<br>
+          scheduler daemon ─┼─ 进程内 ─▶ run<br>
+          channels daemon&nbsp;&nbsp;─┘
+        </div>
+      </div>
+      <div>
+        <h4 style="color:var(--green)">之后（派发器）</h4>
+        <div class="mono" style="font-size:12px;line-height:1.9;color:var(--text-secondary)">
+          agent router（Pod 内）─┐<br>
+          scheduler ─ 派发 ──────┼─▶ Pod 跑这次交互<br>
+          connector ─ 派发 ──────┘
+        </div>
+      </div>
+    </div>
+  </div>
+  <p>切分后，<b>只有 agent-runner 镜像装载 <code>service.py</code></b>。scheduler 向 inbox RPUSH 并 CR-patch
+  唤醒；connector 调用 EPP 后直拨被唤醒的 Pod。第 4 阶段的验收测试就是字面意义上的：<em>两个服务都不再 import
+  <code>claude_sdk</code></em>。这也是为什么 scheduler 的执行器被 <em>重定位</em> 到 Pod——它们同样在跑 Agent。</p>
+
+  <h3>改造动词（如何读这张图）</h3>
+  <div class="grid3">
+    <div class="mini"><h4>LIFT（搬运）</h4><p style="font-size:12px;margin:0">文件原样移动（如 <code>models/*</code>、hooks 执行器）。</p></div>
+    <div class="mini"><h4>RESHAPE（重塑）</h4><p style="font-size:12px;margin:0">移动 + 改行为：存储→RPC、进程内→派发、单例→每 Pod。</p></div>
+    <div class="mini"><h4>SPLIT（拆分）</h4><p style="font-size:12px;margin:0">一个路由的多个路由分到不同单元（双面路由）。</p></div>
+    <div class="mini"><h4>RELOCATE（重定位）</h4><p style="font-size:12px;margin:0">搬到非显然的归宿（scheduler 执行器 → Pod）。</p></div>
+    <div class="mini"><h4>DELETE（删除）</h4><p style="font-size:12px;margin:0">由平台机制替代（<code>server.sh</code>、<code>config_store</code>）。</p></div>
+    <div class="mini"><h4>NEW（新建）</h4><p style="font-size:12px;margin:0">无现有代码（operator、state-reader、EPP、Redis 目录）。</p></div>
+  </div>
+
+  <div class="note">
+    <div class="h">双面路由</div>
+    六个路由同时暴露 <em>管理/配置</em> 面（→ control-panel）和 <em>运行时</em> 面（→ agent-runner）：
+    <code>hooks</code>、<code>mcp</code>、<code>skills</code>、<code>subagents</code>、<code>pty</code>、
+    <code>scheduler</code>。配置 CRUD 落在控制面（→ 数据面）；执行留在凭据与文件所在的 Pod。实际构建中，
+    agent-runner 把 Agent 相关路由整体保留，由控制面代理它们——这是第 2 阶段发现的务实偏差（hook 注册表与 runner 进程内耦合）。
+  </div>
+</section>
+
+<!-- ============================ 8 状态 ============================ -->
+<section id="status">
+  <div class="kicker">第 8 部分</div>
+  <h2>8. 迁移状态</h2>
+  <p class="lead">一个 fork 优先、渐进式的构建计划。第 0–2 阶段加上一个被压缩进来的第 3 阶段垂直切片均已完成并在
+  <code>main</code> 上；connector/scheduler 抽离与完整 K8s 加固仍待办。</p>
+
+  <table>
+    <tr><th style="width:70px">阶段</th><th>目标</th><th>验收 / 实际构建</th><th style="width:90px">状态</th></tr>
+    <tr><td><b>0</b></td><td>Monorepo 骨架 + 就地抽出 <code>libs/common</code></td><td>7 次抽取经 re-export shim 落地；import 边界验证为 CLEAN；启动绿灯</td><td><span class="pill done">完成</span></td></tr>
+    <tr><td><b>1</b></td><td><code>protos/</code> + 基于 SQLite 的 data-spine；切换存储</td><td>16→5 表；数据面客户端（进程内 + gRPC 桩）；<b>177 项测试通过</b></td><td><span class="pill done">完成</span></td></tr>
+    <tr><td><b>2</b></td><td>把 agent-runner + control-panel 切为本地进程</td><td>彻底切换——单体有意不再可启动；反向代理模式验证通过</td><td><span class="pill done">完成</span></td></tr>
+    <tr><td><b>3</b> <span style="color:var(--text-dim)">切片</span></td><td>minikube 上的每账户供给：agentgateway + operator + EPP</td><td>2026-06-21 合入 <code>main</code>；冷启动 <b>4.1s</b>；真实 BYOK 交互穿过边缘 → <code>HTTP 200</code>；WS 聊天端到端可用</td><td><span class="pill done">完成</span></td></tr>
+    <tr><td><b>3</b> <span style="color:var(--text-dim)">完整</span></td><td>factored <code>resolve·mint·wake·steer</code> + 内部 RPC + faces/内部 隔离</td><td>EPP（EndPoint Picker）已建；<code>:8081</code> 内部 RPC + 完整 CP 隔离模式待办</td><td><span class="pill part">部分</span></td></tr>
+    <tr><td><b>4</b></td><td>抽离 connector + scheduler；斩断「反转」</td><td>两者仍在休眠的单体里；须去掉 <code>claude_sdk</code> 并变成派发器</td><td><span class="pill plan">下一步</span></td></tr>
+    <tr><td><b>5</b></td><td>operator（切片中已完成）+ state-reader</td><td>operator 已跑在 minikube；免唤醒的 <code>state-reader</code> 尚未构建</td><td><span class="pill part">部分</span></td></tr>
+    <tr><td><b>6</b></td><td>完整 K8s 接线：Dockerfile、NetworkPolicy、dev overlay</td><td>基础 manifest + 4 个 Dockerfile 已有；NetworkPolicy + <code>deploy/dev</code> overlay 待办</td><td><span class="pill part">部分</span></td></tr>
+  </table>
+
+  <div class="note ok">
+    <div class="h">当前前沿</div>
+    平台已能让一次完整的 Agent 交互穿过 minikube 上的真实边缘。下一个承重步骤是 <b>第 4 阶段</b>：把
+    channel-connector 与 scheduler 抽出单体，使二者都不再 import 运行循环——之后单体即真正退役，所有入口
+    （浏览器、IM、定时）都在每租户 Pod 上运行。
+  </div>
+</section>
+
+<!-- ============================ 9 关键洞察 ============================ -->
+<section id="insights">
+  <div class="kicker">第 9 部分</div>
+  <h2>9. 关键洞察</h2>
+  <p class="lead">除功能清单之外，这套代码库的可圈可点之处。</p>
+
+  <div class="grid2">
+    <div class="card"><h4 style="margin-top:0;color:var(--blue)">决策先行的工程</h4>
+      代码库罕见地以文档为引领：26 条锁定决策 → 6 份组件深潜 → 一张逐文件切分图 → 一次在写码 <em>之前</em> 就
+      预演脑裂、僵尸 Pod、双权威锁的「对抗性设计风险」复盘。文档还明确标出后续深潜在哪里 <b>取代</b> 了蓝图
+      （M1/M2/M5/M6），让计划对自身的修订保持诚实。</div>
+
+    <div class="card"><h4 style="margin-top:0;color:var(--green)">边缘转发、EPP 决策</h4>
+      把Byte path与控制路径分离，是杠杆最大的一个选择。它让前门保持无状态（N 副本，无 Future、无 JSONL），让
+      缩容至零变成每请求一次的唤醒，也意味着对延迟敏感的 EPP 日后可以剥离成独立单元，而不触碰任何承载字节的东西。</div>
+
+    <div class="card"><h4 style="margin-top:0;color:var(--purple)">一个不可变 id 消灭一整类 bug</h4>
+      把每个锁、路由、绑定、审批都以平台生成、且 <em>就是</em> CLI <code>--session-id</code> 的
+      <code>session_uuid</code> 为键——配合 CREATE/RESUME 拆分、无 remap——从根上移除了原本的孤儿 id 竞态，
+      而非修补其症状。</div>
+
+    <div class="card"><h4 style="margin-top:0;color:var(--cyan)">按持久性契约安置状态</h4>
+      三个存储，各取所长：SQLite（单一所有者的账本）、Redis（网络化原子协调）、PVC（CLI 原生读取的文件）。
+      「绝不把转录字节复制进关系存储」这条规则避免了漂移，也让数据库保持为跨用户事实的轻量索引。</div>
+
+    <div class="card"><h4 style="margin-top:0;color:var(--orange)">对 alpha 状态足够坦诚</h4>
+      实际构建的传输除那一跳被强制的 TLS ext_proc 外处处明文；HS256 共享密钥令牌暂代 JWKS/mTLS；BYOK + 计量
+      延后。关键在于：每个权宜之计都坐在一条稳定接缝之后（<code>mint</code>/<code>verify</code>、wake/steer
+      接口），所以生产化替换是局部的，而非重写。</div>
+
+    <div class="card"><h4 style="margin-top:0;color:var(--blue)">可运维性内建</h4>
+      确定性的 K8s 命名（<code>ar-&lt;account&gt;</code>）使得无需注册表；operator 是 <em>唯一</em> 伸缩者，于是只有一条
+      唤醒通道；<code>/health</code> 暴露 <code>active_runs</code> + <code>last_activity_ts</code> 以支撑简单的空闲回收；
+      每个服务都暴露 <code>/metrics</code>；<code>priva-cloud</code> 启动器经入口点发现，统一派发到所有服务。</div>
+  </div>
+
+  <h3>风险与关注项</h3>
+  <ul class="tight">
+    <li><b>单体仍承载 IM + 定时。</b>第 4 阶段落地前，channels 与 scheduler 守护进程仍住在休眠的 <code>priva/api</code>
+      树里——平台尚未完全自托管这些入口。</li>
+    <li><b>Redis 分层已设计，但尚未接线。</b>协调底座（inbox、审批索引、租约）随 connector/scheduler 到来；
+      跨副本的权限会合依赖它。</li>
+    <li><b>data-spine 单写入者。</b><code>replicas:1</code> + <code>Recreate</code> 对 SQLite 是正确的，但也是
+      吞吐/可用性上限；<code>PgRepo</code> 接口已为将来的 Postgres 路径打桩。</li>
+    <li><b>alpha 安全态势。</b>集群内明文 gRPC、自签名 skip-verify TLS、共享密钥 runner 令牌、放松的出口——
+      都是刻意为之且接缝隔离，但在面向不可信暴露之前都必须翻转。</li>
+  </ul>
+</section>
+
+<!-- ============================ 10 评估与改进 ============================ -->
+<section id="assessment">
+  <div class="kicker">第 10 部分</div>
+  <h2>10. 实现评估与改进</h2>
+  <p class="lead">对各维度给出评分，并据此排出改进路线。评分反映 <b>截至当前 main 的 as-built 实现</b>（而非设计意图）——
+  因此「设计 / 文档」与「生产就绪度」之间的落差本身就是结论。</p>
+
+  <div class="overall">
+    <div class="big">6.9<small>/10</small></div>
+    <div class="desc">
+      <div class="t">卓越的设计与文档 · 早期 alpha 的实现成熟度</div>
+      <div style="color:var(--text-secondary);font-size:13px">12 维度等权平均。亮点在架构（9.0）与文档（9.5）；短板在鲁棒性（5.0）、安全（4.5）、
+      可扩展性（5.5）——均为刻意延后或已知缺口，而非设计缺陷。</div>
+    </div>
+  </div>
+
+  <h3 id="scorecard">维度评分</h3>
+  <table>
+    <tr><th style="width:150px">维度</th><th style="width:165px">评分</th><th>简评</th></tr>
+    <tr><td><b>架构与设计</b></td><td><div class="bar"><span class="track"><i style="width:90%;background:var(--green)"></i></span><b style="color:var(--green)">9.0</b></div></td><td>决策先行；Byte path / 控制路径分离、<code>session_uuid</code> 不变量是高杠杆选择。</td></tr>
+    <tr><td><b>文档质量</b></td><td><div class="bar"><span class="track"><i style="width:95%;background:var(--green)"></i></span><b style="color:var(--green)">9.5</b></div></td><td>26 决策 → 6 深潜 → 逐文件切分 → 对抗性风险复盘，且明示自我修订（M1/M2/M5/M6）。行业罕见。</td></tr>
+    <tr><td><b>代码切分与模块化</b></td><td><div class="bar"><span class="track"><i style="width:85%;background:var(--green)"></i></span><b style="color:var(--green)">8.5</b></div></td><td><code>uv</code> 工作区 + <code>libs/common</code> 单向边界 + 绞杀者；可逆、可增量。</td></tr>
+    <tr><td><b>边缘与 Byte path</b></td><td><div class="bar"><span class="track"><i style="width:80%;background:var(--green)"></i></span><b style="color:var(--green)">8.0</b></div></td><td>EPP relay / steer 优雅；端点发现热路径缺活性复检（见改进 P0）。</td></tr>
+    <tr><td><b>状态与数据模型</b></td><td><div class="bar"><span class="track"><i style="width:80%;background:var(--green)"></i></span><b style="color:var(--green)">8.0</b></div></td><td>三存储按持久性契约分置；16→5 表收敛克制；转录留 PV、不入库。</td></tr>
+    <tr><td><b>可观测与运维</b></td><td><div class="bar"><span class="track"><i style="width:70%;background:var(--cyan)"></i></span><b style="color:var(--cyan)">7.0</b></div></td><td><code>/health</code> + <code>/metrics</code> + 确定性命名 + 单一伸缩者；缺告警 / 追踪 / 面板。</td></tr>
+    <tr><td><b>多租户隔离</b></td><td><div class="bar"><span class="track"><i style="width:65%;background:var(--yellow)"></i></span><b style="color:var(--yellow)">6.5</b></div></td><td>Pod + PVC + RBAC 到位；NetworkPolicy 未落、Pod 以 root 运行（<code>IS_SANDBOX</code>）。</td></tr>
+    <tr><td><b>测试</b></td><td><div class="bar"><span class="track"><i style="width:60%;background:var(--yellow)"></i></span><b style="color:var(--yellow)">6.0</b></div></td><td>data-spine 177 项测试扎实；K8s 切片与边缘互通主要靠手验。</td></tr>
+    <tr><td><b>可扩展性</b></td><td><div class="bar"><span class="track"><i style="width:55%;background:var(--yellow)"></i></span><b style="color:var(--yellow)">5.5</b></div></td><td>阻塞轮询唤醒、data-spine 单写、Redis 协调尚未接线。</td></tr>
+    <tr><td><b>部署成熟度 / 完成度</b></td><td><div class="bar"><span class="track"><i style="width:55%;background:var(--yellow)"></i></span><b style="color:var(--yellow)">5.5</b></div></td><td>minikube 切片端到端打通；Phase 4–6（connector/scheduler/state-reader、NetworkPolicy、prod manifests）未完。</td></tr>
+    <tr><td><b>鲁棒性与容错</b></td><td><div class="bar"><span class="track"><i style="width:50%;background:var(--orange)"></i></span><b style="color:var(--orange)">5.0</b></div></td><td>死 Pod 黑洞、休眠竞态、accept-loss；缺自愈与 status 纠正。</td></tr>
+    <tr><td><b>安全态势（alpha）</b></td><td><div class="bar"><span class="track"><i style="width:45%;background:var(--red)"></i></span><b style="color:var(--red)">4.5</b></div></td><td>明文 gRPC、共享密钥令牌、skip-verify TLS、明文 creds Secret、root Pod、放松出口——均刻意延后但真实。</td></tr>
+  </table>
+  <p style="font-size:12px;color:var(--text-dim)">评分口径：≥8.0 <span style="color:var(--green)">扎实</span> · 7.x <span style="color:var(--cyan)">良好</span> · 5.5–6.9 <span style="color:var(--yellow)">可用待补</span> · &lt;5.5 <span style="color:var(--orange)">早期 / 有缺口</span>。</p>
+
+  <h3 id="roadmap">改进路线</h3>
+  <p class="lead">按优先级排序。<span class="prio p0">P0</span> 修完即可消除用户可见的黑洞 / 偶发失败；
+  <span class="prio p1">P1</span> 决定能否面向更广用户；<span class="prio p2">P2</span> 是把绞杀者走完。</p>
+  <table>
+    <tr><th style="width:64px">优先级</th><th style="width:170px">项</th><th>改进动作</th><th>出处</th></tr>
+    <tr><td><span class="prio p0">P0</span></td><td><b>死 Pod 自愈</b></td><td>热路径增加活性复检；<code>idle_sweep</code> 探活连续失败 → 清 <code>status.podIP</code> 并强制重唤醒，消除「死 IP 黑洞」。</td><td class="path">provisioner.py:104 · reconcile.py:88</td></tr>
+    <tr><td><span class="prio p0">P0</span></td><td><b>休眠竞态消解</b></td><td><code>scale 1→0</code> 前置 <em>draining</em> 状态 + 宽限；或 steer 命中终止中 Pod 时由 gateway 重走 EPP 重解析（破 TOCTOU）。</td><td class="path">reconcile.py:94</td></tr>
+    <tr><td><span class="prio p0">P0</span></td><td><b>唤醒前 pre-gate</b></td><td>EPP 在唤醒前校验账户 <code>disabled</code> / 超配额，直接拒绝而不冷启（蓝图已定义，切片未实现）。</td><td class="path">extproc.py:122</td></tr>
+    <tr><td><span class="prio p1">P1</span></td><td><b>非阻塞事件唤醒</b></td><td>用 watch / informer 事件替代 <code>time.sleep</code> 轮询；并保证 <code>wake_timeout &lt; agentgateway 的 ext_proc 超时</code>。</td><td class="path">provisioner.py:117</td></tr>
+    <tr><td><span class="prio p1">P1</span></td><td><b>生产安全切换</b></td><td>JWKS / mTLS 取代 HS256 共享密钥；边缘真 TLS；EPP 启用真证书校验（<code>mint</code>/<code>verify</code> 接缝已留）。</td><td class="path">runner_token.py · extproc.py</td></tr>
+    <tr><td><span class="prio p1">P1</span></td><td><b>NetworkPolicy 隔离</b></td><td>Pod 仅允许 agentgateway 入站；control-panel faces 与内部 <code>:8081</code> 网络分离。</td><td class="path">deploy/</td></tr>
+    <tr><td><span class="prio p1">P1</span></td><td><b>凭据生命周期 + KMS</b></td><td>creds Secret 改投影 / 短存活、Pod 崩溃时清理；最终以 KMS 信封加密替换当前单一 Fernet 密钥。</td><td class="path">operator/secrets.py</td></tr>
+    <tr><td><span class="prio p1">P1</span></td><td><b>Redis 协调分层接线</b></td><td>落地 inbox / 审批索引 / 租约（T1 持久 + T2 临时），支撑 IM 与跨副本权限会合。</td><td class="path">libs/common/redis_catalog.py</td></tr>
+    <tr><td><span class="prio p2">P2</span></td><td><b>Phase 4：抽离 connector + scheduler</b></td><td>斩断「反转」——两者改为派发器、不再 <code>import claude_sdk</code>，单体真正退役。</td><td class="path">services/{channel-connector,scheduler}</td></tr>
+    <tr><td><span class="prio p2">P2</span></td><td><b>Phase 5：state-reader</b></td><td>免唤醒的只读会话 / 转录读取（Pod 休眠时仍可列会话）。</td><td class="path">services/state-reader</td></tr>
+    <tr><td><span class="prio p2">P2</span></td><td><b>data-spine Postgres 路径</b></td><td>启用已打桩的 <code>PgRepo</code>，解除 SQLite 单写吞吐 / 可用性上限。</td><td class="path">data-spine/repo.py</td></tr>
+    <tr><td><span class="prio p2">P2</span></td><td><b>出口网关 + 计量</b></td><td>M6 解除后恢复受控出口（allow-list + 凭据注入 + 计量）与按量成本。</td><td class="path">blueprint §3</td></tr>
+    <tr><td><span class="prio p2">P2</span></td><td><b>完整 K8s 接线 + 测试覆盖</b></td><td>全套 Dockerfile / manifests、<code>deploy/dev</code> overlay（kind/k3d），以及边缘 / 切片的自动化测试。</td><td class="path">deploy/ · tests/</td></tr>
+  </table>
+
+  <div class="note ok">
+    <div class="h">小结</div>
+    这是一个 <b>「设计与文档显著领先于实现成熟度」</b> 的项目——正是早期、决策驱动的 alpha 的健康形态。把 <b>P0 三项</b>
+    修完即可消除用户可见的黑洞与偶发失败；<b>P1</b> 决定能否安全面向更广用户；<b>P2</b> 把绞杀者迁移走到终点、退役单体。
+    各处快捷方式都坐在稳定接缝之后（<code>mint</code>/<code>verify</code>、wake/steer、<code>PgRepo</code>），所以这些都是
+    <em>渐进式</em> 演进，而非重写。
+  </div>
+</section>
+
+<div class="footer">
+  由实际构建的仓库生成 · 分支 <b>main</b> @ <code>cf868e9</code> · 2026-06-22<br>
+  主要来源：docs/architecture/{byte-path, multi-tenant-platform, code-split, data-relationship-map}.md ·
+  docs/migration_progress/phase-{0..6}.md · 并经 services/{agent-runner,control-panel,data-spine,operator}、
+  libs/common、deploy/* 核对。<br>
+  Priva Cloud —— 基于 Claude Agent SDK 的自托管个人 AI 助手 · MIT 许可证。
+</div>
+
+</main>
+</div>
+</body>
+</html>
