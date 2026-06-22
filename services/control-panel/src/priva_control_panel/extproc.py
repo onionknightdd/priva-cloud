@@ -14,7 +14,6 @@ the pod verifies. Cold/unauth -> an ext_proc immediate response (401 / "waking, 
 
 from __future__ import annotations
 
-import asyncio
 import datetime
 import ssl
 import tempfile
@@ -134,8 +133,15 @@ async def handle_request_headers(http_headers) -> "ep.ProcessingResponse":
         user = None
     if user is None or not getattr(user, "account_id", None):
         return _immediate(401, "Authentication required")
+    # Pre-gate disabled/offboarding/purged accounts BEFORE waking a pod — fail-closed
+    # (anything that isn't exactly "active" is blocked). 403 (vs the 401 unauth path)
+    # so the SPA can distinguish "revoked" from "log in again". status is only as fresh
+    # as the token resolution above (mid-session disable may lag until refresh).
+    # Over-quota/spend is out of scope (QuotaRecord is a cap with no live counter).
+    if getattr(user, "status", "active") != "active":
+        return _immediate(403, "account access revoked")
     try:
-        endpoint = await asyncio.to_thread(provisioner.wake_and_wait, user.account_id)
+        endpoint = await provisioner.wake_and_wait(user.account_id)
     except Exception as exc:
         logger.warning("wake failed account={}: {}", user.account_id, exc)
         return _immediate(503, "agent runner unavailable, retry shortly")

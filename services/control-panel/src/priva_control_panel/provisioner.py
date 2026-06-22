@@ -9,15 +9,23 @@ EPP steers agentgateway to. Deterministic naming means no registry is needed.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime, timezone
 
+import httpx
 from kubernetes import client, config
 
 from priva_common.config import get_settings
 from priva_common.logging import get_app_logger
 
 logger = get_app_logger(__name__)
+
+# Per-account in-flight wake Tasks (coalescing). Concurrent cold requests for one account
+# await a single shared wake (one spec.wake patch, one poll loop) instead of each firing
+# their own. In-process / per-replica only: prod runs N EPP replicas, so this dedupes
+# within a replica — the operator's idempotent on_wake is the real cross-replica safety net.
+_wake_tasks: dict[str, "asyncio.Task[str | None]"] = {}
 
 GROUP = "priva.io"
 VERSION = "v1alpha1"
@@ -95,31 +103,93 @@ def _status(account_id: str) -> dict:
         raise
 
 
-def wake_and_wait(account_id: str) -> str | None:
-    """Ensure the account's pod is awake; return the steer endpoint ``ip:port`` or None on timeout."""
+def _patch_wake(account_id: str) -> None:
+    """Patch the only scale-up trigger (spec.wake.requestedAt); the operator does the rest."""
     s = get_settings()
     ns = s.kubernetes.namespace_tenants
-    port = s.kubernetes.runner_service_port
+    _custom().patch_namespaced_custom_object(
+        GROUP, VERSION, ns, PLURAL, account_id, {"spec": {"wake": {"requestedAt": _now_iso()}}})
 
-    st = _status(account_id)
-    if st.get("phase") == "Running" and st.get("podIP"):
-        return f"{st['podIP']}:{port}"
 
-    # Patch the only scale-up trigger; the operator does the rest.
+async def _alive(pod_ip: str, port: int) -> bool:
+    """Bounded, fail-open liveness probe of a warm pod's ``/health``.
+
+    A fast "is anything listening there" guard so a dead/replaced pod behind a stale
+    status.podIP can't become a permanent black hole (#1/#2). Any error/timeout => treat
+    as not-alive so we fall through to a re-wake; a probe error never crashes the EPP.
+
+    NOTE: k8s reuses pod-CIDR IPs, so a 200 here could be a *different* account's pod —
+    this is only a liveness hint. The authoritative freshness source stays the
+    operator-healed status.podIP (the operator self-heals it against pod reality).
+    """
     try:
-        _custom().patch_namespaced_custom_object(
-            GROUP, VERSION, ns, PLURAL, account_id, {"spec": {"wake": {"requestedAt": _now_iso()}}})
+        async with httpx.AsyncClient(trust_env=False) as cx:
+            r = await cx.get(f"http://{pod_ip}:{port}/health", timeout=1.0)
+        return r.status_code < 500
+    except Exception:
+        return False
+
+
+async def _drive_wake(account_id: str) -> str | None:
+    """Patch spec.wake once, then poll status until Running+podIP or ``wake_hold_seconds``.
+
+    Shared by all concurrent cold requests for one account (coalescing). Bounded by the
+    EPP hold (fast-503): on expiry it returns None — the caller 503s "waking, retry" while
+    the operator keeps driving the wake (its own wake_timeout_seconds), so the SPA's retry
+    lands warm. Blocking kube calls are off-loaded to threads so the event loop stays free.
+    """
+    s = get_settings()
+    port = s.kubernetes.runner_service_port
+    try:
+        await asyncio.to_thread(_patch_wake, account_id)
     except client.ApiException as exc:
         logger.warning("wake patch failed account={}: {}", account_id, exc)
         return None
 
-    deadline = time.monotonic() + float(s.kubernetes.wake_timeout_seconds)
+    deadline = time.monotonic() + float(s.kubernetes.wake_hold_seconds)
     while time.monotonic() < deadline:
-        st = _status(account_id)
+        st = await asyncio.to_thread(_status, account_id)
         if st.get("phase") == "Running" and st.get("podIP"):
             return f"{st['podIP']}:{port}"
-        time.sleep(1.0)
+        await asyncio.sleep(0.5)
     return None
+
+
+async def wake_and_wait(account_id: str) -> str | None:
+    """Ensure the account's pod is awake; return the steer endpoint ``ip:port`` or None.
+
+    Warm path trusts the operator-healed status.podIP but guards it with a fail-open
+    liveness probe; on probe failure (dead/replaced pod) it falls through to a coalesced
+    re-wake that returns the operator-healed fresh IP. None => the caller returns a
+    fast-503 "waking, retry".
+    """
+    s = get_settings()
+    port = s.kubernetes.runner_service_port
+
+    # Warm path: trust status, but verify the pod is actually answering (#1/#2).
+    st = await asyncio.to_thread(_status, account_id)
+    if st.get("phase") == "Running" and st.get("podIP"):
+        if await _alive(st["podIP"], port):
+            return f"{st['podIP']}:{port}"
+        logger.info("warm-path liveness probe failed account={}; re-waking", account_id)
+
+    # Cold / dead path: coalesce concurrent wakes for the same account onto one Task.
+    task = _wake_tasks.get(account_id)
+    if task is None or task.done():
+        task = asyncio.ensure_future(_drive_wake(account_id))
+        _wake_tasks[account_id] = task
+
+        # Clear our own entry when the wake finishes (success or failure) so the next cold
+        # request starts a fresh wake. The guard avoids clobbering a newer task.
+        def _cleanup(t: "asyncio.Task[str | None]", aid: str = account_id) -> None:
+            if _wake_tasks.get(aid) is t:
+                _wake_tasks.pop(aid, None)
+
+        task.add_done_callback(_cleanup)
+
+    # shield: a cancelled awaiter (e.g. the gateway dropped the stream) must not cancel the
+    # shared wake out from under the other coalesced callers.
+    return await asyncio.shield(task)
 
 
 def terminate(account_id: str) -> None:

@@ -165,7 +165,11 @@ class KubernetesSettings(BaseModel):
     idle_grace_seconds: int = 1800  # default spec.idle.graceSeconds (scale-to-zero)
     min_alive_after_wake_seconds: int = 1800  # anti-thrash floor
     max_concurrent_sessions: int = 3  # default spec.concurrency.maxConcurrentSessions
-    wake_timeout_seconds: int = 60  # control-panel wake-and-hold bound before "waking, retry"
+    wake_timeout_seconds: int = 60  # operator wait_pod_ready bound (how long it drives a wake)
+    # EPP fast-503 hold: how long the ext_proc waits before returning "waking, retry" so
+    # the SPA retries warm. MUST be < agentgateway's ext_proc stream timeout (the operator
+    # keeps driving the wake past this). Distinct from wake_timeout_seconds above.
+    wake_hold_seconds: int = 5
 
 
 class EdgeSettings(BaseModel):

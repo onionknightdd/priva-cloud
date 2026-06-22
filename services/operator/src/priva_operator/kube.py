@@ -11,7 +11,7 @@ import time
 from kubernetes import client, config
 
 from priva_common.logging import get_app_logger
-from priva_operator import names
+from priva_operator import GROUP, PLURAL, VERSION, names
 
 logger = get_app_logger(__name__)
 
@@ -37,6 +37,11 @@ def apps() -> "client.AppsV1Api":
 def core() -> "client.CoreV1Api":
     _load()
     return client.CoreV1Api()
+
+
+def custom() -> "client.CustomObjectsApi":
+    _load()
+    return client.CustomObjectsApi()
 
 
 def _ignore_conflict(fn, *args, **kwargs):
@@ -153,15 +158,44 @@ def scale(namespace, account_id, replicas: int) -> None:
         names.deploy_name(account_id), namespace, {"spec": {"replicas": replicas}})
 
 
-def wait_pod_ready(namespace, account_id, timeout: float = 60.0) -> str | None:
-    """Poll until a pod for this account is Ready; return its podIP."""
-    deadline = time.monotonic() + timeout
+def current_ready_pod_ip(namespace, account_id) -> str | None:
+    """IP of the *one* pod for this account that is Ready **and** not terminating, else None.
+
+    Pure pod query — the single source of truth for "is there a live pod and where".
+    Deliberately does NOT consult ``status.phase``: phase is *derived from* this, so
+    coupling them would be circular. The ``deletion_timestamp is None`` filter drops a
+    pod that is mid-termination (its IP is about to disappear) so callers never hand out
+    or probe a doomed endpoint.
+    """
     selector = f"priva.io/account-id={account_id}"
+    pods = core().list_namespaced_pod(namespace, label_selector=selector).items
+    for p in pods:
+        if p.metadata.deletion_timestamp is not None:
+            continue  # terminating — skip its soon-to-vanish IP
+        ready = any(c.type == "Ready" and c.status == "True" for c in (p.status.conditions or []))
+        if ready and p.status.pod_ip:
+            return p.status.pod_ip
+    return None
+
+
+def wait_pod_ready(namespace, account_id, timeout: float = 60.0) -> str | None:
+    """Poll until a Ready, non-terminating pod for this account appears; return its podIP."""
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        pods = core().list_namespaced_pod(namespace, label_selector=selector).items
-        for p in pods:
-            ready = any(c.type == "Ready" and c.status == "True" for c in (p.status.conditions or []))
-            if ready and p.status.pod_ip:
-                return p.status.pod_ip
+        ip = current_ready_pod_ip(namespace, account_id)
+        if ip:
+            return ip
         time.sleep(1.5)
     return None
+
+
+def set_cr_status(namespace, account_id, **fields) -> None:
+    """Patch the AgentTenant *status* subresource directly via the API.
+
+    kopf's ``patch.status[...]`` is buffered and applied as a single PATCH only when
+    the handler *returns*. Cases that must flip status **before** doing something else
+    (e.g. mark not-routable before tearing a pod down) can't use it — they go through
+    here. Idempotent: re-asserting the same fields is a no-op PATCH.
+    """
+    custom().patch_namespaced_custom_object_status(
+        GROUP, VERSION, namespace, PLURAL, account_id, {"status": fields})

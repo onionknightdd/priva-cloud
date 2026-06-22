@@ -39,6 +39,18 @@ def materialize(namespace: str, account_id: str, owner: dict) -> int:
     return len(bundle)
 
 
+def exists(namespace: str, account_id: str) -> bool:
+    """Whether the account's creds Secret currently exists (so the reconcile GC only
+    fires a DELETE when there's actually something to clean up)."""
+    try:
+        core().read_namespaced_secret(names.secret_name(account_id), namespace)
+        return True
+    except client.ApiException as exc:
+        if exc.status == 404:
+            return False
+        raise
+
+
 def delete(namespace: str, account_id: str) -> None:
     try:
         core().delete_namespaced_secret(names.secret_name(account_id), namespace)
