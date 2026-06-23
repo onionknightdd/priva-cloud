@@ -73,3 +73,7 @@ docs/project-analysis-report-zh.md
 
 # ---- Stray legacy paths a still-running server may recreate ----
 /vivian/
+.ds-sync/
+ds-bundle/
+.design-sync/
+web/.ds-*

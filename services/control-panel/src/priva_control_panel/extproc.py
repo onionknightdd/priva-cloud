@@ -144,9 +144,9 @@ async def handle_request_headers(http_headers) -> "ep.ProcessingResponse":
         endpoint = await provisioner.wake_and_wait(user.account_id)
     except Exception as exc:
         logger.warning("wake failed account={}: {}", user.account_id, exc)
-        return _immediate(503, "agent runner unavailable, retry shortly")
+        return _immediate(503, "agent sandbox unavailable, retry shortly")
     if not endpoint:
-        return _immediate(503, "agent runner is waking, retry in a moment")
+        return _immediate(503, "agent sandbox is waking, retry in a moment")
     return _steer(endpoint, mint(user.account_id, user.username))
 
 

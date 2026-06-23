@@ -1,9 +1,9 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { FileDiff, FolderTree, PanelRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
 import useSidebarStore from '../../stores/sidebarStore'
-import useAuthStore from '@shared/stores/authStore'
+import useSandboxStore from '../../stores/sandboxStore'
 import useUiStore from '@shared/stores/uiStore'
 import MessageListBoundary from './MessageListBoundary'
 import ChatInput from './ChatInput'
@@ -53,7 +53,8 @@ export default function ChatPanel() {
   const sessionId = useChatStore((s) => s.sessionId)
   const messages = useChatStore((s) => s.messages)
   const sidebarSessions = useSidebarStore((s) => s.sessions)
-  const authUser = useAuthStore((s) => s.user)
+  const agentWorkspace = useSandboxStore((s) => s.workspace)
+  const fetchHealth = useSandboxStore((s) => s.fetchHealth)
   const canvasVisible = useUiStore((s) => s.canvasVisible)
   const canvasMinimized = useUiStore((s) => s.canvasMinimized)
   const activeCanvasTab = useUiStore((s) => s.activeCanvasTab)
@@ -63,7 +64,12 @@ export default function ChatPanel() {
   const activeSidebarSession = sidebarSessions.find((s) => s.sessionId === sessionId || s.id === sessionId)
   const sessionTitle = activeSidebarSession?.name || (sessionId ? sessionId : '')
   const isEmpty = messages.length === 0
-  const activeCwd = activeSidebarSession?.cwd || authUser?.workspace
+  // First-page bootstrap: wake the sandbox and learn the workspace via the
+  // agent-runner's /api/health (drives the waking/ready toasts in client.js).
+  useEffect(() => { fetchHealth() }, [fetchHealth])
+  // cwd comes entirely from the agent-runner: the active session's cwd, else the
+  // /api/health workspace. Empty until one resolves — CwdIndicator then shows '~'.
+  const activeCwd = activeSidebarSession?.cwd || agentWorkspace || ''
   const activateCanvasTab = (tab) => {
     setActiveCanvasTab(tab)
     setCanvasMinimized(false)

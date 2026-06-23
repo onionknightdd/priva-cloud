@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { ChevronDown, Copy, Check, Code, AlignLeft } from 'lucide-react'
 import CopyButton from '@shared/components/shared/CopyButton'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
-import Tabs from '../shared/Tabs'
+import Tabs from '@shared/components/shared/Tabs'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 
 const HIDDEN_EVENTS = new Set(['keepalive', 'stream_init'])

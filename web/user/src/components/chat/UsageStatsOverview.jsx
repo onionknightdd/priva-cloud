@@ -1,11 +1,12 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Sparkles } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import useAuthStore from '@shared/stores/authStore'
-import Tabs from '../shared/Tabs'
+import useUserDataStore from '../../stores/userDataStore'
+import Tabs from '@shared/components/shared/Tabs'
 import {
   resolveVar, AXIS_STYLE, getGridStyle, ChartTooltip, useThemeKey,
 } from '@shared/components/admin/charts/ChartTheme'
@@ -342,21 +343,28 @@ export default function UsageStatsOverview() {
   const { t } = useTranslation()
   const themeKey = useThemeKey()
   const user = useAuthStore((s) => s.user)
+  // Usage data is agent-runtime state served by the agent-runner (/api/user/overview).
+  // It is no longer embedded in /me, so fetch it here.
+  const overview = useUserDataStore((s) => s.overview)
+  const fetchOverview = useUserDataStore((s) => s.fetchOverview)
   const [activeTab, setActiveTab] = useState('overview')
   const [range, setRange] = useState('7d')
 
+  useEffect(() => { fetchOverview() }, [fetchOverview])
+
   if (!user) return null
 
-  const stats = user.stats || {}
+  const data = overview || {}
+  const stats = data.stats || {}
   const counts = stats[rangeKey(range)] || {
     sessions: 0, messages: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, active_days: 0,
   }
 
-  const currentStreak = user.current_streak || 0
-  const longestStreak = user.longest_streak || 0
-  const peakHour = user.peak_hour
-  const favoriteModel = user.favorite_model
-  const tagline = user.tagline
+  const currentStreak = data.current_streak || 0
+  const longestStreak = data.longest_streak || 0
+  const peakHour = data.peak_hour
+  const favoriteModel = data.favorite_model
+  const tagline = data.tagline
 
   const streakLabel = (n) => t('chat.usage.streakDays', { count: n })
   const peakLabel = peakHour === null || peakHour === undefined
@@ -467,7 +475,7 @@ export default function UsageStatsOverview() {
             </div>
 
             {/* Heatmap (no inner container) */}
-            <Heatmap data={user.heatmap || []} />
+            <Heatmap data={data.heatmap || []} />
 
             {/* Tagline */}
             {tagline && (
@@ -486,8 +494,8 @@ export default function UsageStatsOverview() {
           </>
         ) : (
           <ModelsView
-            modelUsage={user.model_usage || []}
-            dailyModelTokens={user.daily_model_tokens || []}
+            modelUsage={data.model_usage || []}
+            dailyModelTokens={data.daily_model_tokens || []}
             range={range}
             themeKey={themeKey}
           />

@@ -6,6 +6,21 @@ const useUserDataStore = create((set, get) => ({
   activeSection: 'usage',
   setActiveSection: (section) => set({ activeSection: section }),
 
+  // Usage overview (stats/heatmap/streaks/model usage). Served by the
+  // agent-runner from the account's /workspace PVC — formerly embedded in /me.
+  overview: null,
+  overviewLoading: true,
+
+  fetchOverview: async () => {
+    set({ overviewLoading: true })
+    try {
+      const overview = await userDataApi.getUserOverview()
+      set({ overview, overviewLoading: false })
+    } catch {
+      set({ overviewLoading: false })
+    }
+  },
+
   // Usage stats
   stats: null,
   statsLoading: true,
@@ -20,8 +35,10 @@ const useUserDataStore = create((set, get) => ({
     }
   },
 
-  // Audit log (cursor-paginated)
+  // Audit log (cursor-paginated). auditEntries is the agent-runtime feed (runner);
+  // cpAuditEntries is the bounded control-plane feed (control-panel) merged in the UI.
   auditEntries: [],
+  cpAuditEntries: [],
   auditTotal: null,
   auditLoading: true,
   // Cursor stack: stack[-1] is the `before` cursor for the current page.
@@ -71,13 +88,31 @@ const useUserDataStore = create((set, get) => ({
         auditCursorStack: nextStack,
         auditLoading: false,
       })
+
+      // Control-plane events (login/auth) live on the control-panel, not the PVC.
+      // Fetch them once per filter-change (bounded) and merge in the UI by
+      // timestamp; "load more" only paginates the agent-runtime feed.
+      if (!append) {
+        try {
+          const cpParams = { limit: 200 }
+          if (auditActionFilter && auditActionFilter !== 'session') cpParams.action = auditActionFilter
+          if (auditTargetFilter) cpParams.target = auditTargetFilter
+          if (auditSessionFilter) cpParams.session_id = auditSessionFilter
+          if (auditStartTime) cpParams.start = auditStartTime
+          if (auditEndTime) cpParams.end = auditEndTime
+          const cp = await userDataApi.getControlPlaneAudit(cpParams)
+          set({ cpAuditEntries: cp.entries || [] })
+        } catch {
+          set({ cpAuditEntries: [] })
+        }
+      }
     } catch {
       set({ auditLoading: false })
     }
   },
 
   resetAuditCursors: () => set({
-    auditCursorStack: [null], auditNextCursor: null, auditTotal: null, auditEntries: [],
+    auditCursorStack: [null], auditNextCursor: null, auditTotal: null, auditEntries: [], cpAuditEntries: [],
   }),
 
   setAuditActionFilter: (filter) => set({
@@ -108,8 +143,13 @@ const useUserDataStore = create((set, get) => ({
       if (auditSessionFilter) params.session_id = auditSessionFilter
       if (auditStartTime) params.start = auditStartTime
       if (auditEndTime) params.end = auditEndTime
-      const data = await userDataApi.getUserAuditLog(params)
-      set({ auditChartEntries: data.entries, auditChartLoading: false })
+      const [agent, cp] = await Promise.all([
+        userDataApi.getUserAuditLog(params),
+        userDataApi.getControlPlaneAudit(params).catch(() => ({ entries: [] })),
+      ])
+      const merged = [...(agent.entries || []), ...(cp.entries || [])]
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      set({ auditChartEntries: merged, auditChartLoading: false })
     } catch {
       set({ auditChartLoading: false })
     }
@@ -196,7 +236,8 @@ const useUserDataStore = create((set, get) => ({
 
   reset: () => set({
     activeSection: 'usage', stats: null, statsLoading: true,
-    auditEntries: [], auditTotal: null, auditLoading: true,
+    overview: null, overviewLoading: true,
+    auditEntries: [], cpAuditEntries: [], auditTotal: null, auditLoading: true,
     auditCursorStack: [null], auditNextCursor: null,
     auditActionFilter: null, auditTargetFilter: '', auditSessionFilter: '',
     auditStartTime: null, auditEndTime: null,

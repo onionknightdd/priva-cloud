@@ -5,6 +5,7 @@ export const createUser = (data) => postJSON('/admin/users', data)
 export const updateUser = (username, data) => putJSON(`/admin/users/${encodeURIComponent(username)}`, data)
 export const deleteUser = (username) => deleteJSON(`/admin/users/${encodeURIComponent(username)}`)
 export const getAdminStats = () => getJSON('/admin/stats')
+export const getFleet = () => getJSON('/admin/fleet')
 export const getAuditLog = (params = {}) => {
   const query = new URLSearchParams()
   if (params.limit != null) query.set('limit', params.limit)

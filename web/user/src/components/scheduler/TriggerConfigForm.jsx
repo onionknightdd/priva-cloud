@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import Tabs from '../shared/Tabs'
+import Tabs from '@shared/components/shared/Tabs'
 
 const inputStyle = {
   background: 'var(--bg-elevated)',

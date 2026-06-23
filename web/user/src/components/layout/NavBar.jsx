@@ -1,7 +1,7 @@
 import { Moon, Sun, Globe, Bot, Puzzle, Cable, Clock, Brain, Box, LogOut, Webhook, UsersRound, Lightbulb, SquareTerminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Chip from '@shared/components/shared/Chip'
-import Tabs from '../shared/Tabs'
+import Tabs from '@shared/components/shared/Tabs'
 import useUiStore from '@shared/stores/uiStore'
 import useChatStore from '../../stores/chatStore'
 import useAuthStore from '@shared/stores/authStore'

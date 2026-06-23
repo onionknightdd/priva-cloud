@@ -12,10 +12,12 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
 from priva_common.config import get_settings
 from priva_common.logging import AccessLogMiddleware, configure_logging, get_app_logger, shutdown_logging
+from priva_common.models.auth import UserRecord
+from priva_common.workspace import get_user_workspace
 
 from . import activity
 
@@ -103,6 +105,23 @@ def create_app() -> FastAPI:
             "time": datetime.now(timezone.utc).isoformat(),
         }
 
+    from .deps import require_user
+
+    @app.get("/api/health", include_in_schema=False)
+    async def api_health(user: UserRecord = Depends(require_user)):
+        """Per-account readiness + first-page bootstrap, reachable from the SPA via
+        the gateway (the unauthenticated /health above is for the k8s probe only).
+        A cold sandbox 503s at the edge EPP until this pod answers, so the SPA polls
+        this through fetchWithWake — showing the "waking"/"ready" toasts — and renders
+        the first page (the cwd chip) from the returned workspace. Counts as activity
+        (path is not /health), so loading the app keeps the warm pod alive."""
+        return {
+            "status": "ok",
+            "service": "agent-runner",
+            "username": user.username,
+            "workspace": get_user_workspace(user),
+        }
+
     from .routers.agent import router as agent_router
     from .routers.pty import router as pty_router
     from .routers.files import router as files_router
@@ -112,10 +131,13 @@ def create_app() -> FastAPI:
     from .routers.skills import router as skills_router
     from .routers.skill_hub import router as skill_hub_router
     from .routers.subagents import router as subagents_router
+    from .routers.user_config import router as user_config_router
+    from .routers.user_data import router as user_data_router
 
     for r in (
         agent_router, pty_router, files_router, user_files_router,
         hooks_router, mcp_router, skills_router, skill_hub_router, subagents_router,
+        user_config_router, user_data_router,
     ):
         app.include_router(r)
 

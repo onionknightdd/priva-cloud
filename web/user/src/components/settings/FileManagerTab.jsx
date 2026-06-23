@@ -247,7 +247,7 @@ export default function FileManagerTab() {
   const { t } = useTranslation()
   const authUser = useAuthStore((s) => s.user)
   const isAdmin = authUser?.role === 'admin'
-  const [pathInput, setPathInput] = useState(authUser?.workspace || '~')
+  const [pathInput, setPathInput] = useState('~')
   const [entries, setEntries] = useState([])
   const [resolvedPath, setResolvedPath] = useState('')
   const [parentPath, setParentPath] = useState(null)
@@ -300,17 +300,14 @@ export default function FileManagerTab() {
     }
   }, [])
 
-  useEffect(() => { fetchDir(authUser?.workspace || '~') }, [fetchDir, authUser?.workspace])
+  useEffect(() => { fetchDir('~') }, [fetchDir])
 
   const navigateTo = (path) => {
-    if (!isAdmin && authUser?.workspace) {
-      const target = path.replace(/\/+$/, '')
-      const ws = authUser.workspace.replace(/\/+$/, '')
-      if (!target.startsWith(ws + '/') && target !== ws) {
-        setError('Access denied: path is outside your workspace')
-        return
-      }
-    }
+    // Path scoping is enforced server-side by the agent-runner
+    // (user_files._validate_workspace_path). The client must NOT gate on
+    // authUser.workspace — that is the control-panel's work_dir
+    // (/tmp/cp-workspace/<user>), which differs from the agent-runner's real
+    // workspace (/workspace/<user>) the files actually live in.
     setPreview(null)
     setPreviewImageUrl(null)
     setSelectedFileName(null)
@@ -322,18 +319,9 @@ export default function FileManagerTab() {
   const handleGo = () => {
     const val = pathInput.trim()
     if (!val) return
-    if (!isAdmin) {
-      if (val.includes('..')) {
-        setError('Access denied: ".." is not allowed in path')
-        return
-      }
-      if (authUser?.workspace) {
-        const ws = authUser.workspace.replace(/\/+$/, '')
-        if (!val.startsWith(ws + '/') && val !== ws) {
-          setError('Access denied: path is outside your workspace')
-          return
-        }
-      }
+    if (!isAdmin && val.includes('..')) {
+      setError('Access denied: ".." is not allowed in path')
+      return
     }
     navigateTo(val)
   }

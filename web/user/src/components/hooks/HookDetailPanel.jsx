@@ -6,7 +6,7 @@ import Chip from '@shared/components/shared/Chip'
 import HookConfigTab from './HookConfigTab'
 import HookTestTab from './HookTestTab'
 import HookLogsTab from './HookLogsTab'
-import Tabs from '../shared/Tabs'
+import Tabs from '@shared/components/shared/Tabs'
 
 const TABS = ['config', 'test', 'logs']
 

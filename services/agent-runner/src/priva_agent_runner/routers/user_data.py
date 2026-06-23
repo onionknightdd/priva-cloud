@@ -1,57 +1,81 @@
-"""User self-service endpoints: stats and audit log."""
+"""Per-user agent-runtime state: usage overview, stats, analytics, and the
+agent-runtime audit feed.
+
+This is served BY the agent-runner because all of it derives from the
+per-account /workspace PVC: sessions (claude_agent_sdk.list_sessions over
+$work_dir/<user>) and the agent-runtime audit log (get_audit_logger() ->
+$PRIVA_HOME/priva, i.e. /workspace/.priva/priva on the runner). The control-panel
+mounts no such volume, so it cannot compute any of this — it only holds
+control-plane audit (login/auth/user-mgmt), which it serves separately at
+/api/auth/audit and the SPA merges in client-side.
+"""
 
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
+from datetime import datetime as _dt
 from pathlib import Path
 
 from claude_agent_sdk import list_sessions
 from fastapi import APIRouter, Depends, Query
 
-from priva_common.models.admin import AuditEntryResponse, AuditLogResponse
 from priva_common.audit_log import get_audit_logger
-from ..services.auth import require_user
-from priva_common.config import get_settings
-from priva_common.user_store import UserRecord
+from priva_common.models.admin import AuditEntryResponse, AuditLogResponse
+from priva_common.models.auth import UserOverviewResponse, UserRecord
+from priva_common.workspace import get_user_workspace
+from ..deps import require_user
+from ..services.compute_user_stats import compute_user_stats
 
-router = APIRouter(prefix="/api/user", tags=["user"])
+router = APIRouter(prefix="/api/user", tags=["user-data"])
+
+
+@router.get("/overview", response_model=UserOverviewResponse)
+async def get_user_overview(user: UserRecord = Depends(require_user)):
+    """The usage overview the dashboard renders (formerly embedded in /me)."""
+    block = await asyncio.to_thread(compute_user_stats, user.username)
+    return UserOverviewResponse(
+        stats=block.stats,
+        heatmap=block.heatmap,
+        model_usage=block.model_usage,
+        daily_model_tokens=block.daily_model_tokens,
+        favorite_model=block.favorite_model,
+        current_streak=block.current_streak,
+        longest_streak=block.longest_streak,
+        peak_hour=block.peak_hour,
+        tagline=block.tagline,
+    )
 
 
 @router.get("/stats")
-async def get_user_stats(
-    user: UserRecord = Depends(require_user),
-):
-    settings = get_settings()
-    work_dir = Path(settings.server.work_dir).expanduser()
-    user_workspace = work_dir / user.username
+async def get_user_stats(user: UserRecord = Depends(require_user)):
+    user_workspace = Path(get_user_workspace(user))
 
     session_count = 0
     storage_bytes = 0
     last_active = None
 
-    if user_workspace.exists():
-        try:
-            sessions = list_sessions(directory=str(user_workspace))
-            session_count = len(sessions)
-            for s in sessions:
-                storage_bytes += s.file_size or 0
-                if s.last_modified:
-                    if last_active is None or s.last_modified > last_active:
-                        last_active = s.last_modified
-        except Exception:
-            pass
+    try:
+        sessions = list_sessions(directory=str(user_workspace))
+        session_count = len(sessions)
+        for s in sessions:
+            storage_bytes += s.file_size or 0
+            if s.last_modified:
+                if last_active is None or s.last_modified > last_active:
+                    last_active = s.last_modified
+    except Exception:
+        pass
 
-    # Temp-file stats live in the agent-runner (temp_files moved there); the
-    # count is informational only and dropped for the alpha (Phase 2).
-    file_count = 0
-    total_file_size = 0
-
+    # Temp-file stats live elsewhere; informational only and dropped for the alpha.
     return {
         "username": user.username,
+        # The real agent runtime workspace (the per-account /workspace PVC). The
+        # SPA shows this instead of any control-panel-sourced path.
+        "workspace": str(user_workspace),
         "session_count": session_count,
         "storage_bytes": storage_bytes,
-        "file_count": file_count,
-        "total_file_size": total_file_size,
+        "file_count": 0,
+        "total_file_size": 0,
         "last_active": last_active,
     }
 
@@ -68,8 +92,6 @@ async def get_user_audit(
     end: str | None = Query(default=None),
     session_id: str | None = Query(default=None),
 ):
-    from datetime import datetime as _dt
-
     start_time = _dt.fromisoformat(start) if start else None
     end_time = _dt.fromisoformat(end) if end else None
 
@@ -111,9 +133,6 @@ async def get_user_analytics(
     start: str | None = Query(default=None),
     end: str | None = Query(default=None),
 ):
-    from collections import Counter
-    from datetime import datetime as _dt
-
     start_time = _dt.fromisoformat(start) if start else None
     end_time = _dt.fromisoformat(end) if end else None
 
@@ -158,23 +177,20 @@ async def get_user_analytics(
     ]
 
     # Session activity: sessions per day
-    settings = get_settings()
-    work_dir = Path(settings.server.work_dir).expanduser()
-    user_workspace = work_dir / user.username
+    user_workspace = Path(get_user_workspace(user))
     session_day_counter: Counter[str] = Counter()
-    if user_workspace.exists():
-        try:
-            sessions = list_sessions(directory=str(user_workspace))
-            for s in sessions:
-                if s.last_modified:
-                    day = s.last_modified.strftime("%Y-%m-%d")
-                    if start_time and s.last_modified < start_time:
-                        continue
-                    if end_time and s.last_modified > end_time:
-                        continue
-                    session_day_counter[day] += 1
-        except Exception:
-            pass
+    try:
+        sessions = list_sessions(directory=str(user_workspace))
+        for s in sessions:
+            if s.last_modified:
+                day = s.last_modified.strftime("%Y-%m-%d")
+                if start_time and s.last_modified < start_time:
+                    continue
+                if end_time and s.last_modified > end_time:
+                    continue
+                session_day_counter[day] += 1
+    except Exception:
+        pass
     session_activity = [
         {"date": day, "count": count}
         for day, count in sorted(session_day_counter.items())

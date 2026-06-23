@@ -11,9 +11,31 @@ spec:
     - name: priva-gateway
   rules:
     - matches:
+        # Per-account readiness + first-page bootstrap (returns the workspace). A
+        # cold sandbox 503s here at the EPP until the pod answers; the SPA polls it
+        # to drive the waking/ready toasts and render the first page.
+        - path: {type: PathPrefix, value: /api/health}
         - path: {type: PathPrefix, value: /api/agent}
         - path: {type: PathPrefix, value: /api/files}
         - path: {type: PathPrefix, value: /api/user/files}
+        # Per-user agent-runtime state (usage overview/stats/analytics + agent
+        # audit) is derived from the account's /workspace PVC, so the per-account
+        # pod serves it. Control-plane audit stays on control-panel (/api/auth/audit).
+        - path: {type: PathPrefix, value: /api/user/overview}
+        - path: {type: PathPrefix, value: /api/user/stats}
+        - path: {type: PathPrefix, value: /api/user/analytics}
+        - path: {type: PathPrefix, value: /api/user/audit}
+        # Per-user config lives in the account's workspace .priva.user.yml (the
+        # agent reads vision_model there), so these are served by the per-account
+        # pod, not control-panel. /api/resource/models is NOT here — it is a pure
+        # upstream-API proxy with no workspace I/O and stays on the "/" catch-all.
+        - path: {type: PathPrefix, value: /api/resource/quickactions}
+        - path: {type: PathPrefix, value: /api/resource/vision-model}
+        # skills / mcp / skill-hub are agent-runner routers too (per-account, PVC-backed).
+        # Only /api/resource/models stays on control-panel (catch-all) — a pure proxy.
+        - path: {type: PathPrefix, value: /api/resource/skills}
+        - path: {type: PathPrefix, value: /api/resource/mcp}
+        - path: {type: PathPrefix, value: /api/resource/skill-hub}
         - path: {type: PathPrefix, value: /api/pty}
         - path: {type: PathPrefix, value: /api/hooks}
         - path: {type: PathPrefix, value: /api/subagents}

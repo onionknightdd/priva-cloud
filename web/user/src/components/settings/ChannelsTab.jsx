@@ -4,7 +4,7 @@ import { Radio, Eye, EyeOff, X, Plus, RefreshCw, Power, AlertTriangle, MessageSq
 import useChannelStore from '../../stores/channelStore'
 import useUiStore from '@shared/stores/uiStore'
 import CopyButton from '@shared/components/shared/CopyButton'
-import Tabs from '../shared/Tabs'
+import Tabs from '@shared/components/shared/Tabs'
 
 const inputStyle = {
   width: '100%',

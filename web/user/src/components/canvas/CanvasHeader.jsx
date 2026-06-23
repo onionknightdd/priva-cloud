@@ -4,7 +4,7 @@ import useUiStore from '@shared/stores/uiStore'
 import useFileOpsStore from '../../stores/fileOpsStore'
 import useFileBrowserStore from '../../stores/fileBrowserStore'
 import { RollingInteger } from '../shared/Odometer'
-import Tabs from '../shared/Tabs'
+import Tabs from '@shared/components/shared/Tabs'
 
 function CountedTabLabel({ label, count }) {
   if (!count) return label

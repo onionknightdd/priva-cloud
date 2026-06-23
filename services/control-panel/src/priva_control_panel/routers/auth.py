@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from priva_common.models.admin import AuditEntryResponse, AuditLogResponse
 from priva_common.models.auth import (
     ApiKeyResponse,
     ChangePasswordRequest,
@@ -17,13 +19,11 @@ from priva_common.models.user_env import UserEnvResponse, UserEnvSettings, UserE
 from ..services.auth import (
     create_jwt,
     decode_jwt,
-    get_user_workspace,
     rate_limiter,
     require_user,
     user_record_to_public,
 )
 from priva_common.audit_log import AuditEntry, get_audit_logger
-from ..services.compute_user_stats import compute_user_stats
 from priva_common.config import get_settings
 from priva_common.user_env import mask_token
 from ..services.secret_env import has_user_env, read_user_env, write_user_env
@@ -67,7 +67,6 @@ async def setup_admin(request: SetupRequest):
             write_user_env(request.username, env_dict)
 
     public = user_record_to_public(user)
-    public.workspace = get_user_workspace(user)
     return LoginResponse(access_token=token, user=public)
 
 
@@ -100,7 +99,6 @@ async def login(request: LoginRequest):
     public = user_record_to_public(user)
     if role != user.role:
         public.role = role
-    public.workspace = get_user_workspace(user)
 
     audit = get_audit_logger()
     audit.append(AuditEntry(
@@ -122,7 +120,6 @@ async def refresh_token(user: UserRecord = Depends(require_user)):
     public = user_record_to_public(user)
     if role != user.role:
         public.role = role
-    public.workspace = get_user_workspace(user)
     return LoginResponse(access_token=token, user=public)
 
 
@@ -132,20 +129,67 @@ async def get_me(user: UserRecord = Depends(require_user)):
     public = user_record_to_public(user)
     if user.username in settings.auth.admins:
         public.role = "admin"
-    public.workspace = get_user_workspace(user)
 
-    stats_block = compute_user_stats(user.username)
-    public.stats = stats_block.stats
-    public.heatmap = stats_block.heatmap
-    public.model_usage = stats_block.model_usage
-    public.daily_model_tokens = stats_block.daily_model_tokens
-    public.favorite_model = stats_block.favorite_model
-    public.current_streak = stats_block.current_streak
-    public.longest_streak = stats_block.longest_streak
-    public.peak_hour = stats_block.peak_hour
-    public.tagline = stats_block.tagline
-
+    # Usage stats AND the workspace path are agent-runtime state (derived from the
+    # per-account /workspace PVC) that the control-panel cannot see. The SPA gets
+    # them from the agent-runner (GET /api/user/overview, GET /api/user/stats), so
+    # /me no longer sets public.workspace. /me stays control-plane only: identity,
+    # role, api-key presence.
     return public
+
+
+@router.get("/audit", response_model=AuditLogResponse)
+async def get_control_plane_audit(
+    user: UserRecord = Depends(require_user),
+    limit: int = Query(default=50, ge=1, le=200),
+    before: str | None = Query(default=None),
+    after: str | None = Query(default=None),
+    action: str | None = Query(default=None),
+    target: str | None = Query(default=None),
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+    session_id: str | None = Query(default=None),
+):
+    """Control-plane audit for the caller: the login/auth/user-mgmt events the
+    control-panel itself emits into its own store. Agent-runtime audit (runs,
+    skills, tools, hooks, sessions) lives on the per-account PVC and is served by
+    the agent-runner at GET /api/user/audit; the SPA merges the two feeds by
+    timestamp client-side so no history is lost."""
+    from datetime import datetime as _dt
+
+    start_time = _dt.fromisoformat(start) if start else None
+    end_time = _dt.fromisoformat(end) if end else None
+
+    audit = get_audit_logger()
+    entries, next_cursor, prev_cursor, total = await asyncio.to_thread(
+        audit.query_cursor,
+        limit=limit,
+        before=before,
+        after=after,
+        action_filter=action,
+        actor_filter=user.username,
+        target_filter=target,
+        start_time=start_time,
+        end_time=end_time,
+        session_id_filter=session_id,
+    )
+    return AuditLogResponse(
+        entries=[
+            AuditEntryResponse(
+                id=e.id,
+                timestamp=e.timestamp,
+                actor=e.actor,
+                action=e.action,
+                target=e.target,
+                details=e.details,
+            )
+            for e in entries
+        ],
+        next_cursor=next_cursor,
+        prev_cursor=prev_cursor,
+        total=total,
+        limit=limit,
+    )
 
 
 @router.get("/me/apikey", response_model=ApiKeyResponse)

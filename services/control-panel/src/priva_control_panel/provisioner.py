@@ -91,6 +91,41 @@ def ensure_tenant(account_id: str, username: str) -> None:
             raise
 
 
+def list_tenants() -> list[dict]:
+    """List every AgentTenant CR (metadata + spec + operator-written status).
+
+    Used by the admin fleet view to enumerate accounts and read each one's live
+    phase / readyReplicas / podIP without a registry. Blocking kube call — call
+    via asyncio.to_thread from async paths.
+    """
+    s = get_settings()
+    ns = s.kubernetes.namespace_tenants
+    try:
+        resp = _custom().list_namespaced_custom_object(GROUP, VERSION, ns, PLURAL)
+        return resp.get("items", []) or []
+    except client.ApiException as exc:
+        if exc.status == 404:
+            return []
+        raise
+
+
+async def probe_health(pod_ip: str, port: int) -> dict | None:
+    """Fetch a warm pod's ``/health`` body (active_runs, last_activity_ts, …).
+
+    Fail-open: any error/timeout returns None so a single dead/replaced pod behind
+    a stale status.podIP can't break the whole fleet snapshot. Like ``_alive``, a
+    200 here could be a recycled-CIDR pod — the count is a live hint, not ledger.
+    """
+    try:
+        async with httpx.AsyncClient(trust_env=False) as cx:
+            r = await cx.get(f"http://{pod_ip}:{port}/health", timeout=1.5)
+        if r.status_code < 500:
+            return r.json()
+    except Exception:
+        return None
+    return None
+
+
 def _status(account_id: str) -> dict:
     s = get_settings()
     ns = s.kubernetes.namespace_tenants

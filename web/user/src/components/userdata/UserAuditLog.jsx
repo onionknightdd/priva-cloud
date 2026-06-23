@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, useId } from 'react'
+import { useEffect, useState, useRef, useCallback, useId, useMemo } from 'react'
 import { Search, ChevronDown, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useUserDataStore from '../../stores/userDataStore'
@@ -148,6 +148,7 @@ function DetailsBlock({ details }) {
 export default function UserAuditLog() {
   const { t } = useTranslation()
   const auditEntries = useUserDataStore((s) => s.auditEntries)
+  const cpAuditEntries = useUserDataStore((s) => s.cpAuditEntries)
   const auditTotal = useUserDataStore((s) => s.auditTotal)
   const auditNextCursor = useUserDataStore((s) => s.auditNextCursor)
   const auditLoading = useUserDataStore((s) => s.auditLoading)
@@ -191,6 +192,15 @@ export default function UserAuditLog() {
   useEffect(() => { fetchAuditLogForCharts() }, [auditActionFilter, auditTargetFilter, auditSessionFilter, auditStartTime, auditEndTime])
 
   const hasMore = !!auditNextCursor
+
+  // Merge the agent-runtime feed (paginated, runner) with the bounded
+  // control-plane feed (login/auth, control-panel) by timestamp. The two stores
+  // are disjoint, so no dedupe is needed; "load more" extends the agent feed.
+  const mergedEntries = useMemo(
+    () => [...auditEntries, ...cpAuditEntries]
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)),
+    [auditEntries, cpAuditEntries],
+  )
 
   const handleRefresh = () => {
     fetchAuditLog(false)
@@ -298,17 +308,17 @@ export default function UserAuditLog() {
 
           {/* Scrollable entries list */}
           <div className="flex-1 overflow-y-auto" style={{ minHeight: 0, paddingBottom: 32 }}>
-            {auditLoading && auditEntries.length === 0 ? (
+            {auditLoading && mergedEntries.length === 0 ? (
               <EntrySkeleton />
-            ) : auditEntries.length === 0 ? (
+            ) : mergedEntries.length === 0 ? (
               <div className="text-sm" style={{ color: 'var(--text-dim)', padding: '20px 0' }}>
                 {t('admin.noAuditEntries')}
               </div>
             ) : (
               <div className="flex flex-col">
-                {auditEntries.map((entry, i) => (
+                {mergedEntries.map((entry, i) => (
                   <div
-                    key={i}
+                    key={entry.id || i}
                     className="flex flex-col gap-1 px-4 py-3"
                     style={{
                       borderLeft: `2px solid ${getActionBorderColor(entry.action)}`,

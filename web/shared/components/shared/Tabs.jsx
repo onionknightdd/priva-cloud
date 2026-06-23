@@ -1,6 +1,10 @@
 import { useId, useMemo, useState } from 'react'
 import { LayoutGroup, motion } from 'framer-motion'
 
+// Shared sliding-tab primitive (mirrors web/user's Tabs) so the admin app gets the
+// exact same animated tab switch. The active indicator is a framer-motion shared-layout
+// element (`layoutId`) that slides between tabs on change.
+
 export const SLIDING_TAB_TRANSITION = {
   type: 'tween',
   duration: 0.25,
@@ -151,26 +155,5 @@ export default function Tabs({
         })}
       </div>
     </SlidingTabGroup>
-  )
-}
-
-export function TabsDemo() {
-  const labels = ['OVERVIEW', 'LOGS', 'METRICS', 'CONFIG', 'ALERTS']
-  const [active, setActive] = useState(0)
-
-  return (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <Tabs
-        tabs={labels}
-        activeIndex={active}
-        onChange={(index) => setActive(index)}
-        className="flex items-center gap-4"
-        buttonClassName="text-xs font-semibold uppercase"
-        buttonStyle={{ padding: '8px 0', letterSpacing: '0.06em' }}
-      />
-      <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-        {labels[active]}
-      </div>
-    </div>
   )
 }

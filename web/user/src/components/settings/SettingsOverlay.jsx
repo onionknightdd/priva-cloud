@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import useUiStore from '@shared/stores/uiStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import useAuthStore from '@shared/stores/authStore'
-import Tabs from '../shared/Tabs'
+import Tabs from '@shared/components/shared/Tabs'
 
 const SettingsPanel = lazy(() => import('./SettingsPanel'))
 

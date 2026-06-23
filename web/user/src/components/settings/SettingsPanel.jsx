@@ -3,6 +3,7 @@ import { Key, Cpu, Zap, Check, AlertCircle, Eye, EyeOff, Plus, Trash2, Pencil, X
 import { useTranslation } from 'react-i18next'
 import useSettingsStore from '../../stores/settingsStore'
 import useAuthStore from '@shared/stores/authStore'
+import useUserDataStore from '../../stores/userDataStore'
 import { changeMyPassword } from '@shared/api/auth'
 import {
   getCliPath,
@@ -201,6 +202,11 @@ const labelStyle = {
 function AccountTab() {
   const { t } = useTranslation()
   const user = useAuthStore((s) => s.user)
+  // The workspace path is agent-runtime state — sourced from the agent-runner
+  // (/api/user/stats), not the control-panel, which doesn't own it.
+  const workspace = useUserDataStore((s) => s.stats?.workspace)
+  const fetchStats = useUserDataStore((s) => s.fetchStats)
+  useEffect(() => { fetchStats() }, [fetchStats])
 
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -349,7 +355,7 @@ function AccountTab() {
           <div style={{ height: 1, background: 'var(--border-subtle)' }} />
           {profileRow(t('settings.profileRole'), user?.role)}
           <div style={{ height: 1, background: 'var(--border-subtle)' }} />
-          {profileRow(t('settings.profileWorkspace'), user?.workspace)}
+          {profileRow(t('settings.profileWorkspace'), workspace)}
         </div>
       </div>
 

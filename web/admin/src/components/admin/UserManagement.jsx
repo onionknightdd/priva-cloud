@@ -1,13 +1,19 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { Pencil, Trash2, Plus, Search, Eye } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useAdminStore from '../../stores/adminStore'
 import useAuthStore from '@shared/stores/authStore'
 import useUiStore from '@shared/stores/uiStore'
 import * as adminApi from '@shared/api/admin'
+import { useResizable } from '@shared/hooks/useResizable'
+import safeStorage from '@shared/utils/safeStorage'
 import Chip from '@shared/components/shared/Chip'
 import CopyButton from '@shared/components/shared/CopyButton'
 import UserInspectPanel from './UserInspectPanel'
+
+const SPLIT_STORAGE_KEY = 'admin-split-width'
+const SPLIT_MIN = 360
+const SPLIT_MAX_RATIO = 0.7
 
 function TableSkeleton() {
   return (
@@ -252,6 +258,44 @@ export default function UserManagement() {
   const [searchQuery, setSearchQuery] = useState('')
   const [roleFilter, setRoleFilter] = useState('all')
 
+  // Resizable table | inspect split (default 50/50, persisted to localStorage).
+  const splitRef = useRef(null)
+  const [containerWidth, setContainerWidth] = useState(0)
+  const [hoverHandle, setHoverHandle] = useState(false)
+  const [leftWidth, setLeftWidth] = useState(() => {
+    const saved = parseInt(safeStorage.getItem(SPLIT_STORAGE_KEY), 10)
+    return Number.isFinite(saved) ? saved : null
+  })
+
+  useEffect(() => {
+    const el = splitRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width || 0
+      if (w) setContainerWidth(w)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const splitMax = containerWidth ? Math.round(containerWidth * SPLIT_MAX_RATIO) : Infinity
+  const resolvedLeft = leftWidth != null
+    ? Math.min(Math.max(leftWidth, SPLIT_MIN), splitMax)
+    : (containerWidth ? Math.round(containerWidth / 2) : null)
+
+  const onSplitResize = useCallback((w) => {
+    setLeftWidth(w)
+    safeStorage.setItem(SPLIT_STORAGE_KEY, String(Math.round(w)))
+  }, [])
+
+  const { dragging, onMouseDown } = useResizable({
+    initial: resolvedLeft || 400,
+    min: SPLIT_MIN,
+    max: splitMax,
+    direction: 'right',
+    onResize: onSplitResize,
+  })
+
   useEffect(() => { fetchUsers() }, [])
 
   const filteredUsers = useMemo(() => {
@@ -322,11 +366,11 @@ export default function UserManagement() {
       </div>
 
       {/* Split content */}
-      <div className="flex flex-1 min-h-0" style={{ marginTop: 16 }}>
-        {/* Left half: table */}
+      <div ref={splitRef} className="flex flex-1 min-h-0" style={{ marginTop: 16 }}>
+        {/* Left pane: table */}
         <div
           className="flex flex-col overflow-hidden"
-          style={{ width: '50%', borderRight: '1px solid var(--border)', flexShrink: 0 }}
+          style={{ width: resolvedLeft != null ? resolvedLeft : '50%', borderRight: '1px solid var(--border)', flexShrink: 0 }}
         >
           {/* Search & Filter bar */}
           <div className="flex items-center gap-2 px-4 py-2 flex-shrink-0">
@@ -489,8 +533,25 @@ export default function UserManagement() {
           </div>
         </div>
 
-        {/* Right half: inspect panel */}
-        <div className="flex flex-col" style={{ width: '50%', overflow: 'hidden' }}>
+        {/* Drag handle — straddles the 1px divider, transparent → blue on hover/drag */}
+        <div
+          onMouseDown={onMouseDown}
+          onMouseEnter={() => setHoverHandle(true)}
+          onMouseLeave={() => setHoverHandle(false)}
+          className="flex-shrink-0"
+          style={{
+            width: 4,
+            marginLeft: -2,
+            marginRight: -2,
+            cursor: 'col-resize',
+            zIndex: 5,
+            background: (hoverHandle || dragging) ? 'var(--blue)' : 'transparent',
+            transition: 'background 150ms ease',
+          }}
+        />
+
+        {/* Right pane: inspect panel */}
+        <div className="flex flex-col flex-1" style={{ minWidth: 0, overflow: 'hidden' }}>
           <UserInspectPanel />
         </div>
       </div>

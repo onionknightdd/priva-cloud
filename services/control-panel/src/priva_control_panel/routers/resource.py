@@ -1,28 +1,28 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import httpx
-import yaml
 from fastapi import APIRouter, Depends, HTTPException
 
 from priva_common.logging import get_app_logger
 from priva_common.models.resource import (
     ModelInfo,
     ModelListResponse,
-    QuickAction,
-    QuickActionListResponse,
-    QuickActionUpdateRequest,
-    VisionModelResponse,
-    VisionModelUpdateRequest,
 )
-from ..services.auth import get_user_workspace, require_user
-from priva_common.config import get_settings
+from ..services.auth import require_user
 from ..services.secret_env import read_user_env
 from priva_common.user_store import UserRecord
 
 logger = get_app_logger(__name__)
 
+# NOTE: per-user config (quickactions, vision-model) is NOT served here. It lives
+# in the user's ``.priva.user.yml`` under the agent's workspace, which on the
+# agent-runner is the per-account PVC (/workspace/<user>) — the same file the
+# agent reads. The control-panel mounts no such volume (its work_dir is the
+# pod-local /tmp/cp-workspace), so serving that config here would write to an
+# ephemeral dir the agent never sees. Those routes now live on the agent-runner
+# (routers/user_config.py) and the gateway steers /api/resource/quickactions and
+# /api/resource/vision-model to the per-account pod. Only /models — a pure proxy
+# to the user's upstream API (no workspace I/O) — stays on the control-panel.
 router = APIRouter(prefix="/api/resource", tags=["resource"])
 
 
@@ -74,115 +74,3 @@ async def list_models(user: UserRecord = Depends(require_user)):
             models.append(ModelInfo(id=m))
 
     return ModelListResponse(models=models)
-
-
-def _get_user_config_path(username: str) -> Path:
-    settings = get_settings()
-    work_dir = Path(settings.server.work_dir).expanduser()
-    return work_dir / username / ".priva.user.yml"
-
-
-def _read_quickactions(username: str) -> list[dict]:
-    path = _get_user_config_path(username)
-    if not path.exists():
-        return []
-    try:
-        with open(path, "r") as f:
-            data = yaml.safe_load(f) or {}
-        qa = data.get("quickactions", [])
-        return qa if isinstance(qa, list) else []
-    except Exception:
-        return []
-
-
-def _write_quickactions(username: str, quickactions: list[dict]) -> None:
-    path = _get_user_config_path(username)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Preserve other keys in the file
-    existing = {}
-    if path.exists():
-        try:
-            with open(path, "r") as f:
-                existing = yaml.safe_load(f) or {}
-        except Exception:
-            existing = {}
-
-    existing["quickactions"] = quickactions
-    with open(path, "w") as f:
-        yaml.dump(existing, f, default_flow_style=False, allow_unicode=True)
-
-
-@router.get("/quickactions", response_model=QuickActionListResponse)
-async def list_quickactions(user: UserRecord = Depends(require_user)):
-    raw = _read_quickactions(user.username)
-    actions = []
-    for item in raw:
-        if isinstance(item, dict) and "name" in item and "prompt" in item:
-            actions.append(QuickAction(
-                name=item["name"],
-                prompt=item["prompt"],
-                icon=item.get("icon"),
-            ))
-    return QuickActionListResponse(quickactions=actions)
-
-
-@router.put("/quickactions", response_model=QuickActionListResponse)
-async def update_quickactions(
-    request: QuickActionUpdateRequest,
-    user: UserRecord = Depends(require_user),
-):
-    qa_dicts = [qa.model_dump() for qa in request.quickactions]
-    _write_quickactions(user.username, qa_dicts)
-    return QuickActionListResponse(quickactions=request.quickactions)
-
-
-# ── Vision model config ──────────────────────────────────────────────
-
-
-def _read_vision_model(username: str) -> str | None:
-    path = _get_user_config_path(username)
-    if not path.exists():
-        return None
-    try:
-        with open(path, "r") as f:
-            data = yaml.safe_load(f) or {}
-        vm = data.get("vision_model")
-        return vm if isinstance(vm, str) and vm else None
-    except Exception:
-        return None
-
-
-def _write_vision_model(username: str, vision_model: str | None) -> None:
-    path = _get_user_config_path(username)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    existing: dict = {}
-    if path.exists():
-        try:
-            with open(path, "r") as f:
-                existing = yaml.safe_load(f) or {}
-        except Exception:
-            existing = {}
-
-    if vision_model:
-        existing["vision_model"] = vision_model
-    else:
-        existing.pop("vision_model", None)
-
-    with open(path, "w") as f:
-        yaml.dump(existing, f, default_flow_style=False, allow_unicode=True)
-
-
-@router.get("/vision-model", response_model=VisionModelResponse)
-async def get_vision_model(user: UserRecord = Depends(require_user)):
-    return VisionModelResponse(vision_model=_read_vision_model(user.username))
-
-
-@router.put("/vision-model", response_model=VisionModelResponse)
-async def update_vision_model(
-    request: VisionModelUpdateRequest,
-    user: UserRecord = Depends(require_user),
-):
-    _write_vision_model(user.username, request.vision_model)
-    return VisionModelResponse(vision_model=request.vision_model)

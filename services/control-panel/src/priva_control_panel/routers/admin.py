@@ -13,6 +13,8 @@ from priva_common.models.admin import (
     AuditLogResponse,
     CliPathResponse,
     CliPathUpdate,
+    FleetAccountEntry,
+    FleetResponse,
     HistoryRetentionResponse,
     HistoryRetentionUpdate,
     PresetPromptResponse,
@@ -246,6 +248,68 @@ async def get_admin_stats():
         total_sessions=total_sessions,
         total_storage_bytes=total_storage,
         users=user_stats,
+    )
+
+
+@router.get("/fleet", response_model=FleetResponse)
+async def get_fleet():
+    """Live fleet snapshot for the admin dashboard.
+
+    Lists the AgentTenant CRs (operator-written phase / readyReplicas / podIP),
+    then fans out to each *awake* pod's /health to read its in-flight ``active_runs``
+    (summed = "running sessions"). The probe is concurrent and fail-open, so one
+    unreachable pod degrades to active_runs=None rather than failing the snapshot.
+    """
+    from ..provisioner import list_tenants, probe_health
+
+    settings = get_settings()
+    port = settings.kubernetes.runner_service_port
+
+    items = await asyncio.to_thread(list_tenants)
+
+    entries: list[dict] = []
+    awake_targets: list[tuple[int, str]] = []  # (entry index, pod_ip)
+    for it in items:
+        spec = it.get("spec") or {}
+        status = it.get("status") or {}
+        meta = it.get("metadata") or {}
+        account_id = spec.get("accountId") or meta.get("name") or ""
+        phase = status.get("phase") or "Zero"
+        ready = int(status.get("readyReplicas") or 0)
+        pod_ip = status.get("podIP")
+        awake = ready > 0 and phase == "Running" and bool(pod_ip)
+        entries.append({
+            "account_id": account_id,
+            "username": spec.get("username"),
+            "phase": phase,
+            "awake": awake,
+            "ready_replicas": ready,
+            "active_runs": None,
+            "last_activity_ts": None,
+            "pod_ip": pod_ip,
+        })
+        if awake:
+            awake_targets.append((len(entries) - 1, pod_ip))
+
+    # Concurrent, fail-open /health fan-out to the awake pods only.
+    if awake_targets:
+        healths = await asyncio.gather(*(probe_health(ip, port) for _, ip in awake_targets))
+        for (idx, _), health in zip(awake_targets, healths):
+            if health:
+                entries[idx]["active_runs"] = int(health.get("active_runs") or 0)
+                entries[idx]["last_activity_ts"] = health.get("last_activity_ts")
+
+    awake_count = sum(1 for e in entries if e["awake"])
+    running = sum((e["active_runs"] or 0) for e in entries)
+
+    # Awake first, then busiest, then by account for a stable order.
+    entries.sort(key=lambda e: (not e["awake"], -(e["active_runs"] or 0), e["account_id"]))
+
+    return FleetResponse(
+        total_accounts=len(entries),
+        awake_sandboxes=awake_count,
+        running_sessions=running,
+        accounts=[FleetAccountEntry(**e) for e in entries],
     )
 
 

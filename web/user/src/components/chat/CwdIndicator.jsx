@@ -1,12 +1,16 @@
 import { FolderGit2 } from 'lucide-react'
 
 export default function CwdIndicator({ cwd }) {
-  if (!cwd) return null
+  // Always render the chip. Before a real cwd resolves (e.g. while the agent
+  // sandbox is waking, or in an empty chat with no session yet) show '~' — the
+  // agent-runner resolves '~' to the user's workspace, and the chip fills with
+  // the real path (from the agent-runner) once it responds.
+  const display = cwd || '~'
 
   return (
     <div
       className="inline-flex max-w-full"
-      title={cwd}
+      title={display}
     >
       <div
         className="inline-flex items-center gap-1 min-w-0"
@@ -34,7 +38,7 @@ export default function CwdIndicator({ cwd }) {
             lineHeight: 1.2,
           }}
         >
-          {cwd}
+          {display}
         </span>
       </div>
     </div>

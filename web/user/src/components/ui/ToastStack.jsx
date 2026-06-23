@@ -1,10 +1,11 @@
-import { AlertTriangle, Wifi, Info, X } from 'lucide-react'
+import { AlertTriangle, Wifi, Info, Check, X } from 'lucide-react'
 import useToastStore from '@shared/stores/toastStore'
 
 const LEVEL_CONFIG = {
   error:   { color: 'var(--red)',    Icon: AlertTriangle },
   warning: { color: 'var(--yellow)', Icon: Wifi },
   info:    { color: 'var(--blue)',   Icon: Info },
+  success: { color: 'var(--green)',  Icon: Check },
 }
 
 function Toast({ toast }) {

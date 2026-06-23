@@ -37,6 +37,27 @@ class AdminStatsResponse(BaseModel):
     users: list[UserStatsEntry]
 
 
+class FleetAccountEntry(BaseModel):
+    """One account's live agent-runner state, as seen by the control plane."""
+    account_id: str
+    username: str | None = None
+    phase: str = "Zero"  # operator status: Running / Waking / Zero / Unknown
+    awake: bool = False  # ready pod answering at status.podIP
+    ready_replicas: int = 0
+    # In-flight runs from the pod's /health (None = awake but probe failed/timed out).
+    active_runs: int | None = None
+    last_activity_ts: float | None = None  # epoch seconds, from the pod's /health
+    pod_ip: str | None = None
+
+
+class FleetResponse(BaseModel):
+    """Live fleet snapshot: awake sandboxes + summed in-flight runs across pods."""
+    total_accounts: int
+    awake_sandboxes: int
+    running_sessions: int
+    accounts: list[FleetAccountEntry]
+
+
 class PresetPromptResponse(BaseModel):
     enable: bool = False
     content: str | None = None

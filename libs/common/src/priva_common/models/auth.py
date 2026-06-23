@@ -74,6 +74,22 @@ class UserPublic(BaseModel):
     tagline: str | None = None
 
 
+class UserOverviewResponse(BaseModel):
+    """Per-user usage overview — agent-runtime state served by the agent-runner
+    (reads the per-account /workspace PVC). Formerly embedded in /api/auth/me on
+    the control-panel, which could not see the PVC and returned zeros."""
+
+    stats: UsageStats | None = None
+    heatmap: list[HeatmapBucket] | None = None
+    model_usage: list[ModelUsage] | None = None
+    daily_model_tokens: list[DailyModelTokens] | None = None
+    favorite_model: str | None = None
+    current_streak: int = 0
+    longest_streak: int = 0
+    peak_hour: int | None = None
+    tagline: str | None = None
+
+
 class UserCreate(BaseModel):
     username: str
     password: str | None = None

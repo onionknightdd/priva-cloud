@@ -22,11 +22,10 @@ import ini from 'highlight.js/lib/languages/ini'
 import useFileBrowserStore from '../../stores/fileBrowserStore'
 import useChatStore from '../../stores/chatStore'
 import useSidebarStore from '../../stores/sidebarStore'
-import useAuthStore from '@shared/stores/authStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { downloadFile, listDirectory } from '../../api/userFiles'
 import RichFilePreview from '../shared/RichFilePreview'
-import Tabs, { SlidingTabGroup, SlidingTabIndicator } from '../shared/Tabs'
+import Tabs, { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 import MarkdownRenderer from '../markdown/MarkdownRenderer'
 import MermaidDiagram from '../markdown/MermaidDiagram'
@@ -985,7 +984,6 @@ export default function FileBrowserPanel() {
   }, [])
   const sessionId = useChatStore((s) => s.sessionId)
   const sidebarSessions = useSidebarStore((s) => s.sessions)
-  const authUser = useAuthStore((s) => s.user)
   const tabs = useFileBrowserStore((s) => s.tabs)
   const activeTabId = useFileBrowserStore((s) => s.activeTabId)
   const setActiveTab = useFileBrowserStore((s) => s.setActiveTab)
@@ -996,7 +994,9 @@ export default function FileBrowserPanel() {
   const openFileTab = useFileBrowserStore((s) => s.openFile)
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null
   const activeSession = sidebarSessions.find((session) => session.sessionId === sessionId || session.id === sessionId)
-  const activeCwd = activeSession?.cwd || authUser?.workspace || ''
+  // No authUser.workspace fallback — it is the control-panel's /tmp/cp-workspace
+  // path, not the agent-runner's real /workspace cwd where files live.
+  const activeCwd = activeSession?.cwd || ''
   const treeRootPath = useMemo(() => {
     const fileDir = dirname(activeTab?.filePath || '')
     if (activeCwd && (!activeTab?.filePath || isWithinPath(activeTab.filePath, activeCwd))) return activeCwd

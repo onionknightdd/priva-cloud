@@ -1,7 +1,7 @@
 """control-panel FastAPI app.
 
-Single origin: serves its own routes (auth/admin/admin_files/user_data/resource/
-metrics), owns the data-plane (``compose()``), serves the user SPA at ``/`` and
+Single origin: serves its own control-plane routes (auth/admin/admin_files/
+resource/metrics), owns the data-plane (``compose()``), serves the user SPA at ``/`` and
 the admin SPA at ``/admin``, and mounts the reverse-proxy router (``proxy.py``)
 that forwards the runtime to agent-runner. No CORS (same-origin).
 """
@@ -129,11 +129,13 @@ def create_app() -> FastAPI:
     from .routers.auth import router as auth_router
     from .routers.admin import router as admin_router
     from .routers.admin_files import router as admin_files_router
-    from .routers.user_data import router as user_data_router
     from .routers.resource import router as resource_router
     from .routers.metrics import router as metrics_router
 
-    for r in (auth_router, admin_router, admin_files_router, user_data_router, resource_router, metrics_router):
+    # Per-user agent-runtime state (usage overview/stats/analytics + agent audit)
+    # is served by the agent-runner from its /workspace PVC, not here. The CP only
+    # retains control-plane audit, exposed at GET /api/auth/audit (auth router).
+    for r in (auth_router, admin_router, admin_files_router, resource_router, metrics_router):
         app.include_router(r)
 
     # Runtime routes (/api/agent, /api/files, /api/pty, ...) are NOT served or

@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { HelpCircle, Check, ChevronRight, ChevronDown, Plus, X, MessageSquare } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import Tabs from '../shared/Tabs'
+import Tabs from '@shared/components/shared/Tabs'
 
 function QuestionSection({
   question,

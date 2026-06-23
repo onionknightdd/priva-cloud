@@ -1,15 +1,23 @@
 # agent-runner — per-account runtime pod (:8091). Bundles the `claude` CLI the
-# Claude Agent SDK spawns (min v2.0.0) via the native installer (single binary,
-# no Node toolchain).
+# Claude Agent SDK spawns (min v2.0.0).
+#
+# NOTE: the native installer (`curl https://claude.ai/install.sh`) downloads from
+# downloads.claude.ai, which is unreachable on this network (TLS reset). We instead
+# install the CLI from the npm registry in a Node stage and copy the Node runtime +
+# package into the runtime image. The SDK only needs `claude` on PATH.
+FROM node:22-slim AS claudecli
+RUN npm install -g @anthropic-ai/claude-code && claude --version
+
 FROM python:3.12-slim-bookworm
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
-# The SDK resolves `claude` via shutil.which; install the native CLI and put it on PATH.
-RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && cp "$HOME/.local/bin/claude" /usr/local/bin/claude \
-    && /usr/local/bin/claude --version
+# Bring the Node runtime + the npm-installed `claude` CLI in from the claudecli stage.
+# /usr/local/bin/claude is a relative symlink into node_modules, preserved by the copy.
+COPY --from=claudecli /usr/local/bin /usr/local/bin
+COPY --from=claudecli /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN /usr/local/bin/claude --version
 RUN pip install --no-cache-dir uv
 WORKDIR /app
 COPY . /app

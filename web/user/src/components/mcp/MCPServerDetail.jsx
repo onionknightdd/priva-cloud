@@ -3,7 +3,7 @@ import { RefreshCw, Copy, Check } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useMcpStore from '../../stores/mcpStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
-import Tabs from '../shared/Tabs'
+import Tabs from '@shared/components/shared/Tabs'
 
 function mcpToolFullName(serverName, toolName) {
   return `mcp__${serverName}__${toolName}`

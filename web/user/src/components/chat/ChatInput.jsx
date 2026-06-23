@@ -614,7 +614,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
       style={{ background: 'var(--bg-base)' }}
     >
       <div style={{ maxWidth: 900, width: '80%', margin: '0 auto' }}>
-        {cwdPlacement === 'top' && cwd && (
+        {cwdPlacement === 'top' && (
           <div className="min-w-0" style={{ marginBottom: 8 }}>
             <div className="min-w-0" style={{ maxWidth: '100%' }}>
               <CwdIndicator cwd={cwd} />
@@ -663,7 +663,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
           />
         )}
 
-        {cwdPlacement === 'below' && cwd && (
+        {cwdPlacement === 'below' && (
           <div className="min-w-0" style={{ marginTop: 8 }}>
             <CwdIndicator cwd={cwd} />
           </div>

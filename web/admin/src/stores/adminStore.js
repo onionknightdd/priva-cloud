@@ -140,6 +140,23 @@ const useAdminStore = create((set, get) => ({
     }
   },
 
+  // Fleet (live agent-runner snapshot, polled). Skeleton only on the first load;
+  // background polls update in place without flashing the skeleton.
+  fleet: null,
+  fleetLoading: true,
+  fleetRefreshing: false,
+  fleetError: false,
+
+  fetchFleet: async () => {
+    set((s) => (s.fleet ? { fleetRefreshing: true } : { fleetLoading: true }))
+    try {
+      const fleet = await adminApi.getFleet()
+      set({ fleet, fleetLoading: false, fleetRefreshing: false, fleetError: false })
+    } catch {
+      set({ fleetLoading: false, fleetRefreshing: false, fleetError: true })
+    }
+  },
+
   // Audit log (cursor-paginated)
   auditEntries: [],
   auditTotal: null,
@@ -251,6 +268,7 @@ const useAdminStore = create((set, get) => ({
     inspectedUserSchedulerJobs: [], inspectedUserSchedulerLoading: false,
     inspectedUserHooks: { builtins: [], custom: [] }, inspectedUserHooksLoading: false,
     stats: null, statsLoading: true,
+    fleet: null, fleetLoading: true, fleetRefreshing: false, fleetError: false,
     auditEntries: [], auditTotal: null, auditLoading: true,
     auditCursorStack: [null], auditNextCursor: null,
     auditActionFilter: null, auditActorFilter: '', auditTargetFilter: '', auditSessionFilter: '',
