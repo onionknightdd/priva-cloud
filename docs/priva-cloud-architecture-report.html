@@ -386,9 +386,9 @@
   <table>
     <tr><th>可部署单元</th><th>语言</th><th>端口</th><th>副本</th><th>职责</th><th>状态</th></tr>
     <tr><td><b>agent-runner</b></td><td>Py</td><td>:8091 HTTP</td><td>每租户 1（0↔1）</td><td>每租户运行时；启动 <code>claude</code> CLI；SDK + 内置 skills 烤进镜像</td><td><span class="pill done">已建</span></td></tr>
-    <tr><td><b>control-panel</b></td><td>Py</td><td>:8080 HTTP · :9000 ext_proc</td><td>N 无状态</td><td>Agent-runtime EndPoint Picker（EPP）+ 鉴权/管理/配置 + 同时服务两个 SPA + K8s provisioner</td><td><span class="pill done">已建</span></td></tr>
-    <tr><td><b>data-spine</b></td><td>Py/gRPC</td><td>:50051 gRPC</td><td>1（Recreate）</td><td>账户 · 绑定 · 配额 · 任务 · 密钥；SQLite 真相源</td><td><span class="pill done">已建</span></td></tr>
-    <tr><td><b>operator</b></td><td>Py/kopf</td><td>—</td><td>1 活跃</td><td><code>AgentTenant</code> CRD 协调；唯一伸缩者 0↔1；密钥注入；空闲回收</td><td><span class="pill done">已建</span></td></tr>
+    <tr><td><b>control-panel</b></td><td>Py</td><td>:8080 HTTP · :9000 ext_proc</td><td>N 无状态</td><td>Agent-runtime EndPoint Picker（EPP）+ 鉴权/管理/配置 + 同时服务两个 SPA + K8s provisioner + 自助注册审批与运行时实时编辑</td><td><span class="pill done">已建</span></td></tr>
+    <tr><td><b>data-spine</b></td><td>Py/gRPC</td><td>:50051 gRPC</td><td>1（Recreate）</td><td>账户 · 绑定 · 配额 · 任务 · 密钥 · 资源规格 · 待审注册；SQLite 真相源</td><td><span class="pill done">已建</span></td></tr>
+    <tr><td><b>operator</b></td><td>Py/kopf</td><td>—</td><td>1 活跃</td><td><code>AgentTenant</code> CRD 协调；唯一伸缩者 0↔1；密钥注入；空闲回收；<b>运行类型</b>（auto_scale / persistent 常驻）+ <b>每账户资源规格</b>（CPU/内存/卷，实时生效）</td><td><span class="pill done">已建</span></td></tr>
     <tr><td><b>agentgateway</b></td><td>Rust</td><td>:80</td><td>N</td><td>边缘/数据面；第三方，经 Gateway API CRD 接入</td><td><span class="pill ext">已接入</span></td></tr>
     <tr><td><b>channel-connector</b></td><td>Py</td><td>—</td><td>N（租约）</td><td>WeCom/Feishu 长连接 + IM 扇出；把交互派发给 Pod</td><td><span class="pill plan">第4阶段</span></td></tr>
     <tr><td><b>scheduler</b></td><td>Py</td><td>—</td><td>N 无主</td><td>触发 → 抢占 → 唤醒 → 派发；自身不执行</td><td><span class="pill plan">第4阶段</span></td></tr>
@@ -695,17 +695,20 @@
   </div>
 
   <h3>关系核心——<code>account</code> 是枢纽</h3>
-  <p>最初的 16 表设计被有意收敛到 <b>5 张锁定的第 1 阶段表</b>；随后在 minikube 切片中又加回一张 <code>secret</code>
-  表以承载 BYOK 凭据供 operator 注入（<b>实际为 6 张</b>）。一切都挂在 <code>account_id</code> 上、
-  <code>ON DELETE CASCADE</code>——一个干净的爆炸半径。</p>
+  <p>最初的 16 表设计被有意收敛到 <b>5 张锁定的第 1 阶段表</b>；随后在 minikube 切片中加回一张 <code>secret</code>
+  表（BYOK 凭据供 operator 注入），并在运行类型/资源/自助注册增量中再加 <code>account_resource_spec</code> 与
+  <code>pending_registration</code>（<b>实际为 8 张</b>）。一切都挂在 <code>account_id</code> 上、
+  <code>ON DELETE CASCADE</code>——一个干净的爆炸半径（<code>pending_registration</code> 例外：审批前尚无账户，故独立）。</p>
   <table>
     <tr><th>表</th><th>基数</th><th>持有</th><th>备注</th></tr>
-    <tr><td><b>account</b> ★</td><td>枢纽</td><td>username、password（bcrypt）、api_key（Fernet）、role、status、feishu 关联</td><td><code>api_key_lookup</code> = HMAC，免解密即可 O(1) 查找</td></tr>
+    <tr><td><b>account</b> ★</td><td>枢纽</td><td>username、password（bcrypt）、api_key（Fernet）、role、status、<code>agent_runner_type</code>、feishu 关联</td><td><code>api_key_lookup</code> = HMAC，免解密即可 O(1) 查找；<code>agent_runner_type</code> ∈ {auto_scale, persistent}</td></tr>
     <tr><td>quota</td><td>1 : 1</td><td>tier、max_concurrent_sessions、idle_grace</td><td>运营杠杆</td></tr>
     <tr><td>channel_binding</td><td>1 : 0..1</td><td>session_uuid（UNIQUE）、first_run_done</td><td>全新；<code>session_uuid</code> ⇄ 会话的纽带</td></tr>
     <tr><td>scheduled_job</td><td>1 : N</td><td>trigger（JSON）、job_type、job_config</td><td>cron / interval / 一次性</td></tr>
     <tr><td>job_run_record</td><td>1 : N</td><td>status、duration、num_turns、result_summary</td><td>仅元数据——转录留在 PV；删除任务时 <code>job_id</code> SET NULL</td></tr>
     <tr><td>secret <span class="pill done" style="margin-left:4px">切片</span></td><td>1 : 1</td><td>bundle（Fernet 密文）、generation</td><td>读取时解密；唤醒时物化为一个 K8s Secret</td></tr>
+    <tr><td>account_resource_spec <span class="pill done" style="margin-left:4px">增量</span></td><td>1 : 1</td><td>cpu_cores、memory_mb、volume_gb</td><td>operator 据此设置容器 resources + PVC 大小；卷只可增不可减</td></tr>
+    <tr><td>pending_registration <span class="pill done" style="margin-left:4px">增量</span></td><td>独立</td><td>username、password_hash（bcrypt）、runner_type、cpu/mem/vol、status</td><td>自助注册待审；批准时按此创建账户并供给租户；同名仅一条 pending（部分唯一索引）</td></tr>
   </table>
   <div class="note">
     <div class="h">为什么不把转录放进数据库？</div>
@@ -823,6 +826,7 @@
     <tr><td><b>2</b></td><td>把 agent-runner + control-panel 切为本地进程</td><td>彻底切换——单体有意不再可启动；反向代理模式验证通过</td><td><span class="pill done">完成</span></td></tr>
     <tr><td><b>3</b> <span style="color:var(--text-dim)">切片</span></td><td>minikube 上的每账户供给：agentgateway + operator + EPP</td><td>2026-06-21 合入 <code>main</code>；冷启动 <b>4.1s</b>；真实 BYOK 交互穿过边缘 → <code>HTTP 200</code>；WS 聊天端到端可用</td><td><span class="pill done">完成</span></td></tr>
     <tr><td><b>3</b> <span style="color:var(--text-dim)">完整</span></td><td>factored <code>resolve·mint·wake·steer</code> + 内部 RPC + faces/内部 隔离</td><td>EPP（EndPoint Picker）已建；<code>:8081</code> 内部 RPC + 完整 CP 隔离模式待办</td><td><span class="pill part">部分</span></td></tr>
+    <tr><td><b>3+</b> <span style="color:var(--text-dim)">增量</span></td><td>运行类型（auto_scale / persistent）+ 每账户资源规格（CPU/内存/卷，实时）+ 自助注册与管理员审批</td><td>2026-06-24 验证：注册→审批→登录端到端；persistent 常驻 1 副本且免空闲回收；CPU/内存改动经 Recreate 重启生效；卷 5→8Gi 在线扩容、缩容被拒；可扩容 <code>csi-hostpath-sc</code></td><td><span class="pill done">完成</span></td></tr>
     <tr><td><b>4</b></td><td>抽离 connector + scheduler；斩断「反转」</td><td>两者仍在休眠的单体里；须去掉 <code>claude_sdk</code> 并变成派发器</td><td><span class="pill plan">下一步</span></td></tr>
     <tr><td><b>5</b></td><td>operator（切片中已完成）+ state-reader</td><td>operator 已跑在 minikube；免唤醒的 <code>state-reader</code> 尚未构建</td><td><span class="pill part">部分</span></td></tr>
     <tr><td><b>6</b></td><td>完整 K8s 接线：Dockerfile、NetworkPolicy、dev overlay</td><td>基础 manifest + 4 个 Dockerfile 已有；NetworkPolicy + <code>deploy/dev</code> overlay 待办</td><td><span class="pill part">部分</span></td></tr>

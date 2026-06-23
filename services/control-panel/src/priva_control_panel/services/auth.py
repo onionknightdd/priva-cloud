@@ -41,6 +41,7 @@ def user_record_to_public(user: UserRecord) -> UserPublic:
         api_key=user.api_key,
         created_at=user.created_at,
         updated_at=user.updated_at,
+        agent_runner_type=user.agent_runner_type,
     )
 
 

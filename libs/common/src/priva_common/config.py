@@ -170,6 +170,15 @@ class KubernetesSettings(BaseModel):
     # the SPA retries warm. MUST be < agentgateway's ext_proc stream timeout (the operator
     # keeps driving the wake past this). Distinct from wake_timeout_seconds above.
     wake_hold_seconds: int = 5
+    # Per-account runner pod sizing — fallback when the CR omits resources/storage.
+    # The admin can override per-account (live-editable). Admin "MB"/"GB" are
+    # interpreted as Mi/Gi by the operator (matches the legacy inline "1Gi" PVC).
+    runner_cpu_cores: float = 1.0
+    runner_memory_mb: int = 2048
+    runner_storage_gb: int = 1
+    # Expandable StorageClass for the per-account PVC (volume grow-only edits). "" =>
+    # omit storageClassName => cluster default SC (NOT expandable on vanilla minikube).
+    runner_storage_class: str = "csi-hostpath-sc"
 
 
 class EdgeSettings(BaseModel):

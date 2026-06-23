@@ -20,7 +20,8 @@ from . import schema
 
 _ACCOUNT_COLS = (
     "account_id", "username", "password_hash", "api_key", "api_key_lookup",
-    "role", "status", "feishu_user_id", "feishu_display_name", "created_at", "updated_at",
+    "role", "status", "agent_runner_type", "feishu_user_id", "feishu_display_name",
+    "created_at", "updated_at",
 )
 
 
@@ -109,6 +110,24 @@ class Repository(ABC):
     def secret_upsert(self, account_id: str, bundle: str) -> dict: ...
     @abstractmethod
     def secret_list_account_ids(self) -> list[str]: ...
+    # resource_spec
+    @abstractmethod
+    def resource_spec_get(self, account_id: str) -> dict | None: ...
+    @abstractmethod
+    def resource_spec_upsert(self, account_id: str, fields: dict) -> dict: ...
+    @abstractmethod
+    def resource_spec_list(self) -> list[dict]: ...
+    # pending_registration
+    @abstractmethod
+    def pending_insert(self, row: dict) -> None: ...
+    @abstractmethod
+    def pending_get(self, request_id: str) -> dict | None: ...
+    @abstractmethod
+    def pending_get_open_by_username(self, username: str) -> dict | None: ...
+    @abstractmethod
+    def pending_list_by_status(self, status: str | None) -> list[dict]: ...
+    @abstractmethod
+    def pending_set_status(self, request_id: str, status: str) -> dict | None: ...
     # admin
     @abstractmethod
     def table_count(self, table: str) -> int: ...
@@ -390,6 +409,62 @@ class SqliteRepo(Repository):
 
     def secret_list_account_ids(self):
         return [r["account_id"] for r in self._all("SELECT account_id FROM secret ORDER BY account_id")]
+
+    # resource_spec ----------------------------------------------------------
+    _RSPEC_COLS = ("cpu_cores", "memory_mb", "volume_gb")
+
+    def resource_spec_get(self, account_id):
+        return self._one("SELECT * FROM account_resource_spec WHERE account_id = ?", (account_id,))
+
+    def resource_spec_upsert(self, account_id, fields):
+        # Only the named columns are written; unset ones keep their default / prior value.
+        cols = [c for c in self._RSPEC_COLS if c in fields]
+        insert_cols = ["account_id"] + cols
+        ph = ", ".join("?" for _ in insert_cols)
+        updates = ", ".join(f"{c}=excluded.{c}" for c in cols)
+        updates = (updates + ", " if updates else "") + "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+        self._write(
+            f"INSERT INTO account_resource_spec ({', '.join(insert_cols)}) VALUES ({ph}) "
+            f"ON CONFLICT(account_id) DO UPDATE SET {updates}",
+            tuple([account_id] + [fields[c] for c in cols]),
+        )
+        return self.resource_spec_get(account_id)
+
+    def resource_spec_list(self):
+        return self._all("SELECT * FROM account_resource_spec ORDER BY account_id")
+
+    # pending_registration ---------------------------------------------------
+    _PENDING_COLS = ("request_id", "username", "password_hash", "display_name", "runner_type",
+                     "cpu_cores", "memory_mb", "volume_gb", "note", "status")
+
+    def pending_insert(self, row):
+        cols = [c for c in self._PENDING_COLS if c in row]
+        ph = ", ".join("?" for _ in cols)
+        self._write(
+            f"INSERT INTO pending_registration ({', '.join(cols)}) VALUES ({ph})",
+            tuple(row[c] for c in cols),
+        )
+
+    def pending_get(self, request_id):
+        return self._one("SELECT * FROM pending_registration WHERE request_id = ?", (request_id,))
+
+    def pending_get_open_by_username(self, username):
+        return self._one(
+            "SELECT * FROM pending_registration WHERE username = ? AND status = 'pending'", (username,))
+
+    def pending_list_by_status(self, status):
+        if status:
+            return self._all(
+                "SELECT * FROM pending_registration WHERE status = ? ORDER BY created_at DESC", (status,))
+        return self._all("SELECT * FROM pending_registration ORDER BY created_at DESC")
+
+    def pending_set_status(self, request_id, status):
+        self._write(
+            "UPDATE pending_registration SET status = ?, "
+            "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE request_id = ?",
+            (status, request_id),
+        )
+        return self.pending_get(request_id)
 
     # admin -----------------------------------------------------------------
     def table_count(self, table):

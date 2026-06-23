@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from priva_common.dataplane.v1 import common_pb2 as priva__common_dot_dataplane_dot_v1_dot_common__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\'priva_common/dataplane/v1/account.proto\x12\x12priva.dataplane.v1\x1a&priva_common/dataplane/v1/common.proto\"\xbb\x01\n\x07\x41\x63\x63ount\x12\x12\n\naccount_id\x18\x01 \x01(\t\x12\x10\n\x08username\x18\x02 \x01(\t\x12\x0c\n\x04role\x18\x03 \x01(\t\x12\x0e\n\x06status\x18\x04 \x01(\t\x12\x0f\n\x07\x61pi_key\x18\x05 \x01(\t\x12\x16\n\x0e\x66\x65ishu_user_id\x18\x06 \x01(\t\x12\x1b\n\x13\x66\x65ishu_display_name\x18\x07 \x01(\t\x12\x12\n\ncreated_at\x18\x08 \x01(\t\x12\x12\n\nupdated_at\x18\t \x01(\t\"\x1f\n\x0bUsernameRef\x12\x10\n\x08username\x18\x01 \x01(\t\"#\n\tFeishuRef\x12\x16\n\x0e\x66\x65ishu_user_id\x18\x01 \x01(\t\" \n\rApiKeyRequest\x12\x0f\n\x07\x61pi_key\x18\x01 \x01(\t\"<\n\x0b\x41\x63\x63ountList\x12-\n\x08\x61\x63\x63ounts\x18\x01 \x03(\x0b\x32\x1b.priva.dataplane.v1.Account\"H\n\x14\x43reateAccountRequest\x12\x10\n\x08username\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\x12\x0c\n\x04role\x18\x03 \x01(\t\"\xb5\x01\n\x14UpdateAccountRequest\x12\x12\n\naccount_id\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\x12\x0c\n\x04role\x18\x03 \x01(\t\x12\x0f\n\x07\x61pi_key\x18\x04 \x01(\t\x12\x0e\n\x06status\x18\x05 \x01(\t\x12\x16\n\x0e\x66\x65ishu_user_id\x18\x06 \x01(\t\x12\x1b\n\x13\x66\x65ishu_display_name\x18\x07 \x01(\t\x12\x13\n\x0bupdate_mask\x18\x08 \x03(\t\";\n\x15VerifyPasswordRequest\x12\x10\n\x08username\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t2\xdc\x06\n\x0e\x41\x63\x63ountService\x12\x42\n\x03Get\x12\x1e.priva.dataplane.v1.AccountRef\x1a\x1b.priva.dataplane.v1.Account\x12M\n\rGetByUsername\x12\x1f.priva.dataplane.v1.UsernameRef\x1a\x1b.priva.dataplane.v1.Account\x12\x42\n\x04List\x12\x19.priva.dataplane.v1.Empty\x1a\x1f.priva.dataplane.v1.AccountList\x12O\n\x06\x43reate\x12(.priva.dataplane.v1.CreateAccountRequest\x1a\x1b.priva.dataplane.v1.Account\x12O\n\x06Update\x12(.priva.dataplane.v1.UpdateAccountRequest\x1a\x1b.priva.dataplane.v1.Account\x12\x43\n\x06\x44\x65lete\x12\x1e.priva.dataplane.v1.AccountRef\x1a\x19.priva.dataplane.v1.Empty\x12Z\n\x0eVerifyPassword\x12).priva.dataplane.v1.VerifyPasswordRequest\x1a\x1d.priva.dataplane.v1.BoolValue\x12N\n\x0c\x46indByApiKey\x12!.priva.dataplane.v1.ApiKeyRequest\x1a\x1b.priva.dataplane.v1.Account\x12H\n\x0b\x43ountAdmins\x12\x19.priva.dataplane.v1.Empty\x1a\x1e.priva.dataplane.v1.CountValue\x12P\n\x12\x46indByFeishuUserId\x12\x1d.priva.dataplane.v1.FeishuRef\x1a\x1b.priva.dataplane.v1.Account\x12\x44\n\x08HasUsers\x12\x19.priva.dataplane.v1.Empty\x1a\x1d.priva.dataplane.v1.BoolValueb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\'priva_common/dataplane/v1/account.proto\x12\x12priva.dataplane.v1\x1a&priva_common/dataplane/v1/common.proto\"\xd6\x01\n\x07\x41\x63\x63ount\x12\x12\n\naccount_id\x18\x01 \x01(\t\x12\x10\n\x08username\x18\x02 \x01(\t\x12\x0c\n\x04role\x18\x03 \x01(\t\x12\x0e\n\x06status\x18\x04 \x01(\t\x12\x0f\n\x07\x61pi_key\x18\x05 \x01(\t\x12\x16\n\x0e\x66\x65ishu_user_id\x18\x06 \x01(\t\x12\x1b\n\x13\x66\x65ishu_display_name\x18\x07 \x01(\t\x12\x12\n\ncreated_at\x18\x08 \x01(\t\x12\x12\n\nupdated_at\x18\t \x01(\t\x12\x19\n\x11\x61gent_runner_type\x18\n \x01(\t\"\x1f\n\x0bUsernameRef\x12\x10\n\x08username\x18\x01 \x01(\t\"#\n\tFeishuRef\x12\x16\n\x0e\x66\x65ishu_user_id\x18\x01 \x01(\t\" \n\rApiKeyRequest\x12\x0f\n\x07\x61pi_key\x18\x01 \x01(\t\"<\n\x0b\x41\x63\x63ountList\x12-\n\x08\x61\x63\x63ounts\x18\x01 \x03(\x0b\x32\x1b.priva.dataplane.v1.Account\"z\n\x14\x43reateAccountRequest\x12\x10\n\x08username\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\x12\x0c\n\x04role\x18\x03 \x01(\t\x12\x19\n\x11\x61gent_runner_type\x18\x04 \x01(\t\x12\x15\n\rpassword_hash\x18\x05 \x01(\t\"\xd0\x01\n\x14UpdateAccountRequest\x12\x12\n\naccount_id\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\x12\x0c\n\x04role\x18\x03 \x01(\t\x12\x0f\n\x07\x61pi_key\x18\x04 \x01(\t\x12\x0e\n\x06status\x18\x05 \x01(\t\x12\x16\n\x0e\x66\x65ishu_user_id\x18\x06 \x01(\t\x12\x1b\n\x13\x66\x65ishu_display_name\x18\x07 \x01(\t\x12\x13\n\x0bupdate_mask\x18\x08 \x03(\t\x12\x19\n\x11\x61gent_runner_type\x18\t \x01(\t\";\n\x15VerifyPasswordRequest\x12\x10\n\x08username\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t2\xdc\x06\n\x0e\x41\x63\x63ountService\x12\x42\n\x03Get\x12\x1e.priva.dataplane.v1.AccountRef\x1a\x1b.priva.dataplane.v1.Account\x12M\n\rGetByUsername\x12\x1f.priva.dataplane.v1.UsernameRef\x1a\x1b.priva.dataplane.v1.Account\x12\x42\n\x04List\x12\x19.priva.dataplane.v1.Empty\x1a\x1f.priva.dataplane.v1.AccountList\x12O\n\x06\x43reate\x12(.priva.dataplane.v1.CreateAccountRequest\x1a\x1b.priva.dataplane.v1.Account\x12O\n\x06Update\x12(.priva.dataplane.v1.UpdateAccountRequest\x1a\x1b.priva.dataplane.v1.Account\x12\x43\n\x06\x44\x65lete\x12\x1e.priva.dataplane.v1.AccountRef\x1a\x19.priva.dataplane.v1.Empty\x12Z\n\x0eVerifyPassword\x12).priva.dataplane.v1.VerifyPasswordRequest\x1a\x1d.priva.dataplane.v1.BoolValue\x12N\n\x0c\x46indByApiKey\x12!.priva.dataplane.v1.ApiKeyRequest\x1a\x1b.priva.dataplane.v1.Account\x12H\n\x0b\x43ountAdmins\x12\x19.priva.dataplane.v1.Empty\x1a\x1e.priva.dataplane.v1.CountValue\x12P\n\x12\x46indByFeishuUserId\x12\x1d.priva.dataplane.v1.FeishuRef\x1a\x1b.priva.dataplane.v1.Account\x12\x44\n\x08HasUsers\x12\x19.priva.dataplane.v1.Empty\x1a\x1d.priva.dataplane.v1.BoolValueb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,21 +33,21 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'priva_common.dataplane.v1.a
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_ACCOUNT']._serialized_start=104
-  _globals['_ACCOUNT']._serialized_end=291
-  _globals['_USERNAMEREF']._serialized_start=293
-  _globals['_USERNAMEREF']._serialized_end=324
-  _globals['_FEISHUREF']._serialized_start=326
-  _globals['_FEISHUREF']._serialized_end=361
-  _globals['_APIKEYREQUEST']._serialized_start=363
-  _globals['_APIKEYREQUEST']._serialized_end=395
-  _globals['_ACCOUNTLIST']._serialized_start=397
-  _globals['_ACCOUNTLIST']._serialized_end=457
-  _globals['_CREATEACCOUNTREQUEST']._serialized_start=459
-  _globals['_CREATEACCOUNTREQUEST']._serialized_end=531
-  _globals['_UPDATEACCOUNTREQUEST']._serialized_start=534
-  _globals['_UPDATEACCOUNTREQUEST']._serialized_end=715
-  _globals['_VERIFYPASSWORDREQUEST']._serialized_start=717
-  _globals['_VERIFYPASSWORDREQUEST']._serialized_end=776
-  _globals['_ACCOUNTSERVICE']._serialized_start=779
-  _globals['_ACCOUNTSERVICE']._serialized_end=1639
+  _globals['_ACCOUNT']._serialized_end=318
+  _globals['_USERNAMEREF']._serialized_start=320
+  _globals['_USERNAMEREF']._serialized_end=351
+  _globals['_FEISHUREF']._serialized_start=353
+  _globals['_FEISHUREF']._serialized_end=388
+  _globals['_APIKEYREQUEST']._serialized_start=390
+  _globals['_APIKEYREQUEST']._serialized_end=422
+  _globals['_ACCOUNTLIST']._serialized_start=424
+  _globals['_ACCOUNTLIST']._serialized_end=484
+  _globals['_CREATEACCOUNTREQUEST']._serialized_start=486
+  _globals['_CREATEACCOUNTREQUEST']._serialized_end=608
+  _globals['_UPDATEACCOUNTREQUEST']._serialized_start=611
+  _globals['_UPDATEACCOUNTREQUEST']._serialized_end=819
+  _globals['_VERIFYPASSWORDREQUEST']._serialized_start=821
+  _globals['_VERIFYPASSWORDREQUEST']._serialized_end=880
+  _globals['_ACCOUNTSERVICE']._serialized_start=883
+  _globals['_ACCOUNTSERVICE']._serialized_end=1743
 # @@protoc_insertion_point(module_scope)

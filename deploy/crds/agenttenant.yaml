@@ -20,6 +20,9 @@ spec:
         - name: Account
           type: string
           jsonPath: .spec.accountId
+        - name: Runner
+          type: string
+          jsonPath: .spec.agentRunnerType
         - name: Phase
           type: string
           jsonPath: .status.phase
@@ -41,6 +44,16 @@ spec:
                   enum: [active, offboarding, purge]
                   default: active
                 image: {type: string}
+                agentRunnerType:
+                  type: string
+                  enum: [auto_scale, persistent]
+                  default: auto_scale
+                resources:
+                  type: object
+                  properties:
+                    cpu: {type: number}        # cores; fractional allowed (e.g. 0.5)
+                    memoryMb: {type: integer}  # interpreted as Mi by the operator
+                storageGb: {type: integer}     # PVC size in Gi; grow-only
                 idle:
                   type: object
                   properties:

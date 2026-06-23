@@ -53,9 +53,60 @@ def _ignore_conflict(fn, *args, **kwargs):
         raise
 
 
+# --- resource quantity helpers ----------------------------------------------
+# Admin "MB"/"GB" are interpreted as Mi/Gi (matches the legacy inline "1Gi" PVC).
+
+def cpu_quantity(cores: float) -> str:
+    """cores -> k8s CPU quantity. 0.5 -> '500m', 2 -> '2' (integral stays whole)."""
+    cores = float(cores)
+    if cores == int(cores):
+        return str(int(cores))
+    return f"{int(round(cores * 1000))}m"
+
+
+def mem_quantity(mb: int) -> str:
+    return f"{int(mb)}Mi"
+
+
+def storage_quantity(gb: int) -> str:
+    return f"{int(gb)}Gi"
+
+
+def _parse_gi(q: str | None) -> int | None:
+    """Parse a storage quantity we wrote (always Gi) back to an int. None if absent."""
+    if not q:
+        return None
+    s = str(q).strip()
+    if s.endswith("Gi"):
+        return int(float(s[:-2]))
+    if s.endswith("G"):
+        return int(float(s[:-1]))
+    try:
+        return int(float(s))
+    except ValueError:
+        return None
+
+
+def resolve_resources(spec: dict, settings) -> dict:
+    """CR spec.resources -> container `resources` (requests==limits = Guaranteed QoS),
+    falling back to cluster settings when a field is omitted."""
+    r = (spec.get("resources") or {})
+    cores = r.get("cpu")
+    cores = float(cores) if cores is not None else float(settings.kubernetes.runner_cpu_cores)
+    mb = r.get("memoryMb")
+    mb = int(mb) if mb is not None else int(settings.kubernetes.runner_memory_mb)
+    q = {"cpu": cpu_quantity(cores), "memory": mem_quantity(mb)}
+    return {"requests": dict(q), "limits": dict(q)}
+
+
+def resolve_storage_gb(spec: dict, settings) -> int:
+    sg = spec.get("storageGb")
+    return int(sg) if sg is not None else int(settings.kubernetes.runner_storage_gb)
+
+
 # --- manifest builders ------------------------------------------------------
 
-def _deployment_body(namespace, account_id, username, image, pull_policy, settings, owner) -> dict:
+def _deployment_body(namespace, account_id, username, image, pull_policy, settings, owner, spec) -> dict:
     lbl = names.labels(account_id)
     return {
         "apiVersion": "apps/v1",
@@ -73,6 +124,7 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                         "name": "agent-runner",
                         "image": image,
                         "imagePullPolicy": pull_policy,
+                        "resources": resolve_resources(spec, settings),
                         "ports": [{"containerPort": settings.kubernetes.runner_service_port}],
                         "env": [
                             {"name": "ACCOUNT_ID", "value": account_id},
@@ -122,25 +174,57 @@ def _service_body(namespace, account_id, port, owner) -> dict:
     }
 
 
-def _pvc_body(namespace, account_id, owner) -> dict:
+def _pvc_body(namespace, account_id, owner, settings, spec) -> dict:
+    pvc_spec = {
+        "accessModes": ["ReadWriteOnce"],
+        "resources": {"requests": {"storage": storage_quantity(resolve_storage_gb(spec, settings))}},
+    }
+    sc = settings.kubernetes.runner_storage_class
+    if sc:  # "" => omit storageClassName => cluster default SC
+        pvc_spec["storageClassName"] = sc
     return {
         "apiVersion": "v1",
         "kind": "PersistentVolumeClaim",
         "metadata": {"name": names.pvc_name(account_id), "namespace": namespace,
                      "labels": names.labels(account_id), "ownerReferences": [owner]},
-        "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "1Gi"}}},
+        "spec": pvc_spec,
     }
 
 
 # --- reconcile primitives ---------------------------------------------------
 
-def ensure_runtime_objects(namespace, account_id, username, image, pull_policy, settings, owner) -> None:
+def ensure_runtime_objects(namespace, account_id, username, image, pull_policy, settings, owner, spec) -> None:
     _ignore_conflict(core().create_namespaced_persistent_volume_claim,
-                     namespace, _pvc_body(namespace, account_id, owner))
+                     namespace, _pvc_body(namespace, account_id, owner, settings, spec))
     _ignore_conflict(core().create_namespaced_service,
                      namespace, _service_body(namespace, account_id, settings.kubernetes.runner_service_port, owner))
     _ignore_conflict(apps().create_namespaced_deployment,
-                     namespace, _deployment_body(namespace, account_id, username, image, pull_policy, settings, owner))
+                     namespace, _deployment_body(namespace, account_id, username, image, pull_policy, settings, owner, spec))
+
+
+def patch_deployment_resources(namespace, account_id, resources: dict) -> None:
+    """Strategic-merge patch the container resources by name. With strategy=Recreate
+    this restarts a running pod with the new requests/limits (dormant at replicas 0)."""
+    body = {"spec": {"template": {"spec": {"containers": [
+        {"name": "agent-runner", "resources": resources}]}}}}
+    apps().patch_namespaced_deployment(names.deploy_name(account_id), namespace, body)
+
+
+def get_pvc_storage_gi(namespace, account_id) -> int | None:
+    """Current requested PVC storage in Gi (grow-only comparison). None if absent."""
+    try:
+        p = core().read_namespaced_persistent_volume_claim(names.pvc_name(account_id), namespace)
+    except client.ApiException as exc:
+        if exc.status == 404:
+            return None
+        raise
+    req = (p.spec.resources.requests or {}) if p.spec and p.spec.resources else {}
+    return _parse_gi(req.get("storage"))
+
+
+def patch_pvc_storage(namespace, account_id, gb: int) -> None:
+    body = {"spec": {"resources": {"requests": {"storage": storage_quantity(gb)}}}}
+    core().patch_namespaced_persistent_volume_claim(names.pvc_name(account_id), namespace, body)
 
 
 def get_replicas(namespace, account_id) -> int:

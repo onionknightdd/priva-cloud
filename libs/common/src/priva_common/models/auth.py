@@ -19,6 +19,7 @@ class UserRecord(BaseModel):
     # api_key_lookup (HMAC) is an internal column and is NEVER surfaced on this DTO.
     account_id: str | None = None
     status: str = "active"
+    agent_runner_type: str = "auto_scale"  # auto_scale | persistent
     feishu_user_id: str | None = None
     feishu_display_name: str | None = None
 
@@ -63,6 +64,11 @@ class UserPublic(BaseModel):
     workspace: str | None = None
     created_at: datetime
     updated_at: datetime
+    # runner type + resource spec (admin table RUNNER column + edit drawer prefill)
+    agent_runner_type: str = "auto_scale"
+    cpu_cores: float | None = None
+    memory_mb: int | None = None
+    volume_gb: int | None = None
     stats: UsageStats | None = None
     heatmap: list[HeatmapBucket] | None = None
     model_usage: list[ModelUsage] | None = None
@@ -102,6 +108,11 @@ class UserUpdate(BaseModel):
     role: str | None = None
     api_key: str | None = None
     env: UserEnvSettings | None = None
+    # runtime edit (admin edit drawer) — change runner type / resource spec live
+    agent_runner_type: str | None = None
+    cpu_cores: float | None = None
+    memory_mb: int | None = None
+    volume_gb: int | None = None
 
 
 class LoginRequest(BaseModel):
@@ -123,6 +134,24 @@ class SetupRequest(BaseModel):
 
 class SetupStatus(BaseModel):
     needs_setup: bool
+
+
+class RegisterRequest(BaseModel):
+    """Public self-registration (wizard submit). The user requests a runner type +
+    resource spec; an admin approves. Bounds keep the request sane before approval."""
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=8)
+    display_name: str | None = Field(default=None, max_length=128)
+    runner_type: str = "auto_scale"
+    cpu_cores: float = Field(default=1.0, ge=0.1, le=16)
+    memory_mb: int = Field(default=2048, ge=256, le=131072)
+    volume_gb: int = Field(default=1, ge=1, le=1024)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class RegisterResponse(BaseModel):
+    status: str = "pending_approval"
+    request_id: str
 
 
 class TokenPayload(BaseModel):

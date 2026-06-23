@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package priva.dataplane.v1;
+
+// registration — self-service account requests awaiting admin approval.
+// password_hash is the bcrypt of the user-chosen password (NEVER returned on
+// list/get). On approval the control-panel creates the account from this hash
+// directly, so the user can log in immediately.
+message PendingRegistration {
+  string request_id = 1;
+  string username = 2;
+  string display_name = 3;
+  string runner_type = 4;       // auto_scale | persistent
+  double cpu_cores = 5;
+  int32 memory_mb = 6;
+  int32 volume_gb = 7;
+  string note = 8;
+  string status = 9;            // pending | approved | rejected
+  string created_at = 10;
+  string updated_at = 11;
+  string password_hash = 12;    // bcrypt; only populated on the internal approve read, never on list
+}
+
+message CreatePendingRequest {
+  string username = 1;
+  string password_hash = 2;     // precomputed bcrypt (control-panel hashes the plaintext)
+  string display_name = 3;
+  string runner_type = 4;
+  double cpu_cores = 5;
+  int32 memory_mb = 6;
+  int32 volume_gb = 7;
+  string note = 8;
+}
+
+message StatusRef { string status = 1; }          // filter for List
+message PendingRef { string request_id = 1; }
+message SetStatusRequest {
+  string request_id = 1;
+  string status = 2;            // approved | rejected
+}
+message PendingList { repeated PendingRegistration items = 1; }
+
+service RegistrationService {
+  rpc Create(CreatePendingRequest) returns (PendingRegistration);
+  rpc List(StatusRef) returns (PendingList);        // empty status => all
+  rpc Get(PendingRef) returns (PendingRegistration);
+  rpc SetStatus(SetStatusRequest) returns (PendingRegistration);
+}

@@ -37,8 +37,10 @@ class UserStore:
     def list_users(self) -> list[UserRecord]:
         return self._accounts().list()
 
-    def create_user(self, username: str, password: str, role: str = "user") -> UserRecord:
-        return self._accounts().create(username, password, role)
+    def create_user(self, username: str, password: str = "", role: str = "user",
+                    agent_runner_type: str = "auto_scale", password_hash: str | None = None) -> UserRecord:
+        return self._accounts().create(
+            username, password, role, agent_runner_type=agent_runner_type, password_hash=password_hash)
 
     def update_user(
         self,
@@ -46,12 +48,14 @@ class UserStore:
         password: str | None = None,
         role: str | None = None,
         api_key=_UNSET,
+        agent_runner_type: str | None = None,
     ) -> UserRecord:
         accounts = self._accounts()
         rec = accounts.get_by_username(username)
         if rec is None:
             raise ValueError(f"User '{username}' not found")
-        return accounts.update(rec.account_id, password=password, role=role, api_key=api_key)
+        return accounts.update(rec.account_id, password=password, role=role, api_key=api_key,
+                               agent_runner_type=agent_runner_type)
 
     def delete_user(self, username: str) -> None:
         accounts = self._accounts()

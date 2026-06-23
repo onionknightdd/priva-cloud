@@ -9,6 +9,21 @@ NS=priva-cloud
 echo "==> 1. build + load images"
 "$ROOT/deploy/minikube/build.sh"
 
+echo "==> 1b. CSI hostpath driver (expandable StorageClass 'csi-hostpath-sc' for PVC grow)"
+# The default 'standard' SC (k8s.io/minikube-hostpath) does NOT allow volume expansion;
+# the csi-hostpath-driver addon installs the hostpath.csi.k8s.io provisioner + a
+# 'csi-hostpath-sc' SC. Some minikube versions ship that SC with expansion DISABLED,
+# so patch it on (allowVolumeExpansion is mutable). Idempotent.
+minikube addons enable volumesnapshots
+minikube addons enable csi-hostpath-driver
+for i in 1 2 3 4 5 6 7 8; do
+  kubectl get sc csi-hostpath-sc >/dev/null 2>&1 && break; sleep 2
+done
+kubectl patch sc csi-hostpath-sc -p '{"allowVolumeExpansion":true}' >/dev/null 2>&1 || true
+kubectl get sc csi-hostpath-sc -o jsonpath='{.allowVolumeExpansion}' | grep -q true \
+  && echo "    csi-hostpath-sc expandable: ok" \
+  || echo "    WARN: csi-hostpath-sc missing/not expandable — volume grow edits will fail"
+
 echo "==> 2. namespace"
 kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
 

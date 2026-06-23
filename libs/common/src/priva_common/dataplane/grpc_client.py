@@ -39,6 +39,10 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         common_pb2,
         quota_pb2,
         quota_pb2_grpc,
+        registration_pb2,
+        registration_pb2_grpc,
+        resource_spec_pb2,
+        resource_spec_pb2_grpc,
         secret_pb2,
         secret_pb2_grpc,
     )
@@ -58,10 +62,14 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         def list(self):
             return [cv.user_from_pb(a) for a in self._s.List(common_pb2.Empty()).accounts]
 
-        def create(self, username, password, role="user"):
+        def create(self, username, password="", role="user", agent_runner_type="auto_scale",
+                   password_hash=None):
             try:
                 return cv.user_from_pb(
-                    self._s.Create(account_pb2.CreateAccountRequest(username=username, password=password, role=role))
+                    self._s.Create(account_pb2.CreateAccountRequest(
+                        username=username, password=password, role=role,
+                        agent_runner_type=agent_runner_type or "auto_scale",
+                        password_hash=password_hash or ""))
                 )
             except grpc.RpcError as exc:
                 if exc.code() == grpc.StatusCode.ALREADY_EXISTS:
@@ -69,7 +77,7 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
                 raise
 
         def update(self, account_id, *, password=None, role=None, api_key=UNSET,
-                   status=None, feishu_user_id=UNSET, feishu_display_name=UNSET):
+                   status=None, agent_runner_type=None, feishu_user_id=UNSET, feishu_display_name=UNSET):
             req = account_pb2.UpdateAccountRequest(account_id=account_id)
             mask: list[str] = []
             if password is not None:
@@ -81,6 +89,9 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
             if status is not None:
                 req.status = status
                 mask.append("status")
+            if agent_runner_type is not None:
+                req.agent_runner_type = agent_runner_type
+                mask.append("agent_runner_type")
             if api_key is not UNSET:
                 req.api_key = api_key or ""  # "" => clear
                 mask.append("api_key")
@@ -200,6 +211,60 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         def list_account_ids(self):
             return list(self._s.ListSecrets(common_pb2.Empty()).account_ids)
 
+    class _ResourceSpecs:
+        def __init__(self):
+            self._s = resource_spec_pb2_grpc.ResourceSpecServiceStub(channel)
+
+        def get(self, account_id):
+            return cv.resource_spec_from_pb(self._s.Get(common_pb2.AccountRef(account_id=account_id)))
+
+        def set(self, account_id, *, cpu_cores=None, memory_mb=None, volume_gb=None):
+            req = resource_spec_pb2.SetResourceSpecRequest(account_id=account_id)
+            mask: list[str] = []
+            if cpu_cores is not None:
+                req.cpu_cores = cpu_cores
+                mask.append("cpu_cores")
+            if memory_mb is not None:
+                req.memory_mb = memory_mb
+                mask.append("memory_mb")
+            if volume_gb is not None:
+                req.volume_gb = volume_gb
+                mask.append("volume_gb")
+            req.update_mask.extend(mask)
+            return cv.resource_spec_from_pb(self._s.Set(req))
+
+        def list(self):
+            return [cv.resource_spec_from_pb(r) for r in self._s.List(common_pb2.Empty()).specs]
+
+    class _Registrations:
+        def __init__(self):
+            self._s = registration_pb2_grpc.RegistrationServiceStub(channel)
+
+        def create(self, *, username, password_hash, display_name=None, runner_type="auto_scale",
+                   cpu_cores=1.0, memory_mb=2048, volume_gb=1, note=None):
+            return cv.pending_from_pb(self._s.Create(registration_pb2.CreatePendingRequest(
+                username=username, password_hash=password_hash, display_name=display_name or "",
+                runner_type=runner_type or "auto_scale", cpu_cores=cpu_cores, memory_mb=memory_mb,
+                volume_gb=volume_gb, note=note or "")))
+
+        def get_open_by_username(self, username):
+            # Server has no by-username RPC; filter the pending list (small set).
+            for p in self._s.List(registration_pb2.StatusRef(status="pending")).items:
+                if p.username == username:
+                    return cv.pending_from_pb(p)
+            return None
+
+        def list(self, status=None):
+            return [cv.pending_from_pb(p) for p in
+                    self._s.List(registration_pb2.StatusRef(status=status or "")).items]
+
+        def get(self, request_id):
+            return cv.pending_from_pb(self._s.Get(registration_pb2.PendingRef(request_id=request_id)))
+
+        def set_status(self, request_id, status):
+            return cv.pending_from_pb(self._s.SetStatus(
+                registration_pb2.SetStatusRequest(request_id=request_id, status=status)))
+
     class _SchedulerDeferred:
         """scheduler is not served over gRPC this phase (Phase 4)."""
 
@@ -215,6 +280,8 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         scheduler=_SchedulerDeferred(),
         admin=_Admin(),
         secrets=_Secrets(),
+        resource_specs=_ResourceSpecs(),
+        registrations=_Registrations(),
     )
     _cache[dsn] = client
     return client

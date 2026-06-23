@@ -51,6 +51,19 @@ export async function login(username, password) {
   return hydrateLoginResponse(payload)
 }
 
+export async function submitRegistration(payload) {
+  const res = await fetch(`${BASE_URL}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text)
+  }
+  return res.json()
+}
+
 export async function getMyApiKey() {
   const token = getToken()
   const res = await fetch(`${BASE_URL}/auth/me/apikey`, {

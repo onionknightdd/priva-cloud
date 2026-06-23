@@ -29,6 +29,25 @@ The shared secret (`priva-shared-secret`: jwt/hmac) is generated at bring-up and
 **not** committed. Per-account credentials (`ANTHROPIC_*`) are set via the SPA Settings,
 stored Fernet-encrypted in data-spine, and injected into each pod by the operator at wake.
 
+`up.sh` also enables the `csi-hostpath-driver` addon (and patches its `csi-hostpath-sc`
+StorageClass to `allowVolumeExpansion: true`) so per-account PVCs can grow live. The
+default `standard` SC is **not** expandable.
+
+## Per-account runner type, resource specs & self-registration
+
+- **Runner type** (`account.agent_runner_type` ∈ `auto_scale` | `persistent`): `auto_scale`
+  is the wake-on-demand / idle-scale-to-zero default; `persistent` pins the pod to 1 replica
+  and exempts it from the idle sweep (always-on). Stamped onto `AgentTenant.spec.agentRunnerType`.
+- **Resource specs** (`account_resource_spec`: cpu_cores / memory_mb / volume_gb): templated
+  into the runner container `resources` (requests==limits) + PVC size. Admin-editable live in
+  the admin UI — control-panel patches the CR, the operator applies it: CPU/mem → `Recreate`
+  restart, volume → online grow (grow-only). Stamped onto `AgentTenant.spec.{resources,storageGb}`.
+- **Self-registration**: public `POST /api/auth/register` stores a `pending_registration` row
+  (user-chosen bcrypt password + requested runner type / resources). An admin approves via
+  `POST /api/admin/pending-registrations/{id}/approve` (or `/reject`), which creates the account
+  from the stored hash + provisions the tenant. Admin routes accept an admin JWT **or** an
+  admin's account api-key.
+
 ## Request paths
 
 - **Control / SPAs / admin / auth / config** → agentgateway → `control-panel:8080` (plain HTTP).

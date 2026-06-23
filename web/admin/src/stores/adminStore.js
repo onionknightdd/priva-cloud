@@ -25,6 +25,30 @@ const useAdminStore = create((set, get) => ({
   openUserDrawer: (username) => set({ selectedUser: username, drawerOpen: true }),
   closeUserDrawer: () => set({ selectedUser: null, drawerOpen: false }),
 
+  // Pending registrations (awaiting admin approval)
+  pendingUsers: [],
+  pendingUsersLoading: true,
+
+  fetchPendingUsers: async () => {
+    set({ pendingUsersLoading: true })
+    try {
+      const pendingUsers = await adminApi.getPendingRegistrations()
+      set({ pendingUsers, pendingUsersLoading: false })
+    } catch {
+      set({ pendingUsersLoading: false })
+    }
+  },
+
+  approvePendingUser: async (requestId) => {
+    await adminApi.approvePendingUser(requestId)
+    await Promise.all([get().fetchPendingUsers(), get().fetchUsers()])
+  },
+
+  rejectPendingUser: async (requestId) => {
+    await adminApi.rejectPendingUser(requestId)
+    await get().fetchPendingUsers()
+  },
+
   // User inspection (tab viewer)
   inspectedUser: null,
   inspectedTab: 'skills',
@@ -262,6 +286,7 @@ const useAdminStore = create((set, get) => ({
   reset: () => set({
     activeSection: 'users', users: [], usersLoading: true,
     selectedUser: null, drawerOpen: false,
+    pendingUsers: [], pendingUsersLoading: true,
     inspectedUser: null, inspectedTab: 'skills',
     inspectedUserSkills: [], inspectedUserSkillsLoading: false,
     inspectedUserMcpServers: [], inspectedUserMcpLoading: false,

@@ -3,6 +3,7 @@ import { Bot } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { login } from '../../api/auth'
 import useAuthStore from '../../stores/authStore'
+import RegistrationWizardModal from './RegistrationWizardModal'
 
 export default function LoginPage() {
   const { t } = useTranslation()
@@ -10,6 +11,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [registerOpen, setRegisterOpen] = useState(false)
 
   const setToken = useAuthStore((s) => s.setToken)
   const setUser = useAuthStore((s) => s.setUser)
@@ -139,7 +141,31 @@ export default function LoginPage() {
         >
           {submitting ? t('auth.signingIn') : t('auth.signIn')}
         </button>
+
+        <button
+          type="button"
+          className="font-normal"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--blue)',
+            fontSize: 13,
+            cursor: 'pointer',
+            padding: 0,
+            alignSelf: 'center',
+            transition: 'opacity 150ms ease',
+          }}
+          onClick={() => setRegisterOpen(true)}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.8' }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
+        >
+          {t('auth.createAccount')}
+        </button>
       </form>
+
+      {registerOpen && (
+        <RegistrationWizardModal onClose={() => setRegisterOpen(false)} />
+      )}
     </div>
   )
 }

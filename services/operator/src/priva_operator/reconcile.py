@@ -26,19 +26,50 @@ def _ids(spec, name):
     return account_id, username
 
 
+def _runner_type(spec) -> str:
+    return spec.get("agentRunnerType") or "auto_scale"
+
+
+def _is_persistent(spec) -> bool:
+    return _runner_type(spec) == "persistent"
+
+
 @kopf.on.create(GROUP, VERSION, PLURAL)
 @kopf.on.resume(GROUP, VERSION, PLURAL)
-def ensure(spec, name, namespace, uid, patch, logger, **_):
+def ensure(spec, name, namespace, uid, status, patch, logger, **_):
     s = get_settings()
     account_id, username = _ids(spec, name)
     image = spec.get("image") or s.kubernetes.runner_image
     owner = names.owner_ref(name, uid)
     kube.ensure_runtime_objects(
-        namespace, account_id, username, image, s.kubernetes.runner_image_pull_policy, s, owner)
-    if kube.get_replicas(namespace, account_id) <= 0:
+        namespace, account_id, username, image, s.kubernetes.runner_image_pull_policy, s, owner, spec)
+
+    replicas = kube.get_replicas(namespace, account_id)
+
+    # Persistent runners are always-on: bring them to 1 here (the reconcile-to-desired
+    # home that runs on create AND resume, so it self-heals across operator restarts).
+    # Guard on desiredState so an offboarding/purge account is never force-woken.
+    if _is_persistent(spec) and spec.get("desiredState", "active") == "active":
+        if replicas != 1:
+            # Materialize creds first so the pod is request-ready the moment it's Running.
+            secrets.materialize(namespace, account_id, owner)
+            kube.scale(namespace, account_id, 1)
+        pod_ip = kube.wait_pod_ready(namespace, account_id, timeout=float(s.kubernetes.wake_timeout_seconds))
+        if pod_ip:
+            patch.status["phase"] = "Running"
+            patch.status["podIP"] = pod_ip
+            patch.status["readyReplicas"] = 1
+            # Preserve the min_alive clock across resume; only set it on a fresh pod.
+            patch.status["startedAt"] = status.get("startedAt") or time.time()
+        else:
+            patch.status["phase"] = "Waking"
+        logger.info("ensured persistent runner at 1 for account=%s", account_id)
+        return
+
+    if replicas <= 0:
         patch.status["phase"] = "Zero"
         patch.status["readyReplicas"] = 0
-    logger.info("ensured runtime objects for account=%s", account_id)
+    logger.info("ensured runtime objects for account=%s type=%s", account_id, _runner_type(spec))
 
 
 @kopf.on.field(GROUP, VERSION, PLURAL, field="spec.wake.requestedAt")
@@ -132,6 +163,11 @@ def reconcile_runtime(spec, name, namespace, status, patch, logger, **_):
         logger.info("healed stale podIP account=%s -> %s", account_id, real_ip)
         return  # next tick runs the idle check against the now-correct IP
 
+    # Persistent runner: never idle-sweep to zero. podIP self-heal above still runs
+    # (so a replaced persistent pod's status stays correct); only the sleep is skipped.
+    if _is_persistent(spec):
+        return
+
     # --- idle sweep (always against the real, healed IP — never status.podIP) ---------
     started_at = status.get("startedAt")
     if not started_at:
@@ -166,3 +202,73 @@ def reconcile_runtime(spec, name, namespace, status, patch, logger, **_):
         patch.status["readyReplicas"] = 0
         patch.status["idleSince"] = now
         logger.info("slept idle account=%s (idle %.0fs > grace %ds)", account_id, now - last, grace)
+
+
+# --- live admin edits (CR spec patches from control-panel.update_tenant_runtime) ----
+# Each handler skips the CREATE event (old is None) — `ensure` already builds objects
+# with the correct resources/storage and scales persistent. They act only on real edits.
+
+@kopf.on.field(GROUP, VERSION, PLURAL, field="spec.agentRunnerType")
+def on_runner_type_change(spec, name, namespace, uid, old, new, patch, logger, **_):
+    if old is None:
+        return
+    s = get_settings()
+    account_id, _ = _ids(spec, name)
+    owner = names.owner_ref(name, uid)
+    if new == "persistent" and spec.get("desiredState", "active") == "active":
+        if kube.get_replicas(namespace, account_id) != 1:
+            secrets.materialize(namespace, account_id, owner)
+            kube.scale(namespace, account_id, 1)
+            patch.status["phase"] = "Waking"
+            patch.status["startedAt"] = time.time()
+        logger.info("runner_type -> persistent, pinned to 1 account=%s", account_id)
+    elif new == "auto_scale":
+        # Re-enable the idle sweep; do NOT eagerly scale down a possibly-busy pod —
+        # the next idle tick sweeps it once genuinely idle past grace.
+        logger.info("runner_type -> auto_scale, idle sweep re-enabled account=%s", account_id)
+
+
+@kopf.on.field(GROUP, VERSION, PLURAL, field="spec.resources")
+def on_resources_change(spec, name, namespace, old, new, logger, **_):
+    if old is None:
+        return
+    s = get_settings()
+    account_id, _ = _ids(spec, name)
+    resources = kube.resolve_resources(spec, s)
+    # Patch the template always: dormant at replicas 0 (applies on next wake), or a
+    # Recreate restart with the new requests/limits when the pod is running.
+    try:
+        kube.patch_deployment_resources(namespace, account_id, resources)
+        logger.info("resources updated account=%s -> %s", account_id, resources)
+    except kube.client.ApiException as exc:
+        if exc.status == 404:
+            logger.warning("resources change but no Deployment yet account=%s", account_id)
+            return
+        raise
+
+
+@kopf.on.field(GROUP, VERSION, PLURAL, field="spec.storageGb")
+def on_storage_change(spec, name, namespace, old, new, patch, logger, **_):
+    if old is None:
+        return
+    account_id, _ = _ids(spec, name)
+    desired = int(new)
+    current = kube.get_pvc_storage_gi(namespace, account_id)
+    if current is None:
+        logger.warning("storage change but no PVC yet account=%s", account_id)
+        return
+    if desired <= current:
+        # K8s can't shrink a PVC — ignore, surface on status (status preserves unknown).
+        patch.status["storageWarning"] = f"shrink ignored: requested {desired}Gi <= current {current}Gi"
+        logger.warning("ignored PVC shrink account=%s %dGi->%dGi", account_id, current, desired)
+        return
+    try:
+        kube.patch_pvc_storage(namespace, account_id, desired)
+        patch.status["storageGb"] = desired
+        patch.status["storageWarning"] = None
+        logger.info("grew PVC account=%s %dGi -> %dGi", account_id, current, desired)
+    except kube.client.ApiException as exc:
+        # Non-expandable StorageClass rejects the resize. Surface it; do NOT re-raise
+        # (an un-retriable config error would make kopf retry the handler forever).
+        patch.status["storageWarning"] = f"expansion failed: {exc.reason}"
+        logger.error("PVC expansion rejected account=%s: %s", account_id, exc)

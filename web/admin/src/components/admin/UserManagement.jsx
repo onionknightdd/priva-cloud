@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
-import { Pencil, Trash2, Plus, Search, Eye } from 'lucide-react'
+import { Pencil, Trash2, Plus, Search, Eye, Check, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useAdminStore from '../../stores/adminStore'
 import useAuthStore from '@shared/stores/authStore'
@@ -7,9 +7,15 @@ import useUiStore from '@shared/stores/uiStore'
 import * as adminApi from '@shared/api/admin'
 import { useResizable } from '@shared/hooks/useResizable'
 import safeStorage from '@shared/utils/safeStorage'
+import Tabs from '@shared/components/shared/Tabs'
 import Chip from '@shared/components/shared/Chip'
 import CopyButton from '@shared/components/shared/CopyButton'
 import UserInspectPanel from './UserInspectPanel'
+
+// Runner type → chip color. persistent (always-on) gets a distinct semantic color.
+function runnerColor(type) {
+  return type === 'persistent' ? 'var(--orange)' : 'var(--cyan)'
+}
 
 const SPLIT_STORAGE_KEY = 'admin-split-width'
 const SPLIT_MIN = 360
@@ -244,6 +250,167 @@ function CreateUserDialog({ onClose, onCreated }) {
   )
 }
 
+function PendingApprovalPane() {
+  const { t } = useTranslation()
+  const pendingUsers = useAdminStore((s) => s.pendingUsers)
+  const pendingUsersLoading = useAdminStore((s) => s.pendingUsersLoading)
+  const fetchPendingUsers = useAdminStore((s) => s.fetchPendingUsers)
+  const approvePendingUser = useAdminStore((s) => s.approvePendingUser)
+  const rejectPendingUser = useAdminStore((s) => s.rejectPendingUser)
+  const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
+
+  useEffect(() => { fetchPendingUsers() }, [])
+
+  const formatDateTime = (dateStr) => {
+    if (!dateStr) return '—'
+    const d = new Date(dateStr)
+    return Number.isNaN(d.getTime()) ? dateStr : d.toLocaleString()
+  }
+
+  const handleApprove = (req) => {
+    showConfirmDialog({
+      title: t('admin.approveUserTitle'),
+      message: (
+        <div className="flex flex-col gap-1">
+          <span>{t('admin.approveUserMessage', { name: req.username })}</span>
+          <span className="text-xs" style={{ color: 'var(--text-dim)' }}>
+            {t('admin.displayName')}: {req.display_name || '—'}
+          </span>
+          <span className="text-xs" style={{ color: 'var(--text-dim)' }}>
+            {t('admin.approveDetailRunner')}: {req.runner_type}
+          </span>
+          <span className="text-xs" style={{ color: 'var(--text-dim)' }}>
+            {t('admin.approveDetailResources')}: {req.cpu_cores} {t('admin.cpuUnit')} · {req.memory_mb} {t('admin.memoryUnit')} · {req.volume_gb} {t('admin.volumeUnit')}
+          </span>
+          <span className="text-xs" style={{ color: 'var(--text-dim)' }}>
+            {t('admin.requested')}: {formatDateTime(req.created_at)}
+          </span>
+        </div>
+      ),
+      confirmLabel: t('admin.approve'),
+      onConfirm: async () => {
+        try {
+          await approvePendingUser(req.request_id)
+        } catch (e) {
+          console.error(e)
+        }
+      },
+    })
+  }
+
+  const handleReject = (req) => {
+    showConfirmDialog({
+      title: t('admin.rejectUserTitle'),
+      message: t('admin.rejectUserMessage', { name: req.username }),
+      confirmLabel: t('admin.reject'),
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await rejectPendingUser(req.request_id)
+        } catch (e) {
+          console.error(e)
+        }
+      },
+    })
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      {pendingUsersLoading ? (
+        <TableSkeleton />
+      ) : pendingUsers.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center py-12" style={{ color: 'var(--text-dim)' }}>
+          <span className="text-sm">{t('admin.noPendingRequests')}</span>
+        </div>
+      ) : (
+        <div style={{ borderTop: '1px solid var(--border)' }}>
+          {/* Header row */}
+          <div
+            className="flex items-center gap-3 px-4 py-2 text-xs uppercase"
+            style={{
+              background: 'var(--bg-surface)',
+              color: 'var(--text-secondary)',
+              letterSpacing: '0.06em',
+              borderBottom: '1px solid var(--border)',
+            }}
+          >
+            <span className="flex-1 min-w-0">{t('admin.username')}</span>
+            <span style={{ width: 120, flexShrink: 0 }}>{t('admin.displayName')}</span>
+            <span style={{ width: 140, flexShrink: 0 }}>{t('admin.requested')}</span>
+            <span style={{ width: 132, flexShrink: 0, textAlign: 'right' }}>{t('admin.actions')}</span>
+          </div>
+          {/* Rows */}
+          {pendingUsers.map((req) => (
+            <div
+              key={req.request_id}
+              className="flex items-center gap-3 px-4 py-2"
+              style={{
+                borderBottom: '1px solid var(--border-subtle)',
+                borderLeft: '2px solid var(--yellow)',
+              }}
+            >
+              <span
+                className="text-sm font-semibold flex-1 min-w-0 truncate"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                {req.username}
+              </span>
+              <span
+                className="text-sm truncate"
+                style={{ color: 'var(--text-secondary)', width: 120, flexShrink: 0 }}
+              >
+                {req.display_name || '—'}
+              </span>
+              <span
+                className="text-xs font-light"
+                style={{ color: 'var(--text-dim)', width: 140, flexShrink: 0 }}
+              >
+                {formatDateTime(req.created_at)}
+              </span>
+              <span className="flex items-center gap-2 justify-end" style={{ width: 132, flexShrink: 0 }}>
+                <button
+                  className="flex items-center gap-1 px-2 py-1 text-xs"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--green)',
+                    borderRadius: 4,
+                    color: 'var(--green)',
+                    cursor: 'pointer',
+                    transition: 'opacity 150ms ease',
+                  }}
+                  onClick={() => handleApprove(req)}
+                  onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.8' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
+                >
+                  <Check size={12} strokeWidth={1.5} />
+                  {t('admin.approve')}
+                </button>
+                <button
+                  className="flex items-center gap-1 px-2 py-1 text-xs"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--red)',
+                    borderRadius: 4,
+                    color: 'var(--red)',
+                    cursor: 'pointer',
+                    transition: 'opacity 150ms ease',
+                  }}
+                  onClick={() => handleReject(req)}
+                  onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.8' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
+                >
+                  <X size={12} strokeWidth={1.5} />
+                  {t('admin.reject')}
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function UserManagement() {
   const { t } = useTranslation()
   const users = useAdminStore((s) => s.users)
@@ -254,9 +421,18 @@ export default function UserManagement() {
   const setInspectedUser = useAdminStore((s) => s.setInspectedUser)
   const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
   const authUser = useAuthStore((s) => s.user)
+  const pendingUsers = useAdminStore((s) => s.pendingUsers)
+  const fetchPendingUsers = useAdminStore((s) => s.fetchPendingUsers)
   const [showCreate, setShowCreate] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [roleFilter, setRoleFilter] = useState('all')
+  const [selectedTab, setSelectedTab] = useState('registered')
+
+  const pendingCount = pendingUsers.length
+  const TABS = [
+    { id: 'registered', label: t('admin.tabRegisteredUsers') },
+    { id: 'pending', label: `${t('admin.tabPendingApproval')}${pendingCount ? ` (${pendingCount})` : ''}` },
+  ]
 
   // Resizable table | inspect split (default 50/50, persisted to localStorage).
   const splitRef = useRef(null)
@@ -296,7 +472,7 @@ export default function UserManagement() {
     onResize: onSplitResize,
   })
 
-  useEffect(() => { fetchUsers() }, [])
+  useEffect(() => { fetchUsers(); fetchPendingUsers() }, [])
 
   const filteredUsers = useMemo(() => {
     let result = users
@@ -346,27 +522,61 @@ export default function UserManagement() {
         <h2 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>
           {t('admin.userManagement')}
         </h2>
-        <button
-          className="flex items-center gap-1 px-3 py-1 text-sm"
-          style={{
-            background: 'var(--blue)',
-            border: 'none',
-            borderRadius: '4px',
-            color: 'var(--text-inverse)',
-            cursor: 'pointer',
-            transition: 'opacity 150ms ease',
-          }}
-          onClick={() => setShowCreate(true)}
-          onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85' }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
-        >
-          <Plus size={14} strokeWidth={1.5} />
-          {t('admin.createUser')}
-        </button>
+        {selectedTab === 'registered' && (
+          <button
+            className="flex items-center gap-1 px-3 py-1 text-sm"
+            style={{
+              background: 'var(--blue)',
+              border: 'none',
+              borderRadius: '4px',
+              color: 'var(--text-inverse)',
+              cursor: 'pointer',
+              transition: 'opacity 150ms ease',
+            }}
+            onClick={() => setShowCreate(true)}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85' }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
+          >
+            <Plus size={14} strokeWidth={1.5} />
+            {t('admin.createUser')}
+          </button>
+        )}
       </div>
 
-      {/* Split content */}
-      <div ref={splitRef} className="flex flex-1 min-h-0" style={{ marginTop: 16 }}>
+      {/* Tab switch — Registered Users / Pending Approval */}
+      <div
+        className="flex items-center flex-shrink-0"
+        style={{ padding: '0 24px', marginTop: 12 }}
+      >
+        <Tabs
+          tabs={TABS}
+          variant="underline"
+          layoutId="user-mgmt-tab-indicator"
+          activeKey={selectedTab}
+          onChange={(index, tab) => {
+            setSelectedTab(tab.id)
+            if (tab.id === 'pending') fetchPendingUsers()
+          }}
+          className="flex items-center gap-4"
+          buttonStyle={{ paddingBottom: 8, fontSize: 13 }}
+          getButtonStyle={({ active }) => ({ fontWeight: active ? 600 : 400 })}
+        />
+        <div className="flex-1" style={{ borderBottom: '1px solid var(--border)', alignSelf: 'stretch' }} />
+      </div>
+
+      {/* Pending Approval tab */}
+      {selectedTab === 'pending' && (
+        <div className="flex flex-col flex-1 min-h-0" style={{ marginTop: 8 }}>
+          <PendingApprovalPane />
+        </div>
+      )}
+
+      {/* Registered Users tab — split content */}
+      <div
+        ref={splitRef}
+        className="flex flex-1 min-h-0"
+        style={{ marginTop: 8, display: selectedTab === 'registered' ? 'flex' : 'none' }}
+      >
         {/* Left pane: table */}
         <div
           className="flex flex-col overflow-hidden"
@@ -440,6 +650,7 @@ export default function UserManagement() {
                 >
                   <span className="flex-1 min-w-0">{t('admin.username')}</span>
                   <span style={{ width: 60, flexShrink: 0 }}>{t('admin.role')}</span>
+                  <span style={{ width: 88, flexShrink: 0 }}>{t('admin.runner')}</span>
                   <span style={{ width: 32, flexShrink: 0, textAlign: 'center' }}>{t('admin.apiKey')}</span>
                   <span style={{ width: 72, flexShrink: 0 }}>{t('admin.created')}</span>
                   <span style={{ width: 52, flexShrink: 0, textAlign: 'right' }}>{t('admin.actions')}</span>
@@ -476,6 +687,15 @@ export default function UserManagement() {
                         <Chip color={user.role === 'admin' ? 'var(--green)' : 'var(--text-secondary)'}>
                           {user.role.toUpperCase()}
                         </Chip>
+                      </span>
+                      <span style={{ width: 88, flexShrink: 0 }}>
+                        {user.agent_runner_type ? (
+                          <Chip color={runnerColor(user.agent_runner_type)}>
+                            {user.agent_runner_type.toUpperCase()}
+                          </Chip>
+                        ) : (
+                          <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>—</span>
+                        )}
                       </span>
                       <span style={{ width: 32, flexShrink: 0, textAlign: 'center' }}>
                         <ApiKeyPopover apiKey={user.api_key} />

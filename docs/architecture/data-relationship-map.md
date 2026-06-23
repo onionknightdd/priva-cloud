@@ -71,8 +71,18 @@
 | `account → scheduled_job` | 1 : N | CASCADE | many jobs per account |
 | `account → job_run_record` | 1 : N | CASCADE | deleting an account wipes its runs |
 | `scheduled_job → job_run_record` | 1 : N | **SET NULL** | runs survive job deletion; `job_name` denormalized so history stays readable |
+| `account → secret` | 1 : 1 | CASCADE | BYOK bundle (Fernet); operator materializes a K8s Secret at wake |
+| `account → account_resource_spec` | 1 : 1 | CASCADE | cpu_cores / memory_mb / volume_gb; operator → container resources + PVC size |
+| `pending_registration` | — | **no FK** | self-registration request awaiting approval; the account does not exist yet |
 
-Deleting an `account` cascades to quota, binding, jobs, and runs — one clean blast radius.
+Deleting an `account` cascades to quota, binding, jobs, runs, secret, and resource-spec — one
+clean blast radius. `pending_registration` stands alone (independent of `account`); a `pending`
+row is consumed at approval (→ creates the account) or rejected.
+
+> **As-built increment (2026-06-24).** `account` gained `agent_runner_type` (`auto_scale` |
+> `persistent`); two tables were added — `account_resource_spec` (per-account pod sizing) and
+> `pending_registration` (self-service approval queue). The slice's `secret` table (line 147's
+> "DROPPED" list) is in fact **re-added** as-built (BYOK creds for operator injection).
 
 ---
 

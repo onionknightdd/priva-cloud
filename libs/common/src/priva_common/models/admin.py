@@ -58,6 +58,21 @@ class FleetResponse(BaseModel):
     accounts: list[FleetAccountEntry]
 
 
+class PendingRegistrationResponse(BaseModel):
+    """One pending self-registration request (admin Pending Approval tab).
+    password_hash is NEVER included."""
+    request_id: str
+    username: str
+    display_name: str | None = None
+    runner_type: str = "auto_scale"
+    cpu_cores: float = 1.0
+    memory_mb: int = 2048
+    volume_gb: int = 1
+    note: str | None = None
+    status: str = "pending"
+    created_at: str | None = None
+
+
 class PresetPromptResponse(BaseModel):
     enable: bool = False
     content: str | None = None

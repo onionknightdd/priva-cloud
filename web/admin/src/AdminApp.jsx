@@ -4,6 +4,7 @@ import useAuthStore from '@shared/stores/authStore'
 import useAdminStore from './stores/adminStore'
 import { useResizable } from '@shared/hooks/useResizable'
 import Tabs from '@shared/components/shared/Tabs'
+import ConfirmDialog from '@shared/components/shared/ConfirmDialog'
 import LoginPage from '@shared/components/auth/LoginPage'
 import UserManagement from './components/admin/UserManagement'
 import AuditLog from './components/admin/AuditLog'
@@ -300,6 +301,7 @@ export default function AdminApp() {
       </main>
 
       {drawerOpen && <UserEditDrawer />}
+      <ConfirmDialog />
     </div>
   )
 }

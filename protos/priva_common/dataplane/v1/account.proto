@@ -16,6 +16,7 @@ message Account {
   string feishu_display_name = 7;
   string created_at = 8;
   string updated_at = 9;
+  string agent_runner_type = 10;  // auto_scale | persistent
 }
 
 message UsernameRef { string username = 1; }
@@ -27,6 +28,8 @@ message CreateAccountRequest {
   string username = 1;
   string password = 2; // plaintext; server bcrypts
   string role = 3;
+  string agent_runner_type = 4;   // auto_scale (default when empty) | persistent
+  string password_hash = 5;       // precomputed bcrypt; when set, server skips bcrypt (approval path)
 }
 
 // Partial update: only fields named in update_mask are applied.
@@ -39,6 +42,7 @@ message UpdateAccountRequest {
   string feishu_user_id = 6;
   string feishu_display_name = 7;
   repeated string update_mask = 8;
+  string agent_runner_type = 9;   // auto_scale | persistent
 }
 
 message VerifyPasswordRequest {

@@ -17,6 +17,7 @@ from priva_common.models.admin import (
     FleetResponse,
     HistoryRetentionResponse,
     HistoryRetentionUpdate,
+    PendingRegistrationResponse,
     PresetPromptResponse,
     PresetPromptUpdate,
     RetryableToolEntry,
@@ -56,8 +57,22 @@ router = APIRouter(
 
 @router.get("/users", response_model=list[UserPublic])
 async def list_users():
+    from priva_common.dataplane import get_client
+
     store = get_user_store()
-    return [user_record_to_public(u) for u in store.list_users()]
+    # One resource_specs.list() call, mapped by account_id, so the table's RUNNER
+    # column + the edit-drawer prefill don't fan out N gRPC calls.
+    specs = {s.account_id: s for s in get_client().resource_specs.list()}
+    out: list[UserPublic] = []
+    for u in store.list_users():
+        pub = user_record_to_public(u)
+        spec = specs.get(u.account_id)
+        if spec is not None:
+            pub.cpu_cores = spec.cpu_cores
+            pub.memory_mb = spec.memory_mb
+            pub.volume_gb = spec.volume_gb
+        out.append(pub)
+    return out
 
 
 @router.post("/users", response_model=UserPublic)
@@ -153,6 +168,18 @@ async def update_user(
         else:
             kwargs["api_key"] = request.api_key
 
+    if request.agent_runner_type is not None:
+        if request.agent_runner_type not in ("auto_scale", "persistent"):
+            raise HTTPException(400, "Invalid agent_runner_type")
+        if request.agent_runner_type != existing.agent_runner_type:
+            kwargs["agent_runner_type"] = request.agent_runner_type
+            audit.append(AuditEntry(
+                actor=current_user.username,
+                action="user.runner_type_changed",
+                target=username,
+                details={"old": existing.agent_runner_type, "new": request.agent_runner_type},
+            ))
+
     # Write env if provided
     if request.env:
         env_dict = request.env.model_dump(exclude_none=True)
@@ -163,7 +190,46 @@ async def update_user(
         user = store.update_user(username, **kwargs)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return user_record_to_public(user)
+
+    # Resource-spec edit + live CR reconcile. Persist the spec in data-spine, then
+    # patch the AgentTenant CR; the operator's field handlers apply it to the pod
+    # (Recreate restart for cpu/mem, grow for volume, scale for persistent toggle).
+    from priva_common.dataplane import get_client
+
+    spec_kwargs = {}
+    if request.cpu_cores is not None:
+        spec_kwargs["cpu_cores"] = request.cpu_cores
+    if request.memory_mb is not None:
+        spec_kwargs["memory_mb"] = request.memory_mb
+    if request.volume_gb is not None:
+        spec_kwargs["volume_gb"] = request.volume_gb
+    if spec_kwargs:
+        get_client().resource_specs.set(user.account_id, **spec_kwargs)
+        audit.append(AuditEntry(
+            actor=current_user.username,
+            action="user.resource_spec_changed",
+            target=username,
+            details=spec_kwargs,
+        ))
+
+    if request.agent_runner_type is not None or spec_kwargs:
+        from ..provisioner import update_tenant_runtime
+        try:
+            update_tenant_runtime(
+                user.account_id,
+                runner_type=request.agent_runner_type,
+                cpu=request.cpu_cores,
+                memory_mb=request.memory_mb,
+                storage_gb=request.volume_gb,
+            )
+        except Exception as exc:  # pragma: no cover - kube optional locally
+            logger.warning("update_tenant_runtime failed for {}: {}", username, exc)
+
+    pub = user_record_to_public(user)
+    spec = get_client().resource_specs.get(user.account_id)
+    if spec is not None:
+        pub.cpu_cores, pub.memory_mb, pub.volume_gb = spec.cpu_cores, spec.memory_mb, spec.volume_gb
+    return pub
 
 
 @router.delete("/users/{username}")
@@ -199,6 +265,120 @@ async def delete_user(
         details={"role": existing.role},
     ))
 
+    return {"status": "ok"}
+
+
+# --- Self-registration approval ---
+# Guarded by require_admin (router-level), which accepts an admin JWT OR an admin's
+# account api_key (authenticate_raw_token resolves the bearer token either way).
+
+@router.get("/pending-registrations", response_model=list[PendingRegistrationResponse])
+async def list_pending_registrations():
+    from priva_common.dataplane import get_client
+
+    items = get_client().registrations.list("pending")
+    return [
+        PendingRegistrationResponse(
+            request_id=p.request_id,
+            username=p.username,
+            display_name=p.display_name,
+            runner_type=p.runner_type,
+            cpu_cores=p.cpu_cores,
+            memory_mb=p.memory_mb,
+            volume_gb=p.volume_gb,
+            note=p.note,
+            status=p.status,
+            created_at=p.created_at,
+        )
+        for p in items
+    ]
+
+
+@router.post("/pending-registrations/{request_id}/approve", response_model=UserPublic)
+async def approve_registration(
+    request_id: str,
+    current_user: UserRecord = Depends(require_admin),
+):
+    from priva_common.dataplane import get_client
+
+    client = get_client()
+    pending = client.registrations.get(request_id)  # includes password_hash
+    if pending is None:
+        raise HTTPException(404, "Registration request not found")
+    if pending.status != "pending":
+        raise HTTPException(409, f"Request already {pending.status}")
+
+    store = get_user_store()
+    if store.get_user(pending.username) is not None:
+        raise HTTPException(409, f"User '{pending.username}' already exists")
+
+    # Create the account directly from the stored bcrypt hash (user can log in now).
+    try:
+        user = store.create_user(
+            pending.username,
+            role="user",
+            agent_runner_type=pending.runner_type,
+            password_hash=pending.password_hash,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    # Seed the resource spec, then provision the tenant with the requested values.
+    client.resource_specs.set(
+        user.account_id,
+        cpu_cores=pending.cpu_cores,
+        memory_mb=pending.memory_mb,
+        volume_gb=pending.volume_gb,
+    )
+    from ..provisioner import ensure_tenant
+    try:
+        ensure_tenant(
+            user.account_id, user.username,
+            runner_type=pending.runner_type,
+            cpu=pending.cpu_cores,
+            memory_mb=pending.memory_mb,
+            storage_gb=pending.volume_gb,
+        )
+    except Exception as exc:  # pragma: no cover - kube optional locally
+        logger.warning("provision tenant failed for {}: {}", user.username, exc)
+
+    client.registrations.set_status(request_id, "approved")
+
+    audit = get_audit_logger()
+    audit.append(AuditEntry(
+        actor=current_user.username,
+        action="registration.approved",
+        target=pending.username,
+        details={"request_id": request_id, "runner_type": pending.runner_type},
+    ))
+
+    pub = user_record_to_public(user)
+    pub.cpu_cores, pub.memory_mb, pub.volume_gb = pending.cpu_cores, pending.memory_mb, pending.volume_gb
+    return pub
+
+
+@router.post("/pending-registrations/{request_id}/reject")
+async def reject_registration(
+    request_id: str,
+    current_user: UserRecord = Depends(require_admin),
+):
+    from priva_common.dataplane import get_client
+
+    client = get_client()
+    pending = client.registrations.get(request_id)
+    if pending is None:
+        raise HTTPException(404, "Registration request not found")
+    if pending.status != "pending":
+        raise HTTPException(409, f"Request already {pending.status}")
+
+    client.registrations.set_status(request_id, "rejected")
+    audit = get_audit_logger()
+    audit.append(AuditEntry(
+        actor=current_user.username,
+        action="registration.rejected",
+        target=pending.username,
+        details={"request_id": request_id},
+    ))
     return {"status": "ok"}
 
 

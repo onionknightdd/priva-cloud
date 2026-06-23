@@ -11,6 +11,8 @@ from priva_common.models.auth import (
     ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
+    RegisterRequest,
+    RegisterResponse,
     SetupRequest,
     SetupStatus,
     UserPublic,
@@ -68,6 +70,48 @@ async def setup_admin(request: SetupRequest):
 
     public = user_record_to_public(user)
     return LoginResponse(access_token=token, user=public)
+
+
+@router.post("/register", response_model=RegisterResponse)
+async def register(request: RegisterRequest):
+    """Public self-registration. Stores a pending request (bcrypt password hash +
+    requested runner type / resource spec) for an admin to approve. No account is
+    created until approval."""
+    import bcrypt
+
+    from priva_common.dataplane import get_client
+
+    if request.runner_type not in ("auto_scale", "persistent"):
+        raise HTTPException(400, "Invalid runner_type")
+
+    store = get_user_store()
+    if store.get_user(request.username) is not None:
+        raise HTTPException(409, "Username already taken")
+
+    client = get_client()
+    if client.registrations.get_open_by_username(request.username) is not None:
+        raise HTTPException(409, "A registration request for this username is already pending")
+
+    password_hash = bcrypt.hashpw(request.password.encode(), bcrypt.gensalt()).decode()
+    rec = client.registrations.create(
+        username=request.username,
+        password_hash=password_hash,
+        display_name=request.display_name,
+        runner_type=request.runner_type,
+        cpu_cores=request.cpu_cores,
+        memory_mb=request.memory_mb,
+        volume_gb=request.volume_gb,
+        note=request.note,
+    )
+
+    audit = get_audit_logger()
+    audit.append(AuditEntry(
+        actor=request.username,
+        action="registration.requested",
+        target=request.username,
+        details={"runner_type": request.runner_type, "request_id": rec.request_id},
+    ))
+    return RegisterResponse(status="pending_approval", request_id=rec.request_id)
 
 
 @router.post("/login", response_model=LoginResponse)

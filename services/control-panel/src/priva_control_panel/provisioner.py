@@ -63,8 +63,14 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def ensure_tenant(account_id: str, username: str) -> None:
-    """Create the AgentTenant CR for a new account (idempotent)."""
+def ensure_tenant(account_id: str, username: str, *, runner_type: str | None = None,
+                  cpu: float | None = None, memory_mb: int | None = None,
+                  storage_gb: int | None = None) -> None:
+    """Create the AgentTenant CR for a new account (idempotent).
+
+    The runner type + resource spec default to the cluster settings when omitted;
+    the approval path passes the user-requested values so the CR is born correct
+    (operator builds the right-sized pod, persistent scales to 1 in `ensure`)."""
     s = get_settings()
     ns = s.kubernetes.namespace_tenants
     body = {
@@ -76,6 +82,12 @@ def ensure_tenant(account_id: str, username: str) -> None:
             "username": username,
             "desiredState": "active",
             "image": s.kubernetes.runner_image,
+            "agentRunnerType": runner_type or "auto_scale",
+            "resources": {
+                "cpu": float(cpu if cpu is not None else s.kubernetes.runner_cpu_cores),
+                "memoryMb": int(memory_mb if memory_mb is not None else s.kubernetes.runner_memory_mb),
+            },
+            "storageGb": int(storage_gb if storage_gb is not None else s.kubernetes.runner_storage_gb),
             "idle": {
                 "graceSeconds": s.kubernetes.idle_grace_seconds,
                 "minAliveAfterWakeSeconds": s.kubernetes.min_alive_after_wake_seconds,
@@ -89,6 +101,35 @@ def ensure_tenant(account_id: str, username: str) -> None:
     except client.ApiException as exc:
         if exc.status != 409:  # AlreadyExists is fine (re-provision)
             raise
+
+
+def update_tenant_runtime(account_id: str, *, runner_type: str | None = None,
+                          cpu: float | None = None, memory_mb: int | None = None,
+                          storage_gb: int | None = None) -> None:
+    """Admin live-edit: patch ONLY the provided keys onto the AgentTenant spec
+    (strategic merge). The operator's field handlers do all cluster mutation —
+    re-template the Deployment resources (Recreate restart), grow the PVC, or
+    toggle persistent. The provisioner never touches Deployments/PVCs directly."""
+    s = get_settings()
+    ns = s.kubernetes.namespace_tenants
+    spec: dict = {}
+    if runner_type is not None:
+        if runner_type not in ("auto_scale", "persistent"):
+            raise ValueError(f"bad runner_type {runner_type!r}")
+        spec["agentRunnerType"] = runner_type
+    res: dict = {}
+    if cpu is not None:
+        res["cpu"] = float(cpu)
+    if memory_mb is not None:
+        res["memoryMb"] = int(memory_mb)
+    if res:
+        spec["resources"] = res
+    if storage_gb is not None:
+        spec["storageGb"] = int(storage_gb)
+    if not spec:
+        return
+    _custom().patch_namespaced_custom_object(GROUP, VERSION, ns, PLURAL, account_id, {"spec": spec})
+    logger.info("patched AgentTenant runtime account={} spec={}", account_id, spec)
 
 
 def list_tenants() -> list[dict]:

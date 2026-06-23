@@ -26,12 +26,16 @@ __all__ = [
     "QuotaRecord",
     "RunPage",
     "SecretRecord",
+    "ResourceSpecRecord",
+    "PendingRegistrationRecord",
     "AccountClient",
     "BindingClient",
     "QuotaClient",
     "SchedulerClient",
     "AdminClient",
     "SecretClient",
+    "ResourceSpecClient",
+    "RegistrationClient",
     "DataplaneClient",
 ]
 
@@ -72,11 +76,43 @@ class SecretRecord(BaseModel):
     updated_at: str | None = None
 
 
+class ResourceSpecRecord(BaseModel):
+    account_id: str
+    cpu_cores: float = 1.0
+    memory_mb: int = 2048
+    volume_gb: int = 1
+    updated_at: str | None = None
+
+
+class PendingRegistrationRecord(BaseModel):
+    request_id: str
+    username: str
+    display_name: str | None = None
+    runner_type: str = "auto_scale"
+    cpu_cores: float = 1.0
+    memory_mb: int = 2048
+    volume_gb: int = 1
+    note: str | None = None
+    status: str = "pending"
+    created_at: str | None = None
+    updated_at: str | None = None
+    # bcrypt hash — only populated on the internal get() the approval path reads;
+    # never returned by list() (the server zeroes it there).
+    password_hash: str | None = None
+
+
 class AccountClient(Protocol):
     def get(self, account_id: str) -> UserRecord | None: ...
     def get_by_username(self, username: str) -> UserRecord | None: ...
     def list(self) -> list[UserRecord]: ...
-    def create(self, username: str, password: str, role: str = "user") -> UserRecord: ...
+    def create(
+        self,
+        username: str,
+        password: str = "",
+        role: str = "user",
+        agent_runner_type: str = "auto_scale",
+        password_hash: str | None = None,  # precomputed bcrypt (approval path)
+    ) -> UserRecord: ...
     def update(
         self,
         account_id: str,
@@ -85,6 +121,7 @@ class AccountClient(Protocol):
         role: str | None = None,
         api_key: Any = UNSET,  # UNSET=leave, None=clear, str=set
         status: str | None = None,
+        agent_runner_type: str | None = None,
         feishu_user_id: Any = UNSET,
         feishu_display_name: Any = UNSET,
     ) -> UserRecord: ...
@@ -156,6 +193,38 @@ class SecretClient(Protocol):
     def list_account_ids(self) -> list[str]: ...
 
 
+class ResourceSpecClient(Protocol):
+    def get(self, account_id: str) -> ResourceSpecRecord | None: ...
+    def set(
+        self,
+        account_id: str,
+        *,
+        cpu_cores: float | None = None,
+        memory_mb: int | None = None,
+        volume_gb: int | None = None,
+    ) -> ResourceSpecRecord: ...
+    def list(self) -> list[ResourceSpecRecord]: ...
+
+
+class RegistrationClient(Protocol):
+    def create(
+        self,
+        *,
+        username: str,
+        password_hash: str,
+        display_name: str | None = None,
+        runner_type: str = "auto_scale",
+        cpu_cores: float = 1.0,
+        memory_mb: int = 2048,
+        volume_gb: int = 1,
+        note: str | None = None,
+    ) -> PendingRegistrationRecord: ...
+    def get_open_by_username(self, username: str) -> PendingRegistrationRecord | None: ...
+    def list(self, status: str | None = None) -> list[PendingRegistrationRecord]: ...
+    def get(self, request_id: str) -> PendingRegistrationRecord | None: ...  # includes password_hash
+    def set_status(self, request_id: str, status: str) -> PendingRegistrationRecord | None: ...
+
+
 @dataclass
 class DataplaneClient:
     """Aggregate handle — one per process. `get_client()` returns this."""
@@ -166,3 +235,5 @@ class DataplaneClient:
     scheduler: SchedulerClient
     admin: AdminClient
     secrets: SecretClient
+    resource_specs: ResourceSpecClient
+    registrations: RegistrationClient

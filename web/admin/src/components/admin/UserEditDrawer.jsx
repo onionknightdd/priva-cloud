@@ -27,6 +27,10 @@ export default function UserEditDrawer() {
 
   const [role, setRole] = useState(user?.role || 'user')
   const [password, setPassword] = useState('')
+  const [runnerType, setRunnerType] = useState(user?.agent_runner_type || 'auto_scale')
+  const [cpuCores, setCpuCores] = useState(String(user?.cpu_cores ?? 1))
+  const [memoryMb, setMemoryMb] = useState(String(user?.memory_mb ?? 2048))
+  const [volumeGb, setVolumeGb] = useState(String(user?.volume_gb ?? 1))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   // Guards setState after the drawer unmounts mid-request.
@@ -37,6 +41,10 @@ export default function UserEditDrawer() {
     if (user) {
       setRole(user.role)
       setPassword('')
+      setRunnerType(user.agent_runner_type || 'auto_scale')
+      setCpuCores(String(user.cpu_cores ?? 1))
+      setMemoryMb(String(user.memory_mb ?? 2048))
+      setVolumeGb(String(user.volume_gb ?? 1))
       setError(null)
     }
   }, [user?.username])
@@ -50,6 +58,10 @@ export default function UserEditDrawer() {
       const data = {}
       if (role !== user.role) data.role = role
       if (password) data.password = password
+      data.agent_runner_type = runnerType
+      data.cpu_cores = Number(cpuCores)
+      data.memory_mb = Number(memoryMb)
+      data.volume_gb = Number(volumeGb)
       await adminApi.updateUser(user.username, data)
       await fetchUsers()
       closeUserDrawer()
@@ -181,6 +193,103 @@ export default function UserEditDrawer() {
               <option value="user">User</option>
               <option value="admin">Admin</option>
             </select>
+          </div>
+
+          {/* Runner Type */}
+          <div className="flex flex-col gap-2">
+            <label className="text-xs uppercase" style={{ color: 'var(--text-dim)', letterSpacing: '0.06em' }}>
+              {t('admin.runnerType')}
+            </label>
+            <div className="flex gap-2">
+              {[
+                { value: 'auto_scale', label: t('admin.runnerAutoScale') },
+                { value: 'persistent', label: t('admin.runnerPersistent') },
+              ].map(({ value, label }) => {
+                const selected = runnerType === value
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    className="flex items-center gap-2 px-3 py-2 flex-1 min-w-0"
+                    style={{
+                      background: selected ? 'var(--bg-elevated)' : 'transparent',
+                      border: '1px solid var(--border)',
+                      borderLeft: `2px solid ${selected ? 'var(--blue)' : 'var(--border)'}`,
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      transition: 'background 150ms ease, border-color 150ms ease',
+                    }}
+                    onClick={() => setRunnerType(value)}
+                  >
+                    <span
+                      className="flex items-center justify-center flex-shrink-0"
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: '50%',
+                        border: `1px solid ${selected ? 'var(--blue)' : 'var(--border-strong)'}`,
+                      }}
+                    >
+                      {selected && (
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--blue)' }} />
+                      )}
+                    </span>
+                    <span
+                      className="text-sm truncate"
+                      style={{
+                        color: 'var(--text-primary)',
+                        fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+                      }}
+                    >
+                      {label}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            <span className="text-xs font-light" style={{ color: 'var(--text-dim)' }}>
+              &gt; {runnerType === 'persistent' ? t('admin.runnerPersistentHint') : t('admin.runnerAutoScaleHint')}
+            </span>
+          </div>
+
+          {/* Resource Spec */}
+          <div className="flex flex-col gap-2">
+            <label className="text-xs uppercase" style={{ color: 'var(--text-dim)', letterSpacing: '0.06em' }}>
+              {t('admin.resourceSpec')}
+            </label>
+            {[
+              { label: t('admin.cpu'), value: cpuCores, setter: setCpuCores, unit: t('admin.cpuUnit'), min: 0.1, step: 0.1 },
+              { label: t('admin.memory'), value: memoryMb, setter: setMemoryMb, unit: t('admin.memoryUnit'), min: 256, step: 256 },
+              { label: t('admin.volume'), value: volumeGb, setter: setVolumeGb, unit: t('admin.volumeUnit'), min: 1, step: 1 },
+            ].map(({ label, value, setter, unit, min, step }) => (
+              <div key={label} className="flex items-center gap-3">
+                <span
+                  className="text-xs uppercase flex-shrink-0"
+                  style={{ color: 'var(--text-secondary)', letterSpacing: '0.06em', width: 60 }}
+                >
+                  {label}
+                </span>
+                <input
+                  className="px-2 py-1 text-sm"
+                  type="number"
+                  min={min}
+                  step={step}
+                  style={{
+                    ...inputStyle,
+                    width: 100,
+                    fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+                  }}
+                  value={value}
+                  onChange={(e) => setter(e.target.value)}
+                />
+                <span className="text-xs font-light" style={{ color: 'var(--text-dim)' }}>
+                  {unit}
+                </span>
+              </div>
+            ))}
+            <span className="text-xs font-light" style={{ color: 'var(--text-dim)' }}>
+              &gt; {t('admin.saveRestartsPod')}
+            </span>
           </div>
 
           {/* Reset Password */}

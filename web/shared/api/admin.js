@@ -4,6 +4,11 @@ export const listUsers = () => getJSON('/admin/users')
 export const createUser = (data) => postJSON('/admin/users', data)
 export const updateUser = (username, data) => putJSON(`/admin/users/${encodeURIComponent(username)}`, data)
 export const deleteUser = (username) => deleteJSON(`/admin/users/${encodeURIComponent(username)}`)
+
+export const getPendingRegistrations = () => getJSON('/admin/pending-registrations')
+export const approvePendingUser = (requestId) => postJSON(`/admin/pending-registrations/${encodeURIComponent(requestId)}/approve`)
+export const rejectPendingUser = (requestId) => postJSON(`/admin/pending-registrations/${encodeURIComponent(requestId)}/reject`)
+
 export const getAdminStats = () => getJSON('/admin/stats')
 export const getFleet = () => getJSON('/admin/fleet')
 export const getAuditLog = (params = {}) => {

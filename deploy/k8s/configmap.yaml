@@ -19,3 +19,9 @@ data:
   PRIVA_KUBERNETES__MIN_ALIVE_AFTER_WAKE_SECONDS: "60"
   PRIVA_KUBERNETES__WAKE_TIMEOUT_SECONDS: "90"
   PRIVA_KUBERNETES__WAKE_HOLD_SECONDS: "5"
+  # Per-account runner pod sizing defaults (admin overrides per-account, live).
+  PRIVA_KUBERNETES__RUNNER_CPU_CORES: "1.0"
+  PRIVA_KUBERNETES__RUNNER_MEMORY_MB: "2048"
+  PRIVA_KUBERNETES__RUNNER_STORAGE_GB: "1"
+  # Expandable StorageClass (csi-hostpath-driver addon) so volume grow-edits work.
+  PRIVA_KUBERNETES__RUNNER_STORAGE_CLASS: "csi-hostpath-sc"

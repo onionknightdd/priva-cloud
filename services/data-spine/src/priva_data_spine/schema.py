@@ -1,7 +1,7 @@
-"""The 5-table data-spine SQLite schema (locked Phase-1 footprint).
+"""The data-spine SQLite schema.
 
 All STRICT; foreign_keys enforced per connection; timestamps TEXT ISO-8601 UTC.
-create_all() is idempotent (CREATE TABLE IF NOT EXISTS).
+create_all() is idempotent (CREATE TABLE IF NOT EXISTS + guarded column ALTERs).
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ DDL: tuple[str, ...] = (
       api_key_lookup TEXT,
       role           TEXT NOT NULL DEFAULT 'user'   CHECK (role   IN ('user','admin')),
       status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','disabled','offboarding','purged')),
+      agent_runner_type TEXT NOT NULL DEFAULT 'auto_scale' CHECK (agent_runner_type IN ('auto_scale','persistent')),
       feishu_user_id      TEXT,
       feishu_display_name TEXT,
       created_at     TEXT NOT NULL DEFAULT {NOW},
@@ -106,11 +107,67 @@ DDL: tuple[str, ...] = (
       updated_at TEXT NOT NULL DEFAULT {NOW}
     ) STRICT
     """,
+    # 7 ── account_resource_spec --------------------------------------------
+    # Per-account agent-runner pod sizing. The operator reads these (via the CR
+    # the control-panel stamps) to set container resources + PVC size. volume_gb
+    # is grow-only (K8s can't shrink a PVC). cpu_cores is fractional.
+    f"""
+    CREATE TABLE IF NOT EXISTS account_resource_spec (
+      account_id TEXT PRIMARY KEY REFERENCES account(account_id) ON DELETE CASCADE,
+      cpu_cores  REAL    NOT NULL DEFAULT 1.0,
+      memory_mb  INTEGER NOT NULL DEFAULT 2048,
+      volume_gb  INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT    NOT NULL DEFAULT {NOW}
+    ) STRICT
+    """,
+    # 8 ── pending_registration ---------------------------------------------
+    # Self-service account requests awaiting admin approval. password_hash is the
+    # bcrypt of the user-chosen password; on approval the account is created from
+    # it directly. One open ('pending') request per username (partial unique idx).
+    f"""
+    CREATE TABLE IF NOT EXISTS pending_registration (
+      request_id    TEXT PRIMARY KEY,
+      username      TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      display_name  TEXT,
+      runner_type   TEXT NOT NULL DEFAULT 'auto_scale' CHECK (runner_type IN ('auto_scale','persistent')),
+      cpu_cores     REAL    NOT NULL DEFAULT 1.0,
+      memory_mb     INTEGER NOT NULL DEFAULT 2048,
+      volume_gb     INTEGER NOT NULL DEFAULT 1,
+      note          TEXT,
+      status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+      created_at    TEXT NOT NULL DEFAULT {NOW},
+      updated_at    TEXT NOT NULL DEFAULT {NOW}
+    ) STRICT
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_username ON pending_registration(username) WHERE status = 'pending'",
+    "CREATE INDEX IF NOT EXISTS ix_pending_status ON pending_registration(status, created_at DESC)",
 )
 
-TABLES = ("account", "channel_binding", "quota", "scheduled_job", "job_run_record", "secret")
+TABLES = (
+    "account", "channel_binding", "quota", "scheduled_job", "job_run_record",
+    "secret", "account_resource_spec", "pending_registration",
+)
+
+# Idempotent column additions for DBs created before a column existed. CREATE
+# TABLE IF NOT EXISTS won't alter an existing table, so each (table, column, ddl)
+# is applied only when PRAGMA table_info shows the column missing. A bare ALTER
+# would fail on the 2nd boot with "duplicate column name".
+_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("account", "agent_runner_type",
+     "ALTER TABLE account ADD COLUMN agent_runner_type TEXT NOT NULL DEFAULT 'auto_scale' "
+     "CHECK (agent_runner_type IN ('auto_scale','persistent'))"),
+)
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    for table, column, ddl in _MIGRATIONS:
+        cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in cols:
+            conn.execute(ddl)
 
 
 def create_all(conn: sqlite3.Connection) -> None:
     for stmt in DDL:
         conn.execute(stmt)
+    _apply_migrations(conn)

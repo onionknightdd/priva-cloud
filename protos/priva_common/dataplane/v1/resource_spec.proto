@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package priva.dataplane.v1;
+
+import "priva_common/dataplane/v1/common.proto";
+
+// resource_spec — per-account agent-runner pod sizing. cpu_cores is fractional
+// (0.5, 1, 2); memory_mb / volume_gb are whole units (interpreted as Mi/Gi by
+// the operator, matching the legacy inline "1Gi" PVC). Volume is grow-only.
+message ResourceSpec {
+  string account_id = 1;
+  double cpu_cores = 2;
+  int32 memory_mb = 3;
+  int32 volume_gb = 4;
+  string updated_at = 5;
+}
+
+// Partial update: only fields named in update_mask are applied.
+message SetResourceSpecRequest {
+  string account_id = 1;
+  double cpu_cores = 2;
+  int32 memory_mb = 3;
+  int32 volume_gb = 4;
+  repeated string update_mask = 5;
+}
+
+message ResourceSpecList { repeated ResourceSpec specs = 1; }
+
+service ResourceSpecService {
+  rpc Get(AccountRef) returns (ResourceSpec);   // empty account_id when unset
+  rpc Set(SetResourceSpecRequest) returns (ResourceSpec);
+  rpc List(Empty) returns (ResourceSpecList);
+}

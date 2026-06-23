@@ -18,7 +18,9 @@ from priva_common.crypto import decrypt_value, encrypt_value
 from priva_common.dataplane import (
     BindingRecord,
     DataplaneClient,
+    PendingRegistrationRecord,
     QuotaRecord,
+    ResourceSpecRecord,
     RunPage,
     SecretRecord,
     UNSET,
@@ -69,6 +71,7 @@ class AccountService:
             api_key=decrypt_value(row["api_key"]) if row.get("api_key") else None,
             account_id=row["account_id"],
             status=row["status"],
+            agent_runner_type=row.get("agent_runner_type") or "auto_scale",
             feishu_user_id=row.get("feishu_user_id"),
             feishu_display_name=row.get("feishu_display_name"),
             created_at=row["created_at"],
@@ -84,23 +87,27 @@ class AccountService:
     def list(self):
         return [self._to_user(r) for r in self.repo.account_list()]
 
-    def create(self, username, password, role="user"):
+    def create(self, username, password="", role="user", agent_runner_type="auto_scale",
+               password_hash=None):
         if self.repo.account_get_by_username(username) is not None:
             raise ValueError(f"User '{username}' already exists")
         account_id = uuid.uuid4().hex
-        password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        # password_hash is supplied directly by the approval path (the plaintext was
+        # bcrypted at registration); otherwise bcrypt the given plaintext here.
+        pw_hash = password_hash or bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
         self.repo.account_insert({
             "account_id": account_id,
             "username": username,
-            "password_hash": password_hash,
+            "password_hash": pw_hash,
             "role": role,
             "status": "active",
+            "agent_runner_type": agent_runner_type or "auto_scale",
         })
         self.repo.quota_insert({"account_id": account_id})  # seed defaults
         return self.get(account_id)
 
     def update(self, account_id, *, password=None, role=None, api_key=UNSET,
-               status=None, feishu_user_id=UNSET, feishu_display_name=UNSET):
+               status=None, agent_runner_type=None, feishu_user_id=UNSET, feishu_display_name=UNSET):
         fields: dict = {}
         if password is not None:
             fields["password_hash"] = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -108,6 +115,8 @@ class AccountService:
             fields["role"] = role
         if status is not None:
             fields["status"] = status
+        if agent_runner_type is not None:
+            fields["agent_runner_type"] = agent_runner_type
         if api_key is not UNSET:
             if api_key is None:
                 fields["api_key"] = None
@@ -467,6 +476,103 @@ class SecretService:
         return self.repo.secret_list_account_ids()
 
 
+# --- ResourceSpec ----------------------------------------------------------
+
+class ResourceSpecService:
+    """Per-account agent-runner pod sizing (cpu/memory/volume)."""
+
+    def __init__(self, repo: Repository):
+        self.repo = repo
+
+    @staticmethod
+    def _to_record(row: dict | None) -> ResourceSpecRecord | None:
+        if row is None:
+            return None
+        return ResourceSpecRecord(
+            account_id=row["account_id"],
+            cpu_cores=float(row["cpu_cores"]),
+            memory_mb=int(row["memory_mb"]),
+            volume_gb=int(row["volume_gb"]),
+            updated_at=row.get("updated_at"),
+        )
+
+    def get(self, account_id):
+        return self._to_record(self.repo.resource_spec_get(account_id))
+
+    def set(self, account_id, *, cpu_cores=None, memory_mb=None, volume_gb=None):
+        fields: dict = {}
+        if cpu_cores is not None:
+            fields["cpu_cores"] = float(cpu_cores)
+        if memory_mb is not None:
+            fields["memory_mb"] = int(memory_mb)
+        if volume_gb is not None:
+            fields["volume_gb"] = int(volume_gb)
+        return self._to_record(self.repo.resource_spec_upsert(account_id, fields))
+
+    def list(self):
+        return [self._to_record(r) for r in self.repo.resource_spec_list()]
+
+
+# --- Registration ----------------------------------------------------------
+
+class RegistrationService:
+    """Self-service account requests awaiting admin approval. password_hash is the
+    bcrypt of the user-chosen password — never returned on list, only on the
+    internal get the approval path reads."""
+
+    def __init__(self, repo: Repository):
+        self.repo = repo
+
+    @staticmethod
+    def _to_record(row: dict | None, *, with_hash: bool = False) -> PendingRegistrationRecord | None:
+        if row is None:
+            return None
+        return PendingRegistrationRecord(
+            request_id=row["request_id"],
+            username=row["username"],
+            display_name=row.get("display_name"),
+            runner_type=row["runner_type"],
+            cpu_cores=float(row["cpu_cores"]),
+            memory_mb=int(row["memory_mb"]),
+            volume_gb=int(row["volume_gb"]),
+            note=row.get("note"),
+            status=row["status"],
+            created_at=row.get("created_at"),
+            updated_at=row.get("updated_at"),
+            password_hash=row["password_hash"] if with_hash else None,
+        )
+
+    def create(self, *, username, password_hash, display_name=None, runner_type="auto_scale",
+               cpu_cores=1.0, memory_mb=2048, volume_gb=1, note=None):
+        request_id = uuid.uuid4().hex
+        self.repo.pending_insert({
+            "request_id": request_id,
+            "username": username,
+            "password_hash": password_hash,
+            "display_name": display_name,
+            "runner_type": runner_type or "auto_scale",
+            "cpu_cores": float(cpu_cores),
+            "memory_mb": int(memory_mb),
+            "volume_gb": int(volume_gb),
+            "note": note,
+            "status": "pending",
+        })
+        return self._to_record(self.repo.pending_get(request_id))
+
+    def get_open_by_username(self, username):
+        return self._to_record(self.repo.pending_get_open_by_username(username))
+
+    def list(self, status=None):
+        return [self._to_record(r) for r in self.repo.pending_list_by_status(status)]
+
+    def get(self, request_id):
+        # Includes the password_hash — used by the approval path to mint the account.
+        return self._to_record(self.repo.pending_get(request_id), with_hash=True)
+
+    def set_status(self, request_id, status):
+        return self._to_record(self.repo.pending_set_status(request_id, status))
+
+
 # --- composition -----------------------------------------------------------
 
 def build_repo(settings) -> Repository:
@@ -484,6 +590,8 @@ def build_inprocess_client(repo: Repository, settings) -> DataplaneClient:
         scheduler=SchedulerService(repo),
         admin=AdminService(repo),
         secrets=SecretService(repo),
+        resource_specs=ResourceSpecService(repo),
+        registrations=RegistrationService(repo),
     )
 
 
