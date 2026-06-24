@@ -6,12 +6,12 @@ import { animate, svg } from 'animejs'
 // rendered as pure SVG on the GitHub-dark palette. Four color-coded planes
 // (edge=orange, control=purple, data=cyan, tenant=green). Edges are smooth bezier
 // curves routed between the nearest box sides; agent-runner is a cascade stack of
-// pods. Byte-path edges animate a CONSTANT particle flow (anime.js) while healthy,
-// freeze + show an ✕ when unreachable, and are fully disabled under
+// pods. Implemented edges animate a CONSTANT particle flow (anime.js) while healthy,
+// freeze + show an X when unreachable, and are fully disabled under
 // prefers-reduced-motion. Read-only — it draws whatever /admin/system-health returns.
 //
 // SANCTIONED continuous-animation exception (CLAUDE.md + design-spec §8): the
-// byte-path particle flow. Everything else obeys the no-continuous-motion rule.
+// system-map path particle flow. Everything else obeys the no-continuous-motion rule.
 
 const VIEW_W = 1000
 const VIEW_H = 700
@@ -23,22 +23,22 @@ const CORNER_R = 28            // rounded-corner radius → curved bends on clea
 // Verified planar (zero-crossing) node boxes in §3 coordinate space. For agent-runner
 // this is the FRONT (live) box; two dim boxes cascade up-right behind it.
 const NODE_BOX = {
-  browser: { x: 408, y: 20, w: 184, h: 44 },
-  agentgateway: { x: 70, y: 96, w: 860, h: 54 },
+  browser: { x: 408, y: 18, w: 184, h: 72 },
+  agentgateway: { x: 70, y: 104, w: 860, h: 62 },
   'control-panel': { x: 60, y: 210, w: 340, h: 116 },
-  operator: { x: 130, y: 430, w: 180, h: 60 },
-  scheduler: { x: 340, y: 436, w: 150, h: 54 },
-  'agent-runner': { x: 630, y: 238, w: 300, h: 76 },
-  'channel-connector': { x: 780, y: 432, w: 160, h: 54 },
-  'state-reader': { x: 780, y: 500, w: 160, h: 54 },
-  'data-spine': { x: 70, y: 588, w: 580, h: 78 },
+  operator: { x: 96, y: 416, w: 180, h: 76 },
+  scheduler: { x: 300, y: 422, w: 164, h: 80 },
+  'agent-runner': { x: 630, y: 238, w: 300, h: 88 },
+  'channel-connector': { x: 700, y: 374, w: 210, h: 68 },
+  'state-reader': { x: 700, y: 452, w: 210, h: 68 },
+  'data-spine': { x: 70, y: 584, w: 580, h: 88 },
   redis: { x: 690, y: 588, w: 250, h: 78 },
 }
 
 const PLANES = [
   { id: 'edge', label: 'EDGE', color: 'var(--orange)', x: 0, y: 0, w: 1000, h: 168, lx: 982, ly: 24, anchor: 'end' },
   { id: 'control', label: 'CONTROL', color: 'var(--purple)', x: 0, y: 168, w: 496, h: 400, lx: 16, ly: 188, anchor: 'start' },
-  { id: 'tenant', label: 'TENANT', color: 'var(--green)', x: 504, y: 168, w: 496, h: 400, lx: 984, ly: 188, anchor: 'end' },
+  { id: 'tenant', label: 'TENANT/RUNTIME', color: 'var(--green)', x: 504, y: 168, w: 496, h: 400, lx: 984, ly: 188, anchor: 'end' },
   { id: 'data', label: 'DATA', color: 'var(--cyan)', x: 0, y: 568, w: 1000, h: 132, lx: 982, ly: 690, anchor: 'end' },
 ]
 
@@ -52,24 +52,25 @@ const STATUS_COLOR = {
 
 const edgeKey = (e) => `${e.source}|${e.target}|${e.kind}`
 const fmt = (v) => (v == null || Number.isNaN(v) ? '0' : String(Math.round(v)))
+const displayText = (v) => (v == null ? v : String(v).replaceAll('0↔1', '0 ↔ 1'))
 
 // --- Edge routing: verified ZERO-CROSSING waypoint lanes, rendered as smooth
 // rounded-corner paths (curved bends, no crossings). `lab` = label [x,y,anchor];
 // `mid` = ✕ marker anchor. ---
 const EDGE_ROUTE = {
-  'browser|agentgateway|byte': { pts: [[500, 64], [500, 96]], mid: [500, 80], lab: [508, 84, 'start'] },
-  'agentgateway|control-panel|byte': { pts: [[150, 150], [150, 210]], mid: [150, 180], lab: [158, 178, 'start'] },
-  'agentgateway|control-panel|decision': { pts: [[330, 150], [330, 210]], mid: [330, 180], lab: [338, 178, 'start'] },
-  'agentgateway|agent-runner|byte': { pts: [[720, 150], [720, 238]], mid: [720, 196], lab: [728, 196, 'start'] },
-  'control-panel|operator|control': { pts: [[180, 326], [180, 430]], mid: [180, 380], lab: [188, 382, 'start'] },
-  'operator|agent-runner|control': { pts: [[310, 430], [310, 400], [560, 400], [560, 290], [630, 290]], mid: [435, 400], lab: [435, 392, 'middle'] },
-  'control-panel|data-spine|grpc': { pts: [[100, 326], [100, 588]], mid: [100, 470], lab: [108, 470, 'start'] },
-  'operator|data-spine|grpc': { pts: [[230, 490], [230, 588]], mid: [230, 540], lab: [238, 540, 'start'] },
-  'agent-runner|data-spine|grpc': { pts: [[645, 314], [645, 588]], mid: [645, 458], lab: [653, 452, 'start'] },
-  'channel-connector|agent-runner|control': { pts: [[855, 432], [855, 314]], mid: [855, 375] },
-  'scheduler|operator|control': { pts: [[340, 460], [310, 460]], mid: [325, 460] },
-  'scheduler|agent-runner|control': { pts: [[490, 460], [600, 460], [600, 300], [630, 300]], mid: [600, 380] },
-  'data-spine|redis|grpc': { pts: [[650, 627], [690, 627]], mid: [670, 627] },
+  'browser|agentgateway|byte': { pts: [[500, 90], [500, 104]], mid: [500, 97], lab: [508, 100, 'start'] },
+  'agentgateway|control-panel|byte': { pts: [[150, 166], [150, 210]], mid: [150, 188], lab: [158, 188, 'start'] },
+  'agentgateway|control-panel|decision': { pts: [[330, 166], [330, 210]], mid: [330, 188], lab: [338, 188, 'start'] },
+  'agentgateway|agent-runner|byte': { pts: [[720, 166], [720, 238]], mid: [720, 204], lab: [728, 204, 'start'] },
+  'control-panel|operator|control': { pts: [[162, 326], [162, 416]], mid: [162, 374], lab: [170, 376, 'start'] },
+  'operator|agent-runner|control': { pts: [[276, 416], [276, 400], [560, 400], [560, 290], [630, 290]], mid: [418, 400], lab: [418, 392, 'middle'] },
+  'control-panel|data-spine|grpc': { pts: [[70, 326], [70, 584]], mid: [70, 470], lab: [58, 470, 'end'] },
+  'operator|data-spine|grpc': { pts: [[196, 492], [196, 584]], mid: [196, 538], lab: [204, 538, 'start'] },
+  'agent-runner|data-spine|grpc': { pts: [[645, 326], [645, 584]], mid: [645, 456], lab: [653, 452, 'start'] },
+  'channel-connector|agent-runner|control': { pts: [[805, 374], [805, 326]], mid: [805, 350] },
+  'scheduler|operator|control': { pts: [[300, 462], [276, 462]], mid: [288, 462] },
+  'scheduler|agent-runner|control': { pts: [[464, 462], [600, 462], [600, 300], [630, 300]], mid: [600, 382] },
+  'data-spine|redis|grpc': { pts: [[650, 628], [690, 628]], mid: [670, 628] },
 }
 
 // Polyline → SVG path with rounded corners (quadratic fillets) of radius r.
@@ -107,8 +108,8 @@ function edgeVisual(edge) {
     return { stroke: 'var(--red)', width: edge.kind === 'byte' ? 2 : 1.5, dash, opacity: 0.6 }
   }
   if (edge.kind === 'byte') return { stroke: 'var(--cyan)', width: 2, dash: null, opacity: 0.4 }
-  if (edge.kind === 'decision') return { stroke: 'var(--border-strong)', width: 1.4, dash: '3 4', opacity: 0.85 }
-  if (edge.kind === 'grpc') return { stroke: 'var(--border-strong)', width: 1.4, dash: '5 4', opacity: 0.85 }
+  if (edge.kind === 'decision') return { stroke: 'var(--purple)', width: 2, dash: '0.1 6', opacity: 0.72 }
+  if (edge.kind === 'grpc') return { stroke: 'var(--cyan)', width: 1.4, dash: '6 5', opacity: 0.58 }
   return { stroke: 'var(--border-strong)', width: 1.4, dash: null, opacity: 0.85 } // control
 }
 
@@ -133,6 +134,27 @@ function metricLine(node) {
   }
 }
 
+function edgeLabelBox(x, y, anchor, label) {
+  const width = Math.max(42, label.length * 5.9 + 14)
+  const rectX = anchor === 'end' ? x - width + 6 : anchor === 'middle' ? x - width / 2 : x - 6
+  return { x: rectX, y: y - 13, width, height: 18 }
+}
+
+function flowParticleCount(edge) {
+  return edge.bytepath ? PARTICLES_PER_EDGE : 2
+}
+
+function flowParticleColor(edge) {
+  if (edge.kind === 'byte') return 'var(--cyan)'
+  if (edge.kind === 'decision') return 'var(--purple)'
+  if (edge.kind === 'grpc') return 'var(--cyan)'
+  return 'var(--yellow)'
+}
+
+function flowParticleRadius(edge) {
+  return edge.bytepath ? 2.6 : 2.2
+}
+
 function NodeView({ node, reducedMotion }) {
   const box = NODE_BOX[node.id]
   if (!box) return null
@@ -142,11 +164,22 @@ function NodeView({ node, reducedMotion }) {
   const wide = node.id === 'agentgateway' || node.id === 'data-spine'
   const isCP = node.id === 'control-panel'
   const isStack = node.id === 'agent-runner'
-  const subY = box.y + (box.h >= 64 ? 41 : 38)
-  const metricY = wide ? box.y + box.h - 14 : node.sub ? subY + 15 : box.y + 38
+  const sub = displayText(node.sub)
+  const detail = displayText(metric || node.detail)
+  const hasDetail = Boolean(detail)
+  const planned = disabled && Boolean(node.detail)
+  const titleY = box.y + (planned ? 28 : hasDetail ? 26 : 27)
+  const subY = titleY + (planned ? 18 : 17)
+  const detailY = subY + (planned ? 18 : 17)
+  const metricY = wide
+    ? node.id === 'agentgateway' ? titleY + 18 : box.y + box.h - 20
+    : hasDetail ? detailY : node.sub ? subY + 17 : titleY + 17
+  const detailChipW = planned
+    ? Math.min(box.w - 32, Math.max(112, (detail?.length || 0) * 6.2 + 16))
+    : 0
 
   return (
-    <g style={{ opacity: disabled ? 0.45 : 1 }}>
+    <g style={{ opacity: disabled ? 0.58 : 1 }}>
       {/* Cascade pod stack: two dim boxes offset up-right behind the live front box */}
       {isStack && [2, 1].map((k) => (
         <rect key={`bk-${k}`} x={box.x + k * STACK_OFFSET} y={box.y - k * STACK_OFFSET}
@@ -165,12 +198,12 @@ function NodeView({ node, reducedMotion }) {
         transition={{ duration: reducedMotion ? 0 : 0.15 }} style={{ fill: color }} />
 
       {/* Title */}
-      <text x={box.x + 16} y={box.y + 24} fontSize={14} fontWeight={600} fill="var(--text-primary)">
+      <text x={box.x + 16} y={titleY} fontSize={14} fontWeight={600} fill="var(--text-primary)">
         {node.label}
       </text>
       {/* Plane tag (wide bars) on the right */}
       {wide && (
-        <text x={box.x + box.w - 16} y={box.y + 24} fontSize={11} textAnchor="end"
+        <text x={box.x + box.w - 16} y={titleY} fontSize={11} textAnchor="end"
           fill={node.plane === 'edge' ? 'var(--orange)' : 'var(--cyan)'}
           style={{ letterSpacing: '0.06em' }}>
           {node.plane === 'edge' ? 'EDGE' : 'DATA'}
@@ -195,15 +228,24 @@ function NodeView({ node, reducedMotion }) {
         </>
       ) : (
         <>
-          {node.sub && (
-            <text x={box.x + 16} y={subY} fontSize={10.5} fill="var(--text-dim)">{node.sub}</text>
+          {sub && (
+            <text x={box.x + 16} y={subY} fontSize={10.5} fill="var(--text-dim)">{sub}</text>
           )}
-          {(metric || (disabled && node.detail)) && (
+          {planned && detail ? (
+            <g>
+              <rect x={box.x + 16} y={detailY - 13} width={detailChipW} height={18} rx={2}
+                fill="var(--bg-elevated)" stroke="var(--border-subtle)" strokeWidth={1} />
+              <text x={box.x + 24} y={detailY} fontSize={10}
+                fill="var(--text-secondary)" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                {detail}
+              </text>
+            </g>
+          ) : detail && (
             <text x={wide ? box.x + box.w - 16 : box.x + 16} y={metricY}
               textAnchor={wide ? 'end' : 'start'} fontSize={10.5}
               fill={disabled ? 'var(--text-dim)' : 'var(--text-secondary)'}
               style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-              {metric || node.detail}
+              {detail}
             </text>
           )}
         </>
@@ -234,23 +276,24 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
     return { ...e, key, d: roundedPath(r.pts, CORNER_R), mid: r.mid, lab: r.lab }
   }).filter(Boolean), [edges])
 
-  const byteEdges = useMemo(() => routedEdges.filter((e) => e.bytepath), [routedEdges])
+  const flowEdges = useMemo(() => routedEdges.filter((e) => !e.disabled), [routedEdges])
 
-  const pathRefs = useRef({})       // edgeKey → <path> element (byte edges)
+  const pathRefs = useRef({})       // edgeKey → <path> element (animated implemented edges)
   const particleRefs = useRef({})   // `${edgeKey}#${i}` → <circle> element
 
   // Re-run the anime.js effect only when the animated set or reduced-motion changes
   // (NOT on every 5s poll).
-  const byteSig = useMemo(
-    () => byteEdges.map((e) => `${e.key}:${e.healthy ? 1 : 0}`).join(',') + `|rm:${reducedMotion ? 1 : 0}`,
-    [byteEdges, reducedMotion],
+  const flowSig = useMemo(
+    () => flowEdges.map((e) => `${e.key}:${e.healthy ? 1 : 0}:${flowParticleCount(e)}`).join(',') + `|rm:${reducedMotion ? 1 : 0}`,
+    [flowEdges, reducedMotion],
   )
 
   useEffect(() => {
     const anims = []
-    for (const e of byteEdges) {
+    for (const e of flowEdges) {
       const live = !reducedMotion && e.healthy
-      for (let i = 0; i < PARTICLES_PER_EDGE; i++) {
+      const count = flowParticleCount(e)
+      for (let i = 0; i < count; i++) {
         const el = particleRefs.current[`${e.key}#${i}`]
         if (el) el.style.opacity = live ? '1' : '0'
       }
@@ -259,21 +302,21 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
       if (!pathEl) continue
       let motionPath
       try { motionPath = svg.createMotionPath(pathEl) } catch { continue }
-      for (let i = 0; i < PARTICLES_PER_EDGE; i++) {
+      for (let i = 0; i < count; i++) {
         const el = particleRefs.current[`${e.key}#${i}`]
         if (!el) continue
         anims.push(animate(el, {
           translateX: motionPath.translateX,
           translateY: motionPath.translateY,
           duration: PARTICLE_MS,
-          delay: (PARTICLE_MS / PARTICLES_PER_EDGE) * i,
+          delay: (PARTICLE_MS / count) * i,
           ease: 'linear',
           loop: true,
         }))
       }
     }
     return () => { for (const a of anims) { try { a.revert ? a.revert() : a.pause?.() } catch { /* noop */ } } }
-  }, [byteSig]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [flowSig]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="w-full" style={{ minWidth: 0 }}>
@@ -289,6 +332,8 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
         {PLANES.map((p) => (
           <g key={p.id}>
             <rect x={p.x} y={p.y} width={p.w} height={p.h} fill="var(--bg-elevated)" opacity={0.28} />
+            <rect x={p.x + 4} y={p.y + 4} width={p.w - 8} height={p.h - 8} rx={4}
+              fill="none" stroke={p.color} strokeWidth={1} strokeDasharray="6 6" opacity={0.42} />
             <text x={p.lx} y={p.ly} textAnchor={p.anchor} fontSize={11} fill={p.color}
               style={{ letterSpacing: '0.14em', fontWeight: 600 }}>
               {p.label}
@@ -301,7 +346,7 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
           const v = edgeVisual(e)
           return (
             <path key={e.key}
-              ref={e.bytepath ? (el) => { pathRefs.current[e.key] = el } : undefined}
+              ref={!e.disabled ? (el) => { pathRefs.current[e.key] = el } : undefined}
               d={e.d} fill="none" stroke={v.stroke} strokeWidth={v.width}
               strokeDasharray={v.dash || undefined} strokeLinecap="round" strokeLinejoin="round"
               opacity={v.opacity} />
@@ -311,24 +356,30 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
         {/* Edge labels (skip planned) */}
         {routedEdges.map((e) => {
           if (e.disabled || !e.label) return null
+          const label = displayText(e.label)
           const x = e.lab ? e.lab[0] : e.mid[0]
           const y = e.lab ? e.lab[1] : e.mid[1] - 6
           const anchor = e.lab ? e.lab[2] : 'middle'
+          const labelBox = edgeLabelBox(x, y, anchor, label)
           return (
-            <text key={`l-${e.key}`} x={x} y={y} textAnchor={anchor} fontSize={8.5}
-              fill="var(--text-dim)" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-              {e.label}
-            </text>
+            <g key={`l-${e.key}`}>
+              <rect x={labelBox.x} y={labelBox.y} width={labelBox.width} height={labelBox.height} rx={2}
+                fill="var(--bg-base)" stroke="var(--border-subtle)" strokeWidth={1} opacity={0.92} />
+              <text x={x} y={y} textAnchor={anchor} fontSize={9}
+                fill="var(--text-secondary)" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                {label}
+              </text>
+            </g>
           )
         })}
 
-        {/* Byte-path particles (constant flow when healthy; hidden otherwise).
+        {/* Flow particles (constant flow when healthy; hidden otherwise).
             Drawn before nodes so they're occluded as they enter a module. */}
-        {byteEdges.map((e) => (
+        {flowEdges.map((e) => (
           <g key={`p-${e.key}`}>
-            {Array.from({ length: PARTICLES_PER_EDGE }).map((_, i) => (
+            {Array.from({ length: flowParticleCount(e) }).map((_, i) => (
               <circle key={i} ref={(el) => { particleRefs.current[`${e.key}#${i}`] = el }}
-                cx={0} cy={0} r={2.6} fill="var(--cyan)" style={{ opacity: 0 }} />
+                cx={0} cy={0} r={flowParticleRadius(e)} fill={flowParticleColor(e)} style={{ opacity: 0 }} />
             ))}
           </g>
         ))}
@@ -362,7 +413,27 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
             <line x1="0" y1="4" x2="22" y2="4" stroke="var(--cyan)" strokeWidth="2" opacity="0.4" />
             <circle cx="14" cy="4" r="2.4" fill="var(--cyan)" />
           </svg>
-          byte path
+          byte path · HTTP/WS
+        </span>
+        <span className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+          <svg width="22" height="8" aria-hidden="true">
+            <line x1="0" y1="4" x2="22" y2="4" stroke="var(--purple)" strokeWidth="2" strokeDasharray="0.1 6" strokeLinecap="round" opacity="0.72" />
+            <circle cx="14" cy="4" r="2.1" fill="var(--purple)" />
+          </svg>
+          decision path · gRPC ext_proc
+        </span>
+        <span className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+          <svg width="22" height="8" aria-hidden="true">
+            <line x1="0" y1="4" x2="22" y2="4" stroke="var(--border-strong)" strokeWidth="1.4" />
+          </svg>
+          control path · K8s API
+        </span>
+        <span className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+          <svg width="22" height="8" aria-hidden="true">
+            <line x1="0" y1="4" x2="22" y2="4" stroke="var(--cyan)" strokeWidth="1.4" strokeDasharray="6 5" opacity="0.58" />
+            <circle cx="14" cy="4" r="2.1" fill="var(--cyan)" />
+          </svg>
+          data path · gRPC
         </span>
         <span className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
           <svg width="14" height="14" aria-hidden="true">
