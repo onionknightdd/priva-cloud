@@ -23,7 +23,7 @@ const CORNER_R = 28            // rounded-corner radius → curved bends on clea
 // Verified planar (zero-crossing) node boxes in §3 coordinate space. For agent-runner
 // this is the FRONT (live) box; two dim boxes cascade up-right behind it.
 const NODE_BOX = {
-  browser: { x: 408, y: 18, w: 184, h: 72 },
+  browser: { x: 408, y: 2, w: 184, h: 72 },
   agentgateway: { x: 70, y: 104, w: 860, h: 62 },
   'control-panel': { x: 60, y: 210, w: 340, h: 116 },
   operator: { x: 96, y: 416, w: 180, h: 76 },
@@ -58,7 +58,7 @@ const displayText = (v) => (v == null ? v : String(v).replaceAll('0↔1', '0 ↔
 // rounded-corner paths (curved bends, no crossings). `lab` = label [x,y,anchor];
 // `mid` = ✕ marker anchor. ---
 const EDGE_ROUTE = {
-  'browser|agentgateway|byte': { pts: [[500, 90], [500, 104]], mid: [500, 97], lab: [508, 100, 'start'] },
+  'browser|agentgateway|byte': { pts: [[500, 74], [500, 104]], mid: [500, 89], lab: [522, 92, 'start'] },
   'agentgateway|control-panel|byte': { pts: [[150, 166], [150, 210]], mid: [150, 188], lab: [158, 188, 'start'] },
   'agentgateway|control-panel|decision': { pts: [[330, 166], [330, 210]], mid: [330, 188], lab: [338, 188, 'start'] },
   'agentgateway|agent-runner|byte': { pts: [[720, 166], [720, 238]], mid: [720, 204], lab: [728, 204, 'start'] },
@@ -319,8 +319,9 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
   }, [flowSig]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="w-full" style={{ minWidth: 0 }}>
-      <svg
+    <div className="grid w-full gap-3" style={{ minWidth: 0, gridTemplateColumns: 'minmax(0, 1fr) 210px' }}>
+      <div className="min-w-0">
+        <svg
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
         width="100%"
         preserveAspectRatio="xMidYMid meet"
@@ -391,10 +392,12 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
         {routedEdges.map((e) => (
           !e.disabled && !e.healthy ? <XMark key={`x-${e.key}`} x={e.mid[0]} y={e.mid[1]} /> : null
         ))}
-      </svg>
+        </svg>
+      </div>
 
       {/* Legend */}
-      <div className="flex items-center flex-wrap gap-x-4 gap-y-2" style={{ marginTop: 12 }}>
+      <aside className="flex flex-col items-start gap-2" aria-label="Topology legend"
+        style={{ minWidth: 0, paddingLeft: 12, borderLeft: '1px solid var(--border-subtle)' }}>
         {[
           { c: 'var(--green)', t: 'up' },
           { c: 'var(--status-pending)', t: 'degraded' },
@@ -446,7 +449,7 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
           <span style={{ width: 14, height: 0, borderTop: '1.3px dashed var(--status-idle)' }} />
           planned
         </span>
-      </div>
+      </aside>
     </div>
   )
 }
