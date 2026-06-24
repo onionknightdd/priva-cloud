@@ -179,6 +179,11 @@ class KubernetesSettings(BaseModel):
     # Expandable StorageClass for the per-account PVC (volume grow-only edits). "" =>
     # omit storageClassName => cluster default SC (NOT expandable on vanilla minikube).
     runner_storage_class: str = "csi-hostpath-sc"
+    # Data-plane gateway observability: the admin scrapes the agentgateway pod's
+    # Prometheus endpoint for live HTTP request counts. The metrics port is NOT on
+    # the Service, so the scrape targets the pod IP directly (label-selected).
+    gateway_name: str = "priva-gateway"  # Gateway resource name => pod label selector
+    gateway_metrics_port: int = 15020  # agentgateway data-plane Prometheus /metrics port
 
 
 class EdgeSettings(BaseModel):

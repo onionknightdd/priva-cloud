@@ -58,6 +58,67 @@ class FleetResponse(BaseModel):
     accounts: list[FleetAccountEntry]
 
 
+class GatewayMetricsResponse(BaseModel):
+    """Live agentgateway HTTP traffic snapshot.
+
+    Cumulative counters scraped from the data-plane gateway pod's Prometheus
+    endpoint (agentgateway_requests_total). The SPA derives req/s from the delta
+    between successive polls — the server stays stateless. ``available=False`` when
+    no gateway pod is reachable (the tile degrades to '—')."""
+    available: bool = False
+    total_requests: int = 0  # sum of agentgateway_requests_total across all label sets
+    connections: int = 0  # sum of agentgateway_downstream_connections_total
+    by_status_class: dict[str, int] = Field(default_factory=dict)  # "2xx","4xx","5xx",…
+    by_backend: dict[str, int] = Field(default_factory=dict)  # "control-panel","agent-runner"
+    scraped_at: float = 0.0  # server epoch seconds — the SPA's rate-delta time base
+
+
+class HealthDep(BaseModel):
+    """One downstream dependency a module self-reports from its ``/health``.
+
+    ``ok=None`` means unknown / not probed (e.g. a module with no HTTP endpoint),
+    distinct from ``ok=False`` (probed and failing). Drives the edge-level ✕ on
+    the System Map when a real dependency (e.g. agent-runner→data-spine) is down."""
+    name: str
+    ok: bool | None = None
+    detail: str | None = None
+
+
+class SystemNode(BaseModel):
+    """One module on the System Map topology (browser / agentgateway / …)."""
+    id: str                          # "agentgateway","control-panel",...
+    label: str
+    sub: str | None = None           # ":8080 HTTP · :9000 EPP"
+    plane: str                       # "edge"|"control"|"data"|"tenant"
+    status: str                      # "up"|"degraded"|"down"|"idle"|"disabled"
+    detail: str | None = None
+    metrics: dict[str, float] = Field(default_factory=dict)
+    deps: list[HealthDep] = Field(default_factory=list)
+
+
+class SystemEdge(BaseModel):
+    """One connection between modules. ``bytepath`` edges animate a constant
+    particle flow while ``healthy``; an unhealthy edge freezes and shows an ✕."""
+    source: str
+    target: str
+    label: str | None = None
+    kind: str = "control"            # "byte"|"decision"|"control"|"grpc"
+    bytepath: bool = False           # True → animate particles when healthy
+    healthy: bool = True             # False → render ✕ + freeze
+    disabled: bool = False           # planned edge
+
+
+class SystemHealthResponse(BaseModel):
+    """Topology + live per-module health for the admin System Map.
+
+    Read-only observability snapshot: k8s Deployment readiness for up/down,
+    enriched by each module's ``/health`` self-reported downstream connectivity
+    so edge-level failures (e.g. agent-runner→data-spine) surface as ✕."""
+    nodes: list[SystemNode]
+    edges: list[SystemEdge]
+    scraped_at: float = 0.0
+
+
 class PendingRegistrationResponse(BaseModel):
     """One pending self-registration request (admin Pending Approval tab).
     password_hash is NEVER included."""

@@ -15,6 +15,8 @@ from priva_common.models.admin import (
     CliPathUpdate,
     FleetAccountEntry,
     FleetResponse,
+    GatewayMetricsResponse,
+    HealthDep,
     HistoryRetentionResponse,
     HistoryRetentionUpdate,
     PendingRegistrationResponse,
@@ -29,6 +31,9 @@ from priva_common.models.admin import (
     SensitivePatternEntry,
     SensitivePatternsResponse,
     SensitivePatternsUpdate,
+    SystemEdge,
+    SystemHealthResponse,
+    SystemNode,
     UserStatsEntry,
 )
 from priva_common.models.plugin import PluginConfigUpdate, PluginInfo, PluginListResponse
@@ -431,14 +436,15 @@ async def get_admin_stats():
     )
 
 
-@router.get("/fleet", response_model=FleetResponse)
-async def get_fleet():
-    """Live fleet snapshot for the admin dashboard.
+async def _fleet_snapshot() -> dict:
+    """Shared fleet fan-out (used by /fleet and /system-health).
 
     Lists the AgentTenant CRs (operator-written phase / readyReplicas / podIP),
-    then fans out to each *awake* pod's /health to read its in-flight ``active_runs``
-    (summed = "running sessions"). The probe is concurrent and fail-open, so one
-    unreachable pod degrades to active_runs=None rather than failing the snapshot.
+    then fans out concurrently to each *awake* pod's /health to read its in-flight
+    ``active_runs`` (summed = "running sessions") and self-reported ``deps``. The
+    probe is fail-open, so one unreachable pod degrades to active_runs=None rather
+    than failing the snapshot. Returns the sorted entries, the summary counts, the
+    number of awake pods whose probe failed, and the raw health bodies.
     """
     from ..provisioner import list_tenants, probe_health
 
@@ -472,12 +478,17 @@ async def get_fleet():
             awake_targets.append((len(entries) - 1, pod_ip))
 
     # Concurrent, fail-open /health fan-out to the awake pods only.
+    healths: list[dict] = []
+    probe_failures = 0
     if awake_targets:
-        healths = await asyncio.gather(*(probe_health(ip, port) for _, ip in awake_targets))
-        for (idx, _), health in zip(awake_targets, healths):
+        results = await asyncio.gather(*(probe_health(ip, port) for _, ip in awake_targets))
+        for (idx, _), health in zip(awake_targets, results):
             if health:
                 entries[idx]["active_runs"] = int(health.get("active_runs") or 0)
                 entries[idx]["last_activity_ts"] = health.get("last_activity_ts")
+                healths.append(health)
+            else:
+                probe_failures += 1  # awake pod that should answer but didn't
 
     awake_count = sum(1 for e in entries if e["awake"])
     running = sum((e["active_runs"] or 0) for e in entries)
@@ -485,12 +496,214 @@ async def get_fleet():
     # Awake first, then busiest, then by account for a stable order.
     entries.sort(key=lambda e: (not e["awake"], -(e["active_runs"] or 0), e["account_id"]))
 
-    return FleetResponse(
-        total_accounts=len(entries),
-        awake_sandboxes=awake_count,
-        running_sessions=running,
-        accounts=[FleetAccountEntry(**e) for e in entries],
+    return {
+        "entries": entries,
+        "total_accounts": len(entries),
+        "awake_sandboxes": awake_count,
+        "running_sessions": running,
+        "probe_failures": probe_failures,
+        "healths": healths,
+    }
+
+
+async def _gateway_snapshot() -> GatewayMetricsResponse:
+    """Shared gateway scrape (used by /gateway-metrics and /system-health).
+
+    Scrapes the data-plane gateway pod's Prometheus endpoint (port 15020 — a
+    container port not exposed on the Service, so we target the pod IP directly)
+    and sums ``agentgateway_requests_total``. Cumulative counters; the SPA derives
+    req/s from the delta between polls, so the server stays stateless. Fail-open:
+    no reachable gateway pod => available=False.
+    """
+    import time as _time
+
+    from ..provisioner import list_gateway_pod_ips, scrape_gateway_metrics
+
+    settings = get_settings()
+    port = settings.kubernetes.gateway_metrics_port
+
+    ips = await asyncio.to_thread(list_gateway_pod_ips)
+    parsed = None
+    for ip in ips:  # first pod that answers wins (single data-plane pod in alpha)
+        parsed = await scrape_gateway_metrics(ip, port)
+        if parsed:
+            break
+
+    if not parsed:
+        return GatewayMetricsResponse(available=False, scraped_at=_time.time())
+    return GatewayMetricsResponse(
+        available=True,
+        total_requests=parsed["total_requests"],
+        connections=parsed["connections"],
+        by_status_class=parsed["by_status_class"],
+        by_backend=parsed["by_backend"],
+        scraped_at=_time.time(),
     )
+
+
+@router.get("/fleet", response_model=FleetResponse)
+async def get_fleet():
+    """Live fleet snapshot for the admin dashboard. See ``_fleet_snapshot``."""
+    snap = await _fleet_snapshot()
+    return FleetResponse(
+        total_accounts=snap["total_accounts"],
+        awake_sandboxes=snap["awake_sandboxes"],
+        running_sessions=snap["running_sessions"],
+        accounts=[FleetAccountEntry(**e) for e in snap["entries"]],
+    )
+
+
+@router.get("/gateway-metrics", response_model=GatewayMetricsResponse)
+async def get_gateway_metrics():
+    """Live agentgateway HTTP traffic snapshot. See ``_gateway_snapshot``."""
+    return await _gateway_snapshot()
+
+
+@router.get("/system-health", response_model=SystemHealthResponse)
+async def get_system_health():
+    """Topology + live per-module health for the admin System Map.
+
+    Read-only observability: k8s Deployment readiness (operator / data-spine) for
+    up/down, the fleet fan-out for the agent-runner tier, the gateway scrape for
+    the edge, and each module's self-reported ``/health.deps`` for edge-level ✕.
+    Every probe is fail-open so an unreachable dependency degrades a node/edge
+    rather than failing the snapshot. Planned modules render disabled (dim).
+    """
+    import time as _time
+
+    from ..provisioner import dataspine_health, deployment_ready
+
+    # --- Fan out the independent probes concurrently. ---
+    fleet_snap, gateway, ds_health, operator_dep, dataspine_dep = await asyncio.gather(
+        _fleet_snapshot(),
+        _gateway_snapshot(),
+        dataspine_health(),
+        asyncio.to_thread(deployment_ready, "operator"),
+        asyncio.to_thread(deployment_ready, "data-spine"),
+    )
+
+    # --- data-spine node: Deployment readiness for up/down, enriched by readyz/stats. ---
+    ds_ready_ok = bool(ds_health and ds_health.get("ready"))
+    if dataspine_dep is None:
+        ds_status = "down"
+    elif dataspine_dep["ready"] >= 1:
+        ds_status = "up"
+    elif dataspine_dep["desired"] >= 1:
+        ds_status = "degraded"
+    else:
+        ds_status = "down"
+    ds_stats = (ds_health or {}).get("stats") or {}
+    ds_metrics = {k: float(v) for k, v in ds_stats.items() if isinstance(v, (int, float))}
+
+    # --- operator node: Deployment readiness. ---
+    if operator_dep is None:
+        op_status = "down"
+    elif operator_dep["ready"] >= 1:
+        op_status = "up"
+    elif operator_dep["desired"] >= 1:
+        op_status = "degraded"
+    else:
+        op_status = "down"
+
+    # --- agent-runner tier: up if any awake, idle if scaled-to-zero, down on probe failure. ---
+    awake = fleet_snap["awake_sandboxes"]
+    if fleet_snap["probe_failures"] > 0:
+        ar_status = "down"
+    elif awake >= 1:
+        ar_status = "up"
+    else:
+        ar_status = "idle"
+    # Merge the probed pods' self-reported data-spine dep: any pod reporting it down
+    # marks the agent-runner→data-spine edge ✕. None (no probe data) = unknown.
+    pod_ds_oks = [
+        bool(d.get("ok"))
+        for h in fleet_snap["healths"]
+        for d in (h.get("deps") or [])
+        if d.get("name") == "data-spine"
+    ]
+    ar_ds_ok: bool | None = all(pod_ds_oks) if pod_ds_oks else None
+    ar_deps = [HealthDep(name="data-spine", ok=ar_ds_ok,
+                         detail=None if ar_ds_ok is None else
+                         ("reachable" if ar_ds_ok else "a pod reports data-spine down"))]
+
+    # --- gateway (edge) node. ---
+    gw_up = bool(gateway.available)
+    gw_metrics = {"connections": float(gateway.connections)} if gw_up else {}
+
+    nodes = [
+        SystemNode(id="browser", label="browser", sub="SPA · JWT/WS", plane="edge",
+                   status="up", detail="admin / user SPA"),
+        SystemNode(id="agentgateway", label="agentgateway", sub=":80 · Gateway API (Rust)",
+                   plane="edge", status="up" if gw_up else "down",
+                   detail="edge — transports runtime bytes, makes no decisions",
+                   metrics=gw_metrics),
+        SystemNode(id="control-panel", label="control-panel", sub=":8080 HTTP · :9000 EPP",
+                   plane="control", status="up",
+                   detail="auth · admin · config · EndPoint Picker",
+                   deps=[HealthDep(name="data-spine", ok=ds_ready_ok,
+                                   detail=(ds_health or {}).get("detail"))]),
+        SystemNode(id="operator", label="operator", sub="kopf · sole scaler 0↔1",
+                   plane="control", status=op_status,
+                   detail="reconciles AgentTenant CRD · injects Secret · idle reaping",
+                   metrics={"ready": float((operator_dep or {}).get("ready", 0)),
+                            "desired": float((operator_dep or {}).get("desired", 0))}),
+        SystemNode(id="scheduler", label="scheduler", sub="trigger → claim → wake",
+                   plane="control", status="disabled", detail="planned · phase 4"),
+        SystemNode(id="data-spine", label="data-spine", sub=":50051 gRPC · SQLite",
+                   plane="data", status=ds_status,
+                   detail=(ds_health or {}).get("detail") or "source of truth",
+                   metrics=ds_metrics),
+        SystemNode(id="redis", label="redis", sub="coordination bulletin board",
+                   plane="data", status="disabled", detail="planned · phase 4"),
+        SystemNode(id="agent-runner", label="agent-runner", sub="ar-<account> · :8091 · 0↔1",
+                   plane="tenant", status=ar_status,
+                   detail="per-tenant runtime · runs the claude CLI",
+                   metrics={"awake": float(awake),
+                            "running": float(fleet_snap["running_sessions"]),
+                            "total": float(fleet_snap["total_accounts"])},
+                   deps=ar_deps),
+        SystemNode(id="channel-connector", label="channel-connector", sub="WeCom / Feishu fan-out",
+                   plane="tenant", status="disabled", detail="planned · phase 4"),
+        SystemNode(id="state-reader", label="state-reader", sub="wake-free JSONL reads",
+                   plane="tenant", status="disabled", detail="planned · phase 5"),
+    ]
+    status_by_id = {n.id: n.status for n in nodes}
+
+    def _live(node_id: str) -> bool:
+        return status_by_id.get(node_id) not in ("down", "disabled")
+
+    def _edge(source: str, target: str, *, label: str | None = None, kind: str = "control",
+              bytepath: bool = False, disabled: bool = False, dep_ok: bool | None = None) -> SystemEdge:
+        # General rule: healthy unless an endpoint is down/disabled, AND (when a
+        # self-reported dep result is available) that dep is ok.
+        healthy = (not disabled and _live(source) and _live(target)
+                   and (dep_ok is not False))
+        return SystemEdge(source=source, target=target, label=label, kind=kind,
+                          bytepath=bytepath, healthy=healthy, disabled=disabled)
+
+    # control-panel self-reports its own data-spine readyz → drives that edge's ✕.
+    cp_ds_ok = ds_ready_ok
+
+    edges = [
+        # Byte path (animated when healthy).
+        _edge("browser", "agentgateway", label="HTTP :80", kind="byte", bytepath=True),
+        _edge("agentgateway", "control-panel", label="/ · /admin · /api", kind="byte", bytepath=True),
+        _edge("agentgateway", "agent-runner", label="runtime bytes", kind="byte", bytepath=True),
+        # Decision / control / data edges.
+        _edge("agentgateway", "control-panel", label="ext_proc (EPP)", kind="decision"),
+        _edge("control-panel", "operator", label="patch CR", kind="control"),
+        _edge("operator", "agent-runner", label="scale 0↔1 · Secret", kind="control"),
+        _edge("control-panel", "data-spine", label="gRPC", kind="grpc", dep_ok=cp_ds_ok),
+        _edge("operator", "data-spine", label="gRPC", kind="grpc"),
+        _edge("agent-runner", "data-spine", label="gRPC", kind="grpc", dep_ok=ar_ds_ok),
+        # Planned edges (never animated).
+        _edge("scheduler", "operator", kind="control", disabled=True),
+        _edge("scheduler", "agent-runner", kind="control", disabled=True),
+        _edge("channel-connector", "agent-runner", kind="control", disabled=True),
+        _edge("data-spine", "redis", kind="grpc", disabled=True),
+    ]
+
+    return SystemHealthResponse(nodes=nodes, edges=edges, scraped_at=_time.time())
 
 
 @router.get("/audit", response_model=AuditLogResponse)

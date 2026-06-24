@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Server, Activity, RefreshCw } from 'lucide-react'
+import { Server, Activity, ArrowRightLeft, RefreshCw } from 'lucide-react'
+import Dropdown from '@shared/components/shared/Dropdown'
 import useAdminStore from '../../stores/adminStore'
 
 // Fleet — Dashboard overview. Live agent-runner snapshot from /api/admin/fleet:
@@ -8,6 +9,50 @@ import useAdminStore from '../../stores/adminStore'
 // polls update in place. Status is shown via a 2px left border, never dots.
 
 const POLL_MS = 5000
+
+// Selectable trailing windows for the gateway headline count. Values in seconds.
+const WINDOW_OPTIONS = [
+  { value: 30, label: 'last 30s' },
+  { value: 60, label: 'last 1m' },
+  { value: 300, label: 'last 5m' },
+  { value: 900, label: 'last 15m' },
+]
+
+// Destination scope. The metric has no URL-path label; the backend split is the only
+// path-ish dimension — control-plane (control-panel face) vs agent-runtime (the pool).
+const SCOPE_OPTIONS = [
+  { value: 'all', label: 'all' },
+  { value: 'control-panel', label: 'control-plane' },
+  { value: 'agent-runner', label: 'agent-runtime' },
+]
+
+// Derive the rolling-window request count, current req/s, and the req/s sparkline for the
+// selected scope from the per-destination cumulative buffer (server-clock, no browser-skew).
+//  - val() picks the scope's cumulative series (total / control-panel / agent-runner).
+//  - count = val(latest) − val(at-or-before latest.t − windowSec); clamped ≥ 0.
+//  - full  = buffer actually spans the window yet (else count is "so far", still rising).
+function deriveGateway(buffer, windowSec, scope) {
+  if (!buffer || buffer.length === 0) return { count: null, rate: null, spark: [], full: false }
+  const val = scope === 'control-panel' ? (s) => s.cp
+    : scope === 'agent-runner' ? (s) => s.ar
+    : (s) => s.total
+  const latest = buffer[buffer.length - 1]
+  const cutoff = latest.t - windowSec
+  let base = buffer[0]
+  for (let i = buffer.length - 1; i >= 0; i--) {
+    if (buffer[i].t <= cutoff) { base = buffer[i]; break }
+  }
+  const count = Math.max(0, val(latest) - val(base))
+  const full = buffer[0].t <= cutoff
+  let rate = null
+  const spark = []
+  for (let i = 1; i < buffer.length; i++) {
+    const dt = buffer[i].t - buffer[i - 1].t
+    spark.push(dt > 0 ? Math.max(0, (val(buffer[i]) - val(buffer[i - 1])) / dt) : 0)
+  }
+  if (spark.length) rate = spark[spark.length - 1]
+  return { count, rate, spark: spark.slice(-40), full }
+}
 
 // State derived from the operator phase + the pod's in-flight runs. Colors come
 // from the design-spec status palette (running=purple, online=green, waking=yellow,
@@ -60,10 +105,95 @@ function Tile({ icon: Icon, label, value, suffix }) {
   )
 }
 
+// Inline SVG sparkline of recent req/s samples — no chart lib (design-spec minimal).
+// Reserves its footprint until two samples exist so the tile doesn't reflow on fill-in.
+function Sparkline({ data, width = 76, height = 24 }) {
+  if (!data || data.length < 2) return <div style={{ width, height, flexShrink: 0 }} />
+  const max = Math.max(...data)
+  const min = Math.min(...data)
+  const range = max - min || 1
+  const n = data.length
+  const pts = data
+    .map((v, i) => {
+      const x = (i / (n - 1)) * (width - 2) + 1
+      const y = height - 2 - ((v - min) / range) * (height - 4)
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+  return (
+    <svg width={width} height={height} style={{ display: 'block', flexShrink: 0 }} aria-hidden="true">
+      <polyline points={pts} fill="none" stroke="var(--cyan)" strokeWidth={1.5}
+        strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+// Gateway-traffic tile: requests received over the selected trailing window (headline)
+// + a req/s sparkline and the current rate. The window is chosen via a compact dropdown
+// in the header (persisted). '—' when no reachable gateway pod. ``full`` is false while
+// the sample buffer hasn't spanned the window yet — the count is then "so far", marked ~.
+function GatewayTile({ available, count, rate, spark, full, windowSec, onWindowChange, scope, onScopeChange }) {
+  return (
+    <div
+      className="flex flex-col gap-2"
+      style={{
+        flex: 1, minWidth: 0, background: 'var(--bg-surface)',
+        border: '1px solid var(--border)', borderRadius: 4, padding: '16px 18px',
+      }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 uppercase min-w-0" style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em' }}>
+          <ArrowRightLeft size={14} strokeWidth={1.5} className="flex-shrink-0" />
+          <span className="truncate">Gateway</span>
+        </div>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <Dropdown
+            size="sm"
+            align="right"
+            value={windowSec}
+            onChange={onWindowChange}
+            options={WINDOW_OPTIONS}
+            ariaLabel="Trailing window for the request count"
+            title="Trailing window for the request count"
+            minMenuWidth={120}
+            maxTriggerWidth={96}
+          />
+          <Dropdown
+            size="sm"
+            align="right"
+            value={scope}
+            onChange={onScopeChange}
+            options={SCOPE_OPTIONS}
+            ariaLabel="Destination filter (path group)"
+            title="Filter requests by destination / path group"
+            minMenuWidth={150}
+            maxTriggerWidth={120}
+          />
+        </div>
+      </div>
+      {!available ? (
+        <span className="font-bold" style={{ color: 'var(--text-dim)', fontSize: 28, lineHeight: 1 }}>—</span>
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-bold" style={{ color: 'var(--text-primary)', fontSize: 28, lineHeight: 1 }}>
+              {count == null ? '—' : `${full ? '' : '~'}${count.toLocaleString()}`}
+            </span>
+            <Sparkline data={spark} />
+          </div>
+          <span style={{ color: 'var(--text-dim)', fontSize: 12, fontWeight: 300, fontFamily: "'JetBrains Mono', monospace" }}>
+            {rate == null ? '— req/s' : `+${rate.toFixed(rate < 10 ? 1 : 0)} req/s`}
+          </span>
+        </>
+      )}
+    </div>
+  )
+}
+
 function TilesSkeleton() {
   return (
     <div className="flex gap-3">
-      {[1, 2].map((i) => (
+      {[1, 2, 3].map((i) => (
         <div key={i} style={{ flex: 1, background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 4, padding: '16px 18px' }}>
           <div className="skeleton" style={{ width: 120, height: 11, marginBottom: 12 }} />
           <div className="skeleton" style={{ width: 64, height: 28 }} />
@@ -94,17 +224,25 @@ export default function FleetView() {
   const fleetRefreshing = useAdminStore((s) => s.fleetRefreshing)
   const fleetError = useAdminStore((s) => s.fleetError)
   const fetchFleet = useAdminStore((s) => s.fetchFleet)
+  const gateway = useAdminStore((s) => s.gateway)
+  const gatewayBuffer = useAdminStore((s) => s.gatewayBuffer)
+  const gatewayWindowSec = useAdminStore((s) => s.gatewayWindowSec)
+  const setGatewayWindowSec = useAdminStore((s) => s.setGatewayWindowSec)
+  const gatewayScope = useAdminStore((s) => s.gatewayScope)
+  const setGatewayScope = useAdminStore((s) => s.setGatewayScope)
+  const fetchGateway = useAdminStore((s) => s.fetchGateway)
 
   // Re-render once a second so relative timestamps ("12s ago") stay fresh between polls.
   const [, setTick] = useState(0)
-  const fetchRef = useRef(fetchFleet)
-  fetchRef.current = fetchFleet
+  const fetchRef = useRef({ fleet: fetchFleet, gateway: fetchGateway })
+  fetchRef.current = { fleet: fetchFleet, gateway: fetchGateway }
 
   useEffect(() => {
-    fetchRef.current()
-    const poll = setInterval(() => fetchRef.current(), POLL_MS)
-    const tick = setInterval(() => setTick((n) => n + 1), 1000)
-    return () => { clearInterval(poll); clearInterval(tick) }
+    const poll = () => { fetchRef.current.fleet(); fetchRef.current.gateway() }
+    poll()
+    const pid = setInterval(poll, POLL_MS)
+    const tid = setInterval(() => setTick((n) => n + 1), 1000)
+    return () => { clearInterval(pid); clearInterval(tid) }
   }, [])
 
   const accounts = fleet?.accounts || []
@@ -122,7 +260,7 @@ export default function FleetView() {
         </div>
         <button
           className="flex items-center gap-2 px-2 py-1 text-xs uppercase flex-shrink-0"
-          onClick={() => fetchFleet()}
+          onClick={() => { fetchFleet(); fetchGateway() }}
           title="Refresh now"
           style={{
             background: 'transparent',
@@ -154,6 +292,14 @@ export default function FleetView() {
           <div className="flex gap-3">
             <Tile icon={Server} label="Awake Sandboxes" value={fleet?.awake_sandboxes ?? 0} suffix={fleet?.total_accounts ?? 0} />
             <Tile icon={Activity} label="Running Sessions" value={fleet?.running_sessions ?? 0} />
+            <GatewayTile
+              available={!!gateway?.available}
+              {...deriveGateway(gatewayBuffer, gatewayWindowSec, gatewayScope)}
+              windowSec={gatewayWindowSec}
+              onWindowChange={setGatewayWindowSec}
+              scope={gatewayScope}
+              onScopeChange={setGatewayScope}
+            />
           </div>
         )}
 

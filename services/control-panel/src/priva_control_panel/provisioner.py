@@ -59,6 +59,11 @@ def _apps() -> "client.AppsV1Api":
     return client.AppsV1Api()
 
 
+def _core() -> "client.CoreV1Api":
+    _load()
+    return client.CoreV1Api()
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -165,6 +170,123 @@ async def probe_health(pod_ip: str, port: int) -> dict | None:
     except Exception:
         return None
     return None
+
+
+def list_gateway_pod_ips() -> list[str]:
+    """IPs of the Running data-plane gateway (agentgateway) pods.
+
+    The metrics port (15020) is a container port only — it's NOT on the Service —
+    so the admin scrapes pod IPs directly, label-selected by the Gateway name.
+    Best-effort: returns [] on any error so the gateway-traffic tile degrades to
+    'unavailable' rather than failing the dashboard. Blocking kube call.
+    """
+    s = get_settings()
+    ns = s.kubernetes.namespace_tenants
+    selector = f"gateway.networking.k8s.io/gateway-name={s.kubernetes.gateway_name}"
+    try:
+        resp = _core().list_namespaced_pod(ns, label_selector=selector)
+    except client.ApiException:
+        return []
+    return [p.status.pod_ip for p in resp.items
+            if p.status and p.status.phase == "Running" and p.status.pod_ip]
+
+
+def _parse_gateway_metrics(text: str) -> dict:
+    """Sum agentgateway_requests_total (by status-class + backend) and downstream
+    connections from a Prometheus exposition. Each sample line is ``name{labels} value``;
+    the value is the last whitespace token. Unparseable lines are skipped."""
+    import re
+
+    status_re = re.compile(r'status="(\d+)"')
+    total = 0
+    connections = 0
+    by_status: dict[str, int] = {}
+    by_backend: dict[str, int] = {}
+    for line in text.splitlines():
+        if not line or line[0] == "#":
+            continue
+        if line.startswith("agentgateway_requests_total"):
+            try:
+                val = int(float(line.rsplit(None, 1)[1]))
+            except (ValueError, IndexError):
+                continue
+            total += val
+            m = status_re.search(line)
+            cls = f"{m.group(1)[0]}xx" if m else "other"
+            by_status[cls] = by_status.get(cls, 0) + val
+            backend = ("agent-runner" if "agent-runners" in line
+                       else "control-panel" if "control-panel" in line else "other")
+            by_backend[backend] = by_backend.get(backend, 0) + val
+        elif line.startswith("agentgateway_downstream_connections_total"):
+            try:
+                connections += int(float(line.rsplit(None, 1)[1]))
+            except (ValueError, IndexError):
+                continue
+    return {"total_requests": total, "connections": connections,
+            "by_status_class": by_status, "by_backend": by_backend}
+
+
+async def scrape_gateway_metrics(pod_ip: str, port: int) -> dict | None:
+    """Fetch + parse the gateway pod's Prometheus ``/metrics``. Fail-open: any
+    error / non-200 returns None so the admin can fall through to the next pod (or
+    report unavailable). Cumulative counters — the SPA derives req/s from the delta."""
+    try:
+        async with httpx.AsyncClient(trust_env=False) as cx:
+            r = await cx.get(f"http://{pod_ip}:{port}/metrics", timeout=2.0)
+        if r.status_code != 200:
+            return None
+        return _parse_gateway_metrics(r.text)
+    except Exception:
+        return None
+
+
+def deployment_ready(name: str) -> dict | None:
+    """Readiness of one system Deployment, read by exact name (no ``list``).
+
+    Used by the System Map to derive up/down/degraded for ``operator`` and
+    ``data-spine`` in ``namespace_system``. The control-panel RBAC grants
+    ``deployments: [get, patch]`` (not list), so we read the single object.
+    Fail-open: any error (incl. 404 / no kube) returns None — the caller treats
+    None as ``down`` (the safe pessimistic reading). Blocking kube call — invoke
+    via ``asyncio.to_thread`` from async paths.
+    """
+    s = get_settings()
+    ns = s.kubernetes.namespace_system
+    try:
+        dep = _apps().read_namespaced_deployment(name, ns)
+    except Exception:
+        return None
+    st = dep.status
+    spec = dep.spec
+    return {
+        "ready": int(getattr(st, "ready_replicas", 0) or 0),
+        "desired": int(getattr(spec, "replicas", 0) or 0),
+        "available": int(getattr(st, "available_replicas", 0) or 0),
+    }
+
+
+async def dataspine_health() -> dict | None:
+    """data-spine reachability (``readyz``) + ``stats`` via the data-plane admin client.
+
+    Runs the blocking gRPC calls in a thread and fails soft: a slow/unreachable
+    data-spine resolves to ``ready=False`` (so the inbound gRPC edges show ✕) and
+    never stalls the System Map snapshot. ``stats`` degrades to {} on its own error.
+    """
+    def _probe() -> dict:
+        from priva_common.dataplane import get_client
+
+        admin = get_client().admin
+        ok, detail = admin.readyz()
+        try:
+            stats = admin.stats()
+        except Exception:
+            stats = {}
+        return {"ready": bool(ok), "detail": (detail or "")[:160], "stats": dict(stats or {})}
+
+    try:
+        return await asyncio.to_thread(_probe)
+    except Exception as exc:  # pragma: no cover - data-spine optional locally
+        return {"ready": False, "detail": str(exc)[:160], "stats": {}}
 
 
 def _status(account_id: str) -> dict:

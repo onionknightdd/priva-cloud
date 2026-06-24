@@ -196,13 +196,26 @@ Hover states:        150ms ease
 Panels / modals:     200ms cubic-bezier(0.16, 1, 0.3, 1)
 Sidebar / canvas:    220ms cubic-bezier(0.16, 1, 0.3, 1)
 ```
-No continuous animations except: skeleton shimmer, running icon spin, minimized canvas pulse.
+No continuous animations except: skeleton shimmer, running icon spin, minimized canvas pulse, and the System Map's live byte-path edges, which animate a constant particle flow while the path is healthy, freeze and show an ✕ when the path is unreachable, and are fully disabled under `prefers-reduced-motion`.
 
 #### Modals & Drawers
 - Overlay: `var(--bg-overlay)` with backdrop-filter blur
 - Confirm dialogs: center scale-in, 200ms spring easing
 - Detail drawers: slide in from right (480px wide)
 - Danger actions: require typing confirmation text before button activates
+
+#### Dropdowns / Selects
+- **NEVER use a native `<select>`.** Its user-agent styling (system arrow, white menu, OS fonts) breaks the design system.
+- Use the shared **`Dropdown`** component (`web/shared/components/shared/Dropdown.jsx`) — the canonical select style, derived from the agent UI model selector. `CategoryDropdown` (checkmark style) is legacy; do not use it for new controls.
+- **Trigger:** `var(--bg-surface)` + 1px `var(--border)`, 4px radius, chevron-down; hover → `var(--border-strong)` + `var(--text-primary)` (150ms).
+- **Menu:** `var(--bg-elevated)`, 1px border, 4px radius, springs in over 200ms `cubic-bezier(0.16, 1, 0.3, 1)` (opacity + 4px translate).
+- **Active option:** 2px left border `var(--cyan)` + `var(--bg-surface)` bg + `var(--text-primary)`. Never a checkmark-only or filled-background-only state. Hover (inactive) → `var(--bg-surface)`.
+- Props: `options:[{value,label,icon?,disabled?}]` · `value` · `onChange(value)` · `icon` · `align` `'left'|'right'` · `placement` `'bottom'|'top'` · `size` `'sm'|'md'` · `searchable` · `mono`.
+```jsx
+import Dropdown from '@shared/components/shared/Dropdown'
+<Dropdown size="sm" align="right" value={windowSec} onChange={setWindowSec}
+  options={[{ value: 60, label: 'last 1m' }, { value: 300, label: 'last 5m' }]} />
+```
 
 ---
 
@@ -303,4 +316,5 @@ Full component map in `design-spec.md §七`.
 - [ ] Skeleton shape matches real content layout
 - [ ] Copy button: appears on hover, Check icon on click, reverts after 800ms
 - [ ] Status shown via 2px left border, not dots
+- [ ] No native `<select>` — dropdowns use the shared `Dropdown` component
 - [ ] Dangerous actions have confirmation dialog

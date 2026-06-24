@@ -952,6 +952,8 @@ function CopyButton({ content }) {
 /* ❌ Not for: scroll behavior, cursor tracking */
 ```
 
+**Sanctioned continuous-animation exception:** the System Map's live byte-path edges, which animate a constant particle flow (anime.js) while the path is healthy, freeze and show an ✕ when the path is unreachable, and are fully disabled under `prefers-reduced-motion`. This is the only continuous motion beyond skeleton shimmer, running icon spin, and the minimized canvas pulse.
+
 ### Loading States
 
 **① Content placeholder → Skeleton Screen**

@@ -2,6 +2,10 @@ import { create } from 'zustand'
 import safeStorage from '@shared/utils/safeStorage'
 import * as adminApi from '@shared/api/admin'
 
+// Largest selectable gateway trailing window (15m). The sample ring buffer is capped
+// to a little past this so any window's count is always derivable, with no unbounded growth.
+const GATEWAY_MAX_WINDOW_SEC = 900
+
 const useAdminStore = create((set, get) => ({
   activeSection: 'users',
   setActiveSection: (section) => set({ activeSection: section }),
@@ -181,6 +185,75 @@ const useAdminStore = create((set, get) => ({
     }
   },
 
+  // System Map (topology + live per-module health, own 5s poll). Latest snapshot
+  // only — the byte-path flow is constant (not req/s-scaled), so there's no rate
+  // buffer. Skeleton only on the first load; background polls update in place.
+  systemHealth: null,
+  systemHealthLoading: true,
+  systemHealthRefreshing: false,
+  systemHealthError: false,
+
+  fetchSystemHealth: async () => {
+    set((s) => (s.systemHealth ? { systemHealthRefreshing: true } : { systemHealthLoading: true }))
+    try {
+      const systemHealth = await adminApi.getSystemHealth()
+      set({ systemHealth, systemHealthLoading: false, systemHealthRefreshing: false, systemHealthError: false })
+    } catch {
+      set({ systemHealthLoading: false, systemHealthRefreshing: false, systemHealthError: true })
+    }
+  },
+
+  // Gateway traffic (agentgateway HTTP request counters, polled alongside the fleet).
+  // The endpoint returns CUMULATIVE counters; we buffer per-destination cumulatives
+  // { t, total, cp, ar } (server-clock) and derive the rolling-window count, current
+  // req/s, and the sparkline for the selected scope in the view. The metric has no URL
+  // path label, so the only path-ish dimension is the backend (cp=control-panel face,
+  // ar=agent-runner pool). Time-capped to a little over the largest window.
+  gateway: null,
+  gatewayLoading: true,
+  gatewayBuffer: [],  // [{ t, total, cp, ar }] oldest→newest, capped to GATEWAY_MAX_WINDOW_SEC
+  // Selected trailing window (seconds) + destination scope for the count. Both persisted.
+  gatewayWindowSec: safeStorage.getNumber('gateway-window-sec', 60, { min: 5, max: 3600 }),
+  gatewayScope: safeStorage.getItem('gateway-scope') || 'all',  // 'all'|'control-panel'|'agent-runner'
+
+  setGatewayWindowSec: (sec) => {
+    safeStorage.setItem('gateway-window-sec', String(sec))
+    set({ gatewayWindowSec: sec })
+  },
+
+  setGatewayScope: (scope) => {
+    safeStorage.setItem('gateway-scope', scope)
+    set({ gatewayScope: scope })
+  },
+
+  fetchGateway: async () => {
+    try {
+      const g = await adminApi.getGatewayMetrics()
+      set((s) => {
+        if (!g.available) return { gateway: g, gatewayLoading: false }
+        const bb = g.by_backend || {}
+        const sample = {
+          t: g.scraped_at,
+          total: g.total_requests,
+          cp: bb['control-panel'] || 0,
+          ar: bb['agent-runner'] || 0,
+        }
+        let buf = s.gatewayBuffer
+        const last = buf.length ? buf[buf.length - 1] : null
+        // Counter reset (gateway pod restart) => total dropped: start a fresh buffer.
+        if (last && sample.total < last.total) buf = []
+        // Append only when server time advanced (guards duplicate polls / clock skew).
+        if (!last || sample.t > last.t) buf = [...buf, sample]
+        // Time-cap the ring so the largest selectable window is always covered, no more.
+        const cutoff = sample.t - (GATEWAY_MAX_WINDOW_SEC + 30)
+        if (buf.length && buf[0].t < cutoff) buf = buf.filter((p) => p.t >= cutoff)
+        return { gateway: g, gatewayLoading: false, gatewayBuffer: buf }
+      })
+    } catch {
+      set({ gatewayLoading: false })
+    }
+  },
+
   // Audit log (cursor-paginated)
   auditEntries: [],
   auditTotal: null,
@@ -294,6 +367,8 @@ const useAdminStore = create((set, get) => ({
     inspectedUserHooks: { builtins: [], custom: [] }, inspectedUserHooksLoading: false,
     stats: null, statsLoading: true,
     fleet: null, fleetLoading: true, fleetRefreshing: false, fleetError: false,
+    systemHealth: null, systemHealthLoading: true, systemHealthRefreshing: false, systemHealthError: false,
+    gateway: null, gatewayLoading: true, gatewayBuffer: [],
     auditEntries: [], auditTotal: null, auditLoading: true,
     auditCursorStack: [null], auditNextCursor: null,
     auditActionFilter: null, auditActorFilter: '', auditTargetFilter: '', auditSessionFilter: '',

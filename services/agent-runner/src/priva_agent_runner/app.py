@@ -94,14 +94,28 @@ def create_app() -> FastAPI:
 
     @app.get("/health", include_in_schema=False)
     async def health():
+        import asyncio
         import os
         active, last = activity.snapshot()
+
+        # Self-reported downstream connectivity for the admin System Map. Fail-soft
+        # and off-loaded to a thread so a slow/unreachable data-spine never stalls
+        # the k8s readiness probe. redis is planned (not wired today) → not probed.
+        deps = []
+        try:
+            from priva_common.dataplane import get_client
+            ok, detail = await asyncio.to_thread(lambda: get_client().admin.readyz())
+            deps.append({"name": "data-spine", "ok": bool(ok), "detail": (detail or "")[:120]})
+        except Exception as e:  # pragma: no cover - data-spine optional locally
+            deps.append({"name": "data-spine", "ok": False, "detail": str(e)[:120]})
+
         return {
             "status": "ok",
             "service": "agent-runner",
             "account_id": os.environ.get("ACCOUNT_ID"),
             "active_runs": active,
             "last_activity_ts": last,
+            "deps": deps,
             "time": datetime.now(timezone.utc).isoformat(),
         }
 

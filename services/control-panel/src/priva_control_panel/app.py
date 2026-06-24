@@ -117,7 +117,21 @@ def create_app() -> FastAPI:
 
     @app.get("/health", include_in_schema=False)
     async def health():
-        return {"status": "ok", "service": "control-panel", "time": datetime.now(timezone.utc).isoformat()}
+        # Self-reported downstream connectivity (control-panel's own data-spine dep)
+        # for the admin System Map — keeps the per-service /health contract uniform.
+        # Fail-soft + off-loaded so a slow data-spine never stalls the probe.
+        import asyncio
+
+        deps = []
+        try:
+            from priva_common.dataplane import get_client
+            ok, detail = await asyncio.to_thread(lambda: get_client().admin.readyz())
+            deps.append({"name": "data-spine", "ok": bool(ok), "detail": (detail or "")[:120]})
+        except Exception as e:  # pragma: no cover - data-spine optional locally
+            deps.append({"name": "data-spine", "ok": False, "detail": str(e)[:120]})
+
+        return {"status": "ok", "service": "control-panel", "deps": deps,
+                "time": datetime.now(timezone.utc).isoformat()}
 
     # The admin SPA is mounted at "/admin" (StaticFiles serves only "/admin/..."),
     # so a bare "/admin" with no trailing slash 404s. Redirect it to "/admin/".
