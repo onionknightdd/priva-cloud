@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from priva_common.logging import get_app_logger
 from priva_common.audit_log import AuditEntry, get_audit_logger
-from ..deps import account_from_ws, get_user_workspace, negotiated_subprotocol, require_admin, require_user
+from ..deps import account_from_ws, get_user_workspace, negotiated_subprotocol, require_user
 from priva_common.config import PtySettings
 from ..services.pty_session import (
     PtySession,
@@ -52,15 +52,15 @@ async def get_pty_feature(_: UserRecord = Depends(require_user)):
     return PtyFeatureResponse(enabled=cfg.enabled)
 
 
-@router.get("/api/admin/pty/config", response_model=PtySettings)
-async def get_admin_pty_config(_: UserRecord = Depends(require_admin)):
+@router.get("/api/pty/config", response_model=PtySettings)
+async def get_pty_config_route(_: UserRecord = Depends(require_user)):
     return get_pty_config()
 
 
-@router.put("/api/admin/pty/config", response_model=PtySettings)
-async def update_admin_pty_config(
+@router.put("/api/pty/config", response_model=PtySettings)
+async def update_pty_config_route(
     request: PtyConfigUpdate,
-    current_user: UserRecord = Depends(require_admin),
+    current_user: UserRecord = Depends(require_user),
 ):
     updates = request.model_dump(exclude_none=True)
     previous = get_pty_config()

@@ -14,6 +14,7 @@ the pod verifies. Cold/unauth -> an ext_proc immediate response (401 / "waking, 
 
 from __future__ import annotations
 
+import base64
 import datetime
 import ssl
 import tempfile
@@ -43,8 +44,10 @@ _MODE_OVERRIDE = pm.ProcessingMode(
 from grpclib.const import Cardinality, Handler
 from grpclib.server import Server
 
+from priva_common.audit_log import AuditEntry, get_audit_logger
 from priva_common.logging import get_app_logger
 from priva_common.runner_token import mint
+from priva_common.user_store import get_user_store
 
 from . import provisioner
 from .services.auth import authenticate_raw_token
@@ -74,6 +77,9 @@ def _query_param(path: str, key: str) -> str | None:
 WS_TOKEN_PREFIX = "priva.token."
 
 
+WS_TARGET_PREFIX = "priva.target."
+
+
 def _token_from_subprotocol(header_value: str) -> str | None:
     """Pull the JWT out of the ``Sec-WebSocket-Protocol`` handshake header. The
     SPA offers ``priva.ws.v1, priva.token.<jwt>`` because a WS upgrade carries no
@@ -83,6 +89,26 @@ def _token_from_subprotocol(header_value: str) -> str | None:
         proto = proto.strip()
         if proto.startswith(WS_TOKEN_PREFIX):
             return proto[len(WS_TOKEN_PREFIX):] or None
+    return None
+
+
+def _target_username_from_subprotocol(header_value: str) -> str | None:
+    """Admin "console into another account": the admin SPA offers an extra
+    ``priva.target.<base64url(username)>`` subprotocol naming the account whose
+    pod the WS should be steered to. base64url (no padding) keeps arbitrary
+    usernames inside the RFC6455 subprotocol token grammar. Returns the decoded
+    username, or None if absent/undecodable."""
+    for proto in header_value.split(","):
+        proto = proto.strip()
+        if proto.startswith(WS_TARGET_PREFIX):
+            raw = proto[len(WS_TARGET_PREFIX):]
+            if not raw:
+                return None
+            try:
+                pad = "=" * (-len(raw) % 4)
+                return base64.urlsafe_b64decode(raw + pad).decode("utf-8") or None
+            except Exception:
+                return None
     return None
 
 
@@ -140,14 +166,40 @@ async def handle_request_headers(http_headers) -> "ep.ProcessingResponse":
     # Over-quota/spend is out of scope (QuotaRecord is a cap with no live counter).
     if getattr(user, "status", "active") != "active":
         return _immediate(403, "account access revoked")
+    # By default a caller is steered to their OWN pod. An admin may instead open a
+    # console into another account by offering priva.target.<b64url(username)> on
+    # the WS handshake — resolved server-side (never trust a client-supplied
+    # account_id) and gated exactly like a self-connect. The runner token is
+    # minted for the TARGET (account_id + username) so the target pod, which
+    # pins itself to one ACCOUNT_ID and resolves the user by username, accepts it.
+    acct_id, acct_username = user.account_id, user.username
+    target_username = _target_username_from_subprotocol(headers.get("sec-websocket-protocol", ""))
+    if target_username and target_username != user.username:
+        if getattr(user, "role", "") != "admin":
+            return _immediate(403, "admin role required to open another account's console")
+        target = get_user_store().get_user(target_username)
+        if target is None or not getattr(target, "account_id", None):
+            return _immediate(404, "target account not found")
+        if getattr(target, "status", "active") != "active":
+            return _immediate(403, "target account access revoked")
+        acct_id, acct_username = target.account_id, target.username
+        try:  # security-sensitive: an admin shelling into a user's pod is audited
+            get_audit_logger().append(AuditEntry(
+                actor=user.username,
+                action="admin.console_open",
+                target=target.username,
+                details={"account_id": acct_id},
+            ))
+        except Exception:  # pragma: no cover - audit must never block the console
+            pass
     try:
-        endpoint = await provisioner.wake_and_wait(user.account_id)
+        endpoint = await provisioner.wake_and_wait(acct_id)
     except Exception as exc:
-        logger.warning("wake failed account={}: {}", user.account_id, exc)
+        logger.warning("wake failed account={}: {}", acct_id, exc)
         return _immediate(503, "agent sandbox unavailable, retry shortly")
     if not endpoint:
         return _immediate(503, "agent sandbox is waking, retry in a moment")
-    return _steer(endpoint, mint(user.account_id, user.username))
+    return _steer(endpoint, mint(acct_id, acct_username))
 
 
 class ExternalProcessor:

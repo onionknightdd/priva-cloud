@@ -8,12 +8,15 @@
 import { getToken } from '@shared/api/tokenStore'
 import { wsProtocols } from './wsAuth'
 
-export function connectTerminal({ cols, rows, onReady, onOutput, onClosed, onError, onPong }) {
+export function connectTerminal({ cols, rows, targetUsername, wsPath = '/api/pty/ws', onReady, onOutput, onClosed, onError, onPong }) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   // Token rides the `Sec-WebSocket-Protocol` handshake header (the edge auths
-  // the upgrade, which carries no init frame yet). See wsAuth.js.
-  const wsUrl = `${protocol}//${window.location.host}/api/pty/ws`
-  const ws = new WebSocket(wsUrl, wsProtocols())
+  // the upgrade, which carries no init frame yet). See wsAuth.js. `targetUsername`
+  // rides the subprotocol too: on /api/pty/ws the EPP steers to that account's pod;
+  // on /api/admin/console/ws (wsPath) the control-panel reads it as a control-plane
+  // pod selector (control-panel / operator / data-spine).
+  const wsUrl = `${protocol}//${window.location.host}${wsPath}`
+  const ws = new WebSocket(wsUrl, wsProtocols(targetUsername))
   let closed = false
 
   ws.onopen = () => {

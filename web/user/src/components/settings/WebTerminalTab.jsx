@@ -41,7 +41,7 @@ const fieldDefs = [
   { key: 'rlimit_nofile', labelKey: 'settings.webTerminal.rlimitNofile' },
 ]
 
-export default function AdminWebTerminalTab() {
+export default function WebTerminalTab() {
   const { t } = useTranslation()
   const setTerminalFeatureEnabled = useUiStore((s) => s.setTerminalFeatureEnabled)
 

@@ -58,6 +58,8 @@ export const updateSensitivePatterns = (data) => putJSON('/admin/sensitive-patte
 export const getPlugins = () => getJSON('/admin/system/plugin')
 export const updatePlugin = (id, data) => putJSON(`/admin/system/plugin/${encodeURIComponent(id)}`, data)
 
-export const getPtyConfig = () => getJSON('/admin/pty/config')
-export const updatePtyConfig = (data) => putJSON('/admin/pty/config', data)
+// Per-account: served by the account's own agent-runner pod (gateway routes the
+// /api/pty prefix to it). Not admin-gated — each user configures their own pod.
+export const getPtyConfig = () => getJSON('/pty/config')
+export const updatePtyConfig = (data) => putJSON('/pty/config', data)
 export const getPtyFeature = () => getJSON('/pty/feature')

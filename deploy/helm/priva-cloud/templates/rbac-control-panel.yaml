@@ -26,6 +26,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]
+  # Admin control-plane web terminal: exec a shell into control-plane pods
+  # (control-panel / operator / data-spine) via the k8s API. Admin-gated, audited.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
   # Read live agent-runner CPU/memory (metrics-server) for the Resource Quota view.
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods"]

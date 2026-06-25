@@ -61,6 +61,8 @@ function TerminalSessionInner({
   onClosed,        // (id, info) => void  — called when WS closes (drawer can update tab badge)
   panelHeight,     // when this changes, refit
   panelMinimized,  // refit only when expanded
+  targetUsername,  // admin console: steer the WS to this account's pod (else the caller's own)
+  wsPath,          // admin console: override the WS path (control-plane pods use /api/admin/console/ws)
 }) {
   const { t } = useTranslation()
   const theme = useUiStore((s) => s.theme)
@@ -146,6 +148,8 @@ function TerminalSessionInner({
     const client = connectTerminal({
       cols,
       rows,
+      targetUsername,
+      wsPath,
       onReady: (msg) => {
         setReady(true)
         setConnecting(false)
@@ -184,7 +188,7 @@ function TerminalSessionInner({
     pingTimerRef.current = setInterval(() => {
       try { client.sendPing() } catch { /* noop */ }
     }, 30_000)
-  }, [onMetaChange, onClosed])
+  }, [onMetaChange, onClosed, targetUsername, wsPath])
 
   // Connect on mount, tear down on unmount.
   useEffect(() => {
@@ -377,6 +381,8 @@ const TerminalSession = memo(TerminalSessionInner, (prev, next) => (
   prev.visible === next.visible
   && prev.panelHeight === next.panelHeight
   && prev.panelMinimized === next.panelMinimized
+  && prev.targetUsername === next.targetUsername
+  && prev.wsPath === next.wsPath
 ))
 
 export default TerminalSession

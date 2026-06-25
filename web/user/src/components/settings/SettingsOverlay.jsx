@@ -1,20 +1,22 @@
-import { lazy, Suspense, useEffect, useCallback, useMemo } from 'react'
-import { Key, Cpu, Zap, Settings2, ScrollText, Radio, Puzzle, User, X, Terminal } from 'lucide-react'
+import { lazy, Suspense, useEffect, useCallback } from 'react'
+import { Key, Cpu, Zap, Settings2, User, X, Terminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useUiStore from '@shared/stores/uiStore'
 import useSidebarStore from '../../stores/sidebarStore'
-import useAuthStore from '@shared/stores/authStore'
 import Tabs from '@shared/components/shared/Tabs'
 
 const SettingsPanel = lazy(() => import('./SettingsPanel'))
 
-const BASE_TABS = [
+// The agent-runner SPA is per-account, so every tab here is the user's OWN config
+// (no cross-account/admin settings). Web Terminal configures this account's own pod.
+const TABS = [
   { id: 'account', labelKey: 'settings.account', icon: User },
   { id: 'api', labelKey: 'settings.apiKey', icon: Key },
   { id: 'models', labelKey: 'settings.llmProvider', icon: Cpu },
   { id: 'quickactions', labelKey: 'settings.quickActions', icon: Zap },
   // Channels hidden in Phase 2 (channel-connector deferred).
   { id: 'advanced', labelKey: 'settings.advanced', icon: Settings2 },
+  { id: 'webterminal', labelKey: 'settings.webTerminal.title', icon: Terminal },
 ]
 
 export default function SettingsOverlay() {
@@ -25,17 +27,8 @@ export default function SettingsOverlay() {
   const setSettingsActiveTab = useUiStore((s) => s.setSettingsActiveTab)
   const sidebarWidth = useSidebarStore((s) => s.width)
   const sidebarCollapsed = useSidebarStore((s) => s.collapsed)
-  const user = useAuthStore((s) => s.user)
 
-  const tabs = useMemo(() => {
-    const result = [...BASE_TABS]
-    if (user?.role === 'admin') {
-      result.push({ id: 'systemprompt', labelKey: 'settings.runtime', icon: ScrollText })
-      result.push({ id: 'plugins', labelKey: 'settings.plugins', icon: Puzzle })
-      result.push({ id: 'webterminal', labelKey: 'settings.webTerminal.title', icon: Terminal })
-    }
-    return result
-  }, [user?.role])
+  const tabs = TABS
 
   const effectiveSidebarWidth = sidebarCollapsed ? 48 : sidebarWidth
 

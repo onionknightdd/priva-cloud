@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { LogOut, Users, ScrollText, LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen, Server, Activity, Network, Gauge } from 'lucide-react'
+import { LogOut, Users, ScrollText, LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen, Server, Activity, Network, Gauge, SquareTerminal } from 'lucide-react'
 import useAuthStore from '@shared/stores/authStore'
 import useAdminStore from './stores/adminStore'
 import { useResizable } from '@shared/hooks/useResizable'
@@ -11,6 +11,7 @@ import AuditLog from './components/admin/AuditLog'
 import FleetView from './components/admin/FleetView'
 import ResourceQuotaView from './components/admin/ResourceQuotaView'
 import SystemMapView from './components/admin/SystemMapView'
+import ConsoleView from './components/admin/ConsoleView'
 import UserEditDrawer from './components/admin/UserEditDrawer'
 import AgentRunnerSandbox from './components/admin/AgentRunnerSandbox'
 import safeStorage from '@shared/utils/safeStorage'
@@ -30,6 +31,7 @@ const NAV = {
     { id: 'fleet', label: 'Fleet', icon: Activity },
     { id: 'resource-quota', label: 'Resource Quota', icon: Gauge },
     { id: 'system-map', label: 'System Map', icon: Network },
+    { id: 'console', label: 'Console', icon: SquareTerminal },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'audit', label: 'Audit', icon: ScrollText },
   ],
@@ -300,6 +302,7 @@ export default function AdminApp() {
         {activeTab === 'dashboard' && section === 'fleet' && <FleetView />}
         {activeTab === 'dashboard' && section === 'resource-quota' && <ResourceQuotaView />}
         {activeTab === 'dashboard' && section === 'system-map' && <SystemMapView />}
+        {activeTab === 'dashboard' && section === 'console' && <ConsoleView />}
         {activeTab === 'dashboard' && section === 'users' && <UserManagement />}
         {activeTab === 'dashboard' && section === 'audit' && <AuditLog />}
         {activeTab === 'config' && section === 'sandbox' && <AgentRunnerSandbox />}

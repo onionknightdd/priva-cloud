@@ -145,11 +145,13 @@ def create_app() -> FastAPI:
     from .routers.admin_files import router as admin_files_router
     from .routers.resource import router as resource_router
     from .routers.metrics import router as metrics_router
+    from .routers.console import router as console_router
 
     # Per-user agent-runtime state (usage overview/stats/analytics + agent audit)
     # is served by the agent-runner from its /workspace PVC, not here. The CP only
     # retains control-plane audit, exposed at GET /api/auth/audit (auth router).
-    for r in (auth_router, admin_router, admin_files_router, resource_router, metrics_router):
+    # console_router: admin web terminal INTO control-plane pods (k8s exec bridge).
+    for r in (auth_router, admin_router, admin_files_router, resource_router, metrics_router, console_router):
         app.include_router(r)
 
     # Runtime routes (/api/agent, /api/files, /api/pty, ...) are NOT served or

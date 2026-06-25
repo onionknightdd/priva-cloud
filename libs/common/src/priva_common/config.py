@@ -111,7 +111,7 @@ class ChannelsSettings(BaseModel):
 
 
 class PtySettings(BaseModel):
-    enabled: bool = False
+    enabled: bool = True
     max_sessions_per_user: int = 3
     idle_timeout_seconds: int = 600
     absolute_timeout_seconds: int = 7200

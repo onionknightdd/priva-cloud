@@ -11,7 +11,7 @@ import useAuthStore from '@shared/stores/authStore'
 import { useResizable } from '@shared/hooks/useResizable'
 import { useDraggable } from '../../hooks/useDraggable'
 import { useEdgeResizable } from '../../hooks/useEdgeResizable'
-import TerminalSession from './TerminalSession'
+import TerminalSession from '@shared/components/terminal/TerminalSession'
 
 const HEADER_HEIGHT = 36
 const TAB_LABEL_FALLBACK = 'shell'

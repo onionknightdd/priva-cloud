@@ -1,7 +1,7 @@
 import { getAuthHeaders } from '@shared/api/client'
 import useConnectionStore from '../stores/connectionStore'
 import { getToken } from '@shared/api/tokenStore'
-import { wsProtocols } from './wsAuth'
+import { wsProtocols } from '@shared/api/wsAuth'
 import i18n from '@shared/i18n'
 
 const BASE_URL = '/api'
