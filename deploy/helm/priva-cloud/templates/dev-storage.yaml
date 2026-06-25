@@ -1,0 +1,120 @@
+{{- if .Values.devStorage.enabled }}
+{{- $ns := include "priva-cloud.namespace" . -}}
+# DEV-ONLY: in-cluster NFSv4 server on a loopback export + the quota-manager API
+# (same container). PRIVILEGED — never enable in prod (use storageBackend=cephfs).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: priva-nfs
+  namespace: {{ $ns }}
+  labels:
+    app: priva-nfs
+    role: dev-storage
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  serviceName: priva-nfs
+  replicas: 1
+  selector:
+    matchLabels: {app: priva-nfs}
+  template:
+    metadata:
+      labels: {app: priva-nfs, role: dev-storage}
+    spec:
+      containers:
+        - name: nfs-xfs
+          image: {{ include "priva-cloud.devStorageImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            privileged: true   # loop-mount + run nfsd (dev-only liberty)
+          env:
+            - {name: EXPORT_IMG_GB, value: {{ .Values.devStorage.exportImgGb | quote }}}
+            - {name: EXPORT_DIR, value: {{ .Values.devStorage.exportDir | quote }}}
+            - {name: QUOTA_PORT, value: {{ .Values.devStorage.quotaPort | quote }}}
+          ports:
+            - {name: nfs, containerPort: {{ .Values.devStorage.nfs.port }}}
+            - {name: quota, containerPort: {{ .Values.devStorage.quotaPort }}}
+          volumeMounts:
+            - {name: backing, mountPath: /data}    # holds the export image file
+          readinessProbe:
+            httpGet: {path: /health, port: {{ .Values.devStorage.quotaPort }}}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 30
+  volumeClaimTemplates:
+    - metadata:
+        name: backing
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.devStorage.backingStorage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: priva-nfs
+  namespace: {{ $ns }}
+  labels:
+    app: priva-nfs
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  # FIXED ClusterIP: the NFS PV must reference an IP, not cluster DNS — the kubelet
+  # mounts NFS from the host netns (can't resolve *.svc.cluster.local), but kube-proxy
+  # DNATs the ClusterIP from the host. A pinned IP keeps the committed PV deterministic.
+  clusterIP: {{ .Values.devStorage.nfs.clusterIP }}
+  selector: {app: priva-nfs}
+  ports:
+    - {name: nfs, port: {{ .Values.devStorage.nfs.port }}, targetPort: {{ .Values.devStorage.nfs.port }}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: priva-quota
+  namespace: {{ $ns }}
+  labels:
+    app: priva-nfs
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  selector: {app: priva-nfs}
+  ports:
+    - {name: quota, port: {{ .Values.devStorage.quotaPort }}, targetPort: {{ .Values.devStorage.quotaPort }}}
+---
+# The single shared RWX export every runner subPaths into (subPath=<account_id>).
+# fsid=0 on the server makes /export the NFSv4 root, so the client path is "/".
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Values.devStorage.export.pvName }}
+  labels:
+    app: priva-export
+    role: dev-storage
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  capacity:
+    storage: {{ .Values.devStorage.export.capacity }}   # nominal; real per-account limits are backend quotas
+  accessModes: ["ReadWriteMany"]
+  persistentVolumeReclaimPolicy: {{ .Values.devStorage.export.reclaimPolicy }}
+  storageClassName: ""     # static binding, no dynamic provisioner
+  mountOptions:
+    {{- toYaml .Values.devStorage.export.mountOptions | nindent 4 }}
+  nfs:
+    server: {{ .Values.devStorage.nfs.clusterIP }}
+    path: "/"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.devStorage.export.claimName }}
+  namespace: {{ $ns }}
+  labels:
+    app: priva-export
+    role: dev-storage
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: ""
+  volumeName: {{ .Values.devStorage.export.pvName }}   # bind to the static PV above
+  resources:
+    requests:
+      storage: {{ .Values.devStorage.export.capacity }}
+{{- end }}

@@ -1,0 +1,30 @@
+{{- $ns := include "priva-cloud.namespace" . -}}
+# operator — kopf AgentTenant controller (sole scaler 0<->1). Logs to stderr.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: operator
+  namespace: {{ $ns }}
+  labels:
+    app: operator
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.services.operator.replicas }}
+  strategy: {type: Recreate}   # a single active controller (no peering)
+  selector:
+    matchLabels: {app: operator}
+  template:
+    metadata:
+      labels: {app: operator}
+    spec:
+      serviceAccountName: priva-operator
+      containers:
+        - name: operator
+          image: {{ include "priva-cloud.image" (dict "svc" .Values.services.operator "root" .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "priva_operator"]
+          envFrom:
+            - configMapRef: {name: {{ .Values.config.name }}}
+          {{- with .Values.operator.resources }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}

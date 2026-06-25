@@ -1,0 +1,73 @@
+{{- $ns := include "priva-cloud.namespace" . -}}
+# data-spine — single writer (replicas:1, Recreate), gRPC :50051, SQLite on a RWO PVC.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-spine-data
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.dataSpine.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.dataSpine.storage }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-spine
+  namespace: {{ $ns }}
+  labels:
+    app: data-spine
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.services.dataSpine.replicas }}
+  strategy: {type: Recreate}   # never two pods co-mounting the RWO PVC
+  selector:
+    matchLabels: {app: data-spine}
+  template:
+    metadata:
+      labels: {app: data-spine}
+    spec:
+      containers:
+        - name: data-spine
+          image: {{ include "priva-cloud.image" (dict "svc" .Values.services.dataSpine "root" .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "priva_data_spine", "serve"]
+          ports: [{containerPort: 50051, name: grpc}]
+          env:
+            # Explicit, to override the K8s-injected DATA_SPINE_PORT=tcp://... service
+            # var (which the entry would otherwise int()-parse and crash on).
+            - {name: DATA_SPINE_HOST, value: "0.0.0.0"}
+            - {name: DATA_SPINE_PORT, value: "50051"}
+            - {name: PRIVA_DATASPINE__SQLITE_PATH, value: "/data/priva.dataspine.db"}
+            - {name: PRIVA_LOG_DIR, value: "/tmp/logs"}
+            - {name: PRIVA_SERVER__WORK_DIR, value: "/data"}
+          envFrom:
+            - secretRef: {name: {{ .Values.sharedSecret.name }}}   # api_key_hmac_secret / jwt_secret (lookup parity)
+          volumeMounts: [{name: data, mountPath: /data}]
+          {{- with .Values.dataSpine.resources }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            tcpSocket: {port: 50051}
+            initialDelaySeconds: 2
+            periodSeconds: 3
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: data-spine-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-spine
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  selector: {app: data-spine}
+  ports: [{port: 50051, targetPort: 50051, name: grpc}]

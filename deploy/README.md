@@ -14,8 +14,21 @@ for the as-built design and the agentgateway-EPP-over-TLS gotcha.
 | `rbac/` | ServiceAccounts + Roles for the operator and control-panel. |
 | `k8s/` | ConfigMap + Deployments/Services for data-spine, control-panel, operator. |
 | `gateway/` | agentgateway `Gateway`, `InferencePool` (EPP = control-panel:9000), `HTTPRoute`. |
+| `dev-storage/` | DEV-ONLY shared-RWX storage backend: in-cluster NFS server + quota-manager + the `priva-export` PV/PVC. |
+| `helm/priva-cloud/` | Full Helm chart for the whole control plane (CRD, config/secret, control-plane, RBAC, edge, dev-storage) — `helm install` alternative to the raw `kubectl apply` flow. |
 | `minikube/build.sh` | Build the 4 images and load them into minikube (runtime=containerd). |
 | `minikube/up.sh` | One-shot bring-up: images → Gateway API + GIE CRDs + agentgateway (Helm) → CRD/RBAC → control-plane → edge. |
+
+## Install via Helm (alternative to `up.sh`)
+
+```bash
+deploy/minikube/build.sh                          # build + load images (still needed)
+# Gateway API + GIE CRDs + agentgateway controller — see deploy/helm/priva-cloud/README.md
+helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace
+```
+
+The chart mirrors these manifests one-for-one; `deploy/helm/priva-cloud/README.md` covers
+prod overrides (`devStorage.enabled=false`, `storageBackend=cephfs`, registry/tags).
 
 ## Bring-up (minikube)
 

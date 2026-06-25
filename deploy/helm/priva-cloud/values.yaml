@@ -1,0 +1,140 @@
+# Priva Cloud — Helm values.
+# Templated from the raw manifests in deploy/{k8s,rbac,crds,gateway,dev-storage}.
+# Defaults reproduce the minikube dev bring-up (deploy/minikube/up.sh) exactly.
+
+# Override the install namespace. Empty => use the Helm release namespace (`-n …`).
+namespaceOverride: ""
+
+# ---------------------------------------------------------------------------
+# Images. Final ref = [registry/]repository:tag  (registry prepended only if set).
+# Per-service `tag` falls back to image.tag when empty.
+# ---------------------------------------------------------------------------
+image:
+  registry: ""          # e.g. "ghcr.io/acme" for a real registry; "" = bare repo names
+  tag: "dev"            # global default tag
+  pullPolicy: IfNotPresent
+
+services:
+  dataSpine:
+    repository: priva/data-spine
+    tag: ""
+    replicas: 1
+  controlPanel:
+    repository: priva/control-panel
+    tag: ""
+    replicas: 1
+  operator:
+    repository: priva/operator
+    tag: ""
+    replicas: 1
+  # agent-runner is launched per-account BY THE OPERATOR, not deployed by this chart.
+  # Its image ref is published to the operator via the ConfigMap (RUNNER_IMAGE).
+  agentRunner:
+    repository: priva/agent-runner
+    tag: ""
+
+# ---------------------------------------------------------------------------
+# AgentTenant CRD. Templated (so `helm upgrade` re-applies schema changes —
+# unlike Helm's crds/ dir, which is install-only). Disable if managed out-of-band.
+# ---------------------------------------------------------------------------
+crds:
+  install: true
+  keep: true            # annotate so `helm uninstall` does NOT drop the CRD (+ all CRs)
+
+# ---------------------------------------------------------------------------
+# Shared secret (jwt + dataspine hmac). Random by default, PRESERVED across upgrades
+# via a lookup of the existing Secret. Set explicit values to pin them.
+# ---------------------------------------------------------------------------
+sharedSecret:
+  create: true
+  name: priva-shared-secret
+  jwtSecret: ""                 # "" => generate/keep a random 32-byte hex
+  apiKeyHmacSecret: ""          # "" => generate/keep a random 32-byte hex
+
+# ---------------------------------------------------------------------------
+# priva-config ConfigMap (shared non-secret bootstrap env for CP/operator/runner).
+# ---------------------------------------------------------------------------
+config:
+  name: priva-config
+  dataspine:
+    transport: grpc
+    # {host} is filled with the install namespace at render time.
+    grpcDsn: "data-spine.{ns}.svc.cluster.local:50051"
+  logDir: /tmp/logs
+  kubernetes:
+    inCluster: true
+    runnerImagePullPolicy: IfNotPresent
+    idleGraceSeconds: 120
+    minAliveAfterWakeSeconds: 60
+    wakeTimeoutSeconds: 90
+    wakeHoldSeconds: 5
+    # Per-account runner pod sizing defaults (admin overrides per-account, live).
+    runnerCpuCores: "1.0"
+    runnerMemoryMb: 2048
+    runnerStorageGb: 1
+    # Shared-RWX-export storage model. dev=nfs_xfs, prod=cephfs.
+    storageBackend: nfs_xfs
+    exportClaimName: priva-export
+    # {ns} filled at render time. Points at the dev quota-manager Service.
+    quotaManagerUrl: "http://priva-quota.{ns}.svc.cluster.local:8099"
+    runnerUid: 10001
+    runnerGid: 10001
+
+# ---------------------------------------------------------------------------
+# control-panel — brain/EPP (:9000 ext_proc) + HTTP faces/SPAs (:8080).
+# ---------------------------------------------------------------------------
+controlPanel:
+  workDir: /tmp/cp-workspace
+  resources: {}
+
+dataSpine:
+  storage: 1Gi                  # RWO PVC for the SQLite db
+  storageClassName: ""          # "" => cluster default StorageClass
+  resources: {}
+
+operator:
+  resources: {}
+
+# ---------------------------------------------------------------------------
+# agentgateway edge wiring. Requires Gateway API + GIE CRDs + the agentgateway
+# controller (NOT installed by this chart — see README Prerequisites).
+# ---------------------------------------------------------------------------
+gateway:
+  enabled: true
+  className: agentgateway
+  name: priva-gateway
+  listenerPort: 80
+  inferencePoolName: agent-runners
+  runnerTargetPort: 8091         # the port the EPP routes to on each runner pod
+
+# ---------------------------------------------------------------------------
+# DEV-ONLY shared-RWX storage backend: in-cluster NFSv4 server on a loopback
+# image + the quota-manager API (per-account fixed-size loop images = hard quota).
+# PRIVILEGED — never enable in prod. Prod uses storageBackend=cephfs (no pod here).
+# ---------------------------------------------------------------------------
+devStorage:
+  # Default on for the nfs_xfs backend; flip off (and set storageBackend=cephfs)
+  # for a prod-style install with an external RWX CSI.
+  enabled: true
+  image:
+    repository: priva/nfs-xfs
+    tag: ""
+  exportImgGb: 20                # backing image size (headroom for all account quotas)
+  exportDir: /export
+  quotaPort: 8099
+  backingStorage: 25Gi          # RWO PVC the StatefulSet writes the image onto
+  # The NFS PV must reference an IP (kubelet mounts from host netns, no cluster DNS).
+  # kube-proxy DNATs this pinned ClusterIP. Keep it free in the service CIDR.
+  nfs:
+    clusterIP: 10.96.200.200
+    port: 2049
+  export:
+    pvName: priva-export
+    claimName: priva-export
+    capacity: 20Gi
+    reclaimPolicy: Retain
+    mountOptions:
+      - nfsvers=4.1
+      - hard
+      - timeo=600
+      - retrans=2

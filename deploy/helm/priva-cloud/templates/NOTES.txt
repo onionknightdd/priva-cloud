@@ -1,0 +1,39 @@
+Priva Cloud {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}" in namespace "{{ include "priva-cloud.namespace" . }}".
+
+Storage backend : {{ .Values.config.kubernetes.storageBackend }}{{ if .Values.devStorage.enabled }}  (dev in-cluster NFS — priva-nfs StatefulSet){{ end }}
+Gateway wiring  : {{ if .Values.gateway.enabled }}enabled (Gateway/HTTPRoute/InferencePool){{ else }}disabled{{ end }}
+
+Watch it come up:
+  kubectl -n {{ include "priva-cloud.namespace" . }} get pods -w
+
+{{- if .Values.gateway.enabled }}
+
+PREREQUISITES (NOT installed by this chart) — the Gateway resources are inert without:
+  1. Gateway API CRDs (v1.5):
+       kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.0/standard-install.yaml
+  2. Gateway-API-Inference-Extension CRDs (v1.5):
+       kubectl apply -f https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/download/v1.5.0/manifests.yaml
+  3. agentgateway controller (Helm OCI):
+       helm upgrade -i --create-namespace -n agentgateway-system agentgateway-crds \
+         oci://cr.agentgateway.dev/charts/agentgateway-crds --version v1.3.0
+       helm upgrade -i -n agentgateway-system agentgateway \
+         oci://cr.agentgateway.dev/charts/agentgateway --version v1.3.0 --set inferenceExtension.enabled=true
+
+Reach the edge:
+  kubectl -n {{ include "priva-cloud.namespace" . }} wait --for=condition=Programmed gateway/{{ .Values.gateway.name }} --timeout=120s
+  kubectl -n {{ include "priva-cloud.namespace" . }} port-forward svc/{{ .Values.gateway.name }} 8080:80
+  # then open http://127.0.0.1:8080/
+{{- end }}
+
+{{- if .Values.devStorage.enabled }}
+
+NOTE: devStorage is ON — the privileged priva-nfs pod runs in-cluster. This is DEV-ONLY.
+For production: --set devStorage.enabled=false --set config.kubernetes.storageBackend=cephfs
+and provide an external RWX export bound to a PVC named "{{ .Values.config.kubernetes.exportClaimName }}".
+{{- end }}
+
+{{- if .Values.sharedSecret.create }}
+
+The shared secret "{{ .Values.sharedSecret.name }}" was generated and is preserved across upgrades.
+Per-account ANTHROPIC_* creds are set in the SPA Settings (stored encrypted in data-spine).
+{{- end }}

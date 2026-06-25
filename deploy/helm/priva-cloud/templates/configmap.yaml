@@ -1,0 +1,34 @@
+{{- $ns := include "priva-cloud.namespace" . -}}
+# Shared non-secret bootstrap env for CP / operator / agent-runner pods.
+# (data-spine uses its own env — it's the in-process owner of the DB, not a client.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.config.name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+data:
+  PRIVA_DATASPINE__TRANSPORT: {{ .Values.config.dataspine.transport | quote }}
+  PRIVA_DATASPINE__GRPC_DSN: {{ .Values.config.dataspine.grpcDsn | replace "{ns}" $ns | quote }}
+  PRIVA_LOG_DIR: {{ .Values.config.logDir | quote }}
+  PRIVA_KUBERNETES__IN_CLUSTER: {{ .Values.config.kubernetes.inCluster | quote }}
+  PRIVA_KUBERNETES__NAMESPACE_SYSTEM: {{ $ns | quote }}
+  PRIVA_KUBERNETES__NAMESPACE_TENANTS: {{ $ns | quote }}
+  PRIVA_KUBERNETES__RUNNER_IMAGE: {{ include "priva-cloud.runnerImage" . | quote }}
+  PRIVA_KUBERNETES__RUNNER_IMAGE_PULL_POLICY: {{ .Values.config.kubernetes.runnerImagePullPolicy | quote }}
+  PRIVA_KUBERNETES__IDLE_GRACE_SECONDS: {{ .Values.config.kubernetes.idleGraceSeconds | quote }}
+  PRIVA_KUBERNETES__MIN_ALIVE_AFTER_WAKE_SECONDS: {{ .Values.config.kubernetes.minAliveAfterWakeSeconds | quote }}
+  PRIVA_KUBERNETES__WAKE_TIMEOUT_SECONDS: {{ .Values.config.kubernetes.wakeTimeoutSeconds | quote }}
+  PRIVA_KUBERNETES__WAKE_HOLD_SECONDS: {{ .Values.config.kubernetes.wakeHoldSeconds | quote }}
+  # Per-account runner pod sizing defaults (admin overrides per-account, live).
+  PRIVA_KUBERNETES__RUNNER_CPU_CORES: {{ .Values.config.kubernetes.runnerCpuCores | quote }}
+  PRIVA_KUBERNETES__RUNNER_MEMORY_MB: {{ .Values.config.kubernetes.runnerMemoryMb | quote }}
+  PRIVA_KUBERNETES__RUNNER_STORAGE_GB: {{ .Values.config.kubernetes.runnerStorageGb | quote }}
+  # Shared-RWX-export storage model: each runner subPaths into one RWX export; the
+  # per-account volume quota is enforced by the backend. dev=nfs_xfs, prod=cephfs.
+  PRIVA_KUBERNETES__STORAGE_BACKEND: {{ .Values.config.kubernetes.storageBackend | quote }}
+  PRIVA_KUBERNETES__EXPORT_CLAIM_NAME: {{ .Values.config.kubernetes.exportClaimName | quote }}
+  PRIVA_KUBERNETES__QUOTA_MANAGER_URL: {{ .Values.config.kubernetes.quotaManagerUrl | replace "{ns}" $ns | quote }}
+  PRIVA_KUBERNETES__RUNNER_UID: {{ .Values.config.kubernetes.runnerUid | quote }}
+  PRIVA_KUBERNETES__RUNNER_GID: {{ .Values.config.kubernetes.runnerGid | quote }}

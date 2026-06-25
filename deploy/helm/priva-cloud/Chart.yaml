@@ -1,0 +1,22 @@
+apiVersion: v2
+name: priva-cloud
+description: >-
+  Priva Cloud control plane — data-spine, control-panel (brain/EPP), kopf operator,
+  the AgentTenant CRD + RBAC, the agentgateway edge wiring (Gateway/HTTPRoute/InferencePool),
+  and an optional dev-only shared-RWX storage backend (in-cluster NFS + per-account quota).
+type: application
+version: 0.1.0
+appVersion: "dev"
+keywords:
+  - priva
+  - agent
+  - agentgateway
+  - kopf-operator
+home: https://github.com/onionknightdd/priva-cloud
+maintainers:
+  - name: Priva
+annotations:
+  # Prerequisites NOT installed by this chart (cluster-scoped CRDs / third-party charts).
+  # See README.md "Prerequisites". The Gateway resources here are inert without them.
+  priva.io/requires: >-
+    Gateway API v1.5 CRDs, Gateway-API-Inference-Extension v1.5 CRDs, agentgateway controller.

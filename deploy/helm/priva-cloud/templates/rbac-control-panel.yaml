@@ -1,0 +1,48 @@
+{{- $ns := include "priva-cloud.namespace" . -}}
+# RBAC for control-panel: provision AgentTenant CRs + read their status (EPP wake)
+# + scale a deployment to zero (admin terminate) + read pod metrics (Resource Quota view).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: priva-control-panel
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: priva-control-panel
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["priva.io"]
+    resources: ["agenttenants", "agenttenants/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  # Read live agent-runner CPU/memory (metrics-server) for the Resource Quota view.
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: priva-control-panel
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: priva-control-panel
+subjects:
+  - kind: ServiceAccount
+    name: priva-control-panel
+    namespace: {{ $ns }}
