@@ -31,14 +31,13 @@ If you only want the control plane, install with `--set gateway.enabled=false` a
 
 ## Install
 
-`values.yaml` holds the shared defaults; pick an environment with a `-f` overlay
-(`values-dev.yaml` / `values-prod.yaml`).
+`values.yaml` **is** the dev (minikube) config — a bare install mirrors `up.sh`.
+For prod, layer `values-prod.yaml` on top with `-f`.
 
 ```bash
 # dev (minikube) — mirrors up.sh: in-cluster NFS storage + edge wiring.
 # images already loaded into minikube as priva/<svc>:dev (deploy/minikube/build.sh)
-helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace \
-  -f deploy/helm/priva-cloud/values-dev.yaml
+helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace
 ```
 
 ```bash
@@ -49,7 +48,7 @@ helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace \
   -f deploy/helm/priva-cloud/values-prod.yaml
 ```
 
-You can still `--set key=value` on top of either overlay for one-off tweaks.
+You can still `--set key=value` on top for one-off tweaks.
 
 ## Key values
 
