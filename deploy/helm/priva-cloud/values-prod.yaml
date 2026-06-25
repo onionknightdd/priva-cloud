@@ -1,0 +1,59 @@
+# Prod overlay — external RWX CSI (Ceph/NFS), no privileged in-cluster storage pod.
+# Usage:
+#   helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace \
+#     -f deploy/helm/priva-cloud/values-prod.yaml
+#
+# EDIT the placeholders (registry, tag, storageClassName) before installing.
+# Only the values that differ from the chart defaults for prod are listed here.
+
+# Real registry + an immutable, pinned tag (NOT :dev / :latest).
+# Final ref = <registry>/<services.*.repository>:<tag>, e.g. registry.example.com/priva/operator:v0.1.0
+image:
+  registry: "registry.example.com"   # <-- EDIT (repository already carries the "priva/" prefix)
+  tag: "v0.1.0"                       # <-- EDIT to the released image tag
+  pullPolicy: IfNotPresent
+
+config:
+  kubernetes:
+    # Longer idle/wake than the demo defaults — fewer cold starts under real traffic.
+    idleGraceSeconds: 600
+    minAliveAfterWakeSeconds: 120
+    wakeTimeoutSeconds: 120
+    # Prod storage: CephFS / NFS subvolumes via the operator's CephFsBackend.
+    storageBackend: cephfs
+    # The operator subPaths each runner into this RWX claim; provision it out-of-band
+    # (a CSI RWX PVC bound to your Ceph/NFS export) with this exact name.
+    exportClaimName: priva-export
+
+# No in-cluster privileged NFS pod in prod — storage is an external CSI volume.
+devStorage:
+  enabled: false
+
+# data-spine's SQLite PVC on a durable, backed-up StorageClass.
+dataSpine:
+  storage: 5Gi
+  storageClassName: ""        # <-- EDIT to a real StorageClass (e.g. ceph-rbd / gp3)
+  resources:
+    requests: {cpu: "100m", memory: "256Mi"}
+    limits:   {cpu: "500m", memory: "1Gi"}
+
+# Edge wiring on (Gateway API + GIE CRDs + agentgateway must be installed in-cluster).
+gateway:
+  enabled: true
+
+# Pin jwt/hmac explicitly (e.g. from an external secret manager) instead of relying on
+# the generated-and-kept random — set these or pre-create the Secret and set create:false.
+sharedSecret:
+  create: true
+  jwtSecret: ""               # <-- EDIT or leave "" to auto-generate+preserve
+  apiKeyHmacSecret: ""        # <-- EDIT or leave "" to auto-generate+preserve
+
+# Resource requests/limits for the always-on control-plane pods.
+controlPanel:
+  resources:
+    requests: {cpu: "250m", memory: "512Mi"}
+    limits:   {cpu: "1",    memory: "1Gi"}
+operator:
+  resources:
+    requests: {cpu: "100m", memory: "256Mi"}
+    limits:   {cpu: "500m", memory: "512Mi"}

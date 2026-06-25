@@ -1,0 +1,33 @@
+# Dev overlay (minikube) — mirrors deploy/minikube/up.sh.
+# Usage:
+#   helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace \
+#     -f deploy/helm/priva-cloud/values-dev.yaml
+#
+# Only the values that differ from / pin the chart defaults for dev are listed here;
+# everything else inherits values.yaml.
+
+# Locally-built images loaded into minikube as priva/<svc>:dev (deploy/minikube/build.sh).
+image:
+  registry: ""
+  tag: "dev"
+  pullPolicy: IfNotPresent
+
+config:
+  kubernetes:
+    # Short idle/wake so scale-to-zero is observable in a demo.
+    idleGraceSeconds: 120
+    minAliveAfterWakeSeconds: 60
+    # DEV shared-RWX backend: in-cluster NFS + per-account quota.
+    storageBackend: nfs_xfs
+
+# In-cluster privileged NFS storage simulator — ON for dev.
+devStorage:
+  enabled: true
+
+# Edge wiring on (needs Gateway API + GIE CRDs + agentgateway — see chart README).
+gateway:
+  enabled: true
+
+# Random jwt/hmac generated at install, preserved across upgrades.
+sharedSecret:
+  create: true

@@ -31,21 +31,25 @@ If you only want the control plane, install with `--set gateway.enabled=false` a
 
 ## Install
 
-```bash
-# dev (minikube) — mirrors up.sh: in-cluster NFS storage + edge wiring
-helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace
+`values.yaml` holds the shared defaults; pick an environment with a `-f` overlay
+(`values-dev.yaml` / `values-prod.yaml`).
 
+```bash
+# dev (minikube) — mirrors up.sh: in-cluster NFS storage + edge wiring.
 # images already loaded into minikube as priva/<svc>:dev (deploy/minikube/build.sh)
+helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace \
+  -f deploy/helm/priva-cloud/values-dev.yaml
 ```
 
 ```bash
-# prod-style — external RWX CSI, no privileged NFS pod, real registry/tags
+# prod — external RWX CSI (Ceph/NFS), no privileged NFS pod, real registry/tags.
+# EDIT the placeholders in values-prod.yaml first (registry, tag, storageClassName),
+# then bind an external RWX export to a PVC named "priva-export" (config.kubernetes.exportClaimName).
 helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace \
-  --set image.registry=ghcr.io/acme --set image.tag=v1.2.3 \
-  --set devStorage.enabled=false \
-  --set config.kubernetes.storageBackend=cephfs
-# then bind an external RWX export to a PVC named "priva-export" (config.kubernetes.exportClaimName)
+  -f deploy/helm/priva-cloud/values-prod.yaml
 ```
+
+You can still `--set key=value` on top of either overlay for one-off tweaks.
 
 ## Key values
 
