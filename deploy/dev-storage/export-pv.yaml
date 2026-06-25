@@ -1,0 +1,38 @@
+# The single shared RWX export every runner subPaths into (subPath=<account_id>) and the
+# future read-only state-reader mounts whole-tree. Backed by the in-cluster dev NFS server
+# (nfs-xfs.yaml). fsid=0 on the server makes /export the NFSv4 root, so the client path is "/".
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: priva-export
+  labels: { app: priva-export, role: dev-storage }
+spec:
+  capacity:
+    storage: 20Gi          # nominal; real per-account limits are XFS project quotas
+  accessModes: ["ReadWriteMany"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""     # static binding, no dynamic provisioner
+  mountOptions:
+    - nfsvers=4.1
+    - hard
+    - timeo=600
+    - retrans=2
+  nfs:
+    # The kubelet mounts from the host netns (no cluster DNS) → use the pinned ClusterIP
+    # from nfs-xfs.yaml (kube-proxy DNATs it), not the *.svc.cluster.local name.
+    server: 10.96.200.200
+    path: "/"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: priva-export
+  namespace: priva-cloud
+  labels: { app: priva-export, role: dev-storage }
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: ""
+  volumeName: priva-export   # bind to the static PV above
+  resources:
+    requests:
+      storage: 20Gi

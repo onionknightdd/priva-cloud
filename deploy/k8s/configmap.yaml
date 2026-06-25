@@ -23,5 +23,11 @@ data:
   PRIVA_KUBERNETES__RUNNER_CPU_CORES: "1.0"
   PRIVA_KUBERNETES__RUNNER_MEMORY_MB: "2048"
   PRIVA_KUBERNETES__RUNNER_STORAGE_GB: "1"
-  # Expandable StorageClass (csi-hostpath-driver addon) so volume grow-edits work.
-  PRIVA_KUBERNETES__RUNNER_STORAGE_CLASS: "csi-hostpath-sc"
+  # Shared-RWX-export storage model: each runner subPaths into one RWX export; the
+  # per-account volume quota is enforced by the backend (XFS prjquota in dev via the
+  # quota-manager). dev=nfs_xfs, prod=cephfs.
+  PRIVA_KUBERNETES__STORAGE_BACKEND: "nfs_xfs"
+  PRIVA_KUBERNETES__EXPORT_CLAIM_NAME: "priva-export"
+  PRIVA_KUBERNETES__QUOTA_MANAGER_URL: "http://priva-quota.priva-cloud.svc.cluster.local:8099"
+  PRIVA_KUBERNETES__RUNNER_UID: "10001"
+  PRIVA_KUBERNETES__RUNNER_GID: "10001"

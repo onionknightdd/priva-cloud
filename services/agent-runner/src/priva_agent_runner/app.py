@@ -109,6 +109,19 @@ def create_app() -> FastAPI:
         except Exception as e:  # pragma: no cover - data-spine optional locally
             deps.append({"name": "data-spine", "ok": False, "detail": str(e)[:120]})
 
+        # Volume usage (awake-only fallback for the admin dashboard; the wake-free
+        # source is the quota-manager). On a quota'd mount statvfs reports the project
+        # quota as the total — O(1), no tree walk. Fail-soft.
+        volume = None
+        try:
+            st = os.statvfs("/workspace")
+            volume = {
+                "used_bytes": (st.f_blocks - st.f_bfree) * st.f_frsize,
+                "total_bytes": st.f_blocks * st.f_frsize,
+            }
+        except Exception:
+            pass
+
         return {
             "status": "ok",
             "service": "agent-runner",
@@ -116,6 +129,7 @@ def create_app() -> FastAPI:
             "active_runs": active,
             "last_activity_ts": last,
             "deps": deps,
+            "volume": volume,
             "time": datetime.now(timezone.utc).isoformat(),
         }
 

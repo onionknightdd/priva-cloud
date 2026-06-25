@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { LogOut, Users, ScrollText, LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen, Server, Activity, Network } from 'lucide-react'
+import { LogOut, Users, ScrollText, LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen, Server, Activity, Network, Gauge } from 'lucide-react'
 import useAuthStore from '@shared/stores/authStore'
 import useAdminStore from './stores/adminStore'
 import { useResizable } from '@shared/hooks/useResizable'
@@ -9,6 +9,7 @@ import LoginPage from '@shared/components/auth/LoginPage'
 import UserManagement from './components/admin/UserManagement'
 import AuditLog from './components/admin/AuditLog'
 import FleetView from './components/admin/FleetView'
+import ResourceQuotaView from './components/admin/ResourceQuotaView'
 import SystemMapView from './components/admin/SystemMapView'
 import UserEditDrawer from './components/admin/UserEditDrawer'
 import AgentRunnerSandbox from './components/admin/AgentRunnerSandbox'
@@ -27,6 +28,7 @@ const TABS = [
 const NAV = {
   dashboard: [
     { id: 'fleet', label: 'Fleet', icon: Activity },
+    { id: 'resource-quota', label: 'Resource Quota', icon: Gauge },
     { id: 'system-map', label: 'System Map', icon: Network },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'audit', label: 'Audit', icon: ScrollText },
@@ -296,6 +298,7 @@ export default function AdminApp() {
       {/* Content */}
       <main className="flex-1 flex flex-col" style={{ minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
         {activeTab === 'dashboard' && section === 'fleet' && <FleetView />}
+        {activeTab === 'dashboard' && section === 'resource-quota' && <ResourceQuotaView />}
         {activeTab === 'dashboard' && section === 'system-map' && <SystemMapView />}
         {activeTab === 'dashboard' && section === 'users' && <UserManagement />}
         {activeTab === 'dashboard' && section === 'audit' && <AuditLog />}

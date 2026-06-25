@@ -12,6 +12,7 @@ from kubernetes import client, config
 
 from priva_common.logging import get_app_logger
 from priva_operator import GROUP, PLURAL, VERSION, names
+from priva_operator.storage_backend import MountInfo, get_backend
 
 logger = get_app_logger(__name__)
 
@@ -68,25 +69,6 @@ def mem_quantity(mb: int) -> str:
     return f"{int(mb)}Mi"
 
 
-def storage_quantity(gb: int) -> str:
-    return f"{int(gb)}Gi"
-
-
-def _parse_gi(q: str | None) -> int | None:
-    """Parse a storage quantity we wrote (always Gi) back to an int. None if absent."""
-    if not q:
-        return None
-    s = str(q).strip()
-    if s.endswith("Gi"):
-        return int(float(s[:-2]))
-    if s.endswith("G"):
-        return int(float(s[:-1]))
-    try:
-        return int(float(s))
-    except ValueError:
-        return None
-
-
 def resolve_resources(spec: dict, settings) -> dict:
     """CR spec.resources -> container `resources` (requests==limits = Guaranteed QoS),
     falling back to cluster settings when a field is omitted."""
@@ -106,8 +88,25 @@ def resolve_storage_gb(spec: dict, settings) -> int:
 
 # --- manifest builders ------------------------------------------------------
 
-def _deployment_body(namespace, account_id, username, image, pull_policy, settings, owner, spec) -> dict:
+def _data_volume(mount_info: MountInfo) -> dict:
+    """The shared-export volume source for the runner's /workspace mount."""
+    return {"name": "data", "persistentVolumeClaim": {"claimName": mount_info.claim}}
+
+
+def _data_volume_mount(mount_info: MountInfo) -> dict:
+    """Mount ONLY the account's subdir at /workspace — the runner gets no handle to
+    siblings (isolation is a property of the mount). The reader RO-mounts the whole tree."""
+    vm = {"name": "data", "mountPath": "/workspace"}
+    if mount_info.sub_path:
+        vm["subPath"] = mount_info.sub_path
+    return vm
+
+
+def _deployment_body(namespace, account_id, username, image, pull_policy, settings, owner, spec,
+                     mount_info: MountInfo) -> dict:
     lbl = names.labels(account_id)
+    uid = int(settings.kubernetes.runner_uid)
+    gid = int(settings.kubernetes.runner_gid)
     return {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -115,17 +114,30 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                      "labels": lbl, "ownerReferences": [owner]},
         "spec": {
             "replicas": 0,  # scale-to-zero from birth; the operator is the sole scaler
-            "strategy": {"type": "Recreate"},  # never two pods on one RWO PVC
+            "strategy": {"type": "Recreate"},  # one pod per subPath; clean cutover on restart
             "selector": {"matchLabels": lbl},
             "template": {
                 "metadata": {"labels": lbl},
                 "spec": {
+                    # Non-root: run as the sandbox uid that owns /export/<account_id>. fsGroup
+                    # makes the mount group-writable; OnRootMismatch skips the recursive chown
+                    # once the quota-manager has already chowned the subdir (NFS root_squash).
+                    "securityContext": {
+                        "runAsNonRoot": True, "runAsUser": uid, "runAsGroup": gid,
+                        "fsGroup": gid, "fsGroupChangePolicy": "OnRootMismatch",
+                        "seccompProfile": {"type": "RuntimeDefault"},
+                    },
                     "containers": [{
                         "name": "agent-runner",
                         "image": image,
                         "imagePullPolicy": pull_policy,
                         "resources": resolve_resources(spec, settings),
                         "ports": [{"containerPort": settings.kubernetes.runner_service_port}],
+                        "securityContext": {
+                            "allowPrivilegeEscalation": False,
+                            "readOnlyRootFilesystem": True,
+                            "capabilities": {"drop": ["ALL"]},
+                        },
                         "env": [
                             {"name": "ACCOUNT_ID", "value": account_id},
                             {"name": "USERNAME", "value": username},
@@ -135,28 +147,31 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                             {"name": "WORKSPACE_DIR", "value": "/workspace"},
                             {"name": "PRIVA_HOME", "value": "/workspace/.priva"},
                             {"name": "CLAUDE_CONFIG_DIR", "value": "/workspace/.claude"},
-                            # The runtime drives the claude CLI with
-                            # permission_mode=bypassPermissions (= --dangerously-skip-permissions).
-                            # The CLI refuses that flag when running as root ("cannot be used
-                            # with root/sudo privileges") and exits 1 → the agent run fails.
-                            # This per-account pod IS an isolated sandbox, so assert it: the
-                            # CLI's IS_SANDBOX escape allows the flag as root. (Hardening to a
-                            # non-root UID is deferred — would need PVC/PRIVA_HOME ownership.)
-                            {"name": "IS_SANDBOX", "value": "1"},
+                            # HOME must be writable on the volume (readOnlyRootFilesystem).
+                            {"name": "HOME", "value": "/workspace/.home"},
+                            # NOTE: no IS_SANDBOX — the claude CLI refuses
+                            # --dangerously-skip-permissions only as root; running non-root
+                            # (runAsUser above) satisfies it without the escape (byte-path.md).
                         ],
                         "envFrom": [
                             {"configMapRef": {"name": "priva-config"}},
                             {"secretRef": {"name": "priva-shared-secret"}},
                             {"secretRef": {"name": names.secret_name(account_id), "optional": True}},
                         ],
-                        "volumeMounts": [{"name": "data", "mountPath": "/workspace"}],
+                        "volumeMounts": [
+                            _data_volume_mount(mount_info),
+                            # readOnlyRootFilesystem → give the CLI/node a writable scratch.
+                            {"name": "tmp", "mountPath": "/tmp"},
+                        ],
                         "readinessProbe": {
                             "httpGet": {"path": "/health", "port": settings.kubernetes.runner_service_port},
                             "initialDelaySeconds": 2, "periodSeconds": 3, "failureThreshold": 30,
                         },
                     }],
-                    "volumes": [{"name": "data",
-                                 "persistentVolumeClaim": {"claimName": names.pvc_name(account_id)}}],
+                    "volumes": [
+                        _data_volume(mount_info),
+                        {"name": "tmp", "emptyDir": {}},
+                    ],
                 },
             },
         },
@@ -174,32 +189,18 @@ def _service_body(namespace, account_id, port, owner) -> dict:
     }
 
 
-def _pvc_body(namespace, account_id, owner, settings, spec) -> dict:
-    pvc_spec = {
-        "accessModes": ["ReadWriteOnce"],
-        "resources": {"requests": {"storage": storage_quantity(resolve_storage_gb(spec, settings))}},
-    }
-    sc = settings.kubernetes.runner_storage_class
-    if sc:  # "" => omit storageClassName => cluster default SC
-        pvc_spec["storageClassName"] = sc
-    return {
-        "apiVersion": "v1",
-        "kind": "PersistentVolumeClaim",
-        "metadata": {"name": names.pvc_name(account_id), "namespace": namespace,
-                     "labels": names.labels(account_id), "ownerReferences": [owner]},
-        "spec": pvc_spec,
-    }
-
-
 # --- reconcile primitives ---------------------------------------------------
 
 def ensure_runtime_objects(namespace, account_id, username, image, pull_policy, settings, owner, spec) -> None:
-    _ignore_conflict(core().create_namespaced_persistent_volume_claim,
-                     namespace, _pvc_body(namespace, account_id, owner, settings, spec))
+    # Provision the per-account subdir + quota on the shared export FIRST (idempotent:
+    # mkdir + chown + set the backend quota), then render the Deployment to mount it.
+    # No per-account PVC — the runner subPaths into the one shared RWX export claim.
+    mount_info = get_backend(settings).provision(account_id, resolve_storage_gb(spec, settings))
     _ignore_conflict(core().create_namespaced_service,
                      namespace, _service_body(namespace, account_id, settings.kubernetes.runner_service_port, owner))
     _ignore_conflict(apps().create_namespaced_deployment,
-                     namespace, _deployment_body(namespace, account_id, username, image, pull_policy, settings, owner, spec))
+                     namespace, _deployment_body(namespace, account_id, username, image, pull_policy,
+                                                 settings, owner, spec, mount_info))
 
 
 def patch_deployment_resources(namespace, account_id, resources: dict) -> None:
@@ -208,23 +209,6 @@ def patch_deployment_resources(namespace, account_id, resources: dict) -> None:
     body = {"spec": {"template": {"spec": {"containers": [
         {"name": "agent-runner", "resources": resources}]}}}}
     apps().patch_namespaced_deployment(names.deploy_name(account_id), namespace, body)
-
-
-def get_pvc_storage_gi(namespace, account_id) -> int | None:
-    """Current requested PVC storage in Gi (grow-only comparison). None if absent."""
-    try:
-        p = core().read_namespaced_persistent_volume_claim(names.pvc_name(account_id), namespace)
-    except client.ApiException as exc:
-        if exc.status == 404:
-            return None
-        raise
-    req = (p.spec.resources.requests or {}) if p.spec and p.spec.resources else {}
-    return _parse_gi(req.get("storage"))
-
-
-def patch_pvc_storage(namespace, account_id, gb: int) -> None:
-    body = {"spec": {"resources": {"requests": {"storage": storage_quantity(gb)}}}}
-    core().patch_namespaced_persistent_volume_claim(names.pvc_name(account_id), namespace, body)
 
 
 def get_replicas(namespace, account_id) -> int:

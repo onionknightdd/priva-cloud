@@ -85,7 +85,7 @@ export default function SystemMapView() {
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto" style={{ padding: '16px 24px 24px 24px' }}>
-        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+        <div style={{ width: '100%', minWidth: 0 }}>
           {initialLoad ? (
             <DiagramSkeleton />
           ) : (

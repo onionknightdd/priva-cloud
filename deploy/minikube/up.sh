@@ -27,6 +27,15 @@ kubectl get sc csi-hostpath-sc -o jsonpath='{.allowVolumeExpansion}' | grep -q t
 echo "==> 2. namespace"
 kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
 
+echo "==> 2b. dev storage: in-cluster NFS + XFS project quota (the shared RWX export)"
+# DEV-ONLY: one NFS server on a loopback XFS export (prjquota) + the quota-manager API.
+# Every runner subPaths into the 'priva-export' RWX PVC; the per-account quota is the XFS
+# project quota (set by the operator via the quota-manager). Prod swaps this for Ceph/NFS.
+"$ROOT/deploy/minikube/build.sh" nfs-xfs
+kubectl apply -f deploy/dev-storage/nfs-xfs.yaml
+kubectl -n "$NS" rollout status statefulset/priva-nfs --timeout=180s
+kubectl apply -f deploy/dev-storage/export-pv.yaml
+
 echo "==> 3. Gateway API + GIE CRDs"
 kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.0/standard-install.yaml
 kubectl apply -f https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/download/v1.5.0/manifests.yaml

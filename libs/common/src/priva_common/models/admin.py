@@ -119,6 +119,46 @@ class SystemHealthResponse(BaseModel):
     scraped_at: float = 0.0
 
 
+class ResourceUsageAccountEntry(BaseModel):
+    """One account's agent-runner resource line: live usage vs allocated quota.
+
+    ``*_used_*`` come from metrics-server (0 when the pod is asleep — nothing to
+    measure); ``*_allocated_*`` come from the account's ``account_resource_spec``
+    (the committed ceiling, independent of sleep state). Volume has no live-usage
+    figure (metrics-server doesn't report PVC disk), so only ``volume_gb`` is shown."""
+    account_id: str
+    username: str | None = None
+    runner_type: str = "auto_scale"
+    awake: bool = False
+    cpu_used_m: float = 0.0          # live millicores
+    cpu_allocated_m: float = 0.0     # spec cpu_cores × 1000
+    memory_used_mb: float = 0.0      # live MiB
+    memory_allocated_mb: float = 0.0
+    volume_gb: int = 1               # allocated quota (Gi)
+    volume_used_gb: float | None = None  # backend-reported used (Gi); None if unavailable
+
+
+class ResourceUsageResponse(BaseModel):
+    """Agent-runtime resource consumption for the admin Resource Quota view.
+
+    Fleet-wide used vs allocated totals + per-account rows. ``used`` is summed
+    over awake pods (live metrics); ``allocated`` is summed over ALL accounts'
+    resource specs (the committed quota). ``available=False`` when metrics-server
+    is unreachable (the bars degrade to '—' rather than failing the view)."""
+    available: bool = False
+    cpu_used_m: float = 0.0
+    cpu_allocated_m: float = 0.0
+    memory_used_mb: float = 0.0
+    memory_allocated_mb: float = 0.0
+    volume_allocated_gb: int = 0
+    volume_used_gb: float = 0.0      # fleet total of backend-reported usage (Gi)
+    awake: int = 0
+    sleeping: int = 0
+    total_accounts: int = 0
+    accounts: list[ResourceUsageAccountEntry] = Field(default_factory=list)
+    scraped_at: float = 0.0
+
+
 class PendingRegistrationResponse(BaseModel):
     """One pending self-registration request (admin Pending Approval tab).
     password_hash is NEVER included."""

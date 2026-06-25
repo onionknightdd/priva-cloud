@@ -240,6 +240,99 @@ async def scrape_gateway_metrics(pod_ip: str, port: int) -> dict | None:
         return None
 
 
+def _cpu_to_millicores(q: str) -> float:
+    """K8s CPU quantity → millicores. metrics-server reports nanocores ('5383948n');
+    other forms are 'm' (milli), 'u' (micro), or bare cores ('1', '0.5'). Bad input → 0."""
+    if not q:
+        return 0.0
+    try:
+        if q.endswith("n"):
+            return float(q[:-1]) / 1e6
+        if q.endswith("u"):
+            return float(q[:-1]) / 1e3
+        if q.endswith("m"):
+            return float(q[:-1])
+        return float(q) * 1000.0
+    except ValueError:
+        return 0.0
+
+
+def _mem_to_mib(q: str) -> float:
+    """K8s memory quantity → MiB. metrics-server reports binary 'Ki' ('82556Ki');
+    handle the binary (Ki/Mi/Gi/Ti) and decimal (k/M/G/T) suffixes + bare bytes. Bad → 0."""
+    if not q:
+        return 0.0
+    binary = {"Ki": 1 / 1024, "Mi": 1.0, "Gi": 1024.0, "Ti": 1024.0 * 1024}
+    decimal = {"k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12}
+    try:
+        for suf, factor in binary.items():
+            if q.endswith(suf):
+                return float(q[:-len(suf)]) * factor
+        for suf, factor in decimal.items():
+            if q.endswith(suf):
+                return float(q[:-1]) * factor / (1024.0 * 1024.0)
+        return float(q) / (1024.0 * 1024.0)  # bare bytes
+    except ValueError:
+        return 0.0
+
+
+def scrape_runner_usage() -> dict | None:
+    """Live CPU/memory of the agent-runner pods, summed per account.
+
+    Reads the ``metrics.k8s.io/v1beta1`` PodMetrics (the same data ``kubectl top``
+    shows; needs the metrics-server addon + a ``metrics.k8s.io: pods`` RBAC grant).
+    Each PodMetrics carries the pod's labels, so we key by ``priva.io/account-id``
+    rather than parsing pod names. Returns ``{account_id: {"cpu_m", "memory_mb"}}``.
+    Fail-open: any error (metrics-server down, RBAC missing) returns None so the
+    Resource Quota view degrades to 'unavailable' rather than failing. Blocking
+    kube call — invoke via ``asyncio.to_thread`` from async paths.
+    """
+    s = get_settings()
+    ns = s.kubernetes.namespace_tenants
+    try:
+        resp = _custom().list_namespaced_custom_object(
+            "metrics.k8s.io", "v1beta1", ns, "pods", label_selector="app=agent-runner"
+        )
+    except Exception:
+        return None
+
+    usage: dict[str, dict[str, float]] = {}
+    for item in resp.get("items") or []:
+        meta = item.get("metadata") or {}
+        account_id = (meta.get("labels") or {}).get("priva.io/account-id")
+        if not account_id:
+            continue
+        cpu_m = 0.0
+        mem_mb = 0.0
+        for c in item.get("containers") or []:
+            u = c.get("usage") or {}
+            cpu_m += _cpu_to_millicores(u.get("cpu", ""))
+            mem_mb += _mem_to_mib(u.get("memory", ""))
+        acc = usage.setdefault(account_id, {"cpu_m": 0.0, "memory_mb": 0.0})
+        acc["cpu_m"] += cpu_m
+        acc["memory_mb"] += mem_mb
+    return usage
+
+
+def scrape_volume_usage() -> dict | None:
+    """Per-account volume usage (used vs limit bytes), read **wake-free** from the
+    quota-manager on the dev NFS server (``GET /usage`` → ``xfs_quota report``). No pod
+    is touched, so it works while every runner is scaled to zero. Returns
+    ``{account_id: {"used_bytes", "limit_bytes"}}``. Fail-open (None) like
+    ``scrape_runner_usage`` so the Resource Quota view degrades to allocated-only.
+    Blocking HTTP — invoke via ``asyncio.to_thread``. (Prod: the state-reader / Ceph API.)
+    """
+    s = get_settings()
+    url = s.kubernetes.quota_manager_url.rstrip("/") + "/usage"
+    try:
+        # trust_env=False: internal Service hop must not route through a host proxy.
+        r = httpx.get(url, timeout=4.0, trust_env=False)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None
+
+
 def deployment_ready(name: str) -> dict | None:
     """Readiness of one system Deployment, read by exact name (no ``list``).
 

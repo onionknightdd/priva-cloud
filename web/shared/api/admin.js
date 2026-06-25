@@ -12,6 +12,7 @@ export const rejectPendingUser = (requestId) => postJSON(`/admin/pending-registr
 export const getAdminStats = () => getJSON('/admin/stats')
 export const getFleet = () => getJSON('/admin/fleet')
 export const getGatewayMetrics = () => getJSON('/admin/gateway-metrics')
+export const getResourceUsage = () => getJSON('/admin/resource-usage')
 export const getSystemHealth = () => getJSON('/admin/system-health')
 export const getAuditLog = (params = {}) => {
   const query = new URLSearchParams()

@@ -22,6 +22,8 @@ from priva_common.models.admin import (
     PendingRegistrationResponse,
     PresetPromptResponse,
     PresetPromptUpdate,
+    ResourceUsageAccountEntry,
+    ResourceUsageResponse,
     RetryableToolEntry,
     RetryCallbackWeComConfig,
     RetryableToolsResponse,
@@ -557,6 +559,95 @@ async def get_fleet():
 async def get_gateway_metrics():
     """Live agentgateway HTTP traffic snapshot. See ``_gateway_snapshot``."""
     return await _gateway_snapshot()
+
+
+@router.get("/resource-usage", response_model=ResourceUsageResponse)
+async def get_resource_usage():
+    """Agent-runtime resource consumption for the admin Resource Quota view.
+
+    Joins three sources by account_id: the fleet snapshot (live roster + awake
+    state + username), live metrics-server CPU/memory (``scrape_runner_usage`` —
+    only awake pods report), and the per-account ``account_resource_spec`` (the
+    allocated quota). ``used`` totals sum over awake rows; ``allocated`` totals
+    sum over ALL accounts. Fail-open: an unreachable metrics-server sets
+    ``available=False`` and zeroes the used figures rather than failing.
+    """
+    import time as _time
+
+    from priva_common.dataplane import get_client
+
+    from ..provisioner import scrape_runner_usage, scrape_volume_usage
+
+    fleet_snap, usage, vol_usage = await asyncio.gather(
+        _fleet_snapshot(),
+        asyncio.to_thread(scrape_runner_usage),
+        asyncio.to_thread(scrape_volume_usage),
+    )
+    available = usage is not None
+    usage = usage or {}
+    vol_usage = vol_usage or {}  # {account_id: {used_bytes, limit_bytes}}, wake-free
+
+    specs = {s.account_id: s for s in get_client().resource_specs.list()}
+    users = {u.account_id: u for u in get_user_store().list_users()}
+
+    entries: list[ResourceUsageAccountEntry] = []
+    cpu_used = cpu_alloc = mem_used = mem_alloc = 0.0
+    vol_alloc = 0
+    vol_used = 0.0
+    awake_n = sleeping_n = 0
+
+    for e in fleet_snap["entries"]:
+        aid = e["account_id"]
+        spec = specs.get(aid)
+        user = users.get(aid)
+        u = usage.get(aid) or {}
+        awake = bool(e["awake"])
+
+        cpu_alloc_m = (spec.cpu_cores if spec else 1.0) * 1000.0
+        mem_alloc_mb = float(spec.memory_mb if spec else 2048)
+        vol_gb = int(spec.volume_gb if spec else 1)
+        cpu_used_m = float(u.get("cpu_m", 0.0)) if awake else 0.0
+        mem_used_mb = float(u.get("memory_mb", 0.0)) if awake else 0.0
+        # Volume used is backend-reported (wake-free) — independent of awake state.
+        vu = vol_usage.get(aid)
+        vol_used_gb = round(vu["used_bytes"] / 1024 ** 3, 2) if vu else None
+
+        entries.append(ResourceUsageAccountEntry(
+            account_id=aid,
+            username=e.get("username") or (user.username if user else None),
+            runner_type=(getattr(user, "agent_runner_type", None) or "auto_scale"),
+            awake=awake,
+            cpu_used_m=round(cpu_used_m, 1),
+            cpu_allocated_m=round(cpu_alloc_m, 1),
+            memory_used_mb=round(mem_used_mb, 1),
+            memory_allocated_mb=round(mem_alloc_mb, 1),
+            volume_gb=vol_gb,
+            volume_used_gb=vol_used_gb,
+        ))
+
+        cpu_used += cpu_used_m
+        cpu_alloc += cpu_alloc_m
+        mem_used += mem_used_mb
+        mem_alloc += mem_alloc_mb
+        vol_alloc += vol_gb
+        vol_used += vol_used_gb or 0.0
+        awake_n += 1 if awake else 0
+        sleeping_n += 0 if awake else 1
+
+    return ResourceUsageResponse(
+        available=available,
+        cpu_used_m=round(cpu_used, 1),
+        cpu_allocated_m=round(cpu_alloc, 1),
+        memory_used_mb=round(mem_used, 1),
+        memory_allocated_mb=round(mem_alloc, 1),
+        volume_allocated_gb=vol_alloc,
+        volume_used_gb=round(vol_used, 2),
+        awake=awake_n,
+        sleeping=sleeping_n,
+        total_accounts=len(entries),
+        accounts=entries,
+        scraped_at=_time.time(),
+    )
 
 
 @router.get("/system-health", response_model=SystemHealthResponse)

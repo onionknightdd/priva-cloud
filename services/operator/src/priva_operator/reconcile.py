@@ -17,7 +17,7 @@ import httpx
 import kopf
 
 from priva_common.config import get_settings
-from priva_operator import GROUP, PLURAL, VERSION, kube, names, secrets
+from priva_operator import GROUP, PLURAL, VERSION, kube, names, secrets, storage_backend
 
 
 def _ids(spec, name):
@@ -251,24 +251,18 @@ def on_resources_change(spec, name, namespace, old, new, logger, **_):
 def on_storage_change(spec, name, namespace, old, new, patch, logger, **_):
     if old is None:
         return
+    s = get_settings()
     account_id, _ = _ids(spec, name)
     desired = int(new)
-    current = kube.get_pvc_storage_gi(namespace, account_id)
-    if current is None:
-        logger.warning("storage change but no PVC yet account=%s", account_id)
-        return
-    if desired <= current:
-        # K8s can't shrink a PVC — ignore, surface on status (status preserves unknown).
-        patch.status["storageWarning"] = f"shrink ignored: requested {desired}Gi <= current {current}Gi"
-        logger.warning("ignored PVC shrink account=%s %dGi->%dGi", account_id, current, desired)
-        return
+    # Set the per-account quota on the storage backend (XFS project quota in dev). Unlike
+    # a PVC, a backend quota can SHRINK, so both grow and shrink are honored directly.
     try:
-        kube.patch_pvc_storage(namespace, account_id, desired)
+        storage_backend.get_backend(s).set_quota(account_id, desired)
         patch.status["storageGb"] = desired
         patch.status["storageWarning"] = None
-        logger.info("grew PVC account=%s %dGi -> %dGi", account_id, current, desired)
-    except kube.client.ApiException as exc:
-        # Non-expandable StorageClass rejects the resize. Surface it; do NOT re-raise
-        # (an un-retriable config error would make kopf retry the handler forever).
-        patch.status["storageWarning"] = f"expansion failed: {exc.reason}"
-        logger.error("PVC expansion rejected account=%s: %s", account_id, exc)
+        logger.info("set volume quota account={} -> {}Gi", account_id, desired)
+    except Exception as exc:
+        # Backend blip — surface it; do NOT re-raise (an un-retriable error would make kopf
+        # retry the handler forever). The next reconcile/edit can re-apply.
+        patch.status["storageWarning"] = f"quota set failed: {exc}"
+        logger.error("quota set rejected account=%s: %s", account_id, exc)

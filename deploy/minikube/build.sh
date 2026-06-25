@@ -11,8 +11,15 @@ SERVICES=("${@:-data-spine agent-runner control-panel operator}")
 read -r -a LIST <<< "${SERVICES[*]}"
 
 for svc in "${LIST[@]}"; do
-  echo ">>> docker build priva/${svc}:dev"
-  docker build -t "priva/${svc}:dev" -f "deploy/docker/${svc}.Dockerfile" .
+  if [[ "$svc" == "nfs-xfs" ]]; then
+    # DEV-ONLY storage image: its Dockerfile COPYs files relative to deploy/dev-storage,
+    # so build with that as the context (not the repo root).
+    echo ">>> docker build priva/nfs-xfs:dev (dev-storage)"
+    docker build -t "priva/nfs-xfs:dev" -f "deploy/dev-storage/nfs-xfs.Dockerfile" deploy/dev-storage
+  else
+    echo ">>> docker build priva/${svc}:dev"
+    docker build -t "priva/${svc}:dev" -f "deploy/docker/${svc}.Dockerfile" .
+  fi
   echo ">>> minikube image load priva/${svc}:dev"
   minikube image load "priva/${svc}:dev"
 done

@@ -175,10 +175,21 @@ class KubernetesSettings(BaseModel):
     # interpreted as Mi/Gi by the operator (matches the legacy inline "1Gi" PVC).
     runner_cpu_cores: float = 1.0
     runner_memory_mb: int = 2048
-    runner_storage_gb: int = 1
-    # Expandable StorageClass for the per-account PVC (volume grow-only edits). "" =>
-    # omit storageClassName => cluster default SC (NOT expandable on vanilla minikube).
+    runner_storage_gb: int = 1  # default per-account volume quota in Gi (backend-enforced)
+    # DEPRECATED: only the abandoned legacy per-account PVCs used this. The shared-export
+    # model provisions a per-account quota'd subdir via the storage backend, not a PVC.
     runner_storage_class: str = "csi-hostpath-sc"
+    # --- shared-RWX-export storage model (supersedes per-account PVCs) ---------------
+    # The runner mounts only its own subdir (subPath=<account_id>) of one shared RWX
+    # export; a read-only reader can mount the whole tree (wake-free aggregation). The
+    # per-account volume quota is enforced by the storage backend, set at provision time.
+    storage_backend: Literal["nfs_xfs", "cephfs"] = "nfs_xfs"  # dev=nfs_xfs, prod=cephfs
+    export_claim_name: str = "priva-export"  # the one shared RWX PVC all runners subPath into
+    # The quota-manager sidecar (on the dev NFS server) that creates per-account subdirs,
+    # sets the XFS project quota, and reports usage (wake-free). Prod uses the Ceph API.
+    quota_manager_url: str = "http://priva-quota.priva-cloud.svc:8099"
+    runner_uid: int = 10001  # non-root sandbox uid the runner runs as / owns its subdir
+    runner_gid: int = 10001
     # Data-plane gateway observability: the admin scrapes the agentgateway pod's
     # Prometheus endpoint for live HTTP request counts. The metrics port is NOT on
     # the Service, so the scrape targets the pod IP directly (label-selected).

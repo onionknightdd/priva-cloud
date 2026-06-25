@@ -185,6 +185,23 @@ const useAdminStore = create((set, get) => ({
     }
   },
 
+  // Resource Quota (agent-runtime live usage vs allocated, polled). Same skeleton-on-
+  // first-load + background-refresh shape as the fleet snapshot.
+  resourceUsage: null,
+  resourceUsageLoading: true,
+  resourceUsageRefreshing: false,
+  resourceUsageError: false,
+
+  fetchResourceUsage: async () => {
+    set((s) => (s.resourceUsage ? { resourceUsageRefreshing: true } : { resourceUsageLoading: true }))
+    try {
+      const resourceUsage = await adminApi.getResourceUsage()
+      set({ resourceUsage, resourceUsageLoading: false, resourceUsageRefreshing: false, resourceUsageError: false })
+    } catch {
+      set({ resourceUsageLoading: false, resourceUsageRefreshing: false, resourceUsageError: true })
+    }
+  },
+
   // System Map (topology + live per-module health, own 5s poll). Latest snapshot
   // only — the byte-path flow is constant (not req/s-scaled), so there's no rate
   // buffer. Skeleton only on the first load; background polls update in place.

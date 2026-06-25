@@ -14,8 +14,9 @@ def svc_name(account_id: str) -> str:
     return f"ar-{account_id}"
 
 
-def pvc_name(account_id: str) -> str:
-    return f"ar-{account_id}-data"
+def account_subpath(account_id: str) -> str:
+    """The per-account subdir within the shared export = the subPath the runner mounts."""
+    return account_id
 
 
 def secret_name(account_id: str) -> str:

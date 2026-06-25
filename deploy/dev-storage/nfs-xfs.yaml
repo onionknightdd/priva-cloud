@@ -1,0 +1,71 @@
+# DEV-ONLY: in-cluster NFSv4 server on an XFS export with project quotas, plus the
+# quota-manager API (same container). Privileged — never ship to prod.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: priva-nfs
+  namespace: priva-cloud
+  labels: { app: priva-nfs, role: dev-storage }
+spec:
+  serviceName: priva-nfs
+  replicas: 1
+  selector:
+    matchLabels: { app: priva-nfs }
+  template:
+    metadata:
+      labels: { app: priva-nfs, role: dev-storage }
+    spec:
+      containers:
+        - name: nfs-xfs
+          image: priva/nfs-xfs:dev
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true   # loop-mount XFS + run nfsd (dev-only liberty)
+          env:
+            - { name: EXPORT_IMG_GB, value: "20" }   # XFS image size (sum of all account quotas headroom)
+            - { name: EXPORT_DIR, value: "/export" }
+            - { name: QUOTA_PORT, value: "8099" }
+          ports:
+            - { name: nfs, containerPort: 2049 }
+            - { name: quota, containerPort: 8099 }
+          volumeMounts:
+            - { name: backing, mountPath: /data }    # holds the XFS image file
+          readinessProbe:
+            httpGet: { path: /health, port: 8099 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 30
+  volumeClaimTemplates:
+    - metadata:
+        name: backing
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 25Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: priva-nfs
+  namespace: priva-cloud
+  labels: { app: priva-nfs }
+spec:
+  # FIXED ClusterIP: the NFS PV must reference an IP, not cluster DNS — the kubelet mounts
+  # NFS from the node's (host) netns, which can't resolve *.svc.cluster.local, but kube-proxy
+  # DNATs the ClusterIP from the host. A pinned IP keeps the committed PV deterministic.
+  clusterIP: 10.96.200.200
+  selector: { app: priva-nfs }
+  ports:
+    - { name: nfs, port: 2049, targetPort: 2049 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: priva-quota
+  namespace: priva-cloud
+  labels: { app: priva-nfs }
+spec:
+  selector: { app: priva-nfs }
+  ports:
+    - { name: quota, port: 8099, targetPort: 8099 }

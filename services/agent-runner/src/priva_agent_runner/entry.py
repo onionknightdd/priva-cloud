@@ -38,6 +38,18 @@ def main(argv: list[str] | None = None) -> int:
     if not os.environ.get("CLAUDE_CONFIG_DIR") and os.environ.get("CONFIG_HOME"):
         os.environ["CLAUDE_CONFIG_DIR"] = os.environ["CONFIG_HOME"]
 
+    # Non-root + readOnlyRootFilesystem: HOME must point at a writable path on the
+    # per-account volume (the baked /home/sandbox is on the read-only root fs). The
+    # operator sets HOME=/workspace/.home; ensure it exists. node/claude write here.
+    if workspace:
+        os.environ.setdefault("HOME", os.path.join(workspace, ".home"))
+    home = os.environ.get("HOME")
+    if home:
+        try:
+            os.makedirs(home, exist_ok=True)
+        except OSError:
+            pass
+
     if not os.environ.get("ACCOUNT_ID"):
         parser.error("agent-runner requires --account-id (or ACCOUNT_ID env) to pin its account")
 

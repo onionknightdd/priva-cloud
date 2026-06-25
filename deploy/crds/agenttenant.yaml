@@ -53,7 +53,7 @@ spec:
                   properties:
                     cpu: {type: number}        # cores; fractional allowed (e.g. 0.5)
                     memoryMb: {type: integer}  # interpreted as Mi by the operator
-                storageGb: {type: integer}     # PVC size in Gi; grow-only
+                storageGb: {type: integer}     # per-account volume quota in Gi (backend-enforced; shrink allowed)
                 idle:
                   type: object
                   properties:
