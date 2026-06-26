@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { animate, svg } from 'animejs'
+import { useTranslation } from 'react-i18next'
 
 // SystemTopologyDiagram — a modernized §3 topology (docs/priva-cloud-architecture-report.html)
 // rendered as pure SVG on the GitHub-dark palette. Four color-coded planes
@@ -36,10 +37,10 @@ const NODE_BOX = {
 }
 
 const PLANES = [
-  { id: 'edge', label: 'EDGE', color: 'var(--orange)', x: 0, y: 0, w: 1000, h: 168, lx: 982, ly: 24, anchor: 'end' },
-  { id: 'control', label: 'CONTROL', color: 'var(--purple)', x: 0, y: 168, w: 496, h: 400, lx: 16, ly: 188, anchor: 'start' },
-  { id: 'tenant', label: 'TENANT/RUNTIME', color: 'var(--green)', x: 504, y: 168, w: 496, h: 400, lx: 984, ly: 188, anchor: 'end' },
-  { id: 'data', label: 'DATA', color: 'var(--cyan)', x: 0, y: 568, w: 1000, h: 132, lx: 982, ly: 690, anchor: 'end' },
+  { id: 'edge', labelKey: 'admin.planeEdge', color: 'var(--orange)', x: 0, y: 0, w: 1000, h: 168, lx: 982, ly: 24, anchor: 'end' },
+  { id: 'control', labelKey: 'admin.planeControl', color: 'var(--purple)', x: 0, y: 168, w: 496, h: 400, lx: 16, ly: 188, anchor: 'start' },
+  { id: 'tenant', labelKey: 'admin.planeTenantRuntime', color: 'var(--green)', x: 504, y: 168, w: 496, h: 400, lx: 984, ly: 188, anchor: 'end' },
+  { id: 'data', labelKey: 'admin.planeData', color: 'var(--cyan)', x: 0, y: 568, w: 1000, h: 132, lx: 982, ly: 690, anchor: 'end' },
 ]
 
 const STATUS_COLOR = {
@@ -52,7 +53,16 @@ const STATUS_COLOR = {
 
 const edgeKey = (e) => `${e.source}|${e.target}|${e.kind}`
 const fmt = (v) => (v == null || Number.isNaN(v) ? '0' : String(Math.round(v)))
-const displayText = (v) => (v == null ? v : String(v).replaceAll('0↔1', '0 ↔ 1'))
+const displayText = (v, t) => {
+  if (v == null) return v
+  let text = String(v).replaceAll('0↔1', '0 ↔ 1')
+  if (t) {
+    text = text
+      .replace(/\bplanned\b/g, t('admin.topologyPlanned'))
+      .replace(/\bphase\b/g, t('admin.topologyPhase'))
+  }
+  return text
+}
 
 // --- Edge routing: verified ZERO-CROSSING waypoint lanes, rendered as smooth
 // rounded-corner paths (curved bends, no crossings). `lab` = label [x,y,anchor];
@@ -113,22 +123,22 @@ function edgeVisual(edge) {
   return { stroke: 'var(--border-strong)', width: 1.4, dash: null, opacity: 0.85 } // control
 }
 
-function metricLine(node) {
+function metricLine(node, t) {
   const m = node.metrics || {}
   switch (node.id) {
     case 'agentgateway':
-      return node.status === 'up' ? `${fmt(m.connections)} conns` : null
+      return node.status === 'up' ? t('admin.metricConnections', { count: fmt(m.connections) }) : null
     case 'operator':
-      return `${fmt(m.ready)}/${fmt(m.desired)} ready`
+      return t('admin.metricReady', { ready: fmt(m.ready), desired: fmt(m.desired) })
     case 'data-spine': {
       const parts = []
-      if ('accounts' in m) parts.push(`${fmt(m.accounts)} acct`)
-      if ('jobs' in m) parts.push(`${fmt(m.jobs)} job`)
-      if ('runs' in m) parts.push(`${fmt(m.runs)} run`)
+      if ('accounts' in m) parts.push(t('admin.metricAccounts', { count: fmt(m.accounts) }))
+      if ('jobs' in m) parts.push(t('admin.metricJobs', { count: fmt(m.jobs) }))
+      if ('runs' in m) parts.push(t('admin.metricRuns', { count: fmt(m.runs) }))
       return parts.join(' · ') || null
     }
     case 'agent-runner':
-      return `${fmt(m.awake)} awake · ${fmt(m.running)} run · ${fmt(m.total)} total`
+      return t('admin.metricRunner', { awake: fmt(m.awake), running: fmt(m.running), total: fmt(m.total) })
     default:
       return null
   }
@@ -155,17 +165,17 @@ function flowParticleRadius(edge) {
   return edge.bytepath ? 2.6 : 2.2
 }
 
-function NodeView({ node, reducedMotion }) {
+function NodeView({ node, reducedMotion, t }) {
   const box = NODE_BOX[node.id]
   if (!box) return null
   const disabled = node.status === 'disabled'
   const color = STATUS_COLOR[node.status] || 'var(--status-idle)'
-  const metric = metricLine(node)
+  const metric = metricLine(node, t)
   const wide = node.id === 'agentgateway' || node.id === 'data-spine'
   const isCP = node.id === 'control-panel'
   const isStack = node.id === 'agent-runner'
-  const sub = displayText(node.sub)
-  const detail = displayText(metric || node.detail)
+  const sub = displayText(node.sub, t)
+  const detail = displayText(metric || node.detail, t)
   const hasDetail = Boolean(detail)
   const planned = disabled && Boolean(node.detail)
   const titleY = box.y + (planned ? 28 : hasDetail ? 26 : 27)
@@ -206,7 +216,7 @@ function NodeView({ node, reducedMotion }) {
         <text x={box.x + box.w - 16} y={titleY} fontSize={11} textAnchor="end"
           fill={node.plane === 'edge' ? 'var(--orange)' : 'var(--cyan)'}
           style={{ letterSpacing: '0.06em' }}>
-          {node.plane === 'edge' ? 'EDGE' : 'DATA'}
+          {node.plane === 'edge' ? t('admin.planeEdge') : t('admin.planeData')}
         </text>
       )}
 
@@ -265,6 +275,7 @@ function XMark({ x, y }) {
 }
 
 export default function SystemTopologyDiagram({ data, reducedMotion }) {
+  const { t } = useTranslation()
   const nodes = data?.nodes || []
   const edges = data?.edges || []
 
@@ -327,7 +338,7 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
         preserveAspectRatio="xMidYMid meet"
         style={{ display: 'block', width: '100%', height: 'auto' }}
         role="img"
-        aria-label="Priva system topology and live health"
+        aria-label={t('admin.systemTopologyAria')}
       >
         {/* Plane bands */}
         {PLANES.map((p) => (
@@ -337,7 +348,7 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
               fill="none" stroke={p.color} strokeWidth={1} strokeDasharray="6 6" opacity={0.42} />
             <text x={p.lx} y={p.ly} textAnchor={p.anchor} fontSize={11} fill={p.color}
               style={{ letterSpacing: '0.14em', fontWeight: 600 }}>
-              {p.label}
+              {t(p.labelKey)}
             </text>
           </g>
         ))}
@@ -357,7 +368,7 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
         {/* Edge labels (skip planned) */}
         {routedEdges.map((e) => {
           if (e.disabled || !e.label) return null
-          const label = displayText(e.label)
+          const label = displayText(e.label, t)
           const x = e.lab ? e.lab[0] : e.mid[0]
           const y = e.lab ? e.lab[1] : e.mid[1] - 6
           const anchor = e.lab ? e.lab[2] : 'middle'
@@ -386,7 +397,7 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
         ))}
 
         {/* Nodes */}
-        {nodes.map((n) => <NodeView key={n.id} node={n} reducedMotion={reducedMotion} />)}
+        {nodes.map((n) => <NodeView key={n.id} node={n} reducedMotion={reducedMotion} t={t} />)}
 
         {/* ✕ markers for unreachable (non-disabled, unhealthy) edges */}
         {routedEdges.map((e) => (
@@ -396,19 +407,19 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
       </div>
 
       {/* Legend */}
-      <aside className="flex flex-col items-start gap-2" aria-label="Topology legend"
+      <aside className="flex flex-col items-start gap-2" aria-label={t('admin.topologyLegend')}
         style={{ minWidth: 0, paddingLeft: 12, borderLeft: '1px solid var(--border-subtle)' }}>
         {[
-          { c: 'var(--green)', t: 'up' },
-          { c: 'var(--status-pending)', t: 'degraded' },
-          { c: 'var(--red)', t: 'down' },
-          { c: 'var(--cyan)', t: 'idle' },
-          { c: 'var(--status-idle)', t: 'disabled' },
+          { c: 'var(--green)', labelKey: 'admin.statusUp' },
+          { c: 'var(--status-pending)', labelKey: 'admin.statusDegraded' },
+          { c: 'var(--red)', labelKey: 'admin.statusDown' },
+          { c: 'var(--cyan)', labelKey: 'admin.statusIdle' },
+          { c: 'var(--status-idle)', labelKey: 'admin.statusDisabled' },
         ].map((s) => (
-          <span key={s.t} className="flex items-center gap-2 uppercase"
+          <span key={s.labelKey} className="flex items-center gap-2 uppercase"
             style={{ fontSize: 11, color: 'var(--text-secondary)', letterSpacing: '0.06em' }}>
             <span style={{ width: 12, height: 0, borderTop: `2px solid ${s.c}` }} />
-            {s.t}
+            {t(s.labelKey)}
           </span>
         ))}
         <span className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
@@ -416,38 +427,38 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
             <line x1="0" y1="4" x2="22" y2="4" stroke="var(--cyan)" strokeWidth="2" opacity="0.4" />
             <circle cx="14" cy="4" r="2.4" fill="var(--cyan)" />
           </svg>
-          byte path · HTTP/WS
+          {t('admin.legendBytePath')}
         </span>
         <span className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
           <svg width="22" height="8" aria-hidden="true">
             <line x1="0" y1="4" x2="22" y2="4" stroke="var(--purple)" strokeWidth="2" strokeDasharray="0.1 6" strokeLinecap="round" opacity="0.72" />
             <circle cx="14" cy="4" r="2.1" fill="var(--purple)" />
           </svg>
-          decision path · gRPC ext_proc
+          {t('admin.legendDecisionPath')}
         </span>
         <span className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
           <svg width="22" height="8" aria-hidden="true">
             <line x1="0" y1="4" x2="22" y2="4" stroke="var(--border-strong)" strokeWidth="1.4" />
           </svg>
-          control path · K8s API
+          {t('admin.legendControlPath')}
         </span>
         <span className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
           <svg width="22" height="8" aria-hidden="true">
             <line x1="0" y1="4" x2="22" y2="4" stroke="var(--cyan)" strokeWidth="1.4" strokeDasharray="6 5" opacity="0.58" />
             <circle cx="14" cy="4" r="2.1" fill="var(--cyan)" />
           </svg>
-          data path · gRPC
+          {t('admin.legendDataPath')}
         </span>
         <span className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
           <svg width="14" height="14" aria-hidden="true">
             <circle cx="7" cy="7" r="6" fill="var(--bg-base)" stroke="var(--red)" strokeWidth="1" />
             <path d="M4.5,4.5 L9.5,9.5 M9.5,4.5 L4.5,9.5" stroke="var(--red)" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
-          unreachable
+          {t('admin.legendUnreachable')}
         </span>
         <span className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--text-dim)' }}>
           <span style={{ width: 14, height: 0, borderTop: '1.3px dashed var(--status-idle)' }} />
-          planned
+          {t('admin.legendPlanned')}
         </span>
       </aside>
     </div>

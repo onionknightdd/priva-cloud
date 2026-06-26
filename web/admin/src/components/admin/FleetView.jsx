@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Server, Activity, ArrowRightLeft, RefreshCw } from 'lucide-react'
+import { Server, Activity, ArrowRightLeft } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import Dropdown from '@shared/components/shared/Dropdown'
 import useAdminStore from '../../stores/adminStore'
+import LiveToggleButton from './LiveToggleButton'
 
 // Fleet — Dashboard overview. Live agent-runner snapshot from /api/admin/fleet:
 // two summary tiles (awake sandboxes, running sessions) + a per-account table.
@@ -12,18 +14,18 @@ const POLL_MS = 5000
 
 // Selectable trailing windows for the gateway headline count. Values in seconds.
 const WINDOW_OPTIONS = [
-  { value: 30, label: 'last 30s' },
-  { value: 60, label: 'last 1m' },
-  { value: 300, label: 'last 5m' },
-  { value: 900, label: 'last 15m' },
+  { value: 30, labelKey: 'admin.windowLast30s' },
+  { value: 60, labelKey: 'admin.windowLast1m' },
+  { value: 300, labelKey: 'admin.windowLast5m' },
+  { value: 900, labelKey: 'admin.windowLast15m' },
 ]
 
 // Destination scope. The metric has no URL-path label; the backend split is the only
 // path-ish dimension — control-plane (control-panel face) vs agent-runtime (the pool).
 const SCOPE_OPTIONS = [
-  { value: 'all', label: 'all' },
-  { value: 'control-panel', label: 'control-plane' },
-  { value: 'agent-runner', label: 'agent-runtime' },
+  { value: 'all', labelKey: 'admin.scopeAll' },
+  { value: 'control-panel', labelKey: 'admin.scopeControlPlane' },
+  { value: 'agent-runner', labelKey: 'admin.scopeAgentRuntime' },
 ]
 
 // Derive the rolling-window request count, current req/s, and the req/s sparkline for the
@@ -58,24 +60,24 @@ function deriveGateway(buffer, windowSec, scope) {
 // from the design-spec status palette (running=purple, online=green, waking=yellow,
 // idle=neutral border) and drive both the row's left border and the label.
 function stateOf(acct) {
-  if (acct.phase === 'Waking') return { label: 'WAKING', color: 'var(--status-pending)' }
+  if (acct.phase === 'Waking') return { labelKey: 'admin.stateWaking', color: 'var(--status-pending)' }
   if (acct.awake) {
-    if ((acct.active_runs || 0) > 0) return { label: 'RUNNING', color: 'var(--status-running)' }
-    return { label: 'ONLINE', color: 'var(--green)' }
+    if ((acct.active_runs || 0) > 0) return { labelKey: 'admin.stateRunning', color: 'var(--status-running)' }
+    return { labelKey: 'admin.stateOnline', color: 'var(--green)' }
   }
-  return { label: 'IDLE', color: 'var(--status-idle)' }
+  return { labelKey: 'admin.stateIdle', color: 'var(--status-idle)' }
 }
 
-function relTime(ts) {
-  if (!ts) return '—'
+function relTime(ts, t) {
+  if (!ts) return t('admin.never')
   const secs = Math.max(0, Math.floor(Date.now() / 1000 - ts))
-  if (secs < 5) return 'just now'
-  if (secs < 60) return `${secs}s ago`
+  if (secs < 5) return t('admin.justNow')
+  if (secs < 60) return t('admin.secondsAgo', { count: secs })
   const mins = Math.floor(secs / 60)
-  if (mins < 60) return `${mins}m ago`
+  if (mins < 60) return t('admin.minutesAgo', { count: mins })
   const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.floor(hrs / 24)}d ago`
+  if (hrs < 24) return t('admin.hoursAgo', { count: hrs })
+  return t('admin.daysAgo', { count: Math.floor(hrs / 24) })
 }
 
 function Tile({ icon: Icon, label, value, suffix }) {
@@ -133,6 +135,10 @@ function Sparkline({ data, width = 76, height = 24 }) {
 // in the header (persisted). '—' when no reachable gateway pod. ``full`` is false while
 // the sample buffer hasn't spanned the window yet — the count is then "so far", marked ~.
 function GatewayTile({ available, count, rate, spark, full, windowSec, onWindowChange, scope, onScopeChange }) {
+  const { t } = useTranslation()
+  const windowOptions = WINDOW_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))
+  const scopeOptions = SCOPE_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))
+
   return (
     <div
       className="flex flex-col gap-2"
@@ -144,7 +150,7 @@ function GatewayTile({ available, count, rate, spark, full, windowSec, onWindowC
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 uppercase min-w-0" style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em' }}>
           <ArrowRightLeft size={14} strokeWidth={1.5} className="flex-shrink-0" />
-          <span className="truncate">Gateway</span>
+          <span className="truncate">{t('admin.gateway')}</span>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           <Dropdown
@@ -152,9 +158,9 @@ function GatewayTile({ available, count, rate, spark, full, windowSec, onWindowC
             align="right"
             value={windowSec}
             onChange={onWindowChange}
-            options={WINDOW_OPTIONS}
-            ariaLabel="Trailing window for the request count"
-            title="Trailing window for the request count"
+            options={windowOptions}
+            ariaLabel={t('admin.gatewayWindowAria')}
+            title={t('admin.gatewayWindowTitle')}
             minMenuWidth={120}
             maxTriggerWidth={96}
           />
@@ -163,9 +169,9 @@ function GatewayTile({ available, count, rate, spark, full, windowSec, onWindowC
             align="right"
             value={scope}
             onChange={onScopeChange}
-            options={SCOPE_OPTIONS}
-            ariaLabel="Destination filter (path group)"
-            title="Filter requests by destination / path group"
+            options={scopeOptions}
+            ariaLabel={t('admin.gatewayScopeAria')}
+            title={t('admin.gatewayScopeTitle')}
             minMenuWidth={150}
             maxTriggerWidth={120}
           />
@@ -182,7 +188,7 @@ function GatewayTile({ available, count, rate, spark, full, windowSec, onWindowC
             <Sparkline data={spark} />
           </div>
           <span style={{ color: 'var(--text-dim)', fontSize: 12, fontWeight: 300, fontFamily: "'JetBrains Mono', monospace" }}>
-            {rate == null ? '— req/s' : `+${rate.toFixed(rate < 10 ? 1 : 0)} req/s`}
+            {rate == null ? t('admin.reqPerSecEmpty') : t('admin.reqPerSec', { rate: rate.toFixed(rate < 10 ? 1 : 0) })}
           </span>
         </>
       )}
@@ -219,6 +225,7 @@ function TableSkeleton() {
 }
 
 export default function FleetView() {
+  const { t } = useTranslation()
   const fleet = useAdminStore((s) => s.fleet)
   const fleetLoading = useAdminStore((s) => s.fleetLoading)
   const fleetRefreshing = useAdminStore((s) => s.fleetRefreshing)
@@ -231,6 +238,7 @@ export default function FleetView() {
   const gatewayScope = useAdminStore((s) => s.gatewayScope)
   const setGatewayScope = useAdminStore((s) => s.setGatewayScope)
   const fetchGateway = useAdminStore((s) => s.fetchGateway)
+  const [liveEnabled, setLiveEnabled] = useState(true)
 
   // Re-render once a second so relative timestamps ("12s ago") stay fresh between polls.
   const [, setTick] = useState(0)
@@ -238,49 +246,54 @@ export default function FleetView() {
   fetchRef.current = { fleet: fetchFleet, gateway: fetchGateway }
 
   useEffect(() => {
+    if (!liveEnabled) return undefined
     const poll = () => { fetchRef.current.fleet(); fetchRef.current.gateway() }
     poll()
     const pid = setInterval(poll, POLL_MS)
+    return () => clearInterval(pid)
+  }, [liveEnabled])
+
+  useEffect(() => {
     const tid = setInterval(() => setTick((n) => n + 1), 1000)
-    return () => { clearInterval(pid); clearInterval(tid) }
+    return () => clearInterval(tid)
   }, [])
 
   const accounts = fleet?.accounts || []
   const initialLoad = fleetLoading && !fleet
+  const handleLiveToggle = () => {
+    if (fleetError) {
+      setLiveEnabled(true)
+      fetchFleet()
+      fetchGateway()
+      return
+    }
+    setLiveEnabled((enabled) => {
+      const next = !enabled
+      if (next) {
+        fetchFleet()
+        fetchGateway()
+      }
+      return next
+    })
+  }
 
   return (
     <div className="flex flex-col" style={{ height: '100%', overflow: 'hidden' }}>
       {/* Header */}
       <div className="flex items-center justify-between flex-shrink-0" style={{ padding: '20px 24px 0 24px' }}>
         <div>
-          <h2 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>Fleet</h2>
+          <h2 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>{t('admin.fleetTitle')}</h2>
           <p className="text-xs" style={{ color: 'var(--text-dim)', marginTop: 4 }}>
-            Live agent-runner sandboxes and in-flight agent sessions across all accounts.
+            {t('admin.fleetDescription')}
           </p>
         </div>
-        <button
-          className="flex items-center gap-2 px-2 py-1 text-xs uppercase flex-shrink-0"
-          onClick={() => { fetchFleet(); fetchGateway() }}
-          title="Refresh now"
-          style={{
-            background: 'transparent',
-            border: '1px solid var(--border)',
-            borderRadius: 4,
-            color: fleetError ? 'var(--red)' : 'var(--text-secondary)',
-            cursor: 'pointer',
-            letterSpacing: '0.06em',
-            transition: 'color 150ms ease, border-color 150ms ease',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--border-strong)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)' }}
-        >
-          <RefreshCw
-            size={12}
-            strokeWidth={1.5}
-            style={fleetRefreshing ? { animation: 'fleet-spin 1s linear infinite' } : undefined}
-          />
-          {fleetError ? 'Retry' : 'Live'}
-        </button>
+        <LiveToggleButton
+          active={liveEnabled && !fleetError}
+          error={!!fleetError}
+          refreshing={fleetRefreshing}
+          onClick={handleLiveToggle}
+          spinAnimation="fleet-spin 1s linear infinite"
+        />
       </div>
 
       {/* Body */}
@@ -290,8 +303,8 @@ export default function FleetView() {
           <TilesSkeleton />
         ) : (
           <div className="flex gap-3">
-            <Tile icon={Server} label="Awake Sandboxes" value={fleet?.awake_sandboxes ?? 0} suffix={fleet?.total_accounts ?? 0} />
-            <Tile icon={Activity} label="Running Sessions" value={fleet?.running_sessions ?? 0} />
+            <Tile icon={Server} label={t('admin.awakeSandboxes')} value={fleet?.awake_sandboxes ?? 0} suffix={fleet?.total_accounts ?? 0} />
+            <Tile icon={Activity} label={t('admin.runningSessions')} value={fleet?.running_sessions ?? 0} />
             <GatewayTile
               available={!!gateway?.available}
               {...deriveGateway(gatewayBuffer, gatewayWindowSec, gatewayScope)}
@@ -315,22 +328,23 @@ export default function FleetView() {
               borderBottom: '1px solid var(--border)',
             }}
           >
-            <span className="flex-1 min-w-0">Account</span>
-            <span style={{ width: 80, flexShrink: 0 }}>State</span>
-            <span style={{ width: 48, flexShrink: 0, textAlign: 'right' }}>Runs</span>
-            <span style={{ width: 96, flexShrink: 0, textAlign: 'right' }}>Last Activity</span>
+            <span className="flex-1 min-w-0">{t('admin.account')}</span>
+            <span style={{ width: 80, flexShrink: 0 }}>{t('admin.state')}</span>
+            <span style={{ width: 88, flexShrink: 0, textAlign: 'right' }}>{t('admin.runs')}</span>
+            <span style={{ width: 96, flexShrink: 0, textAlign: 'right' }}>{t('admin.lastActivity')}</span>
           </div>
 
           {initialLoad ? (
             <TableSkeleton />
           ) : accounts.length === 0 ? (
             <div className="flex items-center justify-center" style={{ padding: '32px 16px', color: 'var(--text-dim)', fontSize: 13 }}>
-              No agent-runner accounts yet.
+              {t('admin.noAgentRunnerAccounts')}
             </div>
           ) : (
             accounts.map((a) => {
               const st = stateOf(a)
               const runs = a.active_runs == null ? '—' : a.active_runs
+              const stateLabel = t(st.labelKey)
               return (
                 <div
                   key={a.account_id}
@@ -352,18 +366,18 @@ export default function FleetView() {
                   </span>
                   <span
                     className="uppercase"
-                    style={{ width: 80, flexShrink: 0, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', color: st.label === 'IDLE' ? 'var(--text-dim)' : st.color }}
+                    style={{ width: 80, flexShrink: 0, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', color: st.labelKey === 'admin.stateIdle' ? 'var(--text-dim)' : st.color }}
                   >
-                    {st.label}
+                    {stateLabel}
                   </span>
                   <span
                     className="text-sm"
-                    style={{ width: 48, flexShrink: 0, textAlign: 'right', color: a.active_runs ? 'var(--text-primary)' : 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace" }}
+                    style={{ width: 88, flexShrink: 0, textAlign: 'right', color: a.active_runs ? 'var(--text-primary)' : 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace" }}
                   >
                     {runs}
                   </span>
                   <span className="text-xs font-light" style={{ width: 96, flexShrink: 0, textAlign: 'right', color: 'var(--text-dim)' }}>
-                    {relTime(a.last_activity_ts)}
+                    {relTime(a.last_activity_ts, t)}
                   </span>
                 </div>
               )

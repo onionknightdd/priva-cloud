@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Cpu, MemoryStick, HardDrive, RefreshCw, Gauge } from 'lucide-react'
+import { Cpu, MemoryStick, HardDrive, Gauge } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import Chip from '@shared/components/shared/Chip'
 import useAdminStore from '../../stores/adminStore'
+import LiveToggleButton from './LiveToggleButton'
 
 // Resource Quota — Dashboard section. Live agent-runtime CPU/memory usage vs the
 // allocated per-account quota, from /api/admin/resource-usage. Two fleet-wide
@@ -113,21 +115,24 @@ function TableSkeleton() {
 }
 
 export default function ResourceQuotaView() {
+  const { t } = useTranslation()
   const usage = useAdminStore((s) => s.resourceUsage)
   const loading = useAdminStore((s) => s.resourceUsageLoading)
   const refreshing = useAdminStore((s) => s.resourceUsageRefreshing)
   const error = useAdminStore((s) => s.resourceUsageError)
   const fetchResourceUsage = useAdminStore((s) => s.fetchResourceUsage)
+  const [liveEnabled, setLiveEnabled] = useState(true)
 
   const fetchRef = useRef(fetchResourceUsage)
   fetchRef.current = fetchResourceUsage
 
   useEffect(() => {
+    if (!liveEnabled) return undefined
     const poll = () => fetchRef.current()
     poll()
     const pid = setInterval(poll, POLL_MS)
     return () => clearInterval(pid)
-  }, [])
+  }, [liveEnabled])
 
   const accounts = usage?.accounts || []
   const available = !!usage?.available
@@ -135,36 +140,36 @@ export default function ResourceQuotaView() {
   // available when any account reports a backend usage figure.
   const volAvailable = accounts.some((a) => a.volume_used_gb != null)
   const initialLoad = loading && !usage
+  const handleLiveToggle = () => {
+    if (error) {
+      setLiveEnabled(true)
+      fetchResourceUsage()
+      return
+    }
+    setLiveEnabled((enabled) => {
+      const next = !enabled
+      if (next) fetchResourceUsage()
+      return next
+    })
+  }
 
   return (
     <div className="flex flex-col" style={{ height: '100%', overflow: 'hidden' }}>
       {/* Header */}
       <div className="flex items-center justify-between flex-shrink-0" style={{ padding: '20px 24px 0 24px' }}>
         <div>
-          <h2 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>Resource Quota</h2>
+          <h2 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>{t('admin.resourceQuotaTitle')}</h2>
           <p className="text-xs" style={{ color: 'var(--text-dim)', marginTop: 4 }}>
-            Agent-runtime CPU, memory and volume consumption vs allocated quota, across all accounts.
+            {t('admin.resourceQuotaDescription')}
           </p>
         </div>
-        <button
-          className="flex items-center gap-2 px-2 py-1 text-xs uppercase flex-shrink-0"
-          onClick={() => fetchResourceUsage()}
-          title="Refresh now"
-          style={{
-            background: 'transparent',
-            border: '1px solid var(--border)',
-            borderRadius: 4,
-            color: error ? 'var(--red)' : 'var(--text-secondary)',
-            cursor: 'pointer',
-            letterSpacing: '0.06em',
-            transition: 'color 150ms ease, border-color 150ms ease',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--border-strong)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)' }}
-        >
-          <RefreshCw size={12} strokeWidth={1.5} style={refreshing ? { animation: 'rq-spin 1s linear infinite' } : undefined} />
-          {error ? 'Retry' : 'Live'}
-        </button>
+        <LiveToggleButton
+          active={liveEnabled && !error}
+          error={!!error}
+          refreshing={refreshing}
+          onClick={handleLiveToggle}
+          spinAnimation="rq-spin 1s linear infinite"
+        />
       </div>
 
       {/* Body */}
@@ -176,27 +181,27 @@ export default function ResourceQuotaView() {
           <div className="flex flex-col gap-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 4, padding: '16px 18px' }}>
             <div className="flex items-center gap-2 uppercase" style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em' }}>
               <Gauge size={14} strokeWidth={1.5} className="flex-shrink-0" />
-              <span className="truncate">Agent Runtime</span>
+              <span className="truncate">{t('admin.agentRuntime')}</span>
             </div>
             <UsageBar icon={Cpu} label="CPU" used={usage?.cpu_used_m ?? 0} allocated={usage?.cpu_allocated_m ?? 0} fmt={fmtCpu} available={available} />
-            <UsageBar icon={MemoryStick} label="Memory" used={usage?.memory_used_mb ?? 0} allocated={usage?.memory_allocated_mb ?? 0} fmt={fmtMem} available={available} />
-            <UsageBar icon={HardDrive} label="Volume" used={usage?.volume_used_gb ?? 0} allocated={usage?.volume_allocated_gb ?? 0} fmt={fmtVol} available={volAvailable} />
+            <UsageBar icon={MemoryStick} label={t('admin.memory')} used={usage?.memory_used_mb ?? 0} allocated={usage?.memory_allocated_mb ?? 0} fmt={fmtMem} available={available} />
+            <UsageBar icon={HardDrive} label={t('admin.volume')} used={usage?.volume_used_gb ?? 0} allocated={usage?.volume_allocated_gb ?? 0} fmt={fmtVol} available={volAvailable} />
             <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-dim)', fontWeight: 300 }}>
-              <span style={{ color: 'var(--green)' }}>{usage?.awake ?? 0} awake</span>
+              <span style={{ color: 'var(--green)' }}>{t('admin.awakeCount', { count: usage?.awake ?? 0 })}</span>
               <span>·</span>
-              <span>{usage?.sleeping ?? 0} sleeping</span>
+              <span>{t('admin.sleepingCount', { count: usage?.sleeping ?? 0 })}</span>
               <span>·</span>
-              <span>{usage?.total_accounts ?? 0} accounts</span>
+              <span>{t('admin.accountsCount', { count: usage?.total_accounts ?? 0 })}</span>
               {!available && (
                 <>
                   <span>·</span>
-                  <span style={{ color: 'var(--yellow)' }}>metrics-server unavailable</span>
+                  <span style={{ color: 'var(--yellow)' }}>{t('admin.metricsServerUnavailable')}</span>
                 </>
               )}
               {!volAvailable && (
                 <>
                   <span>·</span>
-                  <span style={{ color: 'var(--yellow)' }}>volume usage unavailable</span>
+                  <span style={{ color: 'var(--yellow)' }}>{t('admin.volumeUsageUnavailable')}</span>
                 </>
               )}
             </div>
@@ -209,18 +214,18 @@ export default function ResourceQuotaView() {
             className="flex items-center gap-3 px-4 py-2 text-xs uppercase"
             style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)' }}
           >
-            <span className="flex-1 min-w-0">Account</span>
-            <span style={{ width: 96, flexShrink: 0 }}>Runner</span>
+            <span className="flex-1 min-w-0">{t('admin.account')}</span>
+            <span style={{ width: 96, flexShrink: 0 }}>{t('admin.runner')}</span>
             <span style={{ width: 112, flexShrink: 0, textAlign: 'right' }}>CPU</span>
-            <span style={{ width: 132, flexShrink: 0, textAlign: 'right' }}>Memory</span>
-            <span style={{ width: 104, flexShrink: 0, textAlign: 'right' }}>Vol</span>
+            <span style={{ width: 132, flexShrink: 0, textAlign: 'right' }}>{t('admin.memory')}</span>
+            <span style={{ width: 104, flexShrink: 0, textAlign: 'right' }}>{t('admin.volShort')}</span>
           </div>
 
           {initialLoad ? (
             <TableSkeleton />
           ) : accounts.length === 0 ? (
             <div className="flex items-center justify-center" style={{ padding: '32px 16px', color: 'var(--text-dim)', fontSize: 13 }}>
-              No agent-runner accounts yet.
+              {t('admin.noAgentRunnerAccounts')}
             </div>
           ) : (
             accounts.map((a) => (

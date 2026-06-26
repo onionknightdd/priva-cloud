@@ -1,7 +1,8 @@
-import { Moon, Sun, Globe, Bot, Puzzle, Cable, Clock, Brain, Box, LogOut, Webhook, UsersRound, Lightbulb, SquareTerminal } from 'lucide-react'
+import { Moon, Sun, Bot, Puzzle, Cable, Clock, Brain, Box, LogOut, Webhook, UsersRound, Lightbulb, SquareTerminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Chip from '@shared/components/shared/Chip'
 import Tabs from '@shared/components/shared/Tabs'
+import LanguageToggleButton from '@shared/components/shared/LanguageToggleButton'
 import useUiStore from '@shared/stores/uiStore'
 import useChatStore from '../../stores/chatStore'
 import useAuthStore from '@shared/stores/authStore'
@@ -10,8 +11,6 @@ export default function NavBar() {
   const { t } = useTranslation()
   const theme = useUiStore((s) => s.theme)
   const toggleTheme = useUiStore((s) => s.toggleTheme)
-  const language = useUiStore((s) => s.language)
-  const toggleLanguage = useUiStore((s) => s.toggleLanguage)
   const activeNavTab = useUiStore((s) => s.activeNavTab)
   const setActiveNavTab = useUiStore((s) => s.setActiveNavTab)
   const sessionId = useChatStore((s) => s.sessionId)
@@ -156,16 +155,7 @@ export default function NavBar() {
             ? <Sun size={16} strokeWidth={1.5} />
             : <Moon size={16} strokeWidth={1.5} />}
         </button>
-        <button
-          className="flex items-center gap-1 text-xs"
-          onClick={toggleLanguage}
-          style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--text-dim)', transition: 'color 150ms ease' }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-        >
-          <Globe size={14} strokeWidth={1.5} />
-          <span>{language.toUpperCase()}</span>
-        </button>
+        <LanguageToggleButton />
         {authUser && (
           <span className="text-md" style={{ color: 'var(--text-secondary)' }}>{authUser.username}</span>
         )}

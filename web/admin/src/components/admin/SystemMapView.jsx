@@ -1,10 +1,12 @@
-import { useEffect, useRef } from 'react'
-import { Network, RefreshCw } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Network } from 'lucide-react'
 import { useReducedMotion } from 'framer-motion'
+import { useTranslation } from 'react-i18next'
 import useAdminStore from '../../stores/adminStore'
+import LiveToggleButton from './LiveToggleButton'
 import SystemTopologyDiagram from './SystemTopologyDiagram'
 
-// System Map — Dashboard view. Live topology + per-module health from
+// System Topology — Dashboard view. Live topology + per-module health from
 // /api/admin/system-health on its own 5s poll. Edges are curved bezier routes; the
 // byte-path edges animate a constant particle flow while healthy, freeze + show an
 // ✕ when unreachable, and are fully disabled under prefers-reduced-motion.
@@ -26,24 +28,39 @@ function DiagramSkeleton() {
 }
 
 export default function SystemMapView() {
+  const { t } = useTranslation()
   const reducedMotion = useReducedMotion()
   const systemHealth = useAdminStore((s) => s.systemHealth)
   const systemHealthLoading = useAdminStore((s) => s.systemHealthLoading)
   const systemHealthRefreshing = useAdminStore((s) => s.systemHealthRefreshing)
   const systemHealthError = useAdminStore((s) => s.systemHealthError)
   const fetchSystemHealth = useAdminStore((s) => s.fetchSystemHealth)
+  const [liveEnabled, setLiveEnabled] = useState(true)
 
   const fetchRef = useRef(fetchSystemHealth)
   fetchRef.current = fetchSystemHealth
 
   useEffect(() => {
+    if (!liveEnabled) return undefined
     const poll = () => fetchRef.current()
     poll()
     const pid = setInterval(poll, POLL_MS)
     return () => clearInterval(pid)
-  }, [])
+  }, [liveEnabled])
 
   const initialLoad = systemHealthLoading && !systemHealth
+  const handleLiveToggle = () => {
+    if (systemHealthError) {
+      setLiveEnabled(true)
+      fetchSystemHealth()
+      return
+    }
+    setLiveEnabled((enabled) => {
+      const next = !enabled
+      if (next) fetchSystemHealth()
+      return next
+    })
+  }
 
   return (
     <div className="flex flex-col" style={{ height: '100%', overflow: 'hidden' }}>
@@ -52,35 +69,19 @@ export default function SystemMapView() {
         <div>
           <h2 className="font-semibold text-lg flex items-center gap-2" style={{ color: 'var(--text-primary)', margin: 0 }}>
             <Network size={18} strokeWidth={1.5} />
-            System Map
+            {t('admin.systemTopologyTitle')}
           </h2>
           <p className="text-xs" style={{ color: 'var(--text-dim)', marginTop: 4 }}>
-            Live module topology and health across the four planes. Byte-path edges flow while healthy; an ✕ marks an unreachable path.
+            {t('admin.systemTopologyDescription')}
           </p>
         </div>
-        <button
-          className="flex items-center gap-2 px-2 py-1 text-xs uppercase flex-shrink-0"
-          onClick={() => fetchSystemHealth()}
-          title="Refresh now"
-          style={{
-            background: 'transparent',
-            border: '1px solid var(--border)',
-            borderRadius: 4,
-            color: systemHealthError ? 'var(--red)' : 'var(--text-secondary)',
-            cursor: 'pointer',
-            letterSpacing: '0.06em',
-            transition: 'color 150ms ease, border-color 150ms ease',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--border-strong)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)' }}
-        >
-          <RefreshCw
-            size={12}
-            strokeWidth={1.5}
-            style={systemHealthRefreshing ? { animation: 'fleet-spin 1s linear infinite' } : undefined}
-          />
-          {systemHealthError ? 'Retry' : 'Live'}
-        </button>
+        <LiveToggleButton
+          active={liveEnabled && !systemHealthError}
+          error={!!systemHealthError}
+          refreshing={systemHealthRefreshing}
+          onClick={handleLiveToggle}
+          spinAnimation="fleet-spin 1s linear infinite"
+        />
       </div>
 
       {/* Body */}

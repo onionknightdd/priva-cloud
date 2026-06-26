@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { LogOut, Users, ScrollText, LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen, Server, Activity, Network, Gauge, SquareTerminal } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import useAuthStore from '@shared/stores/authStore'
 import useAdminStore from './stores/adminStore'
 import { useResizable } from '@shared/hooks/useResizable'
 import Tabs from '@shared/components/shared/Tabs'
+import LanguageToggleButton from '@shared/components/shared/LanguageToggleButton'
 import ConfirmDialog from '@shared/components/shared/ConfirmDialog'
 import LoginPage from '@shared/components/auth/LoginPage'
 import UserManagement from './components/admin/UserManagement'
@@ -22,21 +24,21 @@ import safeStorage from '@shared/utils/safeStorage'
 
 // Top-level tabs (segmented switch under the sidebar title) → each owns a nav group.
 const TABS = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'config', label: 'Configurations', icon: Settings },
+  { id: 'dashboard', labelKey: 'admin.navDashboard', icon: LayoutDashboard },
+  { id: 'config', labelKey: 'admin.navConfigurations', icon: Settings },
 ]
 
 const NAV = {
   dashboard: [
-    { id: 'fleet', label: 'Fleet', icon: Activity },
-    { id: 'resource-quota', label: 'Resource Quota', icon: Gauge },
-    { id: 'system-map', label: 'System Map', icon: Network },
-    { id: 'console', label: 'Console', icon: SquareTerminal },
-    { id: 'users', label: 'Users', icon: Users },
-    { id: 'audit', label: 'Audit', icon: ScrollText },
+    { id: 'fleet', labelKey: 'admin.navFleet', icon: Activity },
+    { id: 'resource-quota', labelKey: 'admin.navResourceQuota', icon: Gauge },
+    { id: 'system-map', labelKey: 'admin.navSystemTopology', icon: Network },
+    { id: 'console', labelKey: 'admin.navConsole', icon: SquareTerminal },
+    { id: 'users', labelKey: 'admin.users', icon: Users },
+    { id: 'audit', labelKey: 'admin.navAudit', icon: ScrollText },
   ],
   config: [
-    { id: 'sandbox', label: 'Agent Runner Sandbox', icon: Server },
+    { id: 'sandbox', labelKey: 'admin.sandboxTitle', icon: Server },
   ],
 }
 
@@ -47,17 +49,20 @@ const SIDEBAR_COLLAPSED = 48
 
 // Empty-state for the Configurations tab until real settings pages are wired.
 function ConfigPlaceholder() {
+  const { t } = useTranslation()
+
   return (
     <div className="flex flex-1 items-center justify-center" style={{ color: 'var(--text-dim)' }}>
       <div className="flex flex-col items-center gap-2">
         <Settings size={24} strokeWidth={1.5} />
-        <span className="text-sm">No settings yet</span>
+        <span className="text-sm">{t('admin.noSettingsYet')}</span>
       </div>
     </div>
   )
 }
 
 export default function AdminApp() {
+  const { t } = useTranslation()
   const loading = useAuthStore((s) => s.loading)
   const user = useAuthStore((s) => s.user)
   const initialize = useAuthStore((s) => s.initialize)
@@ -164,7 +169,7 @@ export default function AdminApp() {
           {collapsed ? (
             <button
               onClick={toggleCollapsed}
-              title="Expand sidebar"
+              title={t('admin.expandSidebar')}
               style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--text-dim)', transition: 'color 150ms ease' }}
               onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
               onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
@@ -177,10 +182,11 @@ export default function AdminApp() {
                 <span className="font-bold uppercase" style={{ fontSize: 16, letterSpacing: '0.06em' }}>Priva</span>
                 <span style={{ color: 'var(--text-dim)', fontSize: 16 }}>·</span>
                 <span className="font-semibold uppercase" style={{ fontSize: 14, letterSpacing: '0.06em', color: 'var(--blue)' }}>Admin</span>
+                <LanguageToggleButton />
               </div>
               <button
                 onClick={toggleCollapsed}
-                title="Collapse sidebar"
+                title={t('admin.collapseSidebar')}
                 className="flex-shrink-0"
                 style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--text-dim)', transition: 'color 150ms ease' }}
                 onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
@@ -213,7 +219,7 @@ export default function AdminApp() {
                 return (
                   <span className="flex items-center justify-center gap-1" style={{ minWidth: 0 }}>
                     <Icon size={14} strokeWidth={1.5} className="flex-shrink-0" />
-                    <span className="truncate">{tab.label}</span>
+                    <span className="truncate">{t(tab.labelKey)}</span>
                   </span>
                 )
               }}
@@ -223,8 +229,9 @@ export default function AdminApp() {
 
         {/* Nav items */}
         <div className="flex flex-col flex-1 py-2" style={{ minHeight: 0, overflowY: 'auto' }}>
-          {NAV[activeTab].map(({ id, label, icon: Icon }) => {
+          {NAV[activeTab].map(({ id, labelKey, icon: Icon }) => {
             const active = section === id
+            const label = t(labelKey)
             return (
               <button
                 key={id}
@@ -268,7 +275,7 @@ export default function AdminApp() {
           )}
           <button
             onClick={logout}
-            title={collapsed ? `Sign out (${user.username})` : 'Sign out'}
+            title={collapsed ? t('admin.signOutAs', { username: user.username }) : t('admin.signOut')}
             className="flex-shrink-0"
             style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--text-dim)', transition: 'color 150ms ease' }}
             onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
@@ -294,7 +301,7 @@ export default function AdminApp() {
           background: (hoverHandle || dragging) ? 'var(--blue)' : 'transparent',
           transition: 'background 150ms ease',
         }}
-        title={collapsed ? 'Double-click to expand' : 'Drag to resize · double-click to collapse'}
+        title={collapsed ? t('admin.doubleClickExpand') : t('admin.resizeSidebarHint')}
       />
 
       {/* Content */}

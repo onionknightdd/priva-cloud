@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { SquareTerminal, RefreshCw } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import Dropdown from '@shared/components/shared/Dropdown'
 import TerminalSession from '@shared/components/terminal/TerminalSession'
 import useAdminStore from '../../stores/adminStore'
@@ -17,16 +18,17 @@ const CP_PATH = '/api/admin/console/ws'
 const AR_PATH = '/api/pty/ws'
 
 function StatusLabel({ meta, ready, closed }) {
+  const { t } = useTranslation()
   if (!meta) return null
   const [text, color] = closed
-    ? ['Disconnected', 'var(--red)']
+    ? [t('admin.consoleDisconnected'), 'var(--red)']
     : ready
-      ? ['Live', 'var(--green)']
-      : ['Connecting', 'var(--yellow)']
+      ? [t('admin.live'), 'var(--green)']
+      : [t('admin.consoleConnecting'), 'var(--yellow)']
   return (
     <div className="flex items-center gap-2 flex-shrink-0">
       <span className="uppercase text-xs" style={{ color: 'var(--text-dim)', letterSpacing: '0.06em' }}>
-        {meta.kind === 'cp' ? 'control-plane' : 'agent-runner'}
+        {meta.kind === 'cp' ? t('admin.scopeControlPlane') : t('admin.agentRunner')}
       </span>
       <span className="uppercase text-xs" style={{ color, fontWeight: 600, letterSpacing: '0.06em' }}>
         {text}
@@ -36,6 +38,7 @@ function StatusLabel({ meta, ready, closed }) {
 }
 
 export default function ConsoleView() {
+  const { t } = useTranslation()
   const users = useAdminStore((s) => s.users)
   const usersLoading = useAdminStore((s) => s.usersLoading)
   const fetchUsers = useAdminStore((s) => s.fetchUsers)
@@ -60,12 +63,12 @@ export default function ConsoleView() {
       .map((u) => ({ value: `acct:${u.username}`, label: u.role === 'admin' ? `${u.username} · admin` : u.username }))
       .sort((a, b) => a.label.localeCompare(b.label))
     return [
-      { value: '__hdr_cp', label: 'Control plane', disabled: true },
-      ...CONTROL_PLANE.map((t) => ({ value: `cp:${t}`, label: t })),
-      { value: '__hdr_ar', label: 'Agent runners', disabled: true },
+      { value: '__hdr_cp', label: t('admin.consoleControlPlane'), disabled: true },
+      ...CONTROL_PLANE.map((target) => ({ value: `cp:${target}`, label: target })),
+      { value: '__hdr_ar', label: t('admin.consoleAgentRunners'), disabled: true },
       ...accounts,
     ]
-  }, [users])
+  }, [t, users])
 
   const meta = selected ? targetMeta[selected] : null
 
@@ -95,10 +98,10 @@ export default function ConsoleView() {
         <div style={{ minWidth: 0 }}>
           <h2 className="font-semibold text-lg flex items-center gap-2" style={{ color: 'var(--text-primary)', margin: 0 }}>
             <SquareTerminal size={18} strokeWidth={1.5} className="flex-shrink-0" />
-            Console
+            {t('admin.consoleTitle')}
           </h2>
           <p className="text-xs" style={{ color: 'var(--text-dim)', marginTop: 4 }}>
-            Open a shell into an account&apos;s agent-runner pod, or a control-plane pod. Waking a pod may take a moment.
+            {t('admin.consoleDescription')}
           </p>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
@@ -111,12 +114,12 @@ export default function ConsoleView() {
             value={selected}
             onChange={handleSelect}
             options={options}
-            placeholder={usersLoading ? 'Loading…' : 'Select target'}
+            placeholder={usersLoading ? t('sidebar.loading') : t('admin.consoleSelectTarget')}
           />
           <button
             className="flex items-center gap-2 px-2 py-1 text-xs uppercase flex-shrink-0"
             onClick={() => fetchUsers()}
-            title="Reload accounts"
+            title={t('admin.reloadAccounts')}
             style={{
               background: 'transparent',
               border: '1px solid var(--border)',
@@ -130,7 +133,7 @@ export default function ConsoleView() {
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)' }}
           >
             <RefreshCw size={12} strokeWidth={1.5} style={usersLoading ? { animation: 'cv-spin 1s linear infinite' } : undefined} />
-            Reload
+            {t('admin.reload')}
           </button>
         </div>
       </div>
@@ -155,7 +158,7 @@ export default function ConsoleView() {
             style={{ height: '100%', border: '1px dashed var(--border)', borderRadius: 4, color: 'var(--text-dim)' }}
           >
             <SquareTerminal size={24} strokeWidth={1.5} />
-            <span className="text-sm">Select an agent-runner account or a control-plane pod</span>
+            <span className="text-sm">{t('admin.consoleEmpty')}</span>
           </div>
         )}
       </div>
