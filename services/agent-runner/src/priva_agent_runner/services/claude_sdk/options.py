@@ -172,6 +172,16 @@ async def build_agent_options(
         env_dict["ANTHROPIC_MODEL"] = model_override
         model = model_override
 
+    # Point the AGENT's python/pip at the per-account /workspace venv (persistent,
+    # survives restarts). This only mutates the per-run env_dict that becomes the CLI
+    # subprocess's options.env — the runner SERVICE's own os.environ is untouched, so a
+    # user-installed package can't shadow a dependency this service imports.
+    try:
+        from ..sandbox_venv import venv_env_overlay
+        env_dict.update(venv_env_overlay(env_dict))
+    except Exception:
+        _get_logger().warning("venv env overlay skipped", exc_info=True)
+
     # One-time cleanup of legacy global-skill symlinks created by the old
     # sync_global_skill_symlinks path; enable/disable is now driven by
     # ``options.skills`` below.

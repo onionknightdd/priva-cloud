@@ -70,6 +70,15 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logger.warning("Skill seeding skipped: {}", exc)
 
+        # Bootstrap the per-account Python venv on /workspace (once; persists across
+        # wakes). Lets the agent install packages that survive restarts, isolated from
+        # this service's own interpreter. Fail-soft — never blocks the pod coming up.
+        try:
+            from .services.sandbox_venv import ensure_user_venv
+            ensure_user_venv()
+        except Exception as exc:
+            logger.warning("sandbox venv bootstrap skipped: {}", exc)
+
         import os
         logger.info(
             "agent-runner ready: account={}, user={}, workspace={}",
