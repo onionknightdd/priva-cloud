@@ -142,11 +142,30 @@ DDL: tuple[str, ...] = (
     """,
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_username ON pending_registration(username) WHERE status = 'pending'",
     "CREATE INDEX IF NOT EXISTS ix_pending_status ON pending_registration(status, created_at DESC)",
+    # 9 ── runner_defaults --------------------------------------------------
+    # Platform-wide GLOBAL defaults for per-account agent-runner pods (the admin
+    # "Agent Runner Sandbox" panel). Single row (id=1), seeded from the cluster
+    # settings on first read. An account whose AgentTenant CR omits a field
+    # inherits the matching value here; a per-account override (CR field present)
+    # wins. No NOT NULL DEFAULTs — the row is seeded explicitly from settings so
+    # the seed stays single-sourced in the service, not duplicated in the schema.
+    f"""
+    CREATE TABLE IF NOT EXISTS runner_defaults (
+      id                           INTEGER PRIMARY KEY CHECK (id = 1),
+      idle_grace_seconds           INTEGER NOT NULL,
+      min_alive_after_wake_seconds INTEGER NOT NULL,
+      cpu_cores                    REAL    NOT NULL,
+      memory_mb                    INTEGER NOT NULL,
+      storage_gb                   INTEGER NOT NULL,
+      runner_image                 TEXT    NOT NULL,
+      updated_at                   TEXT    NOT NULL DEFAULT {NOW}
+    ) STRICT
+    """,
 )
 
 TABLES = (
     "account", "channel_binding", "quota", "scheduled_job", "job_run_record",
-    "secret", "account_resource_spec", "pending_registration",
+    "secret", "account_resource_spec", "pending_registration", "runner_defaults",
 )
 
 # Idempotent column additions for DBs created before a column existed. CREATE

@@ -43,6 +43,8 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         registration_pb2_grpc,
         resource_spec_pb2,
         resource_spec_pb2_grpc,
+        runner_defaults_pb2,
+        runner_defaults_pb2_grpc,
         secret_pb2,
         secret_pb2_grpc,
     )
@@ -236,6 +238,38 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         def list(self):
             return [cv.resource_spec_from_pb(r) for r in self._s.List(common_pb2.Empty()).specs]
 
+    class _RunnerDefaults:
+        def __init__(self):
+            self._s = runner_defaults_pb2_grpc.RunnerDefaultsServiceStub(channel)
+
+        def get(self):
+            return cv.runner_defaults_from_pb(self._s.Get(common_pb2.Empty()))
+
+        def set(self, *, idle_grace_seconds=None, min_alive_after_wake_seconds=None,
+                cpu_cores=None, memory_mb=None, storage_gb=None, runner_image=None):
+            req = runner_defaults_pb2.SetRunnerDefaultsRequest()
+            mask: list[str] = []
+            if idle_grace_seconds is not None:
+                req.idle_grace_seconds = idle_grace_seconds
+                mask.append("idle_grace_seconds")
+            if min_alive_after_wake_seconds is not None:
+                req.min_alive_after_wake_seconds = min_alive_after_wake_seconds
+                mask.append("min_alive_after_wake_seconds")
+            if cpu_cores is not None:
+                req.cpu_cores = cpu_cores
+                mask.append("cpu_cores")
+            if memory_mb is not None:
+                req.memory_mb = memory_mb
+                mask.append("memory_mb")
+            if storage_gb is not None:
+                req.storage_gb = storage_gb
+                mask.append("storage_gb")
+            if runner_image is not None:
+                req.runner_image = runner_image
+                mask.append("runner_image")
+            req.update_mask.extend(mask)
+            return cv.runner_defaults_from_pb(self._s.Set(req))
+
     class _Registrations:
         def __init__(self):
             self._s = registration_pb2_grpc.RegistrationServiceStub(channel)
@@ -281,6 +315,7 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         admin=_Admin(),
         secrets=_Secrets(),
         resource_specs=_ResourceSpecs(),
+        runner_defaults=_RunnerDefaults(),
         registrations=_Registrations(),
     )
     _cache[dsn] = client

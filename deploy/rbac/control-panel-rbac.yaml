@@ -44,3 +44,27 @@ subjects:
   - kind: ServiceAccount
     name: priva-control-panel
     namespace: priva-cloud
+---
+# Cluster-scoped: list node images (Node.status.images) to discover available
+# agent-runner image tags for the admin Sandbox panel's image dropdown. Read-only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: priva-control-panel-nodes
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: priva-control-panel-nodes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: priva-control-panel-nodes
+subjects:
+  - kind: ServiceAccount
+    name: priva-control-panel
+    namespace: priva-cloud

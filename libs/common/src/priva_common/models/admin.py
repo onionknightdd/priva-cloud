@@ -174,6 +174,38 @@ class PendingRegistrationResponse(BaseModel):
     created_at: str | None = None
 
 
+class RunnerDefaultsResponse(BaseModel):
+    """Platform-wide GLOBAL defaults for per-account agent-runner pods (admin "Agent
+    Runner Sandbox" panel). An account whose CR omits a field inherits the value here.
+    CPU is in MILLICORES for the digit-only UI (250 = 0.25 cores; stored as cpu_cores)."""
+    idle_grace_seconds: int = 1800
+    min_alive_after_wake_seconds: int = 1800
+    cpu_millicores: int = 1000
+    memory_mb: int = 2048
+    storage_gb: int = 1
+    runner_image: str = "priva/agent-runner:dev"
+    updated_at: str | None = None
+
+
+class RunnerDefaultsUpdate(BaseModel):
+    """Partial update — only the provided fields are applied (each is an independent
+    Save in the panel). CPU in millicores."""
+    idle_grace_seconds: int | None = None
+    min_alive_after_wake_seconds: int | None = None
+    cpu_millicores: int | None = None
+    memory_mb: int | None = None
+    storage_gb: int | None = None
+    runner_image: str | None = None
+
+
+class RunnerImagesResponse(BaseModel):
+    """Agent-runner image tags discoverable in the cluster (kubelet node images),
+    unioned with the current default. ``source`` records how they were enumerated
+    ('nodes', or 'fallback' when node listing is unavailable)."""
+    images: list[str] = Field(default_factory=list)
+    source: str = "nodes"
+
+
 class PresetPromptResponse(BaseModel):
     enable: bool = False
     content: str | None = None

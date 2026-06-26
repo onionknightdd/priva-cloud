@@ -69,21 +69,36 @@ def mem_quantity(mb: int) -> str:
     return f"{int(mb)}Mi"
 
 
-def resolve_resources(spec: dict, settings) -> dict:
+# --- the inherit cascade: CR spec field (per-account override) > global runner_defaults
+# (the admin "Agent Runner Sandbox" panel) > static env settings (the ultimate seed/
+# fail-soft when data-spine is unreachable). `defaults` is a RunnerDefaultsRecord or None.
+
+def resolve_resources(spec: dict, settings, defaults=None) -> dict:
     """CR spec.resources -> container `resources` (requests==limits = Guaranteed QoS),
-    falling back to cluster settings when a field is omitted."""
+    inheriting the global default then the env seed when a field is omitted."""
     r = (spec.get("resources") or {})
     cores = r.get("cpu")
-    cores = float(cores) if cores is not None else float(settings.kubernetes.runner_cpu_cores)
+    if cores is None:
+        cores = defaults.cpu_cores if defaults else settings.kubernetes.runner_cpu_cores
     mb = r.get("memoryMb")
-    mb = int(mb) if mb is not None else int(settings.kubernetes.runner_memory_mb)
-    q = {"cpu": cpu_quantity(cores), "memory": mem_quantity(mb)}
+    if mb is None:
+        mb = defaults.memory_mb if defaults else settings.kubernetes.runner_memory_mb
+    q = {"cpu": cpu_quantity(float(cores)), "memory": mem_quantity(int(mb))}
     return {"requests": dict(q), "limits": dict(q)}
 
 
-def resolve_storage_gb(spec: dict, settings) -> int:
+def resolve_storage_gb(spec: dict, settings, defaults=None) -> int:
     sg = spec.get("storageGb")
-    return int(sg) if sg is not None else int(settings.kubernetes.runner_storage_gb)
+    if sg is None:
+        sg = defaults.storage_gb if defaults else settings.kubernetes.runner_storage_gb
+    return int(sg)
+
+
+def resolve_image(spec: dict, settings, defaults=None) -> str:
+    img = spec.get("image")
+    if img:
+        return img
+    return defaults.runner_image if defaults else settings.kubernetes.runner_image
 
 
 # --- manifest builders ------------------------------------------------------
@@ -103,7 +118,7 @@ def _data_volume_mount(mount_info: MountInfo) -> dict:
 
 
 def _deployment_body(namespace, account_id, username, image, pull_policy, settings, owner, spec,
-                     mount_info: MountInfo) -> dict:
+                     mount_info: MountInfo, defaults=None) -> dict:
     lbl = names.labels(account_id)
     uid = int(settings.kubernetes.runner_uid)
     gid = int(settings.kubernetes.runner_gid)
@@ -131,7 +146,7 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                         "name": "agent-runner",
                         "image": image,
                         "imagePullPolicy": pull_policy,
-                        "resources": resolve_resources(spec, settings),
+                        "resources": resolve_resources(spec, settings, defaults),
                         "ports": [{"containerPort": settings.kubernetes.runner_service_port}],
                         "securityContext": {
                             "allowPrivilegeEscalation": False,
@@ -191,16 +206,17 @@ def _service_body(namespace, account_id, port, owner) -> dict:
 
 # --- reconcile primitives ---------------------------------------------------
 
-def ensure_runtime_objects(namespace, account_id, username, image, pull_policy, settings, owner, spec) -> None:
+def ensure_runtime_objects(namespace, account_id, username, image, pull_policy, settings, owner, spec,
+                           defaults=None) -> None:
     # Provision the per-account subdir + quota on the shared export FIRST (idempotent:
     # mkdir + chown + set the backend quota), then render the Deployment to mount it.
     # No per-account PVC — the runner subPaths into the one shared RWX export claim.
-    mount_info = get_backend(settings).provision(account_id, resolve_storage_gb(spec, settings))
+    mount_info = get_backend(settings).provision(account_id, resolve_storage_gb(spec, settings, defaults))
     _ignore_conflict(core().create_namespaced_service,
                      namespace, _service_body(namespace, account_id, settings.kubernetes.runner_service_port, owner))
     _ignore_conflict(apps().create_namespaced_deployment,
                      namespace, _deployment_body(namespace, account_id, username, image, pull_policy,
-                                                 settings, owner, spec, mount_info))
+                                                 settings, owner, spec, mount_info, defaults))
 
 
 def patch_deployment_resources(namespace, account_id, resources: dict) -> None:
@@ -208,6 +224,16 @@ def patch_deployment_resources(namespace, account_id, resources: dict) -> None:
     this restarts a running pod with the new requests/limits (dormant at replicas 0)."""
     body = {"spec": {"template": {"spec": {"containers": [
         {"name": "agent-runner", "resources": resources}]}}}}
+    apps().patch_namespaced_deployment(names.deploy_name(account_id), namespace, body)
+
+
+def patch_deployment_runtime(namespace, account_id, resources: dict, image: str) -> None:
+    """Patch the container resources + image together (by container name). Called from
+    the wake/ensure scale-up path while the Deployment is at replicas 0, so a stale
+    template is refreshed to the current effective config WITHOUT restarting a running
+    pod (the "apply on next restart" policy)."""
+    body = {"spec": {"template": {"spec": {"containers": [
+        {"name": "agent-runner", "resources": resources, "image": image}]}}}}
     apps().patch_namespaced_deployment(names.deploy_name(account_id), namespace, body)
 
 

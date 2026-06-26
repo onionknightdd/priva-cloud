@@ -58,6 +58,12 @@ export const updateSensitivePatterns = (data) => putJSON('/admin/sensitive-patte
 export const getPlugins = () => getJSON('/admin/system/plugin')
 export const updatePlugin = (id, data) => putJSON(`/admin/system/plugin/${encodeURIComponent(id)}`, data)
 
+// Agent Runner Sandbox: platform-wide global defaults every account inherits unless
+// it has a per-account override. CPU crosses the wire as millicores (digit-only UI).
+export const getRunnerDefaults = () => getJSON('/admin/runner-defaults')
+export const updateRunnerDefaults = (data) => putJSON('/admin/runner-defaults', data)
+export const getRunnerImages = () => getJSON('/admin/runner-images')
+
 // Per-account: served by the account's own agent-runner pod (gateway routes the
 // /api/pty prefix to it). Not admin-gated — each user configures their own pod.
 export const getPtyConfig = () => getJSON('/pty/config')

@@ -24,6 +24,9 @@ from priva_common.models.admin import (
     PresetPromptUpdate,
     ResourceUsageAccountEntry,
     ResourceUsageResponse,
+    RunnerDefaultsResponse,
+    RunnerDefaultsUpdate,
+    RunnerImagesResponse,
     RetryableToolEntry,
     RetryCallbackWeComConfig,
     RetryableToolsResponse,
@@ -62,14 +65,107 @@ router = APIRouter(
 )
 
 
+# --- Agent Runner Sandbox: global runner defaults --------------------------------
+# Platform-wide defaults every account inherits unless it carries a per-account CR
+# override. Stored in data-spine (runner_defaults); the operator resolves the live
+# cascade (CR > these defaults > env seed) and applies them lazily — no pod restart
+# is forced here. CPU crosses the API as millicores for the digit-only UI.
+
+def _runner_defaults_response(d) -> RunnerDefaultsResponse:
+    return RunnerDefaultsResponse(
+        idle_grace_seconds=d.idle_grace_seconds,
+        min_alive_after_wake_seconds=d.min_alive_after_wake_seconds,
+        cpu_millicores=int(round(d.cpu_cores * 1000)),
+        memory_mb=d.memory_mb,
+        storage_gb=d.storage_gb,
+        runner_image=d.runner_image,
+        updated_at=d.updated_at,
+    )
+
+
+@router.get("/runner-defaults", response_model=RunnerDefaultsResponse)
+async def get_runner_defaults():
+    from priva_common.dataplane import get_client
+    return _runner_defaults_response(get_client().runner_defaults.get())
+
+
+@router.put("/runner-defaults", response_model=RunnerDefaultsResponse)
+async def update_runner_defaults(
+    request: RunnerDefaultsUpdate,
+    current_user: UserRecord = Depends(require_admin),
+):
+    from priva_common.dataplane import get_client
+
+    kw: dict = {}
+    if request.idle_grace_seconds is not None:
+        if request.idle_grace_seconds < 0:
+            raise HTTPException(400, "idle_grace_seconds must be >= 0")
+        kw["idle_grace_seconds"] = int(request.idle_grace_seconds)
+    if request.min_alive_after_wake_seconds is not None:
+        if request.min_alive_after_wake_seconds < 0:
+            raise HTTPException(400, "min_alive_after_wake_seconds must be >= 0")
+        kw["min_alive_after_wake_seconds"] = int(request.min_alive_after_wake_seconds)
+    if request.cpu_millicores is not None:
+        if request.cpu_millicores <= 0:
+            raise HTTPException(400, "cpu_millicores must be > 0")
+        kw["cpu_cores"] = request.cpu_millicores / 1000.0
+    if request.memory_mb is not None:
+        if request.memory_mb <= 0:
+            raise HTTPException(400, "memory_mb must be > 0")
+        kw["memory_mb"] = int(request.memory_mb)
+    if request.storage_gb is not None:
+        if request.storage_gb <= 0:
+            raise HTTPException(400, "storage_gb must be > 0")
+        kw["storage_gb"] = int(request.storage_gb)
+    if request.runner_image is not None:
+        img = request.runner_image.strip()
+        if not img:
+            raise HTTPException(400, "runner_image must not be empty")
+        kw["runner_image"] = img
+
+    client = get_client()
+    if not kw:
+        return _runner_defaults_response(client.runner_defaults.get())
+    d = client.runner_defaults.set(**kw)
+    get_audit_logger().append(AuditEntry(
+        actor=current_user.username,
+        action="admin.runner_defaults_changed",
+        target="runner_defaults",
+        details=kw,
+    ))
+    return _runner_defaults_response(d)
+
+
+@router.get("/runner-images", response_model=RunnerImagesResponse)
+async def get_runner_images():
+    """Agent-runner image tags discoverable in the cluster (kubelet node images),
+    unioned with the current default so the panel always lists the active one."""
+    from priva_common.dataplane import get_client
+    from ..provisioner import list_runner_images
+
+    imgs = await asyncio.to_thread(list_runner_images)
+    try:
+        default_img = get_client().runner_defaults.get().runner_image
+    except Exception:
+        default_img = None
+    found = set(imgs)
+    if default_img:
+        found.add(default_img)
+    return RunnerImagesResponse(images=sorted(found), source="nodes" if imgs else "fallback")
+
+
 @router.get("/users", response_model=list[UserPublic])
 async def list_users():
     from priva_common.dataplane import get_client
 
     store = get_user_store()
+    client = get_client()
     # One resource_specs.list() call, mapped by account_id, so the table's RUNNER
     # column + the edit-drawer prefill don't fan out N gRPC calls.
-    specs = {s.account_id: s for s in get_client().resource_specs.list()}
+    specs = {s.account_id: s for s in client.resource_specs.list()}
+    # Accounts WITHOUT a spec row are inheriting the global defaults — show those
+    # effective values (not the bare model defaults) so the table is honest.
+    rd = client.runner_defaults.get()
     out: list[UserPublic] = []
     for u in store.list_users():
         pub = user_record_to_public(u)
@@ -78,6 +174,10 @@ async def list_users():
             pub.cpu_cores = spec.cpu_cores
             pub.memory_mb = spec.memory_mb
             pub.volume_gb = spec.volume_gb
+        else:
+            pub.cpu_cores = rd.cpu_cores
+            pub.memory_mb = rd.memory_mb
+            pub.volume_gb = rd.storage_gb
         out.append(pub)
     return out
 
@@ -236,6 +336,9 @@ async def update_user(
     spec = get_client().resource_specs.get(user.account_id)
     if spec is not None:
         pub.cpu_cores, pub.memory_mb, pub.volume_gb = spec.cpu_cores, spec.memory_mb, spec.volume_gb
+    else:  # inheriting the global defaults — report the effective values
+        rd = get_client().runner_defaults.get()
+        pub.cpu_cores, pub.memory_mb, pub.volume_gb = rd.cpu_cores, rd.memory_mb, rd.storage_gb
     return pub
 
 
@@ -589,6 +692,9 @@ async def get_resource_usage():
 
     specs = {s.account_id: s for s in get_client().resource_specs.list()}
     users = {u.account_id: u for u in get_user_store().list_users()}
+    # Accounts without a spec inherit the global defaults — use those as the allocated
+    # fallback so the quota bars reflect the effective ceiling, not bare constants.
+    rd = get_client().runner_defaults.get()
 
     entries: list[ResourceUsageAccountEntry] = []
     cpu_used = cpu_alloc = mem_used = mem_alloc = 0.0
@@ -603,9 +709,9 @@ async def get_resource_usage():
         u = usage.get(aid) or {}
         awake = bool(e["awake"])
 
-        cpu_alloc_m = (spec.cpu_cores if spec else 1.0) * 1000.0
-        mem_alloc_mb = float(spec.memory_mb if spec else 2048)
-        vol_gb = int(spec.volume_gb if spec else 1)
+        cpu_alloc_m = (spec.cpu_cores if spec else rd.cpu_cores) * 1000.0
+        mem_alloc_mb = float(spec.memory_mb if spec else rd.memory_mb)
+        vol_gb = int(spec.volume_gb if spec else rd.storage_gb)
         cpu_used_m = float(u.get("cpu_m", 0.0)) if awake else 0.0
         mem_used_mb = float(u.get("memory_mb", 0.0)) if awake else 0.0
         # Volume used is backend-reported (wake-free) — independent of awake state.

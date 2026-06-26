@@ -15,6 +15,7 @@ from priva_common.dataplane.client import (
     PendingRegistrationRecord,
     QuotaRecord,
     ResourceSpecRecord,
+    RunnerDefaultsRecord,
     SecretRecord,
 )
 from priva_common.models.auth import UserRecord
@@ -87,6 +88,19 @@ def resource_spec_from_pb(m) -> ResourceSpecRecord | None:
         cpu_cores=m.cpu_cores,
         memory_mb=m.memory_mb,
         volume_gb=m.volume_gb,
+        updated_at=m.updated_at or None,
+    )
+
+
+def runner_defaults_from_pb(m) -> RunnerDefaultsRecord:
+    # Singleton, always populated server-side (seeded from settings) — no None case.
+    return RunnerDefaultsRecord(
+        idle_grace_seconds=m.idle_grace_seconds,
+        min_alive_after_wake_seconds=m.min_alive_after_wake_seconds,
+        cpu_cores=m.cpu_cores,
+        memory_mb=m.memory_mb,
+        storage_gb=m.storage_gb,
+        runner_image=m.runner_image,
         updated_at=m.updated_at or None,
     )
 

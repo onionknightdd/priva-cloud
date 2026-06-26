@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package priva.dataplane.v1;
+
+import "priva_common/dataplane/v1/common.proto";
+
+// runner_defaults — the platform-wide GLOBAL defaults for per-account agent-runner
+// pods (the admin "Agent Runner Sandbox" panel). A single row, seeded from the
+// cluster settings on first read. An account whose CR omits a field inherits the
+// matching default here; a per-account override (CR field present) wins. cpu_cores
+// is fractional cores; memory_mb / storage_gb are whole units (Mi / Gi).
+message RunnerDefaults {
+  int32 idle_grace_seconds = 1;
+  int32 min_alive_after_wake_seconds = 2;
+  double cpu_cores = 3;
+  int32 memory_mb = 4;
+  int32 storage_gb = 5;
+  string runner_image = 6;
+  string updated_at = 7;
+}
+
+// Partial update: only fields named in update_mask are applied.
+message SetRunnerDefaultsRequest {
+  int32 idle_grace_seconds = 1;
+  int32 min_alive_after_wake_seconds = 2;
+  double cpu_cores = 3;
+  int32 memory_mb = 4;
+  int32 storage_gb = 5;
+  string runner_image = 6;
+  repeated string update_mask = 7;
+}
+
+service RunnerDefaultsService {
+  rpc Get(Empty) returns (RunnerDefaults);   // seeded from settings when never set
+  rpc Set(SetRunnerDefaultsRequest) returns (RunnerDefaults);
+}

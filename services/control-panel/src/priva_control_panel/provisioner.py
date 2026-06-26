@@ -73,32 +73,36 @@ def ensure_tenant(account_id: str, username: str, *, runner_type: str | None = N
                   storage_gb: int | None = None) -> None:
     """Create the AgentTenant CR for a new account (idempotent).
 
-    The runner type + resource spec default to the cluster settings when omitted;
-    the approval path passes the user-requested values so the CR is born correct
-    (operator builds the right-sized pod, persistent scales to 1 in `ensure`)."""
+    Inheritable fields (image, resources, storageGb, idle) are written ONLY when an
+    explicit per-account value is passed — otherwise they are OMITTED so the field is
+    absent on the CR, which the operator reads as "inherit the global runner default"
+    (the admin Sandbox panel). A present field = a per-account override that wins and
+    stops following the default. The admin create-user path passes nothing (full
+    inherit); the self-registration approval path passes the user-requested specs
+    (= overrides)."""
     s = get_settings()
     ns = s.kubernetes.namespace_tenants
+    spec: dict = {
+        "accountId": account_id,
+        "username": username,
+        "desiredState": "active",
+        "agentRunnerType": runner_type or "auto_scale",
+        "concurrency": {"maxConcurrentSessions": s.kubernetes.max_concurrent_sessions},
+    }
+    res: dict = {}
+    if cpu is not None:
+        res["cpu"] = float(cpu)
+    if memory_mb is not None:
+        res["memoryMb"] = int(memory_mb)
+    if res:
+        spec["resources"] = res
+    if storage_gb is not None:
+        spec["storageGb"] = int(storage_gb)
     body = {
         "apiVersion": f"{GROUP}/{VERSION}",
         "kind": "AgentTenant",
         "metadata": {"name": account_id, "namespace": ns},
-        "spec": {
-            "accountId": account_id,
-            "username": username,
-            "desiredState": "active",
-            "image": s.kubernetes.runner_image,
-            "agentRunnerType": runner_type or "auto_scale",
-            "resources": {
-                "cpu": float(cpu if cpu is not None else s.kubernetes.runner_cpu_cores),
-                "memoryMb": int(memory_mb if memory_mb is not None else s.kubernetes.runner_memory_mb),
-            },
-            "storageGb": int(storage_gb if storage_gb is not None else s.kubernetes.runner_storage_gb),
-            "idle": {
-                "graceSeconds": s.kubernetes.idle_grace_seconds,
-                "minAliveAfterWakeSeconds": s.kubernetes.min_alive_after_wake_seconds,
-            },
-            "concurrency": {"maxConcurrentSessions": s.kubernetes.max_concurrent_sessions},
-        },
+        "spec": spec,
     }
     try:
         _custom().create_namespaced_custom_object(GROUP, VERSION, ns, PLURAL, body)
@@ -170,6 +174,30 @@ async def probe_health(pod_ip: str, port: int) -> dict | None:
     except Exception:
         return None
     return None
+
+
+def list_runner_images() -> list[str]:
+    """Agent-runner image tags present on the cluster nodes (the kubelet's image list,
+    ``Node.status.images``). This is the cross-environment way to discover what's
+    actually pullable WITHOUT a registry API — dev (minikube) has no registry, and prod's
+    is customer-provided with no stored creds. Digest-only refs (``repo@sha256:…``) are
+    dropped; only human ``repo:tag`` refs mentioning agent-runner are kept. Best-effort:
+    returns [] on any error (incl. missing nodes RBAC). Blocking kube call — invoke via
+    ``asyncio.to_thread``. (Prod enhancement: union with the registry v2 tags/list API.)
+    """
+    _load()
+    try:
+        resp = _core().list_node()
+    except Exception as exc:
+        logger.debug("list_runner_images: list_node failed: {}", exc)
+        return []
+    tags: set[str] = set()
+    for node in resp.items:
+        for img in (node.status.images or []):
+            for ref in (img.names or []):
+                if "agent-runner" in ref and "@sha256" not in ref:
+                    tags.add(ref)
+    return sorted(tags)
 
 
 def list_gateway_pod_ips() -> list[str]:

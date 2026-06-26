@@ -117,6 +117,13 @@ class Repository(ABC):
     def resource_spec_upsert(self, account_id: str, fields: dict) -> dict: ...
     @abstractmethod
     def resource_spec_list(self) -> list[dict]: ...
+    # runner_defaults (single row, id=1)
+    @abstractmethod
+    def runner_defaults_get(self) -> dict | None: ...
+    @abstractmethod
+    def runner_defaults_seed(self, values: dict) -> dict: ...
+    @abstractmethod
+    def runner_defaults_upsert(self, fields: dict) -> dict: ...
     # pending_registration
     @abstractmethod
     def pending_insert(self, row: dict) -> None: ...
@@ -432,6 +439,37 @@ class SqliteRepo(Repository):
 
     def resource_spec_list(self):
         return self._all("SELECT * FROM account_resource_spec ORDER BY account_id")
+
+    # runner_defaults (single row id=1) --------------------------------------
+    _RDEFAULTS_COLS = ("idle_grace_seconds", "min_alive_after_wake_seconds",
+                       "cpu_cores", "memory_mb", "storage_gb", "runner_image")
+
+    def runner_defaults_get(self):
+        return self._one("SELECT * FROM runner_defaults WHERE id = 1")
+
+    def runner_defaults_seed(self, values):
+        # Insert the single row from the supplied seed iff it doesn't exist yet.
+        cols = list(self._RDEFAULTS_COLS)
+        ph = ", ".join("?" for _ in cols)
+        self._write(
+            f"INSERT OR IGNORE INTO runner_defaults (id, {', '.join(cols)}) "
+            f"VALUES (1, {ph})",
+            tuple(values[c] for c in cols),
+        )
+        return self.runner_defaults_get()
+
+    def runner_defaults_upsert(self, fields):
+        # Update only the named columns of the seeded row (callers seed first).
+        cols = [c for c in self._RDEFAULTS_COLS if c in fields]
+        if not cols:
+            return self.runner_defaults_get()
+        sets = ", ".join(f"{c} = ?" for c in cols)
+        self._write(
+            f"UPDATE runner_defaults SET {sets}, "
+            f"updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = 1",
+            tuple(fields[c] for c in cols),
+        )
+        return self.runner_defaults_get()
 
     # pending_registration ---------------------------------------------------
     _PENDING_COLS = ("request_id", "username", "password_hash", "display_name", "runner_type",

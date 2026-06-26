@@ -21,6 +21,7 @@ from priva_common.dataplane import (
     PendingRegistrationRecord,
     QuotaRecord,
     ResourceSpecRecord,
+    RunnerDefaultsRecord,
     RunPage,
     SecretRecord,
     UNSET,
@@ -513,6 +514,67 @@ class ResourceSpecService:
         return [self._to_record(r) for r in self.repo.resource_spec_list()]
 
 
+# --- RunnerDefaults ---------------------------------------------------------
+
+class RunnerDefaultsService:
+    """Platform-wide GLOBAL defaults for per-account agent-runner pods. A single
+    row, seeded from the cluster settings (`KubernetesSettings`) on first access
+    so a fresh DB reports the same values the operator's env fallback would."""
+
+    def __init__(self, repo: Repository, settings):
+        self.repo = repo
+        self.settings = settings
+
+    def _seed_values(self) -> dict:
+        k = self.settings.kubernetes
+        return {
+            "idle_grace_seconds": int(k.idle_grace_seconds),
+            "min_alive_after_wake_seconds": int(k.min_alive_after_wake_seconds),
+            "cpu_cores": float(k.runner_cpu_cores),
+            "memory_mb": int(k.runner_memory_mb),
+            "storage_gb": int(k.runner_storage_gb),
+            "runner_image": str(k.runner_image),
+        }
+
+    @staticmethod
+    def _to_record(row: dict) -> RunnerDefaultsRecord:
+        return RunnerDefaultsRecord(
+            idle_grace_seconds=int(row["idle_grace_seconds"]),
+            min_alive_after_wake_seconds=int(row["min_alive_after_wake_seconds"]),
+            cpu_cores=float(row["cpu_cores"]),
+            memory_mb=int(row["memory_mb"]),
+            storage_gb=int(row["storage_gb"]),
+            runner_image=row["runner_image"],
+            updated_at=row.get("updated_at"),
+        )
+
+    def get(self) -> RunnerDefaultsRecord:
+        row = self.repo.runner_defaults_get()
+        if row is None:
+            row = self.repo.runner_defaults_seed(self._seed_values())
+        return self._to_record(row)
+
+    def set(self, *, idle_grace_seconds=None, min_alive_after_wake_seconds=None,
+            cpu_cores=None, memory_mb=None, storage_gb=None,
+            runner_image=None) -> RunnerDefaultsRecord:
+        if self.repo.runner_defaults_get() is None:  # ensure the single row exists
+            self.repo.runner_defaults_seed(self._seed_values())
+        fields: dict = {}
+        if idle_grace_seconds is not None:
+            fields["idle_grace_seconds"] = int(idle_grace_seconds)
+        if min_alive_after_wake_seconds is not None:
+            fields["min_alive_after_wake_seconds"] = int(min_alive_after_wake_seconds)
+        if cpu_cores is not None:
+            fields["cpu_cores"] = float(cpu_cores)
+        if memory_mb is not None:
+            fields["memory_mb"] = int(memory_mb)
+        if storage_gb is not None:
+            fields["storage_gb"] = int(storage_gb)
+        if runner_image is not None:
+            fields["runner_image"] = str(runner_image)
+        return self._to_record(self.repo.runner_defaults_upsert(fields))
+
+
 # --- Registration ----------------------------------------------------------
 
 class RegistrationService:
@@ -591,6 +653,7 @@ def build_inprocess_client(repo: Repository, settings) -> DataplaneClient:
         admin=AdminService(repo),
         secrets=SecretService(repo),
         resource_specs=ResourceSpecService(repo),
+        runner_defaults=RunnerDefaultsService(repo, settings),
         registrations=RegistrationService(repo),
     )
 

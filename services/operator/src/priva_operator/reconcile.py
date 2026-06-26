@@ -34,15 +34,27 @@ def _is_persistent(spec) -> bool:
     return _runner_type(spec) == "persistent"
 
 
+def _runner_defaults():
+    """Global runner defaults from data-spine (the admin Sandbox panel). Fail-soft:
+    any error (data-spine blip) returns None so the resolvers fall back to the env
+    seed — a transient outage must never crash reconcile or mis-size a pod."""
+    try:
+        from priva_common.dataplane import get_client
+        return get_client().runner_defaults.get()
+    except Exception:
+        return None
+
+
 @kopf.on.create(GROUP, VERSION, PLURAL)
 @kopf.on.resume(GROUP, VERSION, PLURAL)
 def ensure(spec, name, namespace, uid, status, patch, logger, **_):
     s = get_settings()
     account_id, username = _ids(spec, name)
-    image = spec.get("image") or s.kubernetes.runner_image
+    defaults = _runner_defaults()
+    image = kube.resolve_image(spec, s, defaults)
     owner = names.owner_ref(name, uid)
     kube.ensure_runtime_objects(
-        namespace, account_id, username, image, s.kubernetes.runner_image_pull_policy, s, owner, spec)
+        namespace, account_id, username, image, s.kubernetes.runner_image_pull_policy, s, owner, spec, defaults)
 
     replicas = kube.get_replicas(namespace, account_id)
 
@@ -51,6 +63,10 @@ def ensure(spec, name, namespace, uid, status, patch, logger, **_):
     # Guard on desiredState so an offboarding/purge account is never force-woken.
     if _is_persistent(spec) and spec.get("desiredState", "active") == "active":
         if replicas != 1:
+            # About to scale up — refresh the template to the current effective config
+            # while at 0 (free; the running-pod case below is left untouched).
+            kube.patch_deployment_runtime(
+                namespace, account_id, kube.resolve_resources(spec, s, defaults), image)
             # Materialize creds first so the pod is request-ready the moment it's Running.
             secrets.materialize(namespace, account_id, owner)
             kube.scale(namespace, account_id, 1)
@@ -100,6 +116,13 @@ def on_wake(spec, name, namespace, uid, status, patch, logger, **_):
         logger.info("wake resolved (already scaled to 1) account=%s pod=%s", account_id, pod_ip)
         return
 
+    # Cold scale-up: refresh the Deployment template to the current effective config
+    # (CR override > global default > env seed) while at replicas 0, so this wake picks
+    # up any default change without ever restarting a running pod.
+    defaults = _runner_defaults()
+    kube.patch_deployment_runtime(
+        namespace, account_id, kube.resolve_resources(spec, s, defaults),
+        kube.resolve_image(spec, s, defaults))
     n = secrets.materialize(namespace, account_id, owner)
     kube.scale(namespace, account_id, 1)
     patch.status["phase"] = "Waking"
@@ -125,6 +148,23 @@ def reconcile_runtime(spec, name, namespace, status, patch, logger, **_):
     s = get_settings()
     account_id, _ = _ids(spec, name)
     replicas = kube.get_replicas(namespace, account_id)
+    defaults = _runner_defaults()  # one fetch per tick; reused below
+
+    # --- volume-quota reconcile (restart-free) ---------------------------------------
+    # Converge the per-account quota to the effective value (CR override > global default
+    # > env seed) so a global storage-default change propagates to inherited accounts
+    # WITHOUT a wake. Guard on status.storageGb so the quota-manager is called only on
+    # drift, not every 10s tick. Runs even when scaled to zero (the quota outlives the pod).
+    desired_gb = kube.resolve_storage_gb(spec, s, defaults)
+    if int(status.get("storageGb") or 0) != desired_gb:
+        try:
+            storage_backend.get_backend(s).set_quota(account_id, desired_gb)
+            patch.status["storageGb"] = desired_gb
+            patch.status["storageWarning"] = None
+            logger.info("reconciled volume quota account=%s -> %dGi", account_id, desired_gb)
+        except Exception as exc:  # backend blip — surface, don't crash the tick
+            patch.status["storageWarning"] = f"quota reconcile failed: {exc}"
+            logger.warning("quota reconcile failed account=%s: %s", account_id, exc)
 
     # --- #7: GC the plaintext creds Secret when the runtime is scaled down -----------
     # Reconcile Secret existence against replicas==0, NOT podIP=None: on a *replacement*
@@ -172,9 +212,19 @@ def reconcile_runtime(spec, name, namespace, status, patch, logger, **_):
     started_at = status.get("startedAt")
     if not started_at:
         return
+    # Inherit cascade: CR spec.idle.* (override) > global default > env seed. Read live
+    # each tick (`defaults` fetched at the top), so a default change takes effect on the
+    # next sweep with NO pod restart.
     idle_cfg = spec.get("idle") or {}
-    grace = int(idle_cfg.get("graceSeconds", s.kubernetes.idle_grace_seconds))
-    min_alive = int(idle_cfg.get("minAliveAfterWakeSeconds", s.kubernetes.min_alive_after_wake_seconds))
+    grace = idle_cfg.get("graceSeconds")
+    if grace is None:
+        grace = defaults.idle_grace_seconds if defaults else s.kubernetes.idle_grace_seconds
+    grace = int(grace)
+    min_alive = idle_cfg.get("minAliveAfterWakeSeconds")
+    if min_alive is None:
+        min_alive = (defaults.min_alive_after_wake_seconds if defaults
+                     else s.kubernetes.min_alive_after_wake_seconds)
+    min_alive = int(min_alive)
     now = time.time()
     if now - float(started_at) < min_alive:
         return
@@ -234,12 +284,20 @@ def on_resources_change(spec, name, namespace, old, new, logger, **_):
         return
     s = get_settings()
     account_id, _ = _ids(spec, name)
-    resources = kube.resolve_resources(spec, s)
-    # Patch the template always: dormant at replicas 0 (applies on next wake), or a
-    # Recreate restart with the new requests/limits when the pod is running.
+    # "Apply on next restart": resources need a pod (re)start, so DON'T patch a running
+    # pod (strategy=Recreate would force-restart it). Patch only when dormant (replicas
+    # 0) — the change applies cleanly on the next wake; a running pod picks it up via
+    # on_wake's pre-scale refresh after it next sleeps/restarts. Resolving with defaults
+    # so an override cleared back to inherit re-resolves correctly.
+    replicas = kube.get_replicas(namespace, account_id)
+    if replicas != 0:
+        logger.info("resources change deferred (replicas=%s, applies on next restart) account=%s",
+                    replicas, account_id)
+        return
+    resources = kube.resolve_resources(spec, s, _runner_defaults())
     try:
         kube.patch_deployment_resources(namespace, account_id, resources)
-        logger.info("resources updated account=%s -> %s", account_id, resources)
+        logger.info("resources updated (dormant) account=%s -> %s", account_id, resources)
     except kube.client.ApiException as exc:
         if exc.status == 404:
             logger.warning("resources change but no Deployment yet account=%s", account_id)
@@ -251,6 +309,10 @@ def on_resources_change(spec, name, namespace, old, new, logger, **_):
 def on_storage_change(spec, name, namespace, old, new, patch, logger, **_):
     if old is None:
         return
+    if new is None:
+        # Override cleared (field removed) — back to inherit. Re-resolve from the cascade
+        # now; the periodic reconcile would also converge it on the next tick.
+        new = kube.resolve_storage_gb(spec, get_settings(), _runner_defaults())
     s = get_settings()
     account_id, _ = _ids(spec, name)
     desired = int(new)

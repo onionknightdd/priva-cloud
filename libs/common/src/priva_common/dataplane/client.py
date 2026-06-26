@@ -27,6 +27,7 @@ __all__ = [
     "RunPage",
     "SecretRecord",
     "ResourceSpecRecord",
+    "RunnerDefaultsRecord",
     "PendingRegistrationRecord",
     "AccountClient",
     "BindingClient",
@@ -35,6 +36,7 @@ __all__ = [
     "AdminClient",
     "SecretClient",
     "ResourceSpecClient",
+    "RunnerDefaultsClient",
     "RegistrationClient",
     "DataplaneClient",
 ]
@@ -81,6 +83,18 @@ class ResourceSpecRecord(BaseModel):
     cpu_cores: float = 1.0
     memory_mb: int = 2048
     volume_gb: int = 1
+    updated_at: str | None = None
+
+
+class RunnerDefaultsRecord(BaseModel):
+    """Platform-wide global defaults for per-account agent-runner pods. Always a
+    complete set (seeded from settings) — an account's CR overrides win per-field."""
+    idle_grace_seconds: int = 1800
+    min_alive_after_wake_seconds: int = 1800
+    cpu_cores: float = 1.0
+    memory_mb: int = 2048
+    storage_gb: int = 1
+    runner_image: str = "priva/agent-runner:dev"
     updated_at: str | None = None
 
 
@@ -206,6 +220,20 @@ class ResourceSpecClient(Protocol):
     def list(self) -> list[ResourceSpecRecord]: ...
 
 
+class RunnerDefaultsClient(Protocol):
+    def get(self) -> RunnerDefaultsRecord: ...  # seeded from settings when never set
+    def set(
+        self,
+        *,
+        idle_grace_seconds: int | None = None,
+        min_alive_after_wake_seconds: int | None = None,
+        cpu_cores: float | None = None,
+        memory_mb: int | None = None,
+        storage_gb: int | None = None,
+        runner_image: str | None = None,
+    ) -> RunnerDefaultsRecord: ...
+
+
 class RegistrationClient(Protocol):
     def create(
         self,
@@ -236,4 +264,5 @@ class DataplaneClient:
     admin: AdminClient
     secrets: SecretClient
     resource_specs: ResourceSpecClient
+    runner_defaults: RunnerDefaultsClient
     registrations: RegistrationClient

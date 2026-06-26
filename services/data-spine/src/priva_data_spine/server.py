@@ -30,6 +30,8 @@ from priva_common.dataplane.v1 import (
     registration_pb2_grpc,
     resource_spec_pb2,
     resource_spec_pb2_grpc,
+    runner_defaults_pb2,
+    runner_defaults_pb2_grpc,
     secret_pb2,
     secret_pb2_grpc,
 )
@@ -108,6 +110,18 @@ def _rspec_pb(r) -> resource_spec_pb2.ResourceSpec:
         cpu_cores=r.cpu_cores,
         memory_mb=r.memory_mb,
         volume_gb=r.volume_gb,
+        updated_at=r.updated_at or "",
+    )
+
+
+def _rdefaults_pb(r) -> runner_defaults_pb2.RunnerDefaults:
+    return runner_defaults_pb2.RunnerDefaults(
+        idle_grace_seconds=r.idle_grace_seconds,
+        min_alive_after_wake_seconds=r.min_alive_after_wake_seconds,
+        cpu_cores=r.cpu_cores,
+        memory_mb=r.memory_mb,
+        storage_gb=r.storage_gb,
+        runner_image=r.runner_image,
         updated_at=r.updated_at or "",
     )
 
@@ -293,6 +307,31 @@ class _ResourceSpecServicer(resource_spec_pb2_grpc.ResourceSpecServiceServicer):
         return resource_spec_pb2.ResourceSpecList(specs=[_rspec_pb(r) for r in self.svc.list()])
 
 
+class _RunnerDefaultsServicer(runner_defaults_pb2_grpc.RunnerDefaultsServiceServicer):
+    def __init__(self, svc):
+        self.svc = svc
+
+    def Get(self, request, context):
+        return _rdefaults_pb(self.svc.get())
+
+    def Set(self, request, context):
+        mask = set(request.update_mask)
+        kw = {}
+        if "idle_grace_seconds" in mask:
+            kw["idle_grace_seconds"] = request.idle_grace_seconds
+        if "min_alive_after_wake_seconds" in mask:
+            kw["min_alive_after_wake_seconds"] = request.min_alive_after_wake_seconds
+        if "cpu_cores" in mask:
+            kw["cpu_cores"] = request.cpu_cores
+        if "memory_mb" in mask:
+            kw["memory_mb"] = request.memory_mb
+        if "storage_gb" in mask:
+            kw["storage_gb"] = request.storage_gb
+        if "runner_image" in mask:
+            kw["runner_image"] = request.runner_image
+        return _rdefaults_pb(self.svc.set(**kw))
+
+
 class _RegistrationServicer(registration_pb2_grpc.RegistrationServiceServicer):
     def __init__(self, svc):
         self.svc = svc
@@ -331,6 +370,8 @@ def build_server(settings, max_workers: int = 16) -> grpc.Server:
     secret_pb2_grpc.add_SecretServiceServicer_to_server(_SecretServicer(client.secrets), server)
     resource_spec_pb2_grpc.add_ResourceSpecServiceServicer_to_server(
         _ResourceSpecServicer(client.resource_specs), server)
+    runner_defaults_pb2_grpc.add_RunnerDefaultsServiceServicer_to_server(
+        _RunnerDefaultsServicer(client.runner_defaults), server)
     registration_pb2_grpc.add_RegistrationServiceServicer_to_server(
         _RegistrationServicer(client.registrations), server)
     return server
