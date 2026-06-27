@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Server, Activity, ArrowRightLeft } from 'lucide-react'
+import { Server, Activity, ArrowRightLeft, RotateCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Dropdown from '@shared/components/shared/Dropdown'
+import useUiStore from '@shared/stores/uiStore'
 import useAdminStore from '../../stores/adminStore'
 import LiveToggleButton from './LiveToggleButton'
 
@@ -231,6 +232,8 @@ export default function FleetView() {
   const fleetRefreshing = useAdminStore((s) => s.fleetRefreshing)
   const fleetError = useAdminStore((s) => s.fleetError)
   const fetchFleet = useAdminStore((s) => s.fetchFleet)
+  const restartAccountPod = useAdminStore((s) => s.restartAccountPod)
+  const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
   const gateway = useAdminStore((s) => s.gateway)
   const gatewayBuffer = useAdminStore((s) => s.gatewayBuffer)
   const gatewayWindowSec = useAdminStore((s) => s.gatewayWindowSec)
@@ -274,6 +277,22 @@ export default function FleetView() {
         fetchGateway()
       }
       return next
+    })
+  }
+
+  const handleRestart = (a) => {
+    showConfirmDialog({
+      title: t('admin.restartPodTitle'),
+      message: t('admin.restartPodMessage', { name: a.username || a.account_id }),
+      confirmLabel: t('admin.restartPodConfirm'),
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await restartAccountPod(a.account_id)
+        } catch (e) {
+          console.error(e)
+        }
+      },
     })
   }
 
@@ -332,6 +351,7 @@ export default function FleetView() {
             <span style={{ width: 80, flexShrink: 0 }}>{t('admin.state')}</span>
             <span style={{ width: 88, flexShrink: 0, textAlign: 'right' }}>{t('admin.runs')}</span>
             <span style={{ width: 96, flexShrink: 0, textAlign: 'right' }}>{t('admin.lastActivity')}</span>
+            <span style={{ width: 36, flexShrink: 0 }} />
           </div>
 
           {initialLoad ? (
@@ -379,6 +399,17 @@ export default function FleetView() {
                   <span className="text-xs font-light" style={{ width: 96, flexShrink: 0, textAlign: 'right', color: 'var(--text-dim)' }}>
                     {relTime(a.last_activity_ts, t)}
                   </span>
+                  <button
+                    className="flex items-center justify-center flex-shrink-0"
+                    style={{ width: 36, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 4, transition: 'color 150ms ease' }}
+                    onClick={() => handleRestart(a)}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+                    title={t('admin.restartPodTitle')}
+                    aria-label={t('admin.restartPodTitle')}
+                  >
+                    <RotateCw size={14} strokeWidth={1.5} />
+                  </button>
                 </div>
               )
             })

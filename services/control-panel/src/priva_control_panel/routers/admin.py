@@ -595,6 +595,30 @@ async def get_fleet():
     )
 
 
+@router.post("/accounts/{account_id}/restart-pod")
+async def restart_account_pod(
+    account_id: str,
+    current_user: UserRecord = Depends(require_admin),
+):
+    """Admin: force-restart an account's agent-runner pod by deleting it — the
+    Deployment's ReplicaSet recreates one at once. Replica count is untouched, so
+    the operator (sole scaler) is not fought. No-op if the runner is asleep."""
+    from ..provisioner import force_restart_pod
+
+    try:
+        deleted = await asyncio.to_thread(force_restart_pod, account_id)
+    except Exception as exc:
+        raise HTTPException(500, f"Force restart failed: {exc}") from exc
+
+    get_audit_logger().append(AuditEntry(
+        actor=current_user.username,
+        action="runner.force_restarted",
+        target=account_id,
+        details={"pods_deleted": deleted},
+    ))
+    return {"status": "ok", "pods_deleted": deleted}
+
+
 @router.get("/gateway-metrics", response_model=GatewayMetricsResponse)
 async def get_gateway_metrics():
     """Live agentgateway HTTP traffic snapshot. See ``_gateway_snapshot``."""

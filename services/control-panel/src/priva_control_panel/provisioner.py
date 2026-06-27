@@ -521,3 +521,31 @@ def terminate(account_id: str) -> None:
     except client.ApiException as exc:
         if exc.status != 404:
             raise
+
+
+def force_restart_pod(account_id: str) -> int:
+    """Admin: force-restart the account's runner by deleting its running pod(s);
+    the Deployment's ReplicaSet recreates one at once. Replica count is untouched,
+    so this never fights the operator (the sole scaler). No-op (returns 0) when the
+    runner is scaled to zero — there is no pod to restart. Returns the number of
+    pods deleted."""
+    s = get_settings()
+    ns = s.kubernetes.namespace_tenants
+    try:
+        pods = _core().list_namespaced_pod(
+            ns, label_selector=f"priva.io/account-id={account_id}")
+    except client.ApiException as exc:
+        if exc.status == 404:
+            return 0
+        raise
+    deleted = 0
+    for pod in pods.items:
+        if pod.metadata.deletion_timestamp is not None:
+            continue  # already terminating
+        try:
+            _core().delete_namespaced_pod(pod.metadata.name, ns)
+            deleted += 1
+        except client.ApiException as exc:
+            if exc.status != 404:
+                raise
+    return deleted

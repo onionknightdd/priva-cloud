@@ -20,7 +20,8 @@ rules:
     verbs: ["get", "patch"]
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list"]
+    # delete: admin force-restart of an account's agent-runner pod (ReplicaSet recreates it)
+    verbs: ["get", "list", "delete"]
   # Admin control-plane web terminal: exec a shell into control-plane pods
   # (control-panel / operator / data-spine) via the k8s API. Admin-gated, audited.
   - apiGroups: [""]

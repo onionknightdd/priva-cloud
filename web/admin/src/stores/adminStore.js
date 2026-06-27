@@ -74,6 +74,12 @@ const useAdminStore = create((set, get) => ({
     }
   },
 
+  // Force-restart an account's agent-runner pod, then refresh the fleet snapshot.
+  restartAccountPod: async (accountId) => {
+    await adminApi.restartAccountPod(accountId)
+    await get().fetchFleet()
+  },
+
   // Resource Quota (agent-runtime live usage vs allocated, polled). Same skeleton-on-
   // first-load + background-refresh shape as the fleet snapshot.
   resourceUsage: null,
