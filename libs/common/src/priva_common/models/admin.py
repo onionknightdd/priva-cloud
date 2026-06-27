@@ -22,21 +22,6 @@ class AuditLogResponse(BaseModel):
     limit: int
 
 
-class UserStatsEntry(BaseModel):
-    username: str
-    role: str
-    session_count: int
-    storage_bytes: int
-    last_active: datetime | None = None
-
-
-class AdminStatsResponse(BaseModel):
-    total_users: int
-    total_sessions: int
-    total_storage_bytes: int
-    users: list[UserStatsEntry]
-
-
 class FleetAccountEntry(BaseModel):
     """One account's live agent-runner state, as seen by the control plane."""
     account_id: str

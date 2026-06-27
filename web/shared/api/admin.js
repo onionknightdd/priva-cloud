@@ -9,7 +9,6 @@ export const getPendingRegistrations = () => getJSON('/admin/pending-registratio
 export const approvePendingUser = (requestId) => postJSON(`/admin/pending-registrations/${encodeURIComponent(requestId)}/approve`)
 export const rejectPendingUser = (requestId) => postJSON(`/admin/pending-registrations/${encodeURIComponent(requestId)}/reject`)
 
-export const getAdminStats = () => getJSON('/admin/stats')
 export const getFleet = () => getJSON('/admin/fleet')
 export const getGatewayMetrics = () => getJSON('/admin/gateway-metrics')
 export const getResourceUsage = () => getJSON('/admin/resource-usage')
@@ -27,15 +26,6 @@ export const getAuditLog = (params = {}) => {
   if (params.session_id) query.set('session_id', params.session_id)
   return getJSON(`/admin/audit?${query}`)
 }
-
-export const getUserSkills = (username) => getJSON(`/admin/users/${encodeURIComponent(username)}/skills`)
-export const deleteUserSkill = (username, level, name) => deleteJSON(`/admin/users/${encodeURIComponent(username)}/skills/${encodeURIComponent(level)}/${encodeURIComponent(name)}`)
-
-export const getUserMcpServers = (username) => getJSON(`/admin/users/${encodeURIComponent(username)}/mcp`)
-export const deleteUserMcpServer = (username, level, name) => deleteJSON(`/admin/users/${encodeURIComponent(username)}/mcp/${encodeURIComponent(level)}/${encodeURIComponent(name)}`)
-
-export const getUserSchedulerJobs = (username) => getJSON(`/admin/users/${encodeURIComponent(username)}/scheduler/jobs`)
-export const getUserActiveHooks = (username) => getJSON(`/admin/users/${encodeURIComponent(username)}/hooks/active`)
 
 export const getPresetPrompt = () => getJSON('/admin/presetprompt')
 export const updatePresetPrompt = (data) => putJSON('/admin/presetprompt', data)

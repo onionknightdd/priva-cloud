@@ -7,9 +7,6 @@ import * as adminApi from '@shared/api/admin'
 const GATEWAY_MAX_WINDOW_SEC = 900
 
 const useAdminStore = create((set, get) => ({
-  activeSection: 'users',
-  setActiveSection: (section) => set({ activeSection: section }),
-
   // User management
   users: [],
   usersLoading: true,
@@ -53,119 +50,11 @@ const useAdminStore = create((set, get) => ({
     await get().fetchPendingUsers()
   },
 
-  // User inspection (tab viewer)
-  inspectedUser: null,
-  inspectedTab: 'skills',
-  inspectedUserSkills: [],
-  inspectedUserSkillsLoading: false,
-  inspectedUserMcpServers: [],
-  inspectedUserMcpLoading: false,
-  inspectedUserSchedulerJobs: [],
-  inspectedUserSchedulerLoading: false,
-  inspectedUserHooks: { builtins: [], custom: [] },
-  inspectedUserHooksLoading: false,
-
-  setInspectedUser: (username) => {
-    set({ inspectedUser: username })
-    if (username) {
-      get().fetchInspectedUserSkills(username)
-      get().fetchInspectedUserMcpServers(username)
-      get().fetchInspectedUserSchedulerJobs(username)
-      get().fetchInspectedUserHooks(username)
-    }
-  },
-
-  setInspectedTab: (tab) => set({ inspectedTab: tab }),
-
-  fetchInspectedUserSkills: async (username) => {
-    set({ inspectedUserSkillsLoading: true })
-    try {
-      const data = await adminApi.getUserSkills(username)
-      set({ inspectedUserSkills: data.skills, inspectedUserSkillsLoading: false })
-    } catch {
-      set({ inspectedUserSkills: [], inspectedUserSkillsLoading: false })
-    }
-  },
-
-  deleteInspectedUserSkill: async (username, level, name) => {
-    try {
-      await adminApi.deleteUserSkill(username, level, name)
-      get().fetchInspectedUserSkills(username)
-    } catch (e) {
-      console.error('Failed to delete skill:', e)
-    }
-  },
-
-  fetchInspectedUserMcpServers: async (username) => {
-    set({ inspectedUserMcpLoading: true })
-    try {
-      const data = await adminApi.getUserMcpServers(username)
-      set({ inspectedUserMcpServers: data.servers, inspectedUserMcpLoading: false })
-    } catch {
-      set({ inspectedUserMcpServers: [], inspectedUserMcpLoading: false })
-    }
-  },
-
-  deleteInspectedUserMcpServer: async (username, level, name) => {
-    try {
-      await adminApi.deleteUserMcpServer(username, level, name)
-      get().fetchInspectedUserMcpServers(username)
-    } catch (e) {
-      console.error('Failed to delete MCP server:', e)
-    }
-  },
-
-  fetchInspectedUserSchedulerJobs: async (username) => {
-    set({ inspectedUserSchedulerLoading: true })
-    try {
-      const data = await adminApi.getUserSchedulerJobs(username)
-      set({
-        inspectedUserSchedulerJobs: data.jobs || [],
-        inspectedUserSchedulerLoading: false,
-      })
-    } catch {
-      set({ inspectedUserSchedulerJobs: [], inspectedUserSchedulerLoading: false })
-    }
-  },
-
-  fetchInspectedUserHooks: async (username) => {
-    set({ inspectedUserHooksLoading: true })
-    try {
-      const data = await adminApi.getUserActiveHooks(username)
-      set({
-        inspectedUserHooks: {
-          builtins: data.builtins || [],
-          custom: data.custom || [],
-        },
-        inspectedUserHooksLoading: false,
-      })
-    } catch {
-      set({
-        inspectedUserHooks: { builtins: [], custom: [] },
-        inspectedUserHooksLoading: false,
-      })
-    }
-  },
-
   // Resizable edit drawer
   drawerWidth: safeStorage.getNumber('admin-drawer-width', 420, { min: 320, max: typeof window !== 'undefined' ? Math.round(window.innerWidth * 0.6) : 420 }),
   setDrawerWidth: (width) => {
     safeStorage.setItem('admin-drawer-width', String(width))
     set({ drawerWidth: width })
-  },
-
-  // Stats
-  stats: null,
-  statsLoading: true,
-
-  fetchStats: async () => {
-    set({ statsLoading: true })
-    try {
-      const stats = await adminApi.getAdminStats()
-      set({ stats, statsLoading: false })
-    } catch {
-      set({ statsLoading: false })
-    }
   },
 
   // Fleet (live agent-runner snapshot, polled). Skeleton only on the first load;
@@ -374,15 +263,9 @@ const useAdminStore = create((set, get) => ({
   },
 
   reset: () => set({
-    activeSection: 'users', users: [], usersLoading: true,
+    users: [], usersLoading: true,
     selectedUser: null, drawerOpen: false,
     pendingUsers: [], pendingUsersLoading: true,
-    inspectedUser: null, inspectedTab: 'skills',
-    inspectedUserSkills: [], inspectedUserSkillsLoading: false,
-    inspectedUserMcpServers: [], inspectedUserMcpLoading: false,
-    inspectedUserSchedulerJobs: [], inspectedUserSchedulerLoading: false,
-    inspectedUserHooks: { builtins: [], custom: [] }, inspectedUserHooksLoading: false,
-    stats: null, statsLoading: true,
     fleet: null, fleetLoading: true, fleetRefreshing: false, fleetError: false,
     systemHealth: null, systemHealthLoading: true, systemHealthRefreshing: false, systemHealthError: false,
     gateway: null, gatewayLoading: true, gatewayBuffer: [],

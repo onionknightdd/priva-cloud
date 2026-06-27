@@ -458,4 +458,61 @@ Config resolves from `priva_common.config.Settings` (pydantic; prefix `PRIVA_`, 
 
 ---
 
+## Appendix B — Admin UI surface: as-built status & remaining (2026-06-26)
+
+Cross-references the locked **§6.1 sidebar taxonomy** against the shipped admin SPA (`web/admin/src/`) and admin API (`services/control-panel/src/priva_control_panel/routers/admin.py`). Appendix A remains the as-built **code-map** authority; this appendix is the authority for **which §6 dashboard surfaces actually exist** and what remains.
+
+### B.1 As-built admin sidebar
+
+The shipped SPA (`web/admin/src/AdminApp.jsx`) groups nav under **two top tabs** — *Dashboard* and *Configurations* — rather than the flat §6.1 list:
+
+- **Dashboard:** Fleet · Resource-Quota · System-Map · Console · Users · Audit
+- **Configurations:** Agent Runner Sandbox
+
+Resource-Quota, System-Map, and Console are **additions beyond §6.1** (live per-account resource view; animated topology + live health; control-plane exec console) — kept. **Agent Runner Sandbox** is the global runner-defaults editor (as-built 2026-06-25, §B.3): idle-grace / min-alive / CPU+memory+workspace quota / runner-image dropdown, edited as platform-wide defaults that every account inherits unless it carries a per-account CR override, applied lazily by the operator (no force-restart). Backed by the data-spine `runner_defaults` store + `/api/admin/runner-defaults` + `/runner-images`.
+
+### B.2 §6.1 taxonomy coverage
+
+| §6.1 section | State | Evidence / note |
+|---|---|---|
+| **Fleet** | ✅ built | `FleetView.jsx`; `/api/admin/fleet` (`admin.py` `_fleet_snapshot`) |
+| **Users** | ✅ built | `UserManagement.jsx`; `/users` CRUD + self-registration approval (`admin.py:157-492`) |
+| **Audit** | ✅ built | `AuditLog.jsx`; `/audit` cursor query (`admin.py:906`) |
+| **Settings** | ❌ **backend-only, no UI** | the six runtime-config endpoints exist and are audited — `/presetprompt`, `/clipath`, `/history-retention`, `/retryable-tools`, `/risky-tools`, `/sensitive-patterns` (`admin.py:1025-1241`) — but have **no admin UI**. They were wired in a prior admin build (still present in stale `web/admin/dist/*` bundles) and **dropped in the 3-project SPA split**; only `sandbox` survives in the Configurations tab. Highest-ROI pickup: **zero backend work**. |
+| **Policies** | ❌ **not built** | agentgateway CRD view/edit — routes / JWT / guardrails+PII / MCP tool-scope / rate-limits (§7.6). No API, no UI. |
+| **Budgets** | ⚠️ **deferred (M6) + token view unbuilt** | `$`/ledger/metering correctly dropped (M6, §8). The residual **display-only pod-self-reported token usage** (§7.3 / §9) is not built — there is no Prometheus client or token sink yet. |
+| **Sessions** | ⛔ **blocked** | cross-user wake-free session/transcript browser (§7.5) needs the **state-reader**, still deferred (Phase 5; renders as a *disabled* node in System-Map). |
+
+### B.3 Other §6 surfaces
+
+- **Landing live-activity strip (§6 layout).** Fleet shows the run/idle/zero counts but **not** the live event feed (`14:02 alice wake(login) · bob 429 · scale 0→1`). Recommend a **pod-events / lifecycle feed** (k8s Events: ImagePullBackOff / OOMKilled / CrashLoop + an audit tail) — directly matches the failure modes seen in the minikube slice (image-GC → ImagePullBackOff on wake), which are currently invisible until `kubectl` by hand.
+- **Dangerous-ops (§6.2 / §7.4).** `admin.py` exposes **no** terminate / wake / stop-turn / offboard / **impersonate** endpoint. `provisioner.terminate` (`provisioner.py:514`) and `wake_and_wait` (`:477`) exist but the latter is brain-only and neither is surfaced to admins. The entire §6.2 confirm-dialog dangerous-ops table is **unbuilt** on the admin side.
+- **Observability source (§9).** The dashboard scrapes the gateway `/metrics` pod endpoint **point-in-time** (`_gateway_snapshot`) and metrics-server for live CPU/mem — there is **no Prometheus/OTLP client**, so no time-series, trends, or token usage. §9's Prometheus client + token sink remain unbuilt.
+
+### B.4 Remaining work — priority
+
+1. **Settings panels** — re-wire the six orphaned config endpoints into the Configurations tab (same pattern as the Sandbox panel). Backend complete; pure UI.
+2. **Live-activity / pod-events feed** — the §6 landing strip; surfaces the real lifecycle/failure modes.
+3. **Pod-lifecycle dangerous-ops** — small admin-API addition (terminate / wake / offboard) + confirm-dialog UI; the provisioner half already exists.
+4. **Policies panel** — largest new build (agentgateway CRD read/write); defer unless edge-config-in-app is wanted now.
+5. **Budgets token-usage view + Prometheus client** — couples to pod token self-report (§9) when it lands.
+
+Correctly **not** remaining (deliberately deferred — do not build): Budgets `$`/ledger/metering-proxy (M6); scheduler + channel-connector (Phase 4); state-reader and therefore Sessions (Phase 5). The former 503 stubs for these were **removed** in the B.5 cleanup — they will be re-added as real endpoints when their phase lands.
+
+### B.5 De-history cleanup (2026-06-26)
+
+A dead-code / legacy-reference sweep of the module (backend `services/control-panel/` + admin SPA `web/admin/src/`), verified by a multi-agent scan with repo-wide confirmation. Removed:
+
+- **Per-user inspect feature (dead-on-arrival).** The admin `UserInspectPanel` (Skills/MCP/Scheduler/Hooks tabs) and its six backing `admin.py` 503 stubs (`/users/{u}/skills` GET+DELETE, `/users/{u}/mcp` GET+DELETE, `/users/{u}/scheduler/jobs`, `/users/{u}/hooks/active`), the `inspectedUser*` `adminStore` state/actions, the six admin-only API fns in `web/shared/api/admin.js`, and the related model imports. `UserManagement` is now a single full-width list (the resizable table|inspect split is gone). *(Design §7.5's "reshape onto state-reader" is a future rebuild, not a kept stub.)*
+- **Global scheduler 503 stubs** (`/scheduler/jobs`, `/scheduler/running`) — no admin caller.
+- **Plugins admin 503 stubs** (`/system/plugin` GET+PUT) + `priva_common.models.plugin` import. (The orphaned user-app `PluginsTab` + `getPlugins`/`updatePlugin` are flagged for the separate user-app pass — out of scope here.)
+- **Dead `/stats` chain** (monolith carryover: `list_sessions` over a local workspace the split pod never mounts): the `get_admin_stats` endpoint + `getAdminStats` API fn + `adminStore.stats`/`fetchStats` + the `AdminStatsResponse`/`UserStatsEntry` models.
+- **Dead store/coming-soon residue:** `adminStore.activeSection`/`setActiveSection`, `ConsoleView` unused `cwd` state.
+- **Legacy references rewritten:** docstrings/comments naming the deleted `proxy.py` (`__init__.py`, `app.py`), monolith SPA dist paths (`priva/web/dist*` fallbacks dropped from `_dist_dir`), the "older cached SPA bundles" comment, and the "proxied skill routes" / "deferred Phase-4 scheduler cleanup" comments.
+- **Design-system legacy migrated:** `AuditLog` `CategoryDropdown` → shared `Dropdown`; native `<select>` role pickers in `UserEditDrawer` + `UserManagement` → shared `Dropdown`.
+
+Out of scope (flagged, not touched): `web/shared/api/admin.js` runtime-config fns + `web/user` `SettingsPanel`/`settingsStore`/`PluginsTab` (user app + shared infra) — a separate user-app cleanup.
+
+---
+
 > **Owed next (revised):** the **`agent-gateway.md` reconciliation pass** (§0.3) is **done** (2026-06-18). The **Operator** drill is **done** (`operator.md`). The **central scheduler** drill is **done** (`scheduler.md` — the admin `/scheduler/*` re-point in §7.2/§10 lands there; `PushToChannel` resolved). The **metering proxy is DROPPED** (blueprint **M6** — BYOK + token-count-only). The `data-spine §2.7` idle-default fix is **done** (180→1800). **All components are now drilled.** The **deep M6 body cleanup is DONE (2026-06-18)** — agent-runner, data-spine, agent-gateway, and blueprint §3/§4 are rewritten M6-correct (the blueprint §2 decisions table / system diagram / §5-7 remain under the supersession banner, as with M1/M2/M5). The **channel-connector sub-pass is DONE (2026-06-19)** — agent-gateway §4.4 locks the connector→brain call as an **internal RPC** (option A; not a synthetic `/v1` re-inject), with the brain's `resolve·mint·wake·steer` factored into one function shared by `ext_proc` (browser) and the internal RPC (IM). **No platform work remains.**

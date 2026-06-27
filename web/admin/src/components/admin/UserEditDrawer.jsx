@@ -5,6 +5,7 @@ import { useResizable } from '@shared/hooks/useResizable'
 import useAdminStore from '../../stores/adminStore'
 import * as adminApi from '@shared/api/admin'
 import CopyButton from '@shared/components/shared/CopyButton'
+import Dropdown from '@shared/components/shared/Dropdown'
 
 export default function UserEditDrawer() {
   const { t } = useTranslation()
@@ -184,15 +185,15 @@ export default function UserEditDrawer() {
             <label className="text-xs uppercase" style={{ color: 'var(--text-dim)', letterSpacing: '0.06em' }}>
               {t('admin.role')}
             </label>
-            <select
-              className="px-2 py-1 text-sm"
-              style={inputStyle}
+            <Dropdown
+              size="sm"
               value={role}
-              onChange={(e) => setRole(e.target.value)}
-            >
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
-            </select>
+              onChange={setRole}
+              options={[
+                { value: 'user', label: 'User' },
+                { value: 'admin', label: 'Admin' },
+              ]}
+            />
           </div>
 
           {/* Runner Type */}

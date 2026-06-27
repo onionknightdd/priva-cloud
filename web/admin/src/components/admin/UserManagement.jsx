@@ -1,25 +1,19 @@
-import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { Pencil, Trash2, Plus, Search, Eye, Check, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useAdminStore from '../../stores/adminStore'
 import useAuthStore from '@shared/stores/authStore'
 import useUiStore from '@shared/stores/uiStore'
 import * as adminApi from '@shared/api/admin'
-import { useResizable } from '@shared/hooks/useResizable'
-import safeStorage from '@shared/utils/safeStorage'
 import Tabs from '@shared/components/shared/Tabs'
 import Chip from '@shared/components/shared/Chip'
 import CopyButton from '@shared/components/shared/CopyButton'
-import UserInspectPanel from './UserInspectPanel'
+import Dropdown from '@shared/components/shared/Dropdown'
 
 // Runner type → chip color. persistent (always-on) gets a distinct semantic color.
 function runnerColor(type) {
   return type === 'persistent' ? 'var(--orange)' : 'var(--cyan)'
 }
-
-const SPLIT_STORAGE_KEY = 'admin-split-width'
-const SPLIT_MIN = 360
-const SPLIT_MAX_RATIO = 0.7
 
 function TableSkeleton() {
   return (
@@ -193,15 +187,15 @@ function CreateUserDialog({ onClose, onCreated }) {
             <label className="text-xs uppercase" style={{ color: 'var(--text-dim)', letterSpacing: '0.06em' }}>
               {t('admin.role')}
             </label>
-            <select
-              className="px-2 py-1 text-sm"
-              style={inputStyle}
+            <Dropdown
+              size="sm"
               value={role}
-              onChange={(e) => setRole(e.target.value)}
-            >
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
-            </select>
+              onChange={setRole}
+              options={[
+                { value: 'user', label: 'User' },
+                { value: 'admin', label: 'Admin' },
+              ]}
+            />
           </div>
         </div>
         {error && (
@@ -417,8 +411,6 @@ export default function UserManagement() {
   const usersLoading = useAdminStore((s) => s.usersLoading)
   const fetchUsers = useAdminStore((s) => s.fetchUsers)
   const openUserDrawer = useAdminStore((s) => s.openUserDrawer)
-  const inspectedUser = useAdminStore((s) => s.inspectedUser)
-  const setInspectedUser = useAdminStore((s) => s.setInspectedUser)
   const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
   const authUser = useAuthStore((s) => s.user)
   const pendingUsers = useAdminStore((s) => s.pendingUsers)
@@ -433,44 +425,6 @@ export default function UserManagement() {
     { id: 'registered', label: t('admin.tabRegisteredUsers') },
     { id: 'pending', label: `${t('admin.tabPendingApproval')}${pendingCount ? ` (${pendingCount})` : ''}` },
   ]
-
-  // Resizable table | inspect split (default 50/50, persisted to localStorage).
-  const splitRef = useRef(null)
-  const [containerWidth, setContainerWidth] = useState(0)
-  const [hoverHandle, setHoverHandle] = useState(false)
-  const [leftWidth, setLeftWidth] = useState(() => {
-    const saved = parseInt(safeStorage.getItem(SPLIT_STORAGE_KEY), 10)
-    return Number.isFinite(saved) ? saved : null
-  })
-
-  useEffect(() => {
-    const el = splitRef.current
-    if (!el || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect?.width || 0
-      if (w) setContainerWidth(w)
-    })
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-
-  const splitMax = containerWidth ? Math.round(containerWidth * SPLIT_MAX_RATIO) : Infinity
-  const resolvedLeft = leftWidth != null
-    ? Math.min(Math.max(leftWidth, SPLIT_MIN), splitMax)
-    : (containerWidth ? Math.round(containerWidth / 2) : null)
-
-  const onSplitResize = useCallback((w) => {
-    setLeftWidth(w)
-    safeStorage.setItem(SPLIT_STORAGE_KEY, String(Math.round(w)))
-  }, [])
-
-  const { dragging, onMouseDown } = useResizable({
-    initial: resolvedLeft || 400,
-    min: SPLIT_MIN,
-    max: splitMax,
-    direction: 'right',
-    onResize: onSplitResize,
-  })
 
   useEffect(() => { fetchUsers(); fetchPendingUsers() }, [])
 
@@ -497,8 +451,6 @@ export default function UserManagement() {
         try {
           await adminApi.deleteUser(username)
           fetchUsers()
-          // Clear inspected user if deleted
-          if (inspectedUser === username) setInspectedUser(null)
         } catch (e) {
           console.error(e)
         }
@@ -571,16 +523,15 @@ export default function UserManagement() {
         </div>
       )}
 
-      {/* Registered Users tab — split content */}
+      {/* Registered Users tab */}
       <div
-        ref={splitRef}
         className="flex flex-1 min-h-0"
         style={{ marginTop: 8, display: selectedTab === 'registered' ? 'flex' : 'none' }}
       >
-        {/* Left pane: table */}
+        {/* Users table */}
         <div
-          className="flex flex-col overflow-hidden"
-          style={{ width: resolvedLeft != null ? resolvedLeft : '50%', borderRight: '1px solid var(--border)', flexShrink: 0 }}
+          className="flex flex-col overflow-hidden flex-1"
+          style={{ minWidth: 0 }}
         >
           {/* Search & Filter bar */}
           <div className="flex items-center gap-2 px-4 py-2 flex-shrink-0">
@@ -657,25 +608,17 @@ export default function UserManagement() {
                 </div>
                 {/* Data rows */}
                 {filteredUsers.map((user) => {
-                  const isInspected = inspectedUser === user.username
                   return (
                     <div
                       key={user.username}
                       className="flex items-center gap-3 px-4 py-2"
                       style={{
                         borderBottom: '1px solid var(--border-subtle)',
-                        borderLeft: isInspected ? '2px solid var(--blue)' : '2px solid transparent',
-                        background: isInspected ? 'var(--bg-elevated)' : 'transparent',
-                        cursor: 'pointer',
+                        borderLeft: '2px solid transparent',
                         transition: 'background 150ms ease',
                       }}
-                      onClick={() => setInspectedUser(user.username)}
-                      onMouseEnter={(e) => {
-                        if (!isInspected) e.currentTarget.style.background = 'var(--bg-surface)'
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isInspected) e.currentTarget.style.background = 'transparent'
-                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                     >
                       <span
                         className="text-sm font-semibold flex-1 min-w-0 truncate"
@@ -751,28 +694,6 @@ export default function UserManagement() {
               </div>
             )}
           </div>
-        </div>
-
-        {/* Drag handle — straddles the 1px divider, transparent → blue on hover/drag */}
-        <div
-          onMouseDown={onMouseDown}
-          onMouseEnter={() => setHoverHandle(true)}
-          onMouseLeave={() => setHoverHandle(false)}
-          className="flex-shrink-0"
-          style={{
-            width: 4,
-            marginLeft: -2,
-            marginRight: -2,
-            cursor: 'col-resize',
-            zIndex: 5,
-            background: (hoverHandle || dragging) ? 'var(--blue)' : 'transparent',
-            transition: 'background 150ms ease',
-          }}
-        />
-
-        {/* Right pane: inspect panel */}
-        <div className="flex flex-col flex-1" style={{ minWidth: 0, overflow: 'hidden' }}>
-          <UserInspectPanel />
         </div>
       </div>
 

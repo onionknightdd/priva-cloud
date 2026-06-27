@@ -2,8 +2,9 @@
 
 Single origin: serves its own control-plane routes (auth/admin/admin_files/
 resource/metrics), owns the data-plane (``compose()``), serves the user SPA at ``/`` and
-the admin SPA at ``/admin``, and mounts the reverse-proxy router (``proxy.py``)
-that forwards the runtime to agent-runner. No CORS (same-origin).
+the admin SPA at ``/admin``, and runs the ext_proc EndpointPicker (``extproc.py``) that
+agentgateway consults to steer runtime requests to the per-account agent-runner pod.
+Runtime traffic does not pass through this app. No CORS (same-origin).
 """
 
 from __future__ import annotations
@@ -154,13 +155,13 @@ def create_app() -> FastAPI:
     for r in (auth_router, admin_router, admin_files_router, resource_router, metrics_router, console_router):
         app.include_router(r)
 
-    # Runtime routes (/api/agent, /api/files, /api/pty, ...) are NOT served or
-    # proxied by CP anymore: agentgateway routes them to the per-account pod via
-    # the InferencePool, steered by CP's ext_proc EPP (extproc.py). proxy.py is gone.
+    # Runtime routes (/api/agent, /api/files, /api/pty, ...) are NOT served by CP:
+    # agentgateway routes them to the per-account pod via the InferencePool, steered
+    # by CP's ext_proc EPP (extproc.py).
 
     # --- SPA static serving: admin at /admin first, then user catch-all at / ---
-    admin_dist = _dist_dir("PRIVA_WEB_DIST_ADMIN", "dist-admin", "web/admin/dist", "priva/web/dist-admin")
-    user_dist = _dist_dir("PRIVA_WEB_DIST", "dist", "web/user/dist", "priva/web/dist")
+    admin_dist = _dist_dir("PRIVA_WEB_DIST_ADMIN", "dist-admin", "web/admin/dist")
+    user_dist = _dist_dir("PRIVA_WEB_DIST", "dist", "web/user/dist")
     if admin_dist.exists():
         app.mount("/admin", StaticFiles(directory=admin_dist, html=True), name="admin-spa")
         logger.info("admin SPA mounted at /admin from {}", admin_dist)

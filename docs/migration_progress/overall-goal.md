@@ -31,7 +31,26 @@
   TLS, self-signed). Real HTTPS/mTLS/JWKS/edge-TLS are deferred.
 - **Next:** a live LLM run (needs real `ANTHROPIC_*` creds); Phase 4 (scheduler + channel-connector); prod
   hardening (Redis coordination, mTLS, NetworkPolicies, per-account DEK/KMS).
-- **Last updated:** 2026-06-21.
+- **Admin UI surface (2026-06-26):** the dashboard ships Fleet · Resource-Quota · System-Map · Console ·
+  Users · Audit + a Configurations→**Agent Runner Sandbox** panel (global runner-defaults, as-built
+  2026-06-25). Cross-referenced against `control-panel.md` §6.1, these §6 surfaces **remain** (detail +
+  priorities in **`control-panel.md` Appendix B**, the authority): **Settings** (six runtime-config
+  endpoints exist + audited at `admin.py:1025-1241` but lost their UI in the SPA split — pure-UI pickup,
+  no backend work); **pod-events / live-activity feed** (§6 landing strip — surfaces the ImagePull/OOM/GC
+  failure modes, today invisible); **pod-lifecycle dangerous-ops** (no terminate/wake/offboard/impersonate
+  admin endpoint; `provisioner.terminate` exists but is unsurfaced); **Policies** (agentgateway CRD
+  view/edit — unbuilt); **Budgets** token-usage view + Prometheus client (§9 — unbuilt). Correctly
+  deferred (not gaps): Budgets `$`/ledger (M6), Sessions/state-reader (Phase 5), scheduler/connector/
+  plugins (Phase 4).
+- **control-panel de-history cleanup (2026-06-26):** dead-code / legacy-reference sweep of
+  `services/control-panel/` + `web/admin/src/` (multi-agent scan, repo-wide verified). Removed: the
+  dead-on-arrival per-user inspect feature (UserInspectPanel + 6 admin 503 stubs + store/API wiring),
+  global scheduler & plugins 503 stubs, the monolith-carryover `/stats` chain, dead store/`cwd` state;
+  rewrote all `proxy.py`/`priva-web`/`priva-api` legacy references; migrated `CategoryDropdown` + two
+  native `<select>` to the shared `Dropdown`. Backend boot-green, admin SPA builds. Detail =
+  **`control-panel.md` Appendix B.5**. Out of scope (separate user-app pass): `web/shared/api/admin.js`
+  config fns + `web/user` SettingsPanel/PluginsTab.
+- **Last updated:** 2026-06-26.
 
 ---
 

@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-from pathlib import Path
 
-from claude_agent_sdk import list_sessions
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from priva_common.models.admin import (
-    AdminStatsResponse,
     AuditEntryResponse,
     AuditLogResponse,
     CliPathResponse,
@@ -39,19 +36,11 @@ from priva_common.models.admin import (
     SystemEdge,
     SystemHealthResponse,
     SystemNode,
-    UserStatsEntry,
 )
-from priva_common.models.plugin import PluginConfigUpdate, PluginInfo, PluginListResponse
 from priva_common.models.auth import UserCreate, UserPublic, UserUpdate
-from priva_common.models.mcp import McpLevel, McpServerListResponse
-from priva_common.models.skills import SkillLevel, SkillListResponse
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from ..services.auth import require_admin, user_record_to_public
 from priva_common.config import get_settings
-# Scheduler (deferred, Phase 4) and skills (moved to agent-runner) services are
-# not available to the control-panel; the few admin endpoints that used them
-# return 503 below. Per-user skill management is reached via the proxied
-# /api/resource/skills routes instead.
 from ..services.secret_env import write_user_env
 from priva_common.logging import get_app_logger
 from priva_common.user_store import UserRecord, get_user_store
@@ -364,9 +353,6 @@ async def delete_user(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
-    # Scheduler job cleanup for the deleted user is deferred (Phase 4): the
-    # scheduler subsystem is not part of this deployment yet.
-
     audit = get_audit_logger()
     audit.append(AuditEntry(
         actor=current_user.username,
@@ -490,55 +476,6 @@ async def reject_registration(
         details={"request_id": request_id},
     ))
     return {"status": "ok"}
-
-
-@router.get("/stats", response_model=AdminStatsResponse)
-async def get_admin_stats():
-    store = get_user_store()
-    settings = get_settings()
-    work_dir = Path(settings.server.work_dir).expanduser()
-
-    users = store.list_users()
-    user_stats: list[UserStatsEntry] = []
-    total_sessions = 0
-    total_storage = 0
-
-    for u in users:
-        user_workspace = work_dir / u.username
-        session_count = 0
-        storage_bytes = 0
-        last_active = None
-
-        if user_workspace.exists():
-            try:
-                sessions = list_sessions(directory=str(user_workspace))
-                session_count = len(sessions)
-                for s in sessions:
-                    storage_bytes += s.file_size or 0
-                    if s.last_modified:
-                        if last_active is None or s.last_modified > last_active:
-                            last_active = s.last_modified
-            except Exception:
-                pass
-
-        total_sessions += session_count
-        total_storage += storage_bytes
-        user_stats.append(UserStatsEntry(
-            username=u.username,
-            role=u.role,
-            session_count=session_count,
-            storage_bytes=storage_bytes,
-            last_active=last_active,
-        ))
-
-    user_stats.sort(key=lambda x: x.session_count, reverse=True)
-
-    return AdminStatsResponse(
-        total_users=len(users),
-        total_sessions=total_sessions,
-        total_storage_bytes=total_storage,
-        users=user_stats,
-    )
 
 
 async def _fleet_snapshot() -> dict:
@@ -952,76 +889,6 @@ async def get_audit_log(
     )
 
 
-# --- Admin scheduler endpoints ---
-
-@router.get("/scheduler/jobs")
-async def admin_list_scheduler_jobs():
-    """Deferred (Phase 4): scheduler is not part of this deployment yet."""
-    raise HTTPException(503, "Scheduler is unavailable in this deployment")
-
-
-@router.get("/scheduler/running")
-async def admin_list_running_tasks():
-    """Deferred (Phase 4): scheduler is not part of this deployment yet."""
-    raise HTTPException(503, "Scheduler is unavailable in this deployment")
-
-
-# --- Admin per-user skills endpoints ---
-
-@router.get("/users/{username}/skills", response_model=SkillListResponse)
-async def get_user_skills(username: str):
-    """Moved to agent-runner: use the proxied /api/resource/skills routes."""
-    raise HTTPException(503, "Per-user skill management is served by agent-runner")
-
-
-@router.delete("/users/{username}/skills/{level}/{name}")
-async def delete_user_skill(
-    username: str,
-    level: SkillLevel,
-    name: str,
-    current_user: UserRecord = Depends(require_admin),
-):
-    """Moved to agent-runner: use the proxied /api/resource/skills routes."""
-    raise HTTPException(503, "Per-user skill management is served by agent-runner")
-
-
-# --- Admin per-user MCP endpoints ---
-
-@router.get("/users/{username}/mcp", response_model=McpServerListResponse)
-async def get_user_mcp_servers(username: str):
-    """Moved to agent-runner: per-user MCP config lives in the per-account pod."""
-    raise HTTPException(503, "Per-user MCP management is served by agent-runner")
-
-
-@router.delete("/users/{username}/mcp/{level}/{name}")
-async def delete_user_mcp_server(
-    username: str,
-    level: McpLevel,
-    name: str,
-    current_user: UserRecord = Depends(require_admin),
-):
-    """Moved to agent-runner: per-user MCP config lives in the per-account pod."""
-    raise HTTPException(503, "Per-user MCP management is served by agent-runner")
-
-
-# --- Admin per-user scheduler endpoints ---
-
-
-@router.get("/users/{username}/scheduler/jobs")
-async def get_user_scheduler_jobs(username: str):
-    """Deferred (Phase 4): scheduler is not part of this deployment yet."""
-    raise HTTPException(503, "Scheduler is unavailable in this deployment")
-
-
-# --- Admin per-user hooks endpoints ---
-
-
-@router.get("/users/{username}/hooks/active")
-async def get_user_active_hooks(username: str):
-    """Moved to agent-runner: per-user hook config lives in the per-account pod."""
-    raise HTTPException(503, "Per-user hook management is served by agent-runner")
-
-
 @router.get("/presetprompt", response_model=PresetPromptResponse)
 async def get_preset_prompt():
     store = get_user_store()
@@ -1239,21 +1106,3 @@ async def update_sensitive_patterns(
         enable=bool(request.enable),
         patterns=list(request.patterns),
     )
-
-
-# --- Plugin management endpoints ---
-
-@router.get("/system/plugin", response_model=PluginListResponse)
-async def list_plugins():
-    """Deferred (Phase 4): the plugin manager is not part of this deployment yet."""
-    raise HTTPException(503, "Plugin management is unavailable in this deployment")
-
-
-@router.put("/system/plugin/{plugin_id}", response_model=PluginInfo)
-async def update_plugin(
-    plugin_id: str,
-    request: PluginConfigUpdate,
-    current_user: UserRecord = Depends(require_admin),
-):
-    """Deferred (Phase 4): the plugin manager is not part of this deployment yet."""
-    raise HTTPException(503, "Plugin management is unavailable in this deployment")

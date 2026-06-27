@@ -45,7 +45,6 @@ export default function ConsoleView() {
 
   const [selected, setSelected] = useState(null)   // option value, e.g. "cp:operator" / "acct:alice"
   const [ready, setReady] = useState(false)
-  const [, setCwd] = useState('')
   const [closed, setClosed] = useState(false)
 
   useEffect(() => { fetchUsers() }, [fetchUsers])
@@ -75,7 +74,6 @@ export default function ConsoleView() {
   const handleSelect = useCallback((value) => {
     setSelected(value)
     setReady(false)
-    setCwd('')
     setClosed(false)
   }, [])
 
@@ -86,7 +84,6 @@ export default function ConsoleView() {
   const onMetaChange = useCallback((mc) => {
     if (mc?.ready === true) { setReady(true); setClosed(false) }
     else if (mc?.ready === false) setReady(false)
-    if (mc?.cwd != null) setCwd(mc.cwd)
   }, [])
   const onClosed = useCallback(() => { setReady(false); setClosed(true) }, [])
 

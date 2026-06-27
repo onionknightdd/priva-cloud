@@ -151,8 +151,8 @@ async def handle_request_headers(http_headers) -> "ep.ProcessingResponse":
     token = auth[7:] if auth.lower().startswith("bearer ") else None
     if not token:  # WS upgrade: token rides the Sec-WebSocket-Protocol header
         token = _token_from_subprotocol(headers.get("sec-websocket-protocol", ""))
-    if not token:  # legacy fallback (older cached SPA bundles)
-        token = _query_param(headers.get(":path", ""), "token")
+    if not token:  # WS fallback: a browser can't set Authorization on a WS handshake,
+        token = _query_param(headers.get(":path", ""), "token")  # so it may pass ?token=
     try:
         user = await authenticate_raw_token(token, headers.get("x-user-name"))
     except Exception:

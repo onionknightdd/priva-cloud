@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import time
 from datetime import datetime, timedelta
 
@@ -130,17 +129,6 @@ async def require_admin(
     if user.role != "admin":
         raise HTTPException(403, "Admin access required")
     return user
-
-
-def get_user_workspace(user: UserRecord | None) -> str:
-    settings = get_settings()
-    base = os.path.expanduser(settings.server.work_dir)
-    if user is None:
-        workspace = os.path.join(base, "anonymous")
-    else:
-        workspace = os.path.join(base, user.username)
-    os.makedirs(workspace, exist_ok=True)
-    return workspace
 
 
 class LoginRateLimiter:
