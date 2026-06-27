@@ -182,12 +182,6 @@ async def build_agent_options(
     except Exception:
         _get_logger().warning("venv env overlay skipped", exc_info=True)
 
-    # One-time cleanup of legacy global-skill symlinks created by the old
-    # sync_global_skill_symlinks path; enable/disable is now driven by
-    # ``options.skills`` below.
-    from ..skills import _cleanup_legacy_skill_symlinks
-    _cleanup_legacy_skill_symlinks(username)
-
     def _stderr_logger(line: str) -> None:
         stripped = line.rstrip()
         if stripped:

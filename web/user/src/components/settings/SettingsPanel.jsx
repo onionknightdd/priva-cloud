@@ -17,7 +17,6 @@ import {
 } from '@shared/api/admin'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { getLucideIcon, ICON_NAMES } from '../../utils/lucideIconMap'
-import ChannelsTab from './ChannelsTab'
 import WebTerminalTab from './WebTerminalTab'
 
 function FilterableModelSelect({ models, value, onChange, label, labelStyle, inputStyle, placeholder, filterPlaceholder, noMatchesText }) {
@@ -1455,7 +1454,6 @@ export default function SettingsPanel({ activeTabOverride }) {
       {activeTab === 'api' && <ApiKeyTab />}
       {activeTab === 'models' && <ModelsTab />}
       {activeTab === 'quickactions' && <QuickActionsTab />}
-      {activeTab === 'channels' && <ChannelsTab />}
       {activeTab === 'advanced' && <AdvancedTab />}
       {activeTab === 'webterminal' && <WebTerminalTab />}
     </>

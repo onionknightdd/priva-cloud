@@ -9,7 +9,9 @@ FROM node:22-slim AS claudecli
 RUN npm install -g @anthropic-ai/claude-code && claude --version
 
 FROM python:3.12-slim-bookworm
-ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
+    UV_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*

@@ -27,7 +27,6 @@ export default function NavBar() {
     { id: 'priva', label: t('tabs.priva'), icon: Bot },
     { id: 'skills', label: t('tabs.skills'), icon: Puzzle, disabled: false },
     { id: 'mcp', label: t('tabs.mcp'), icon: Cable },
-    // Scheduler hidden in Phase 2 (scheduler service deferred).
     { id: 'hooks', label: t('tabs.hooks'), icon: Webhook },
     { id: 'subagents', label: t('tabs.subagents'), icon: UsersRound },
     { id: 'memory', label: t('tabs.memory'), icon: Brain, disabled: true },

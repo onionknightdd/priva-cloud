@@ -28,11 +28,6 @@ logger = get_app_logger(__name__)
 router = APIRouter(prefix="/api/resource/mcp", tags=["mcp"])
 
 
-def _require_admin_for_global(level: str, user: UserRecord) -> None:
-    if level == "global" and user.role != "admin":
-        raise HTTPException(403, "Admin access required for global MCP servers")
-
-
 def _config_to_detail(name: str, config: dict, level: str) -> McpServerDetail:
     headers_dict = config.get("headers", {})
     headers = [McpHeaderItem(key=k, value=v) for k, v in headers_dict.items()]
@@ -122,8 +117,6 @@ async def create_mcp_server(
     request: McpServerCreateRequest,
     user: UserRecord = Depends(require_user),
 ):
-    _require_admin_for_global(request.level, user)
-
     mgr = McpConfigManager(user.username)
     headers_dict = {h.key: h.value for h in request.headers}
     config = {
@@ -158,8 +151,6 @@ async def update_mcp_server(
     request: McpServerUpdateRequest,
     user: UserRecord = Depends(require_user),
 ):
-    _require_admin_for_global(level, user)
-
     mgr = McpConfigManager(user.username)
     updates: dict = {}
     if request.type is not None:
@@ -198,8 +189,6 @@ async def delete_mcp_server(
     name: str,
     user: UserRecord = Depends(require_user),
 ):
-    _require_admin_for_global(level, user)
-
     mgr = McpConfigManager(user.username)
     if level == "project":
         deleted = mgr.delete_project_server(name)

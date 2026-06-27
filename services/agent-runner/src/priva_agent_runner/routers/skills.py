@@ -18,7 +18,7 @@ from priva_common.models.skills import (
     SkillsConfigResponse,
 )
 from priva_common.audit_log import AuditEntry, get_audit_logger
-from ..deps import require_admin, require_user
+from ..deps import require_user
 from priva_common import skill_exclude as _skill_exclude
 from ..services.skills import (
     _get_skills_dir,
@@ -138,11 +138,6 @@ async def upload_skill_endpoint(
     level: SkillLevel = Form("project"),
     user: UserRecord = Depends(require_user),
 ):
-    # Global skills require admin
-    if level == "global":
-        if user.role != "admin":
-            raise HTTPException(403, "Admin access required for global skills")
-
     file_data = await file.read()
     skill_name, skill_level = upload_skill(level, file_data, file.filename or "upload.zip", user.username)
 
@@ -169,11 +164,6 @@ async def delete_skill_endpoint(
     name: str,
     user: UserRecord = Depends(require_user),
 ):
-    # Global skills require admin
-    if level == "global":
-        if user.role != "admin":
-            raise HTTPException(403, "Admin access required for global skills")
-
     delete_skill(level, name, user.username)
 
     audit = get_audit_logger()

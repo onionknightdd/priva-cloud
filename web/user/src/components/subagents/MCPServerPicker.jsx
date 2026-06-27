@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { X, ChevronDown, Server } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import CategoryDropdown from '@shared/components/shared/CategoryDropdown'
+import Dropdown from '@shared/components/shared/Dropdown'
 
 const SERVER_TYPE_OPTIONS = [
   { value: 'http', label: 'http' },
@@ -91,10 +91,11 @@ function InlineServerModal({ onAdd, onClose, initial }) {
           <span style={{ fontSize: 11, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
             Type
           </span>
-          <CategoryDropdown
+          <Dropdown
+            size="sm"
             options={SERVER_TYPE_OPTIONS}
-            selected={type}
-            onSelect={setType}
+            value={type}
+            onChange={setType}
           />
         </div>
 

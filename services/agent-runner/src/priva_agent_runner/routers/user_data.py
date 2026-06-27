@@ -32,7 +32,7 @@ router = APIRouter(prefix="/api/user", tags=["user-data"])
 
 @router.get("/overview", response_model=UserOverviewResponse)
 async def get_user_overview(user: UserRecord = Depends(require_user)):
-    """The usage overview the dashboard renders (formerly embedded in /me)."""
+    """The usage overview the dashboard renders."""
     block = await asyncio.to_thread(compute_user_stats, user.username)
     return UserOverviewResponse(
         stats=block.stats,

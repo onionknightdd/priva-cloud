@@ -14,7 +14,6 @@ const TABS = [
   { id: 'api', labelKey: 'settings.apiKey', icon: Key },
   { id: 'models', labelKey: 'settings.llmProvider', icon: Cpu },
   { id: 'quickactions', labelKey: 'settings.quickActions', icon: Zap },
-  // Channels hidden in Phase 2 (channel-connector deferred).
   { id: 'advanced', labelKey: 'settings.advanced', icon: Settings2 },
   { id: 'webterminal', labelKey: 'settings.webTerminal.title', icon: Terminal },
 ]

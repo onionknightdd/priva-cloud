@@ -5,6 +5,7 @@ import useUserDataStore from '../../stores/userDataStore'
 import useUiStore from '@shared/stores/uiStore'
 import { downloadFile } from '../../api/files'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
+import Dropdown from '@shared/components/shared/Dropdown'
 import FilePreviewDrawer from './FilePreviewDrawer'
 import { formatDateTime } from '../../utils/formatTime'
 
@@ -394,44 +395,26 @@ export default function UserFiles() {
           </div>
 
           {/* Date filter */}
-          <select
+          <Dropdown
+            size="sm"
             value={dateFilter || ''}
-            onChange={(e) => setDateFilter(e.target.value || null)}
-            style={{
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border)',
-              borderRadius: '4px',
-              color: 'var(--text-secondary)',
-              fontSize: 12,
-              padding: '4px 8px',
-              outline: 'none',
-            }}
-          >
-            <option value="">{t('userData.allDates')}</option>
-            {uniqueDates.map((d) => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
+            onChange={(v) => setDateFilter(v || null)}
+            options={[
+              { value: '', label: t('userData.allDates') },
+              ...uniqueDates.map((d) => ({ value: d, label: d })),
+            ]}
+          />
 
           {/* Ext filter */}
-          <select
+          <Dropdown
+            size="sm"
             value={extFilter || ''}
-            onChange={(e) => setExtFilter(e.target.value || null)}
-            style={{
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border)',
-              borderRadius: '4px',
-              color: 'var(--text-secondary)',
-              fontSize: 12,
-              padding: '4px 8px',
-              outline: 'none',
-            }}
-          >
-            <option value="">{t('userData.allTypes')}</option>
-            {uniqueExts.map((ext) => (
-              <option key={ext} value={ext}>{ext}</option>
-            ))}
-          </select>
+            onChange={(v) => setExtFilter(v || null)}
+            options={[
+              { value: '', label: t('userData.allTypes') },
+              ...uniqueExts.map((ext) => ({ value: ext, label: ext })),
+            ]}
+          />
 
           {/* Multi-select actions */}
           {selectedFileUuids.size > 0 && (

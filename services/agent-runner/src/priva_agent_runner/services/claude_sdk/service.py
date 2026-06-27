@@ -16,7 +16,12 @@ from . import retry
 from .options import build_agent_options
 from priva_common.logging import get_app_logger
 from .permission_coordinator import PermissionCoordinator, registry
-from .serialization import get_event_label, serialize_assistant_message, serialize_message, serialize_result_message
+from priva_common.serialization import (
+    get_event_label,
+    serialize_assistant_message,
+    serialize_message,
+    serialize_result_message,
+)
 from .session_heal import heal_orphan_tool_uses
 
 logger = get_app_logger(__name__)

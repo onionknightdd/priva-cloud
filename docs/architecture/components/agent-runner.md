@@ -897,3 +897,77 @@ All seven open questions were answered by the user on 2026-06-18 and are now loc
 6. **No impersonation answering of approvals (§6.4, decision 10) — RESOLVED.** A permission request is answerable **only by the user** — via their authenticated WebUI session (their own key) or their bound IM channel. The pod **rejects** any `resolve` whose brain-asserted actor ≠ the session's owning account, **even an audited impersonator**. This **reverses** blueprint decision-10's "impersonator may answer approvals, audited." (Impersonation may still **spend the target's budget / use their tools, audited**, per the rest of decision 10 — only approval-answering is forbidden. If impersonation should be fully out, say so.)
 
 7. **The brain mints `session_uuid`; client never invents it (§2.2) — RESOLVED.** New-vs-resume is decided at the surface: **WebUI** sends an **empty** session id for a new session (session id in the body ⇒ resume); **IM** is always bound to a **fixed** `session_uuid` in `channel_binding` (a user **reset** mints a new one). On the empty/new case the **brain mints** the canonical `session_uuid` (lowercase UUIDv4) **locally** (M5 — no `session_index` row/CAS), returns it, and the surface uses it thereafter — the **client never supplies/invents a uuid** (a client-chosen id could violate uniqueness / the no-remap invariant). `is_first_run` is server-derived (**IM** = `first_run_done` CAS on `channel_binding`; **WebUI** = empty-id + disk-existence guard, M5 §2.2), supplied per turn for **every** CREATE incl. ephemeral/subagent runs.
+
+---
+
+## Appendix A — API surface (as-built, 2026-06-27)
+
+The body above (esp. §1.2) describes the router census by *disposition* ("KEEP / STRIP / config re-pointed") but never enumerated the routes. This appendix is the authoritative as-built list: **71 endpoints** across 11 routers + 2 health routes, all mounted by `app.create_app()`. Base prefix `/api`; auth is `require_account` (exposed as the `require_user` / `get_current_user` aliases in `deps.py`) unless noted. The pod is single-account, so **there is no admin tier** — every route is the account acting on its own pod (see A.2).
+
+### A.1 Endpoints by router
+
+**Agent run & sessions** — `routers/agent.py` `/api/agent` → `services/claude_sdk/service.py`, `permission_coordinator.py`, `options.py`
+
+| Method · Path | Ability | Handler |
+|---|---|---|
+| `POST /run` | One-shot (non-stream) run | `run_agent` |
+| `POST /run/stream` | Run, stream as SSE | `run_agent_stream` |
+| `WS /ws/run` | Run over WebSocket + live permission prompts | `ws_run` |
+| `GET /sessions` | List past sessions (paginated) | `list_agent_sessions` |
+| `GET /sessions/{id}/messages` | Replay a session's messages | `get_agent_session_messages` |
+| `DELETE /sessions/{id}` | Delete a session file | `delete_agent_session` |
+| `POST /permission/respond` | Answer a tool-permission request (owner-only, 403 on actor≠owner) | `respond_permission` |
+| `POST /rewind` | Rewind files to a checkpoint (409 while a run is live) | `rewind_session` |
+| `POST /fork` | Fork a session (mid / tail) | `fork_agent_session` |
+| `PATCH /sessions/{id}` | Rename a session | `rename_agent_session` |
+| `PUT /sessions/{id}/tag` | Set/clear a session tag | `tag_agent_session` |
+
+**File uploads (temp)** — `routers/files.py` `/api/files` → `services/temp_files.py`
+`POST /upload` · `DELETE /{uuid}` · `GET /` · `GET /{uuid}` — upload / delete / list / download temp attachments.
+
+**File explorer** — `routers/user_files.py` `/api/user/files` (in-file `_canonicalize`; whole-pod-FS, OS-perm gated)
+`GET /list` · `GET /download` · `GET /preview` · `POST /upload` — browse / download / preview / **self-serve upload** to the account's own `/workspace`.
+
+**MCP servers** — `routers/mcp.py` `/api/resource/mcp` → `services/mcp/config_manager.py`, `validator.py`
+`GET /` · `GET /{lvl}/{name}` · `GET /{lvl}/{name}/capabilities` · `POST /` · `PUT /{lvl}/{name}` · `DELETE /{lvl}/{name}` · `POST /validate` · `POST /validate/tool` — list / detail / probe-capabilities / create / update / delete / validate-server / test-tool. **No admin gate** (A.2).
+
+**Hooks** — `routers/hooks.py` `/api/hooks` → `services/hooks/{registry,config_manager,executor,log_store,builder}.py`
+`GET /catalog` · `POST /catalog/{id}/enable` · `POST /catalog/{id}/disable` · `GET /config` · `PUT /config` · `POST /test` · `POST /test/builtin` · `GET /script/content` · `GET /logs` — list/enable/disable built-ins, read-merged/write-local bindings, dry-run, read script, execution log. **Admin-enforced-hooks management endpoints removed** (A.2); enforcement still applies via `builder.py` reading org-pushed `runtime.hooks`.
+
+**Skills** — `routers/skills.py` `/api/resource/skills` → `services/skills.py`, `priva_common.skill_exclude`
+`GET /` · `GET /config` · `PUT /config` · `GET /{lvl}/{name}` · `GET /{lvl}/{name}/file` · `GET /{lvl}/{name}/download` · `POST /upload` · `DELETE /{lvl}/{name}` — list / read-exclude-config / write-config / detail / file / download-tar / upload / delete. **No admin gate** (A.2).
+
+**Skill Hub (bundled)** — `routers/skill_hub.py` `/api/resource/skill-hub` → `services/skill_hub.py`
+`POST /upload` · `GET /` · `GET /{name}` · `GET /{name}/file` · `POST /{name}/deliver` · `DELETE /{name}` — upload / list / detail / file / deliver-to-workspace / delete. **No admin gate** (A.2).
+
+**Subagents** — `routers/subagents.py` `/api/subagents` → `services/subagents.py`
+`GET /catalog` · `GET /list` · `GET /{name}` · `POST /` · `PUT /{name}` · `DELETE /{name}` · `POST /{name}/test/stream` — picker-catalog / list / detail / create / update / delete / stream-test.
+
+**PTY / web terminal** — `routers/pty.py` → `services/pty_session.py`
+`GET /api/pty/feature` · `GET /api/pty/config` · `PUT /api/pty/config` · `WS /api/pty/ws` — feature-flag / read-config / write-config / interactive shell.
+
+**User dashboard data** — `routers/user_data.py` `/api/user` → `services/compute_user_stats.py`, `priva_common.audit_log`
+`GET /overview` · `GET /stats` · `GET /audit` · `GET /analytics` — usage-overview / counts+storage / audit feed / activity timeline.
+
+**User config** — `routers/user_config.py` `/api/resource` → `priva_common.skill_exclude`, `models.resource`
+`GET/PUT /quickactions` · `GET/PUT /vision-model` — quick-action templates / vision-model preference.
+
+**Health** — `app.py`
+`GET /health` (no auth) — k8s readiness + downstream/volume probe (the `/readyz` readiness check of §1.2 is folded in here). `GET /api/health` — per-account SPA bootstrap (counts as activity).
+
+### A.2 Enforcement model (single-account pod)
+
+Per §1.2 ("admin_router/admin_files_router → STRIP → control panel") the pod has **no admin tier**. The monolith's admin-role gates were vestigial carryover and are **removed** — every resource route is `require_user`, i.e. the one pinned account managing its own pod:
+- skills / MCP / skill-hub: dropped `require_admin` / `user.role != "admin"` on global-level create/upload/delete.
+- `user_files` (file explorer): the pod is **single-tenant**, so the explorer browses the **whole pod filesystem** via `_canonicalize`, gated only by the sandbox uid's OS permissions — no app-level workspace restriction (`_validate_workspace_path` removed). `~` lands on the user's workspace. This is also what makes upload self-serve.
+
+The **only** admin-enforcement concept that survives is **hook enforcement**: the control plane writes org-mandated `runtime.hooks` into `.priva.settings.yml`, and `services/hooks/builder.py` applies them per run. The pod exposes no endpoint to *manage* enforced hooks (that is the control plane's job).
+
+### A.3 De-history + enforcement cleanup (2026-06-27)
+
+- **Removed** the `GET/POST/DELETE /api/hooks/admin` management trio (no caller in the split; enforcement read-path retained).
+- **Dropped** admin-role gating on skills / MCP / skill-hub / `user_files` → all `require_user`. The `user_files` file explorer browses the **whole pod filesystem** (single-tenant pod; gated only by the sandbox uid's OS permissions), `~` landing on the user's workspace; removed `_validate_workspace_path` and the unused `require_admin` alias from `deps.py`.
+- **Self-serve file upload**: the user SPA File Explorer (UserData tab) now uploads via `POST /api/user/files/upload` for every account; the admin-only upload path + `web/user/src/api/adminFiles.js` were deleted.
+- **Removed** dead-on-arrival frontend: Scheduler panel + Channels settings tab (Phase-4 deferred, no backend in the split) and the unrendered `PluginsTab`.
+- **De-shimmed** `services/claude_sdk/serialization.py` (re-export of `priva_common.serialization`); removed the per-build skill-symlink cleanup shim; neutralized deleted-monolith comment references.
+- **Known gap (not addressed here):** `/rewind` gates on a live run but not yet on a live PTY / pending approval as §4.3 specifies — design follow-up.

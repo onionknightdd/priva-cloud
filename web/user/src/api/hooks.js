@@ -34,6 +34,3 @@ export const fetchLogs = ({ eventType = null, limit = 50, before = null, after =
 // Script content — read a hook script file from the user's work dir
 export const fetchScriptContent = (path) =>
   getJSON(`/hooks/script/content?path=${encodeURIComponent(path)}`)
-
-// Admin
-export const fetchAdminHooks = () => getJSON('/hooks/admin')

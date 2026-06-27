@@ -50,7 +50,22 @@
   native `<select>` to the shared `Dropdown`. Backend boot-green, admin SPA builds. Detail =
   **`control-panel.md` Appendix B.5**. Out of scope (separate user-app pass): `web/shared/api/admin.js`
   config fns + `web/user` SettingsPanel/PluginsTab.
-- **Last updated:** 2026-06-26.
+- **agent-runner + user-SPA de-history + enforcement cleanup (2026-06-27):** same sweep applied to
+  `services/agent-runner/` + `web/user/src/`, preceded by a 41-agent endpoint-map workflow (all **74
+  endpoints → ability → code**, adversarially verified). Persisted the as-built API into
+  **`agent-runner.md` Appendix A** (closes the "session reads" doc gap). Changes: (1) **enforcement model** —
+  dropped vestigial admin-role gates on skills/MCP/skill-hub + the `user_files` explorer (now browses the
+  whole pod filesystem, gated only by the sandbox uid — single-tenant pod) (→ `require_user`),
+  removed the `/api/hooks/admin` management trio (enforcement read-path via `hooks/builder.py` retained),
+  dropped the unused `require_admin` alias — *only admin **hook** enforcement remains*; (2) **self-serve upload** — the
+  UserData→File Explorer uploads to each account's own pod via `POST /api/user/files/upload`, admin-upload
+  path + `api/adminFiles.js` deleted; (3) **removed dead-on-arrival** Scheduler + Channels frontend (Phase-4
+  deferred, no backend) and the unrendered `PluginsTab` + dead `fetchAdminHooks`; (4) **de-history** —
+  de-shimmed `serialization.py`, removed the per-build skill-symlink shim, neutralized monolith comment
+  refs; (5) **design-system** — migrated 6 native `<select>` + 5 `CategoryDropdown` to the shared
+  `Dropdown`. Backend boot-green (hooks 12→9 routes), user SPA builds. Out of scope (flagged): `web/shared`
+  orphaned plugin fns; `/rewind` 409 PTY/pending-approval gap (`agent-runner.md` A.3).
+- **Last updated:** 2026-06-27.
 
 ---
 

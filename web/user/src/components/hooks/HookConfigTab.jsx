@@ -17,6 +17,7 @@ import { HOOK_DEFINITIONS } from '../../data/hookDefinitions'
 import { fetchScriptContent } from '../../api/hooks'
 import Chip from '@shared/components/shared/Chip'
 import CopyButton from '@shared/components/shared/CopyButton'
+import Dropdown from '@shared/components/shared/Dropdown'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 
 if (!hljs.getLanguage('python')) hljs.registerLanguage('python', python)
@@ -265,19 +266,6 @@ const riskyInputStyle = {
   boxSizing: 'border-box',
 }
 
-const riskySelectStyle = {
-  ...riskyInputStyle,
-  minWidth: 92,
-  cursor: 'pointer',
-  appearance: 'none',
-  backgroundImage:
-    'linear-gradient(45deg, transparent 50%, var(--text-dim) 50%), linear-gradient(135deg, var(--text-dim) 50%, transparent 50%)',
-  backgroundPosition: 'calc(100% - 12px) 50%, calc(100% - 8px) 50%',
-  backgroundSize: '4px 4px, 4px 4px',
-  backgroundRepeat: 'no-repeat',
-  paddingRight: 22,
-}
-
 function RiskyPatternsEditor() {
   const { t } = useTranslation()
   const [entries, setEntries] = useState([])
@@ -439,15 +427,15 @@ function RiskyPatternsEditor() {
       >
         <div style={labelStyle}>{t('hooks.addPattern')}</div>
         <div className="flex items-center gap-2">
-          <select
-            style={riskySelectStyle}
-            value={newTool}
-            onChange={(e) => { setNewTool(e.target.value); setAddError(null) }}
-          >
-            {RISKY_TOOL_OPTIONS.map((opt) => (
-              <option key={opt} value={opt}>{opt}</option>
-            ))}
-          </select>
+          <div style={{ minWidth: 92, flexShrink: 0 }}>
+            <Dropdown
+              size="sm"
+              mono
+              value={newTool}
+              onChange={(v) => { setNewTool(v); setAddError(null) }}
+              options={RISKY_TOOL_OPTIONS.map((opt) => ({ value: opt, label: opt }))}
+            />
+          </div>
           <input
             style={{ ...riskyInputStyle, flex: 1, minWidth: 0 }}
             value={newPattern}

@@ -68,15 +68,6 @@ def _canonicalize(path: str) -> str:
     return os.path.realpath(os.path.expanduser(path))
 
 
-def _validate_workspace_path(user_workspace: str, requested_path: str) -> str:
-    """Ensure resolved path is within user's workspace. Returns canonical path."""
-    real_path = _canonicalize(requested_path)
-    ws_resolved = os.path.realpath(user_workspace)
-    if not real_path.startswith(ws_resolved + os.sep) and real_path != ws_resolved:
-        raise HTTPException(403, "Access denied: path is outside your workspace")
-    return real_path
-
-
 def _sanitize_filename(name: str) -> str:
     """Replace surrogate characters that can't be encoded as UTF-8/JSON."""
     return name.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
@@ -97,12 +88,10 @@ async def list_directory(
     path: str = Query(default="~"),
     user: UserRecord = Depends(require_user),
 ):
-    if user.role != "admin":
-        workspace = get_user_workspace(user)
-        if path == "~":
-            real_path = os.path.realpath(workspace)
-        else:
-            real_path = _validate_workspace_path(workspace, path)
+    # Single-tenant pod: the file explorer browses the whole pod filesystem, gated
+    # only by the sandbox uid's OS permissions. "~" lands on the user's workspace.
+    if path == "~":
+        real_path = os.path.realpath(get_user_workspace(user))
     else:
         real_path = _canonicalize(path)
 
@@ -135,11 +124,6 @@ async def list_directory(
     entries.sort(key=lambda e: (0 if e.type == "directory" else 1, e.name.lower()))
 
     parent = os.path.dirname(real_path) if real_path != "/" else None
-    # Hide ".." at workspace root for non-admin users
-    if user.role != "admin":
-        ws_resolved = os.path.realpath(get_user_workspace(user))
-        if real_path == ws_resolved:
-            parent = None
 
     return DirectoryListResponse(path=real_path, parent=parent, entries=entries)
 
@@ -149,10 +133,7 @@ async def download_file(
     path: str = Query(...),
     user: UserRecord = Depends(require_user),
 ):
-    if user.role != "admin":
-        real_path = _validate_workspace_path(get_user_workspace(user), path)
-    else:
-        real_path = _canonicalize(path)
+    real_path = _canonicalize(path)
     if not os.path.isfile(real_path):
         raise HTTPException(404, f"File not found: {real_path}")
 
@@ -175,10 +156,7 @@ async def preview_file(
     path: str = Query(...),
     user: UserRecord = Depends(require_user),
 ):
-    if user.role != "admin":
-        real_path = _validate_workspace_path(get_user_workspace(user), path)
-    else:
-        real_path = _canonicalize(path)
+    real_path = _canonicalize(path)
     if not os.path.isfile(real_path):
         raise HTTPException(404, f"File not found: {real_path}")
 
@@ -242,10 +220,7 @@ async def upload_file(
     directory: str = Form(...),
     user: UserRecord = Depends(require_user),
 ):
-    if user.role != "admin":
-        real_dir = _validate_workspace_path(get_user_workspace(user), directory)
-    else:
-        real_dir = _canonicalize(directory)
+    real_dir = _canonicalize(directory)
 
     if not os.path.isdir(real_dir):
         raise HTTPException(400, f"Not a directory: {real_dir}")

@@ -3,6 +3,7 @@ import { X, Play, Loader, Check, AlertCircle, ChevronDown, Copy } from 'lucide-r
 import { useTranslation } from 'react-i18next'
 import useMcpStore from '../../stores/mcpStore'
 import CopyButton from '@shared/components/shared/CopyButton'
+import Dropdown from '@shared/components/shared/Dropdown'
 import MarkdownRenderer from '../markdown/MarkdownRenderer'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
@@ -542,17 +543,13 @@ function FieldInput({ field, value, onChange, error, t }) {
   if (field.enum) {
     return (
       <>
-        <select
-          className="w-full px-2 py-1"
-          style={inputStyle}
+        <Dropdown
+          size="sm"
+          mono
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          <option value="">—</option>
-          {field.enum.map((v) => (
-            <option key={v} value={v}>{v}</option>
-          ))}
-        </select>
+          onChange={(v) => onChange(v)}
+          options={[{ value: '', label: '—' }, ...field.enum.map((v) => ({ value: v, label: v }))]}
+        />
         {error && <span style={{ color: 'var(--red)', fontSize: 10 }}>{error}</span>}
       </>
     )
@@ -575,15 +572,13 @@ function FieldInput({ field, value, onChange, error, t }) {
 
   if (field.type === 'boolean') {
     return (
-      <select
-        className="w-full px-2 py-1"
-        style={inputStyle}
+      <Dropdown
+        size="sm"
+        mono
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="false">false</option>
-        <option value="true">true</option>
-      </select>
+        onChange={(v) => onChange(v)}
+        options={[{ value: 'false', label: 'false' }, { value: 'true', label: 'true' }]}
+      />
     )
   }
 

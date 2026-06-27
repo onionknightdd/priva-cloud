@@ -8,7 +8,6 @@ const CanvasPanel = lazy(() => import('./CanvasPanel'))
 const UserDataPanel = lazy(() => import('../userdata/UserDataPanel'))
 const SkillsPanel = lazy(() => import('../skills/SkillsPanel'))
 const MCPPanel = lazy(() => import('../mcp/MCPPanel'))
-const SchedulerPanel = lazy(() => import('../scheduler/SchedulerPanel'))
 const HooksPanel = lazy(() => import('../hooks/HooksPanel'))
 const SubAgentsPanel = lazy(() => import('../subagents/SubAgentsPanel'))
 const WebTerminalDrawer = lazy(() => import('../terminal/WebTerminalDrawer'))
@@ -38,10 +37,6 @@ export default function MainLayout() {
 
   if (activeNavTab === 'mcp') {
     return <LazyPanel><MCPPanel /></LazyPanel>
-  }
-
-  if (activeNavTab === 'scheduler') {
-    return <LazyPanel><SchedulerPanel /></LazyPanel>
   }
 
   if (activeNavTab === 'hooks') {

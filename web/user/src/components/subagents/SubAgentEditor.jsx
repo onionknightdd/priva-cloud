@@ -3,7 +3,7 @@ import { Save, RotateCcw, Trash2, ChevronDown, AlertCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSubagentsStore from '../../stores/subagentsStore'
 import useUiStore from '@shared/stores/uiStore'
-import CategoryDropdown from '@shared/components/shared/CategoryDropdown'
+import Dropdown from '@shared/components/shared/Dropdown'
 import MarkdownRenderer from '../markdown/MarkdownRenderer'
 import ToolPicker from './ToolPicker'
 import SkillPicker from './SkillPicker'
@@ -339,10 +339,11 @@ export default function SubAgentEditor() {
             <span style={labelStyle}>{t('subagents.fields.model')}</span>
             <div className="flex gap-2 items-center">
               <div style={{ flex: 1 }}>
-                <CategoryDropdown
+                <Dropdown
+                  size="sm"
                   options={MODEL_OPTIONS}
-                  selected={modelDropdownValue}
-                  onSelect={(v) => {
+                  value={modelDropdownValue}
+                  onChange={(v) => {
                     if (v === CUSTOM_MODEL_VALUE) {
                       if (isPresetModel) setFormField('model', '')
                     } else {
@@ -465,10 +466,11 @@ export default function SubAgentEditor() {
               <div className="flex flex-col gap-1">
                 <span style={labelStyle}>{t('subagents.fields.permissionMode')}</span>
                 <div style={{ width: 240 }}>
-                  <CategoryDropdown
+                  <Dropdown
+                    size="sm"
                     options={PERMISSION_MODE_OPTIONS}
-                    selected={draft.permissionMode || ''}
-                    onSelect={(v) => setFormField('permissionMode', v)}
+                    value={draft.permissionMode || ''}
+                    onChange={(v) => setFormField('permissionMode', v)}
                   />
                 </div>
               </div>
@@ -491,10 +493,11 @@ export default function SubAgentEditor() {
               <div className="flex flex-col gap-1">
                 <span style={labelStyle}>{t('subagents.fields.memory')}</span>
                 <div style={{ width: 200 }}>
-                  <CategoryDropdown
+                  <Dropdown
+                    size="sm"
                     options={MEMORY_OPTIONS}
-                    selected={draft.memory || ''}
-                    onSelect={(v) => setFormField('memory', v)}
+                    value={draft.memory || ''}
+                    onChange={(v) => setFormField('memory', v)}
                   />
                 </div>
               </div>

@@ -9,7 +9,6 @@ import useFileOpsStore from './stores/fileOpsStore'
 import useFileBrowserStore from './stores/fileBrowserStore'
 import useSkillsStore from './stores/skillsStore'
 import useSettingsStore from './stores/settingsStore'
-import useSchedulerStore from './stores/schedulerStore'
 import useUiStore from '@shared/stores/uiStore'
 import useUserDataStore from './stores/userDataStore'
 import useHooksStore from './stores/hooksStore'
@@ -26,7 +25,6 @@ setResetStores([
   useFileBrowserStore,
   useSkillsStore,
   useSettingsStore,
-  useSchedulerStore,
   useUiStore,
   useUserDataStore,
   useHooksStore,

@@ -33,9 +33,7 @@ import OptimizePopup from '../shared/OptimizePopup'
 import getLineFromNode from '../../utils/getLineFromNode'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { listDirectory, previewFile, downloadFile, uploadUserFile } from '../../api/userFiles'
-import { uploadAdminFile } from '../../api/adminFiles'
 import { useResizable } from '@shared/hooks/useResizable'
-import useAuthStore from '@shared/stores/authStore'
 import safeStorage from '@shared/utils/safeStorage'
 import { formatDateTime } from '../../utils/formatTime'
 
@@ -245,8 +243,6 @@ function SortableHeader({ label, field, sortField, sortDir, onSort, width, textA
 
 export default function FileManagerTab() {
   const { t } = useTranslation()
-  const authUser = useAuthStore((s) => s.user)
-  const isAdmin = authUser?.role === 'admin'
   const [pathInput, setPathInput] = useState('~')
   const [entries, setEntries] = useState([])
   const [resolvedPath, setResolvedPath] = useState('')
@@ -303,11 +299,8 @@ export default function FileManagerTab() {
   useEffect(() => { fetchDir('~') }, [fetchDir])
 
   const navigateTo = (path) => {
-    // Path scoping is enforced server-side by the agent-runner
-    // (user_files._validate_workspace_path). The client must NOT gate on
-    // authUser.workspace — that is the control-panel's work_dir
-    // (/tmp/cp-workspace/<user>), which differs from the agent-runner's real
-    // workspace (/workspace/<user>) the files actually live in.
+    // Single-tenant pod: the explorer browses the whole pod filesystem; access is
+    // governed solely by the sandbox uid's OS permissions (no app-level path gate).
     setPreview(null)
     setPreviewImageUrl(null)
     setSelectedFileName(null)
@@ -319,10 +312,6 @@ export default function FileManagerTab() {
   const handleGo = () => {
     const val = pathInput.trim()
     if (!val) return
-    if (!isAdmin && val.includes('..')) {
-      setError('Access denied: ".." is not allowed in path')
-      return
-    }
     navigateTo(val)
   }
 
@@ -401,8 +390,7 @@ export default function FileManagerTab() {
     setUploading(true)
     setUploadProgress(0)
     try {
-      const uploadFn = isAdmin ? uploadAdminFile : uploadUserFile
-      await uploadFn(resolvedPath, file, (p) => setUploadProgress(p))
+      await uploadUserFile(resolvedPath, file, (p) => setUploadProgress(p))
       fetchDir(resolvedPath)
     } catch (err) {
       setError(err.message)
@@ -537,7 +525,7 @@ export default function FileManagerTab() {
     })
   }, [preview])
 
-  // Breadcrumb segments
+  // Breadcrumb segments (absolute — the explorer browses the whole pod filesystem)
   const segments = resolvedPath ? resolvedPath.split('/').filter(Boolean) : []
   const hasPreview = true
 

@@ -54,7 +54,7 @@ def _read_all_audit_entries(username: str) -> list[dict]:
     import json
 
     audit = get_audit_logger()
-    # Trigger one-shot migration of any pre-cursor-patch legacy file
+    # Trigger the audit logger's one-shot migration of any older single-file layout
     audit._ensure_migrated()  # type: ignore[attr-defined]
 
     daily_files = audit._list_daily()  # type: ignore[attr-defined]

@@ -438,7 +438,7 @@ def cleanup_expired_files() -> int:
                 except Exception:
                     pass
 
-        # Clean legacy flat temp/ directory (backwards compat)
+        # Clean the older flat temp/ directory (pre-date-partitioned layout)
         legacy_temp = user_dir / "temp"
         if legacy_temp.is_dir():
             for f in legacy_temp.iterdir():

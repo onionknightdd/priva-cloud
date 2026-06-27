@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { X, Plus, Check, AlertCircle, Loader } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import Dropdown from '@shared/components/shared/Dropdown'
 import useMcpStore from '../../stores/mcpStore'
 
 export default function MCPAddDialog() {
@@ -138,18 +139,15 @@ export default function MCPAddDialog() {
 
           {/* Type */}
           <FormField label={t('mcp.type')}>
-            <select
-              className="w-full px-2 py-1"
-              style={{
-                background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-                borderRadius: 4, color: 'var(--text-primary)', fontSize: 13, outline: 'none',
-              }}
+            <Dropdown
+              size="sm"
               value={type}
-              onChange={(e) => setType(e.target.value)}
-            >
-              <option value="http">HTTP</option>
-              <option value="sse">SSE</option>
-            </select>
+              onChange={(v) => setType(v)}
+              options={[
+                { value: 'http', label: 'HTTP' },
+                { value: 'sse', label: 'SSE' },
+              ]}
+            />
           </FormField>
 
           {/* URL */}

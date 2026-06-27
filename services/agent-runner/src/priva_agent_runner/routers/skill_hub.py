@@ -11,7 +11,7 @@ from priva_common.models.skill_hub import (
 )
 from priva_common.models.skills import SkillFileResponse
 from priva_common.audit_log import AuditEntry, get_audit_logger
-from ..deps import require_admin, require_user
+from ..deps import require_user
 from ..services.skill_hub import (
     delete_hub_skill,
     deliver_hub_skill,
@@ -26,12 +26,12 @@ logger = get_app_logger(__name__)
 router = APIRouter(prefix="/api/resource/skill-hub", tags=["skill-hub"])
 
 
-# --- Admin-only: upload must be registered before /{name} to avoid conflict ---
+# --- upload must be registered before /{name} to avoid path conflict ---
 
 @router.post("/upload", response_model=HubDeliverResponse)
 async def upload_hub_skill_endpoint(
     file: UploadFile = File(...),
-    user: UserRecord = Depends(require_admin),
+    user: UserRecord = Depends(require_user),
 ):
     file_data = await file.read()
     result = upload_hub_skill(file_data, file.filename or "upload.zip")
@@ -96,7 +96,7 @@ async def deliver_hub_skill_endpoint(
 @router.delete("/{name}")
 async def delete_hub_skill_endpoint(
     name: str,
-    user: UserRecord = Depends(require_admin),
+    user: UserRecord = Depends(require_user),
 ):
     delete_hub_skill(name)
 

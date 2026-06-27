@@ -19,7 +19,7 @@ from priva_common.models.hooks import (
     HookTestRequest,
     HookTestResponse,
 )
-from ..deps import get_user_workspace, require_admin, require_user
+from ..deps import get_user_workspace, require_user
 from ..services.hooks.config_manager import HookConfigManager
 from ..services.hooks.executor import test_builtin_hook, test_hook
 from ..services.hooks.log_store import get_hook_log_store
@@ -296,72 +296,3 @@ async def get_logs(
         total=total,
         limit=limit,
     )
-
-
-# -- Admin hook endpoints ---------------------------------------------------
-
-
-@router.get("/admin", dependencies=[Depends(require_admin)])
-async def list_admin_hooks():
-    """List admin-enforced hooks from runtime.hooks."""
-    runtime = get_user_store().get_runtime_config()
-    return {"hooks": runtime.get("hooks", {})}
-
-
-@router.post("/admin")
-async def add_admin_hook(
-    event_type: str,
-    entry: dict,
-    admin: UserRecord = Depends(require_admin),
-):
-    """Add an enforced hook to runtime.hooks in .priva.settings.yml.
-
-    This also mirrors to each user's {cwd}/.claude/settings.json on the
-    next agent run via ``build_hooks()``.
-    """
-    store = get_user_store()
-    runtime = store.get_runtime_config()
-    hooks = runtime.get("hooks", {})
-    hooks.setdefault(event_type, []).append(entry)
-    store.update_runtime_config("hooks", hooks)
-
-    audit = get_audit_logger()
-    audit.append(AuditEntry(
-        actor=admin.username,
-        action="hooks.admin_added",
-        details={"event_type": event_type},
-    ))
-
-    return {"status": "ok", "hooks": hooks}
-
-
-@router.delete("/admin/{event_type}/{index}")
-async def remove_admin_hook(
-    event_type: str,
-    index: int,
-    admin: UserRecord = Depends(require_admin),
-):
-    """Remove an enforced hook by event type and index."""
-    store = get_user_store()
-    runtime = store.get_runtime_config()
-    hooks = runtime.get("hooks", {})
-
-    entries = hooks.get(event_type, [])
-    if index < 0 or index >= len(entries):
-        raise HTTPException(404, "Hook entry not found at that index")
-
-    entries.pop(index)
-    if not entries:
-        hooks.pop(event_type, None)
-    else:
-        hooks[event_type] = entries
-    store.update_runtime_config("hooks", hooks)
-
-    audit = get_audit_logger()
-    audit.append(AuditEntry(
-        actor=admin.username,
-        action="hooks.admin_removed",
-        details={"event_type": event_type, "index": index},
-    ))
-
-    return {"status": "ok", "hooks": hooks}

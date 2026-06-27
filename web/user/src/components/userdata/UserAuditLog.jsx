@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import useUserDataStore from '../../stores/userDataStore'
 import AuditCharts from '@shared/components/admin/charts/AuditCharts'
 import DateRangePicker from '@shared/components/shared/DateRangePicker'
-import CategoryDropdown from '@shared/components/shared/CategoryDropdown'
+import Dropdown from '@shared/components/shared/Dropdown'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 
 const FILTER_CATEGORIES = [
@@ -260,10 +260,11 @@ export default function UserAuditLog() {
               </span>
 
               {/* Category dropdown */}
-              <CategoryDropdown
+              <Dropdown
+                size="sm"
                 options={FILTER_CATEGORIES.map((c) => ({ value: c.value, label: t(c.labelKey) }))}
-                selected={auditActionFilter || ''}
-                onSelect={(val) => {
+                value={auditActionFilter || ''}
+                onChange={(val) => {
                   setAuditActionFilter(val || null)
                   setAuditTargetFilter('')
                   setAuditSessionFilter('')

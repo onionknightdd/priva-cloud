@@ -84,7 +84,7 @@ class HookLogStore:
             if not legacy.exists():
                 return
 
-            logger.info("Migrating legacy hooks log for user {}", username)
+            logger.info("Migrating single-file hooks log to daily partitions for user {}", username)
 
             entries: list[HookLogEntry] = []
             try:

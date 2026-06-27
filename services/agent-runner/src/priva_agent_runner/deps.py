@@ -5,11 +5,9 @@ control-panel (dev edge) instead of a browser credential. ``require_account``
 verifies it, asserts it matches the one account this process is pinned to
 (``ACCOUNT_ID`` env, set at boot, §E), and resolves the ``UserRecord``.
 
-The legacy FastAPI dependencies (``get_current_user`` / ``require_user`` /
-``require_admin``) are aliased to ``require_account`` so the moved route
-signatures keep working unchanged — alpha is single-user, so "the current
-user", "a user", and "an admin" all resolve to the pinned account (role
-enforced below where it mattered).
+``require_user`` and ``get_current_user`` are thin aliases of
+``require_account``: a per-account pod serves exactly one account, so "the
+current user" and "a user" both resolve to the pinned account.
 """
 
 from __future__ import annotations
@@ -78,15 +76,13 @@ def negotiated_subprotocol(websocket: WebSocket) -> str | None:
     return WS_SUBPROTOCOL if WS_SUBPROTOCOL in parts else None
 
 
-# --- Back-compat aliases so moved route signatures keep working (single-account) ---
+# --- Aliases: one pinned account, so every "user" dependency resolves to it ---
 require_user = require_account
-require_admin = require_account
 get_current_user = require_account
 
 __all__ = [
     "require_account",
     "require_user",
-    "require_admin",
     "get_current_user",
     "account_from_ws",
     "negotiated_subprotocol",

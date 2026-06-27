@@ -87,10 +87,8 @@ def _get_skills_dir(level: SkillLevel, username: str | None = None) -> Path:
 def _get_skill_exclude(username: str) -> list[str]:
     """Read the skill_exclude denylist (with lazy migration) from .priva.user.yml.
 
-    Delegates to the shared ``priva_common.skill_exclude`` helper (extracted from
-    the old channels config store) so the skill execution path never imports
-    ``channels``. Failures fall back to ``[]`` so all discovered skills stay
-    enabled rather than crashing a run.
+    Delegates to the shared ``priva_common.skill_exclude`` helper. Failures fall
+    back to ``[]`` so all discovered skills stay enabled rather than crashing a run.
     """
     from priva_common.skill_exclude import get_skill_exclude
     try:
@@ -99,33 +97,6 @@ def _get_skill_exclude(username: str) -> list[str]:
         logger.warning("get_skill_exclude failed; defaulting to empty denylist", exc_info=True)
         return []
     return list(value) if isinstance(value, list) else []
-
-
-def _cleanup_legacy_skill_symlinks(username: str) -> None:
-    """One-time wipe of leftover symlinks created by the old sync_global_skill_symlinks
-    path. Skill enable/disable is now driven by ``options.skills`` and the
-    project skills directory should not contain global-symlinked entries.
-    """
-    try:
-        global_dir = _get_skills_dir("global")
-        project_dir = _get_skills_dir("project", username)
-    except HTTPException:
-        return
-    if not project_dir.exists():
-        return
-    global_dir_str = str(global_dir.resolve())
-    for entry in project_dir.iterdir():
-        if not entry.is_symlink():
-            continue
-        try:
-            target = str(Path(os.readlink(entry)).resolve())
-        except (OSError, ValueError):
-            continue
-        if target.startswith(global_dir_str):
-            try:
-                entry.unlink()
-            except OSError:
-                logger.warning("Failed to remove stale skill symlink: {}", entry)
 
 
 def compute_enabled_skill_names(username: str) -> list[str]:
@@ -148,14 +119,6 @@ def compute_enabled_skill_names(username: str) -> list[str]:
         for entry in sorted(skills_dir.iterdir()):
             if not entry.is_dir():
                 continue
-            # Skip symlinks leftover from the legacy sync (cleaned up elsewhere)
-            if level == "project" and entry.is_symlink():
-                try:
-                    target = str(Path(os.readlink(entry)).resolve())
-                    if target.startswith(str(_get_skills_dir("global").resolve())):
-                        continue
-                except (OSError, ValueError):
-                    pass
             if not (entry / "SKILL.md").exists():
                 continue
             name = entry.name

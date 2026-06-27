@@ -3,11 +3,9 @@ own workspace.
 
 These read/write the user's ``.priva.user.yml`` via the shared
 ``priva_common.skill_exclude`` accessors, so the values land in
-``$work_dir/<username>/.priva.user.yml`` — on the agent-runner that is the
-per-account PVC (/workspace/<username>), the SAME file the agent reads
-(``vision_model`` at claude_sdk/service.py). Previously the control-panel served
-these from its own pod-local /tmp/cp-workspace, which the agent never sees, so
-the saved vision_model was silently dropped and quickactions died with the pod.
+``$work_dir/<username>/.priva.user.yml`` — on the agent-runner the per-account
+PVC (/workspace/<username>), the SAME file the agent reads (``vision_model`` at
+claude_sdk/service.py).
 """
 
 from __future__ import annotations
