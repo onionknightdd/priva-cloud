@@ -1,5 +1,53 @@
 # Priva — Claude Agent SDK Project Rules
 
+## Frontend SPA — build, hotload & redeploy
+
+The user/admin SPAs (`web/user`, `web/admin`) are built on the host and served by the
+**control-panel** pod from `/app/web/{user,admin}/dist` via FastAPI `StaticFiles` (read from
+disk per request). So a frontend change does **NOT** need a Docker image rebuild — hotload the
+freshly-built `dist/` into the running pod and it serves live, no restart.
+
+**The loop for every frontend change:**
+
+1. **Update the code.**
+2. **Build and verify — no errors.**
+   ```bash
+   cd web && npm run build:user        # and/or: npm run build:admin
+   ```
+   Build must finish clean. The pre-existing "chunks larger than 1100 kB" warning is fine; a real
+   error is not. Optionally grep `web/<app>/dist/assets` to confirm new strings/keys landed.
+3. **Hotload the new files directly into the running pod** (StaticFiles serves the new hashed
+   bundle + `index.html` immediately — no restart, no image rebuild):
+   ```bash
+   POD=$(kubectl get pods -n priva-cloud -l app=control-panel -o jsonpath='{.items[0].metadata.name}')
+   # user SPA → /app/web/user/dist   (admin SPA → swap web/admin and /app/web/admin/dist)
+   tar -C web/user/dist -cf - . \
+     | kubectl exec -i -n priva-cloud "$POD" -- tar -C /app/web/user/dist --warning=no-unknown-keyword -xf -
+   ```
+   - `--warning=no-unknown-keyword` silences the harmless `LIBARCHIVE.xattr.com.apple.provenance`
+     spam macOS `tar` emits (one line per file). Pod has GNU tar; rootfs is writable.
+   - Smoke-check it's live (from inside the pod, no port-forward):
+     ```bash
+     kubectl exec -n priva-cloud "$POD" -- python -c 'import urllib.request,re; \
+       h=urllib.request.urlopen("http://localhost:8080/").read().decode(); \
+       print("serving", re.search(r"/assets/index-[A-Za-z0-9_-]+\.js",h).group(0))'
+     ```
+4. **Ask the user to verify** in the browser. **Only rebuild the image + redeploy when the user
+   explicitly asks** — hotloaded files live only in the running pod and are lost on any
+   restart/reschedule; the image rebuild is what makes the change persist.
+
+**Full redeploy (only when the user asks):** rebuild the image so `dist/` is baked in.
+```bash
+docker build -f deploy/docker/control-panel.Dockerfile -t priva/control-panel:dev .   # COPY . /app bakes web/{user,admin}/dist
+minikube image rm priva/control-panel:dev      # same :dev tag won't replace under IfNotPresent unless removed first
+minikube image load priva/control-panel:dev
+kubectl rollout restart deploy/control-panel -n priva-cloud
+```
+Docker / minikube / SSH steps need the sandbox disabled (`dangerouslyDisableSandbox: true`).
+Backend (`services/**`) changes are NOT hotloadable — they always require the image rebuild above.
+
+---
+
 ## WebUI design
 
 > Full design spec: `web/design-spec.md`. This file is the executable summary.
