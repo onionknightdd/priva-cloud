@@ -32,6 +32,26 @@ from priva_common.logging import AccessLogMiddleware, configure_logging, get_app
 logger = get_app_logger(__name__)
 
 
+SPA_SHELL_CACHE_CONTROL = "no-cache"
+SPA_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
+
+
+class SpaStaticFiles(StaticFiles):
+    """Serve Vite SPA files with deployment-safe cache headers."""
+
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers["Cache-Control"] = self._cache_control_for(full_path)
+        return response
+
+    @staticmethod
+    def _cache_control_for(full_path) -> str:
+        path = Path(full_path)
+        if "assets" in path.parts:
+            return SPA_ASSET_CACHE_CONTROL
+        return SPA_SHELL_CACHE_CONTROL
+
+
 def _repo_root() -> Path | None:
     """Locate the monorepo root relative to this file (dev checkout only)."""
     here = Path(__file__).resolve()
@@ -201,13 +221,13 @@ def create_app() -> FastAPI:
     admin_dist = _dist_dir("PRIVA_WEB_DIST_ADMIN", "dist-admin", "web/admin/dist")
     user_dist = _dist_dir("PRIVA_WEB_DIST", "dist", "web/user/dist")
     if admin_dist.exists():
-        app.mount("/admin", StaticFiles(directory=admin_dist, html=True), name="admin-spa")
+        app.mount("/admin", SpaStaticFiles(directory=admin_dist, html=True), name="admin-spa")
         logger.info("admin SPA mounted at /admin from {}", admin_dist)
     else:
         logger.warning("admin SPA dist not found at {} (run `npm run build:admin`)", admin_dist)
     if user_dist.exists():
-        app.mount("/sandbox", StaticFiles(directory=user_dist, html=True), name="user-spa-sandbox")
-        app.mount("/", StaticFiles(directory=user_dist, html=True), name="user-spa")
+        app.mount("/sandbox", SpaStaticFiles(directory=user_dist, html=True), name="user-spa-sandbox")
+        app.mount("/", SpaStaticFiles(directory=user_dist, html=True), name="user-spa")
         logger.info("user SPA mounted at /sandbox and / from {}", user_dist)
     else:
         logger.warning("user SPA dist not found at {} (run `npm run build`)", user_dist)

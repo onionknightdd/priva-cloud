@@ -1,16 +1,17 @@
-import { lazy, Suspense } from 'react'
+import { Suspense } from 'react'
 import Sidebar from './Sidebar'
 import ChatPanel from '../chat/ChatPanel'
 import useSidebarStore from '../../stores/sidebarStore'
 import useUiStore from '@shared/stores/uiStore'
+import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 
-const CanvasPanel = lazy(() => import('./CanvasPanel'))
-const UserDataPanel = lazy(() => import('../userdata/UserDataPanel'))
-const SkillsPanel = lazy(() => import('../skills/SkillsPanel'))
-const MCPPanel = lazy(() => import('../mcp/MCPPanel'))
-const HooksPanel = lazy(() => import('../hooks/HooksPanel'))
-const SubAgentsPanel = lazy(() => import('../subagents/SubAgentsPanel'))
-const WebTerminalDrawer = lazy(() => import('../terminal/WebTerminalDrawer'))
+const CanvasPanel = lazyWithChunkReload(() => import('./CanvasPanel'))
+const UserDataPanel = lazyWithChunkReload(() => import('../userdata/UserDataPanel'))
+const SkillsPanel = lazyWithChunkReload(() => import('../skills/SkillsPanel'))
+const MCPPanel = lazyWithChunkReload(() => import('../mcp/MCPPanel'))
+const HooksPanel = lazyWithChunkReload(() => import('../hooks/HooksPanel'))
+const SubAgentsPanel = lazyWithChunkReload(() => import('../subagents/SubAgentsPanel'))
+const WebTerminalDrawer = lazyWithChunkReload(() => import('../terminal/WebTerminalDrawer'))
 
 function LazyPanel({ children }) {
   return (

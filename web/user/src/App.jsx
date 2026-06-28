@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import NavBar from './components/layout/NavBar'
 import MainLayout from './components/layout/MainLayout'
 import ConfirmDialog from './components/shared/ConfirmDialog'
@@ -13,9 +13,10 @@ import ToastStack from './components/ui/ToastStack'
 import ConnectionBanner from './components/ui/ConnectionBanner'
 import { getPtyFeature } from '@shared/api/admin'
 import safeStorage from '@shared/utils/safeStorage'
+import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 
-const IntroPanel = lazy(() => import('./components/intro/IntroPanel'))
-const SetupWizardModal = lazy(() => import('./components/chat/SetupWizardModal'))
+const IntroPanel = lazyWithChunkReload(() => import('./components/intro/IntroPanel'))
+const SetupWizardModal = lazyWithChunkReload(() => import('./components/chat/SetupWizardModal'))
 
 const INTRO_SEEN_KEY_PREFIX = 'priva-intro-seen'
 

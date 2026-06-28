@@ -1,11 +1,12 @@
-import { lazy, Suspense, useEffect, useCallback } from 'react'
+import { Suspense, useEffect, useCallback } from 'react'
 import { Key, Cpu, Zap, Settings2, User, X, Terminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useUiStore from '@shared/stores/uiStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import Tabs from '@shared/components/shared/Tabs'
+import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 
-const SettingsPanel = lazy(() => import('./SettingsPanel'))
+const SettingsPanel = lazyWithChunkReload(() => import('./SettingsPanel'))
 
 // The agent-runner SPA is per-account, so every tab here is the user's OWN config
 // (no cross-account/admin settings). Web Terminal configures this account's own pod.

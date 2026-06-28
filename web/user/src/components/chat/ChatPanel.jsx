@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { Suspense, useEffect } from 'react'
 import { FileDiff, FolderTree, PanelRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
@@ -11,8 +11,9 @@ import UsageStatsOverview from './UsageStatsOverview'
 import QuickActionChips from './QuickActionChips'
 import CheckpointToggle from './CheckpointToggle'
 import RewindBanner from './RewindBanner'
+import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 
-const MessageList = lazy(() => import('./MessageList'))
+const MessageList = lazyWithChunkReload(() => import('./MessageList'))
 
 function CanvasShortcut({ icon: Icon, title, hidden, onClick }) {
   if (hidden) return null
