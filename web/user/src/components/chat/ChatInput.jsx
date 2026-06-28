@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
-import { Send, Square, Shield, Cable, ChevronRight, X, AlertTriangle, Cpu, CornerDownLeft } from 'lucide-react'
+import { Send, Square, Shield, Cable, ChevronRight, X, AlertTriangle, Cpu, CornerDownLeft, FolderPlus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
 import useUiStore from '@shared/stores/uiStore'
@@ -19,6 +19,8 @@ import FileReferenceCard from '../shared/FileReferenceCard'
 import SelectedXlsxCard from '../shared/SelectedXlsxCard'
 import SelectedFileCard from '../shared/SelectedFileCard'
 import CwdIndicator from './CwdIndicator'
+import DirectoryPicker from '../shared/DirectoryPicker'
+import { setSessionAddDirs } from '../../api/sessions'
 import QueuedMessagesStack from './QueuedMessagesStack'
 import { buildSelectedXlsxXml } from '../../utils/selectedXlsx'
 import { buildSelectedFileXml } from '../../utils/selectedFile'
@@ -45,6 +47,14 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
   const pendingPlanApproval = useChatStore((s) => s.pendingPlanApproval)
   const permissionMode = useChatStore((s) => s.permissionMode)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
+  const sessionId = useChatStore((s) => s.sessionId)
+  const messageCount = useChatStore((s) => s.messages.length)
+  const cwdDraft = useChatStore((s) => s.cwdDraft)
+  const setCwdDraft = useChatStore((s) => s.setCwdDraft)
+  const addDirs = useChatStore((s) => s.addDirs)
+  const setAddDirs = useChatStore((s) => s.setAddDirs)
+  const [cwdPickerOpen, setCwdPickerOpen] = useState(false)
+  const [dirsPickerOpen, setDirsPickerOpen] = useState(false)
   const mcpServers = useChatStore((s) => s.mcpServers)
   const setMcpServers = useChatStore((s) => s.setMcpServers)
   const mcpServerList = useMcpStore((s) => s.servers)
@@ -608,17 +618,86 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
     </>
   )
 
+  // cwd is editable only before a conversation starts; once a session exists or
+  // any message is present it locks (no picker, no lock glyph — disabled chip).
+  const cwdLocked = !!sessionId || messageCount > 0
+  const displayCwd = cwdLocked ? cwd : (cwdDraft || cwd || '')
+
+  const applyAddDirs = (dirs) => {
+    setAddDirs(dirs)
+    // Persist immediately when a session exists so a resume recovers the set.
+    if (sessionId) setSessionAddDirs(sessionId, dirs).catch(() => {})
+  }
+
+  // cwd chip (current place) + add_dirs chip immediately to its right.
+  const cwdRow = (
+    <div className="flex items-center gap-2 min-w-0">
+      <div className="min-w-0" style={{ flex: '0 1 auto', minWidth: 0 }}>
+        <CwdIndicator
+          cwd={displayCwd}
+          disabled={cwdLocked}
+          onClick={cwdLocked ? undefined : () => setCwdPickerOpen(true)}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={() => setDirsPickerOpen(true)}
+        className="inline-flex items-center gap-1 flex-shrink-0"
+        title={addDirs.length ? addDirs.join('\n') : t('chat.addDirsHint')}
+        style={{
+          height: 28,
+          padding: '0 9px',
+          boxSizing: 'border-box',
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 4,
+          cursor: 'pointer',
+          color: addDirs.length ? 'var(--text-secondary)' : 'var(--text-dim)',
+          fontSize: 12,
+          transition: 'border-color 150ms ease, color 150ms ease',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = addDirs.length ? 'var(--text-secondary)' : 'var(--text-dim)' }}
+      >
+        <FolderPlus size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+        <span>{addDirs.length ? t('chat.addDirsCount', { count: addDirs.length }) : t('chat.addDirs')}</span>
+      </button>
+    </div>
+  )
+
+  const directoryPickers = (
+    <>
+      <DirectoryPicker
+        open={cwdPickerOpen}
+        multiple={false}
+        title={t('picker.cwdTitle')}
+        initialPath={cwd || '/'}
+        initialSelected={displayCwd || null}
+        onConfirm={(path) => { setCwdDraft(path); setCwdPickerOpen(false) }}
+        onCancel={() => setCwdPickerOpen(false)}
+      />
+      <DirectoryPicker
+        open={dirsPickerOpen}
+        multiple
+        title={t('picker.addDirsTitle')}
+        initialPath={cwd || '/'}
+        initialSelected={addDirs}
+        onConfirm={(dirs) => { applyAddDirs(dirs); setDirsPickerOpen(false) }}
+        onCancel={() => setDirsPickerOpen(false)}
+      />
+    </>
+  )
+
   return (
     <div
       className="flex-shrink-0 pt-3 pb-3"
       style={{ background: 'var(--bg-base)' }}
     >
+      {directoryPickers}
       <div style={{ maxWidth: 900, width: '80%', margin: '0 auto' }}>
         {cwdPlacement === 'top' && (
           <div className="min-w-0" style={{ marginBottom: 8 }}>
-            <div className="min-w-0" style={{ maxWidth: '100%' }}>
-              <CwdIndicator cwd={cwd} />
-            </div>
+            {cwdRow}
           </div>
         )}
 
@@ -665,7 +744,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
 
         {cwdPlacement === 'below' && (
           <div className="min-w-0" style={{ marginTop: 8 }}>
-            <CwdIndicator cwd={cwd} />
+            {cwdRow}
           </div>
         )}
       </div>

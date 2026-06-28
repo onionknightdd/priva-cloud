@@ -26,6 +26,7 @@
     "collapse": "Collapse",
     "loadMore": "Load more",
     "showMore": "Show more",
+    "moreInDir": "{{count}} more in this dir",
     "loading": "Loading...",
     "today": "Today",
     "yesterday": "Yesterday",
@@ -45,7 +46,26 @@
     "renameFailed": "Rename failed",
     "tagPlaceholder": "tag...",
     "tagClear": "Clear",
-    "tagSave": "Save"
+    "tagSave": "Save",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "archive": "Archive",
+    "pinWorkdir": "Pin workdir",
+    "unpinWorkdir": "Unpin workdir",
+    "archiveWorkdir": "Archive workdir",
+    "archiveWorkdirConfirm": "Archive all {{count}} sessions in this workdir? They move to Settings → Archived and can be restored anytime.",
+    "workdirOptions": "Workdir options",
+    "newChatHere": "New chat in this workdir"
+  },
+  "picker": {
+    "title": "Choose directory",
+    "cwdTitle": "Working directory",
+    "addDirsTitle": "Additional directories",
+    "pathPlaceholder": "Type or paste an absolute path…",
+    "go": "Go",
+    "use": "Use",
+    "cancel": "Cancel",
+    "selectedCount": "{{count}} selected"
   },
   "chat": {
     "placeholder": "Use / to select a skill\nUse @ to attach an uploaded file",
@@ -55,6 +75,9 @@
     "thinking": "Thinking...",
     "thoughtComplete": "Thought",
     "session": "Session",
+    "addDirs": "dirs",
+    "addDirsCount": "dirs ({{count}})",
+    "addDirsHint": "Add directories the agent can access",
     "usage": {
       "title": "What's up next, {{name}}?",
       "tab": {
@@ -826,6 +849,10 @@
     "errorFutureDate": "Cannot select future date"
   },
   "settings": {
+    "archived": "Archived",
+    "archivedHint": "Archived sessions are hidden from the sidebar. Restore one to bring it (and its workdir) back.",
+    "archivedEmpty": "No archived sessions",
+    "unarchive": "Unarchive",
     "apiKey": "API Key",
     "llmProvider": "LLM Provider",
     "quickActions": "Quick Actions",

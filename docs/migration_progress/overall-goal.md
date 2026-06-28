@@ -90,6 +90,18 @@
   `/api/sandbox/*` response >8KB) — worked around for docs, still open for large runtime responses; the
   bundled `priva-user-manual` skill (`SKILL.md`, ~100 endpoints) still lists pre-namespace flat `/api/*`
   paths (never updated for the namespace move) — needs a separate pass.
+- **Session/workdir pin & archive (2026-06-28):** organizing primitives layered on the cwd-grouped sidebar.
+  **Pin** (keep on top) and **archive** (hide from default list) apply to both sessions and workdirs, stored
+  as our own flags in a single account-level index `~/.claude/priva_meta.json`
+  (`services/claude_sdk/session_meta.py`) — kept **separate from the SDK `tag`** (one-slot string; separation
+  also excludes them from tag-filter chips). 4 new routes (`PUT /sessions/{id}/{pin,archive}`,
+  `PUT /workdirs/{pin,archive}`; appendix 72→76) + `GET /sessions?archived=true`. **Workdir-archive cascades**
+  to every session in the cwd (no separate workdir-archive flag); the group vanishes and reappears when any
+  of its sessions is unarchived. Grouped-list order: active workspace → pinned workdirs → rest; pinned
+  sessions float within a group. Frontend: always-visible session three-dot (Pin/Archive) + hover-revealed
+  workdir sliders menu (Pin/Archive-with-confirm) and square-pen (new chat seeded to that cwd); optimistic
+  store updates mirror the backend ordering; new **Settings → Archived** tab unarchives sessions and
+  re-syncs the sidebar. agent-runner image rebuilt + redeployed; user SPA built + hotloaded.
 - **Last updated:** 2026-06-28.
 
 ---

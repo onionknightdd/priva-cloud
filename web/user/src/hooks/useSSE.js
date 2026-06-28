@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { streamAgentRun, streamAgentRunWS, respondPermission as respondPermissionAPI } from '../api/sse'
+import { setSessionAddDirs } from '../api/sessions'
 import useChatStore from '../stores/chatStore'
 import useTaskStore from '../stores/taskStore'
 import useUiStore from '@shared/stores/uiStore'
@@ -779,6 +780,14 @@ export function useSSE() {
           // assistant/tool/system events still render under the active state.
           if (data.session_id) {
             setSessionId(data.session_id)
+            // First assignment of a brand-new conversation: persist its add_dirs
+            // to the server-side sidecar so a resume on any device recovers them.
+            if (!sessionId) {
+              const dirsNow = useChatStore.getState().addDirs
+              if (dirsNow && dirsNow.length > 0) {
+                setSessionAddDirs(data.session_id, dirsNow).catch(() => {})
+              }
+            }
           }
           setCompacting(false)
           setLastResult(data)
@@ -1149,14 +1158,19 @@ export function useSSE() {
     }
 
     const mcpServers = useChatStore.getState().mcpServers
+    const { cwdDraft, addDirs } = useChatStore.getState()
+    // cwd is honored for NEW conversations only; on resume the backend uses the
+    // session's recorded cwd. add_dirs is always sent (request wins; the
+    // hydrated set is re-sent on resume).
+    const cwdForRun = sessionId ? null : (cwdDraft || null)
 
     if (transport === 'ws') {
-      const { abort, sendPermission, sendQueue, sendQueueCancel } = streamAgentRunWS(message, sessionId, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, { tabId }, enableFileCheckpointing)
+      const { abort, sendPermission, sendQueue, sendQueueCancel } = streamAgentRunWS(message, sessionId, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, { tabId }, enableFileCheckpointing, cwdForRun, addDirs)
       setStreamAbort(abort)
       setWsSendPermission(sendPermission)
       useChatStore.getState().setQueueSender({ sendQueue, sendQueueCancel })
     } else {
-      const { abort } = streamAgentRun(message, sessionId, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, enableFileCheckpointing)
+      const { abort } = streamAgentRun(message, sessionId, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, enableFileCheckpointing, cwdForRun, addDirs)
       setStreamAbort(abort)
     }
   }, [])

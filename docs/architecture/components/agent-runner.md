@@ -902,7 +902,7 @@ All seven open questions were answered by the user on 2026-06-18 and are now loc
 
 ## Appendix A — API surface (as-built, 2026-06-27)
 
-The body above (esp. §1.2) describes the router census by *disposition* ("KEEP / STRIP / config re-pointed") but never enumerated the routes. This appendix is the authoritative as-built list: **71 endpoints** across 11 routers + 2 health routes, all mounted by `app.create_app()`. Base prefix `/api/sandbox` (the runtime namespace the edge steers to the account's pod with a single gateway rule — see A.4; control-plane stays on `/api/*` at control-panel); auth is `require_account` (exposed as the `require_user` / `get_current_user` aliases in `deps.py`) unless noted. The pod is single-account, so **there is no admin tier** — every route is the account acting on its own pod (see A.2).
+The body above (esp. §1.2) describes the router census by *disposition* ("KEEP / STRIP / config re-pointed") but never enumerated the routes. This appendix is the authoritative as-built list: **76 endpoints** across 11 routers + 2 health routes, all mounted by `app.create_app()`. Base prefix `/api/sandbox` (the runtime namespace the edge steers to the account's pod with a single gateway rule — see A.4; control-plane stays on `/api/*` at control-panel); auth is `require_account` (exposed as the `require_user` / `get_current_user` aliases in `deps.py`) unless noted. The pod is single-account, so **there is no admin tier** — every route is the account acting on its own pod (see A.2).
 
 ### A.1 Endpoints by router
 
@@ -910,17 +910,26 @@ The body above (esp. §1.2) describes the router census by *disposition* ("KEEP 
 
 | Method · Path | Ability | Handler |
 |---|---|---|
-| `POST /run` | One-shot (non-stream) run | `run_agent` |
-| `POST /run/stream` | Run, stream as SSE | `run_agent_stream` |
-| `WS /ws/run` | Run over WebSocket + live permission prompts | `ws_run` |
-| `GET /sessions` | List past sessions (paginated) | `list_agent_sessions` |
-| `GET /sessions/{id}/messages` | Replay a session's messages | `get_agent_session_messages` |
-| `DELETE /sessions/{id}` | Delete a session file | `delete_agent_session` |
+| `POST /run` | One-shot (non-stream) run; accepts optional `cwd` (new sessions only) + `add_dirs` | `run_agent` |
+| `POST /run/stream` | Run, stream as SSE; same `cwd`/`add_dirs` | `run_agent_stream` |
+| `WS /ws/run` | Run over WebSocket + live permission prompts; init frame carries `cwd`/`add_dirs` | `ws_run` |
+| `GET /sessions` | Default: non-archived sessions **grouped by cwd** (scans all project dirs; active cwd first, then pinned workdirs; pinned sessions float within a group). `?cwd=<path>` → one dir's flat page; `?archived=true` → flat list of all archived sessions | `list_agent_sessions` |
+| `GET /sessions/{id}/messages` | Replay a session's messages (+ its stored `add_dirs`) | `get_agent_session_messages` |
+| `DELETE /sessions/{id}` | Delete a session file (+ its `add_dirs` sidecar + pin/archive entry) | `delete_agent_session` |
 | `POST /permission/respond` | Answer a tool-permission request (owner-only, 403 on actor≠owner) | `respond_permission` |
 | `POST /rewind` | Rewind files to a checkpoint (409 while a run is live) | `rewind_session` |
 | `POST /fork` | Fork a session (mid / tail) | `fork_agent_session` |
 | `PATCH /sessions/{id}` | Rename a session | `rename_agent_session` |
 | `PUT /sessions/{id}/tag` | Set/clear a session tag | `tag_agent_session` |
+| `PUT /sessions/{id}/add_dirs` | Persist a session's extra directories (`--add-dir`), recovered on resume | `set_agent_session_add_dirs` |
+| `PUT /sessions/{id}/pin` | Pin/unpin a session (`{pinned}`) | `pin_agent_session` |
+| `PUT /sessions/{id}/archive` | Archive/unarchive a session (`{archived}`) | `archive_agent_session` |
+| `PUT /workdirs/pin` | Pin/unpin a workdir (`{cwd, pinned}`) | `pin_workdir` |
+| `PUT /workdirs/archive` | Archive a workdir (`{cwd}`) — cascades archive to every session in it | `archive_workdir` |
+
+**Configurable cwd + add_dirs (2026-06-28).** A run's working directory is user-selectable (anywhere on the single-account pod FS) for a **new** conversation and locked once it starts — on resume the cwd is re-derived from the session (the SDK encodes cwd into the transcript dir, so session ops use `_find_session_cwd(session_id)` = `get_session_info().cwd` rather than the one workspace). `add_dirs` (SDK `--add-dir`) is editable any time and persisted per-session in a sidecar `~/.claude/projects/<sanitized-cwd>/<session_id>.add_dirs.json` (we own it — not patched into the transcript the CLI is writing), so a resume on any device recovers it. Because cwd now varies, the sessions list scans **all** project dirs and groups by cwd.
+
+**Pin & archive (2026-06-28).** Pin (keep on top) and archive (hide from the default list) apply to both sessions and workdirs. They're stored as our own flags in a single **account-level** index `~/.claude/priva_meta.json` (`services/claude_sdk/session_meta.py`) — `{sessions:{<id>:{pinned,archived}}, workdirs:{<canonical-cwd>:{pinned}}}` — deliberately *separate* from the SDK `tag` (a single string that can't hold pinned + archived + a user tag at once; keeping them out of `tag` also excludes them from the tag-filter chips). One index file (not per-session sidecars) so the grouped list reads it once and the Settings → Archived panel enumerates without walking project dirs; read-modify-write is lock-guarded + atomic (`os.replace`). **Archiving a workdir is a cascade** — it marks every session in that cwd archived (no separate workdir-archive flag), so the group vanishes from the default list and reappears once any session in it is unarchived. Grouped-list ordering: active workspace first → pinned workdirs (by recent activity) → the rest; pinned sessions float to the top within their group.
 
 **Agent attachments (temp uploads)** — `routers/files.py` `/api/sandbox/agent-attachments` → `services/temp_files.py`
 `POST /upload` · `DELETE /{uuid}` · `GET /` · `GET /{uuid}` — upload / delete / list / download temp attachments.

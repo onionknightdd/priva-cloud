@@ -27,6 +27,12 @@ const useChatStore = create((set, get) => ({
   permissionQueue: [],
   permissionMode: 'bypassPermissions',
   mcpServers: 'auto', // 'auto' | 'disable' | ['srv-A', ...]
+  // Working directory chosen for a NEW conversation (before first send). cwd is
+  // locked once a session exists; on resume the cwd comes from the session.
+  cwdDraft: null,
+  // Additional directories (SDK --add-dir) for this conversation. Editable any
+  // time; persisted server-side per session and recovered on resume.
+  addDirs: [],
   pendingPlanApproval: null,
   availableSkills: [],
   skillsLoaded: false,
@@ -132,6 +138,8 @@ const useChatStore = create((set, get) => ({
   setCompacting: (value) => set({ isCompacting: value }),
   setPermissionMode: (mode) => set({ permissionMode: mode }),
   setMcpServers: (value) => set({ mcpServers: value }),
+  setCwdDraft: (path) => set({ cwdDraft: path || null }),
+  setAddDirs: (dirs) => set({ addDirs: Array.isArray(dirs) ? dirs : [] }),
   setCheckpointingEnabled: (v) => {
     const { sessionId } = get()
     set({ enableFileCheckpointing: v })
@@ -386,6 +394,7 @@ const useChatStore = create((set, get) => ({
     fileReferenceTemplate: null, selectedXlsxReference: null, selectedFileReference: null, isCompacting: false,
     checkpoints: [], forkParentId: null, enableFileCheckpointing: false,
     rewindMarker: null, queuedUserMessages: [], retryState: null, lastUserPrompt: null,
+    cwdDraft: null, addDirs: [],
   }),
 
   reset: () => set({
@@ -399,10 +408,11 @@ const useChatStore = create((set, get) => ({
     enableFileCheckpointing: false, checkpoints: [], forkParentId: null,
     rewindMarker: null, queuedUserMessages: [], queueSender: null,
     retryState: null, lastUserPrompt: null,
+    cwdDraft: null, addDirs: [],
   }),
 
   // For loading a session
-  loadSession: (sessionId, messages, parentId = null, subagentContent = {}) => {
+  loadSession: (sessionId, messages, parentId = null, subagentContent = {}, addDirs = []) => {
     const restored = safeStorage.getBoolean(`${CKPT_STORAGE_PREFIX}${sessionId}`)
     let rewindMarker = null
     const parsed = safeStorage.getJSON(`${REWIND_STORAGE_PREFIX}${sessionId}`)
@@ -420,6 +430,10 @@ const useChatStore = create((set, get) => ({
       enableFileCheckpointing: restored,
       rewindMarker,
       streamGeneration: s.streamGeneration + 1,
+      // cwd is locked to the session; clear any new-chat draft. Hydrate add_dirs
+      // from the session's server-side set so the chip shows the recovered dirs.
+      cwdDraft: null,
+      addDirs: Array.isArray(addDirs) ? addDirs : [],
     }))
     get().fetchAvailableSkills()
   },

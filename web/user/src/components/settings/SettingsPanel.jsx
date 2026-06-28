@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Key, Cpu, Zap, Check, AlertCircle, Eye, EyeOff, Plus, Trash2, Pencil, X, ChevronDown, Search, Copy, RefreshCw, Settings2 } from 'lucide-react'
+import { Key, Cpu, Zap, Check, AlertCircle, Eye, EyeOff, Plus, Trash2, Pencil, X, ChevronDown, Search, Copy, RefreshCw, Settings2, Archive, ArchiveRestore, MessageSquare, FolderBookmark } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSettingsStore from '../../stores/settingsStore'
 import useAuthStore from '@shared/stores/authStore'
 import useUserDataStore from '../../stores/userDataStore'
+import useSidebarStore from '../../stores/sidebarStore'
+import { fetchArchivedSessions, archiveSession as apiArchiveSession } from '../../api/sessions'
 import { changeMyPassword } from '@shared/api/auth'
 import {
   getCliPath,
@@ -1495,6 +1497,149 @@ function AdvancedTab() {
   )
 }
 
+// Last path segment for compact cwd display (full path stays in the title attr).
+function lastSeg(p) {
+  if (!p) return '~'
+  const parts = String(p).split('/').filter(Boolean)
+  return parts.length ? parts[parts.length - 1] : p
+}
+
+function archivedTitle(s) {
+  return s.custom_title || s.first_prompt || s.summary || s.session_id
+}
+
+function ArchivedTab() {
+  const { t } = useTranslation()
+  const [sessions, setSessions] = useState(null) // null = loading
+  const [error, setError] = useState(null)
+  const [busyId, setBusyId] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    fetchArchivedSessions()
+      .then((data) => { if (alive) setSessions(data.sessions || []) })
+      .catch((err) => { if (alive) { setError(String(err?.message || err)); setSessions([]) } })
+    return () => { alive = false }
+  }, [])
+
+  const handleUnarchive = async (s) => {
+    setBusyId(s.session_id)
+    try {
+      await apiArchiveSession(s.session_id, false)
+      setSessions((prev) => prev.filter((x) => x.session_id !== s.session_id))
+      // Re-sync the sidebar so the session (and its workdir) reappears.
+      useSidebarStore.getState().fetchSessions()
+    } catch (err) {
+      setError(String(err?.message || err))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  // Group archived sessions by their workdir (most-recent activity first),
+  // mirroring the sidebar's cwd grouping.
+  const groups = useMemo(() => {
+    if (!sessions) return []
+    const byCwd = new Map()
+    for (const s of sessions) {
+      const arr = byCwd.get(s.cwd) || []
+      arr.push(s)
+      byCwd.set(s.cwd, arr)
+    }
+    const out = []
+    for (const [cwd, list] of byCwd) {
+      out.push({ cwd, sessions: list, lastActivity: list[0]?.last_modified || 0 })
+    }
+    out.sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0))
+    return out
+  }, [sessions])
+
+  if (sessions === null) {
+    return (
+      <div className="flex flex-col gap-2">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="skeleton" style={{ height: 48, width: '100%' }} />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-xs" style={{ color: 'var(--text-dim)', lineHeight: 1.5 }}>
+        {t('settings.archivedHint')}
+      </p>
+      {error && (
+        <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--red)' }}>
+          <AlertCircle size={14} strokeWidth={1.5} />
+          {error}
+        </div>
+      )}
+      {sessions.length === 0 ? (
+        <div
+          className="flex flex-col items-center justify-center gap-2 text-sm"
+          style={{ color: 'var(--text-dim)', padding: '40px 0' }}
+        >
+          <Archive size={24} strokeWidth={1.5} />
+          {t('settings.archivedEmpty')}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {groups.map((g) => (
+            <div key={g.cwd} className="flex flex-col gap-1">
+              {/* Workdir header */}
+              <div className="flex items-center gap-2 px-1 py-1 min-w-0" style={{ color: 'var(--text-secondary)' }}>
+                <FolderBookmark size={14} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                <span className="truncate" style={{ fontSize: 12, fontWeight: 600, minWidth: 0 }} title={g.cwd}>
+                  {lastSeg(g.cwd)}
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', flexShrink: 0 }}>{g.sessions.length}</span>
+              </div>
+              {/* Sessions in this workdir */}
+              {g.sessions.map((s) => (
+                <div
+                  key={s.session_id}
+                  className="flex items-center gap-3 px-3 py-2 min-w-0"
+                  style={{
+                    marginLeft: 8,
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 4,
+                  }}
+                >
+                  <MessageSquare size={14} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />
+                  <span className="truncate flex-1" style={{ fontSize: 13, color: 'var(--text-primary)', minWidth: 0 }}>
+                    {archivedTitle(s)}
+                  </span>
+                  <button
+                    className="flex items-center gap-2 px-2 py-1 flex-shrink-0"
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid var(--border)',
+                      borderRadius: 4,
+                      color: 'var(--text-secondary)',
+                      cursor: busyId === s.session_id ? 'default' : 'pointer',
+                      fontSize: 12,
+                      transition: 'border-color 150ms ease, color 150ms ease',
+                    }}
+                    disabled={busyId === s.session_id}
+                    onClick={() => handleUnarchive(s)}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+                  >
+                    <ArchiveRestore size={14} strokeWidth={1.5} />
+                    {t('settings.unarchive')}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /**
  * SettingsPanel renders the tab content only when given an `activeTabOverride` prop.
  * Used by SettingsOverlay to render the appropriate settings tab.
@@ -1510,6 +1655,7 @@ export default function SettingsPanel({ activeTabOverride }) {
       {activeTab === 'quickactions' && <QuickActionsTab />}
       {activeTab === 'advanced' && <AdvancedTab />}
       {activeTab === 'webterminal' && <WebTerminalTab />}
+      {activeTab === 'archived' && <ArchivedTab />}
     </>
   )
 }

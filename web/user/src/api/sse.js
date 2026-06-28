@@ -18,7 +18,7 @@ const PROTOCOL_AUTH_CLOSE_CODES = new Set([1000, 1001, 4000, 4001])
  * [1, 2, 4, 8, 16] seconds for up to 5 attempts. Reconnects re-init with
  * the same session_id so the backend can pick up where it left off.
  */
-export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, trace, enableFileCheckpointing = false) {
+export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, trace, enableFileCheckpointing = false, cwd = null, addDirs = null) {
   let ws = null
   let userAborted = false
   let completed = false
@@ -46,6 +46,10 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
     if (images && images.length > 0) init.images = images
     if (mcpServers !== undefined) init.mcp_servers = mcpServers
     if (enableFileCheckpointing) init.enable_file_checkpointing = true
+    // cwd: honored for NEW sessions only (locked on resume — backend ignores it).
+    // add_dirs: the run's --add-dir set; omit to recover the session's stored set.
+    if (cwd) init.cwd = cwd
+    if (addDirs && addDirs.length > 0) init.add_dirs = addDirs
     // WebUI can resolve prompts (permission card / AskUserQuestion), so opt in
     // to synchronous feedback. The API default is false (non-interactive safe).
     init.enable_permission_feedback = true
@@ -208,7 +212,7 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
  * POST-based SSE client.
  * Returns { abort } — call abort() to cancel the stream.
  */
-export function streamAgentRun(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, enableFileCheckpointing = false) {
+export function streamAgentRun(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, enableFileCheckpointing = false, cwd = null, addDirs = null) {
   const controller = new AbortController()
 
   const run = async () => {
@@ -230,6 +234,12 @@ export function streamAgentRun(message, sessionId, onEvent, permissionMode, onCo
     }
     if (enableFileCheckpointing) {
       body.enable_file_checkpointing = true
+    }
+    if (cwd) {
+      body.cwd = cwd
+    }
+    if (addDirs && addDirs.length > 0) {
+      body.add_dirs = addDirs
     }
     debugLog('send', `SSE ▶ POST ${BASE_URL}/agent/run/stream`, body)
     const res = await fetch(`${BASE_URL}/agent/run/stream`, {

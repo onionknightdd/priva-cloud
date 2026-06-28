@@ -446,6 +446,7 @@ async def agent_run(
     session_id: str | None = None,
     permission_mode: PermissionMode | None = None,
     cwd: str | None = None,
+    add_dirs: list[str] | None = None,
     username: str | None = None,
     model_override: str | None = None,
     auth_method: Literal["jwt", "api_key", "anonymous"] = "jwt",
@@ -462,7 +463,7 @@ async def agent_run(
         model_override = vision_model
 
     options = await build_agent_options(
-        session_id, permission_mode, cwd=cwd, username=username,
+        session_id, permission_mode, cwd=cwd, add_dirs=add_dirs, username=username,
         auth_method=auth_method,
         model_override=model_override, mcp_servers=mcp_servers,
         inject_scheduler_tools=inject_scheduler_tools,
@@ -655,6 +656,7 @@ async def agent_run_events(
     model_override: str | None = None,
     auth_method: Literal["jwt", "api_key", "anonymous"] = "jwt",
     *,
+    add_dirs: list[str] | None = None,
     emit: Callable[[str, dict[str, Any]], Awaitable[None]],
     cancelled: asyncio.Event | None = None,
     coordinator_out: list[PermissionCoordinator | None] | None = None,
@@ -732,6 +734,7 @@ async def agent_run_events(
         permission_mode,
         can_use_tool=cut_cb,
         cwd=cwd,
+        add_dirs=add_dirs,
         username=username,
         auth_method=auth_method,
         model_override=model_override,
@@ -987,6 +990,7 @@ async def agent_run_stream(
     session_id: str | None = None,
     permission_mode: PermissionMode | None = None,
     cwd: str | None = None,
+    add_dirs: list[str] | None = None,
     username: str | None = None,
     model_override: str | None = None,
     auth_method: Literal["jwt", "api_key", "anonymous"] = "jwt",
@@ -1046,6 +1050,7 @@ async def agent_run_stream(
                 await agent_run_events(
                     prompt, session_id, permission_mode, cwd, username,
                     model_override, auth_method=auth_method,
+                    add_dirs=add_dirs,
                     emit=emit_to_queue, coordinator_out=coordinator_out,
                     attachments=attachments, images=images, mcp_servers=mcp_servers,
                     inject_scheduler_tools=inject_scheduler_tools,

@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useCallback } from 'react'
-import { Key, Cpu, Zap, Settings2, User, X, Terminal } from 'lucide-react'
+import { Key, Cpu, Zap, Settings2, User, X, Terminal, Archive } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useUiStore from '@shared/stores/uiStore'
 import useSidebarStore from '../../stores/sidebarStore'
@@ -17,6 +17,7 @@ const TABS = [
   { id: 'quickactions', labelKey: 'settings.quickActions', icon: Zap },
   { id: 'advanced', labelKey: 'settings.advanced', icon: Settings2 },
   { id: 'webterminal', labelKey: 'settings.webTerminal.title', icon: Terminal },
+  { id: 'archived', labelKey: 'settings.archived', icon: Archive },
 ]
 
 export default function SettingsOverlay() {

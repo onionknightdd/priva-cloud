@@ -8,6 +8,7 @@ from typing import Literal
 from claude_agent_sdk import (
     ClaudeSDKClient,
     fork_session as sdk_fork_session,
+    get_session_info,
     get_session_messages,
     list_sessions,
     rename_session as sdk_rename_session,
@@ -20,20 +21,29 @@ from pydantic import TypeAdapter, ValidationError
 
 from priva_common.logging import get_app_logger
 from priva_common.models.agent import (
+    AddDirsRequest,
     AgentRunRequest,
     AgentRunResponse,
+    ArchiveRequest,
+    ArchivedSessionListResponse,
+    FlatSessionListResponse,
     ForkRequest,
     ForkResponse,
+    GroupedSessionListResponse,
     ImageItem,
     PermissionRespondRequest,
+    PinRequest,
     RenameRequest,
     RewindRequest,
     RewindResponse,
+    SessionGroupResponse,
     SessionInfoResponse,
     SessionListResponse,
     SessionMessageResponse,
     SessionMessagesResponse,
     TagRequest,
+    WorkdirArchiveRequest,
+    WorkdirPinRequest,
     WsClientFrame,
     WsInitFrame,
     WsPermissionFrame,
@@ -41,6 +51,12 @@ from priva_common.models.agent import (
     WsQueueFrame,
 )
 from ..services.claude_sdk.options import build_agent_options
+from ..services.claude_sdk.session_add_dirs import (
+    delete_add_dirs,
+    read_add_dirs,
+    write_add_dirs,
+)
+from ..services.claude_sdk import session_meta
 
 _ws_frame_adapter = TypeAdapter(WsClientFrame)
 from priva_common.audit_log import AuditEntry, get_audit_logger
@@ -63,6 +79,76 @@ def _is_within_directory(path: str, directory: str) -> bool:
         return os.path.commonpath([path, directory]) == directory
     except ValueError:
         return False
+
+
+def _validate_dir(path: str) -> str:
+    """Resolve a user-supplied directory to its realpath; 400 if missing/not a dir.
+
+    cwd and add_dirs may point anywhere on the (single-account) pod FS — OS uid
+    gating is the real boundary — so the only checks are existence + is-a-directory.
+    """
+    real = os.path.realpath(os.path.expanduser(path))
+    if not os.path.isdir(real):
+        raise HTTPException(400, f"Directory not found: {path}")
+    return real
+
+
+def _validate_dirs(paths: list[str] | None) -> list[str]:
+    return [_validate_dir(p) for p in (paths or [])]
+
+
+def _find_session_cwd(session_id: str) -> str | None:
+    """The cwd a session lives under (scans all project dirs). None if unknown."""
+    try:
+        info = get_session_info(session_id)
+    except Exception:
+        logger.warning("get_session_info failed for %s", session_id, exc_info=True)
+        return None
+    return getattr(info, "cwd", None) if info else None
+
+
+def _resolve_run_cwd(request_cwd: str | None, session_id: str | None, user) -> str:
+    """Effective cwd for a run.
+
+    Resume (session_id present): the session's recorded cwd — request.cwd is
+    ignored because cwd is locked once a conversation exists. New session:
+    request.cwd (validated) if given, else the user's default workspace.
+    """
+    if session_id:
+        found = _find_session_cwd(session_id)
+        if found:
+            return found
+    if request_cwd:
+        return _validate_dir(request_cwd)
+    return get_user_workspace(user)
+
+
+def _resolve_run_add_dirs(
+    request_add_dirs: list[str] | None, cwd: str, session_id: str | None
+) -> list[str]:
+    """Effective add_dirs: the request's validated set if provided, else the
+    session's stored sidecar set (recover on resume)."""
+    if request_add_dirs is not None:
+        return _validate_dirs(request_add_dirs)
+    return read_add_dirs(cwd, session_id)
+
+
+def _session_info_to_response(s, meta: dict | None = None) -> SessionInfoResponse:
+    flags = session_meta.get_session_flags(s.session_id, meta)
+    return SessionInfoResponse(
+        session_id=s.session_id,
+        summary=s.summary,
+        last_modified=s.last_modified,
+        file_size=s.file_size,
+        custom_title=s.custom_title,
+        first_prompt=s.first_prompt,
+        git_branch=s.git_branch,
+        cwd=s.cwd,
+        session_source="project",
+        tag=getattr(s, "tag", None),
+        pinned=flags["pinned"],
+        archived=flags["archived"],
+    )
 
 
 def _validate_images(images: list[ImageItem] | None) -> list[dict] | None:
@@ -316,7 +402,8 @@ async def run_agent(
     request: AgentRunRequest,
     user: UserRecord | None = Depends(get_current_user),
 ):
-    cwd = get_user_workspace(user)
+    cwd = _resolve_run_cwd(request.cwd, request.session_id, user)
+    add_dirs = _resolve_run_add_dirs(request.add_dirs, cwd, request.session_id)
     username = user.username if user else None
     attachments = _validate_attachments(request.attachments, cwd)
     images = _validate_images(request.images)
@@ -326,7 +413,7 @@ async def run_agent(
     try:
         result = await agent_run(
             request.message, request.session_id, request.permission_mode,
-            cwd=cwd, username=username, model_override=request.model,
+            cwd=cwd, add_dirs=add_dirs, username=username, model_override=request.model,
             auth_method=auth_method,
             attachments=attachments, images=images, mcp_servers=request.mcp_servers,
             enable_file_checkpointing=request.enable_file_checkpointing,
@@ -349,7 +436,8 @@ async def run_agent_stream(
     request: AgentRunRequest,
     user: UserRecord | None = Depends(get_current_user),
 ):
-    cwd = get_user_workspace(user)
+    cwd = _resolve_run_cwd(request.cwd, request.session_id, user)
+    add_dirs = _resolve_run_add_dirs(request.add_dirs, cwd, request.session_id)
     username = user.username if user else None
     attachments = _validate_attachments(request.attachments, cwd)
     images = _validate_images(request.images)
@@ -357,7 +445,7 @@ async def run_agent_stream(
     return StreamingResponse(
         agent_run_stream(
             request.message, request.session_id, request.permission_mode,
-            cwd=cwd, username=username, model_override=request.model,
+            cwd=cwd, add_dirs=add_dirs, username=username, model_override=request.model,
             auth_method=auth_method,
             attachments=attachments, images=images, mcp_servers=request.mcp_servers,
             mask_output=(auth_method == "api_key"),
@@ -369,45 +457,101 @@ async def run_agent_stream(
     )
 
 
-@router.get("/sessions", response_model=SessionListResponse)
+_GROUP_PAGE_SIZE = 10  # first-N sessions shown per cwd group
+
+
+def _sort_in_group(resp: list[SessionInfoResponse]) -> None:
+    """Order a cwd's sessions: pinned first, then most-recent first.
+
+    Two stable passes — sort by activity, then partition pinned ahead — so pins
+    land inside the first ``_GROUP_PAGE_SIZE`` page even if they're old.
+    """
+    resp.sort(key=lambda r: r.last_modified, reverse=True)
+    resp.sort(key=lambda r: not r.pinned)
+
+
+@router.get("/sessions", response_model=None)
 async def list_agent_sessions(
     limit: int = 20,
     offset: int = 0,
+    cwd: str | None = None,
+    archived: bool = False,
     source: Literal["all", "project", "global"] = "all",  # deprecated — ignored
     user: UserRecord | None = Depends(get_current_user),
-):
-    """List past sessions from this project workspace (paginated).
+) -> GroupedSessionListResponse | FlatSessionListResponse | ArchivedSessionListResponse:
+    """List sessions.
 
-    The ``source`` query parameter is accepted for backwards compatibility
-    but ignored — every response now contains only ``<work_dir>/<username>``
-    sessions, tagged as ``"project"``.
+    Default (no ``cwd``): grouped by cwd across ALL of the account's project
+    dirs, archived sessions excluded. Groups sort active-workspace first, then
+    pinned workdirs, then the rest (each tier by recent activity); within a
+    group, pinned sessions float to the top. Each group carries its first
+    ``_GROUP_PAGE_SIZE`` (non-archived) sessions plus a ``has_more`` flag.
+
+    With ``cwd``: a flat paginated page for that one directory (archived
+    excluded) — backs the per-group "more in this dir" loader.
+
+    With ``archived=true``: a flat list of every archived session across all
+    cwds — backs the Settings → Archived panel. ``source`` is legacy/ignored.
     """
     del source  # legacy parameter, kept for client compat
-    cwd = get_user_workspace(user)
-    raw = list_sessions(directory=cwd)
+    active_cwd = get_user_workspace(user)
+    meta = session_meta.read_meta()
 
-    total = len(raw)
-    page = raw[offset : offset + limit]
-    return SessionListResponse(
-        sessions=[
-            SessionInfoResponse(
-                session_id=s.session_id,
-                summary=s.summary,
-                last_modified=s.last_modified,
-                file_size=s.file_size,
-                custom_title=s.custom_title,
-                first_prompt=s.first_prompt,
-                git_branch=s.git_branch,
-                cwd=s.cwd,
-                session_source="project",
-                tag=getattr(s, "tag", None),
-            )
-            for s in page
-        ],
-        total=total,
-        limit=limit,
-        offset=offset,
-    )
+    # Archived view (Settings → Archived): every archived session, flat.
+    if archived:
+        out = [
+            _session_info_to_response(s, meta)
+            for s in list_sessions(directory=None)
+            if session_meta.get_session_flags(s.session_id, meta)["archived"]
+        ]
+        out.sort(key=lambda r: r.last_modified, reverse=True)
+        return ArchivedSessionListResponse(sessions=out)
+
+    # Single-cwd page (the "more in this dir" loader); archived excluded.
+    if cwd:
+        resp = [
+            _session_info_to_response(s, meta)
+            for s in list_sessions(directory=cwd)
+            if not session_meta.get_session_flags(s.session_id, meta)["archived"]
+        ]
+        _sort_in_group(resp)
+        return FlatSessionListResponse(
+            cwd=cwd,
+            sessions=resp[offset : offset + limit],
+            total=len(resp),
+            limit=limit,
+            offset=offset,
+        )
+
+    # Grouped default: scan every project dir, bin by the session's real cwd,
+    # dropping archived sessions (a fully-archived workdir thus disappears).
+    by_cwd: dict[str, list[SessionInfoResponse]] = {}
+    for s in list_sessions(directory=None):
+        if session_meta.get_session_flags(s.session_id, meta)["archived"]:
+            continue
+        by_cwd.setdefault(s.cwd or active_cwd, []).append(
+            _session_info_to_response(s, meta)
+        )
+
+    groups: list[SessionGroupResponse] = []
+    for group_cwd, resp in by_cwd.items():
+        _sort_in_group(resp)
+        groups.append(SessionGroupResponse(
+            cwd=group_cwd,
+            total=len(resp),
+            sessions=resp[:_GROUP_PAGE_SIZE],
+            has_more=len(resp) > _GROUP_PAGE_SIZE,
+            last_activity=resp[0].last_modified if resp else 0,
+            pinned=session_meta.get_workdir_pinned(group_cwd, meta),
+        ))
+
+    # Order (stable passes, last wins): activity desc → pinned ahead → active
+    # workspace absolute first.
+    groups.sort(key=lambda g: g.last_activity, reverse=True)
+    groups.sort(key=lambda g: not g.pinned)
+    groups.sort(key=lambda g: g.cwd != active_cwd)
+
+    return GroupedSessionListResponse(groups=groups, active_cwd=active_cwd)
 
 
 @router.get("/sessions/{session_id}/messages", response_model=SessionMessagesResponse)
@@ -418,7 +562,7 @@ async def get_agent_session_messages(
     user: UserRecord | None = Depends(get_current_user),
 ):
     """Retrieve messages from a specific past session."""
-    cwd = get_user_workspace(user)
+    cwd = _find_session_cwd(session_id) or get_user_workspace(user)
     messages = get_session_messages(
         session_id=session_id, directory=cwd, limit=limit, offset=offset
     )
@@ -441,29 +585,25 @@ async def get_agent_session_messages(
                 metadata=replay_metadata.get(m.uuid),
             )
             for m in messages
-        ] + sidechain_messages
+        ] + sidechain_messages,
+        add_dirs=read_add_dirs(cwd, session_id),
     )
 
 
 @router.delete("/sessions/{session_id}")
 async def delete_agent_session(session_id: str, user: UserRecord | None = Depends(get_current_user)):
-    """Delete a project-level session file. Only project sessions can be deleted."""
-    cwd = get_user_workspace(user)
+    """Delete a session's transcript (any cwd in this account)."""
+    cwd = _find_session_cwd(session_id)
+    if not cwd:
+        raise HTTPException(404, "Session not found")
 
-    # Verify this session belongs to the current project
-    project_ids = {s.session_id for s in list_sessions(directory=cwd)}
-    if session_id not in project_ids:
-        raise HTTPException(403, "Only project-level sessions can be deleted")
-
-    # Resolve the session file path
-    canonical = _canonicalize_path(cwd)
-    project_dir = _get_project_dir(canonical)
-    session_file = project_dir / f"{session_id}.jsonl"
-
+    session_file = _session_jsonl_path(cwd, session_id)
     if not session_file.exists():
         raise HTTPException(404, "Session file not found")
 
     session_file.unlink()
+    delete_add_dirs(cwd, session_id)
+    await session_meta.prune_session(session_id)
 
     actor = user.username if user else "anonymous"
     audit = get_audit_logger()
@@ -511,7 +651,9 @@ async def rewind_session(
     Requires the session to have been run with `enable_file_checkpointing=True`.
     Refuses to run while a live stream is in flight for the same session.
     """
-    cwd = get_user_workspace(user)
+    cwd = _find_session_cwd(req.session_id)
+    if not cwd:
+        raise HTTPException(404, "Session not found")
     username = user.username if user else None
     auth_method = getattr(http_request.state, "auth_method", "jwt")
     if registry.get(req.session_id):
@@ -549,7 +691,9 @@ async def fork_agent_session(
     user: UserRecord | None = Depends(get_current_user),
 ):
     """Fork a session — either mid-session (up_to_message_uuid) or tail fork."""
-    cwd = get_user_workspace(user)
+    cwd = _find_session_cwd(req.session_id)
+    if not cwd:
+        raise HTTPException(404, "Session not found")
     try:
         result = sdk_fork_session(
             session_id=req.session_id,
@@ -579,7 +723,9 @@ async def rename_agent_session(
     user: UserRecord | None = Depends(get_current_user),
 ):
     """Rename a session by appending a custom-title entry."""
-    cwd = get_user_workspace(user)
+    cwd = _find_session_cwd(session_id)
+    if not cwd:
+        raise HTTPException(404, "Session not found")
     try:
         sdk_rename_session(
             session_id=session_id, title=req.title.strip(), directory=cwd,
@@ -602,7 +748,9 @@ async def tag_agent_session(
     user: UserRecord | None = Depends(get_current_user),
 ):
     """Set or clear a session's tag (pass tag=None to clear)."""
-    cwd = get_user_workspace(user)
+    cwd = _find_session_cwd(session_id)
+    if not cwd:
+        raise HTTPException(404, "Session not found")
     try:
         sdk_tag_session(session_id=session_id, tag=req.tag, directory=cwd)
     except (ValueError, FileNotFoundError) as exc:
@@ -614,6 +762,100 @@ async def tag_agent_session(
         details={"tag": req.tag},
     ))
     return {"status": "ok"}
+
+
+@router.put("/sessions/{session_id}/add_dirs")
+async def set_agent_session_add_dirs(
+    session_id: str,
+    req: AddDirsRequest,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    """Persist a session's additional directories (SDK --add-dir).
+
+    Saved immediately so a resume on any device recovers the set; the next run
+    the user starts re-launches the agent with these ``--add-dir`` flags.
+    """
+    cwd = _find_session_cwd(session_id)
+    if not cwd:
+        raise HTTPException(404, "Session not found")
+    dirs = _validate_dirs(req.add_dirs)
+    write_add_dirs(cwd, session_id, dirs)
+    get_audit_logger().append(AuditEntry(
+        actor=user.username if user else "anonymous",
+        action="session.add_dirs_set",
+        target=session_id,
+        details={"count": len(dirs)},
+    ))
+    return {"status": "ok", "add_dirs": dirs}
+
+
+@router.put("/sessions/{session_id}/pin")
+async def pin_agent_session(
+    session_id: str,
+    req: PinRequest,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    """Pin/unpin a session (floats it to the top of its workdir group)."""
+    if not _find_session_cwd(session_id):
+        raise HTTPException(404, "Session not found")
+    flags = await session_meta.set_session_flags(session_id, pinned=req.pinned)
+    get_audit_logger().append(AuditEntry(
+        actor=user.username if user else "anonymous",
+        action="session.pinned" if req.pinned else "session.unpinned",
+        target=session_id,
+    ))
+    return {"status": "ok", **flags}
+
+
+@router.put("/sessions/{session_id}/archive")
+async def archive_agent_session(
+    session_id: str,
+    req: ArchiveRequest,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    """Archive/unarchive a session (hides it from the default list)."""
+    if not _find_session_cwd(session_id):
+        raise HTTPException(404, "Session not found")
+    flags = await session_meta.set_session_flags(session_id, archived=req.archived)
+    get_audit_logger().append(AuditEntry(
+        actor=user.username if user else "anonymous",
+        action="session.archived" if req.archived else "session.restored",
+        target=session_id,
+    ))
+    return {"status": "ok", **flags}
+
+
+@router.put("/workdirs/pin")
+async def pin_workdir(
+    req: WorkdirPinRequest,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    """Pin/unpin a workdir (floats the whole cwd group toward the top)."""
+    await session_meta.set_workdir_pinned(req.cwd, req.pinned)
+    get_audit_logger().append(AuditEntry(
+        actor=user.username if user else "anonymous",
+        action="workdir.pinned" if req.pinned else "workdir.unpinned",
+        target=req.cwd,
+    ))
+    return {"status": "ok", "pinned": req.pinned}
+
+
+@router.put("/workdirs/archive")
+async def archive_workdir(
+    req: WorkdirArchiveRequest,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    """Archive a workdir by cascading the archive to every session in it; the
+    group then vanishes from the default list and is restored per-session."""
+    ids = [s.session_id for s in list_sessions(directory=req.cwd)]
+    await session_meta.archive_workdir(ids)
+    get_audit_logger().append(AuditEntry(
+        actor=user.username if user else "anonymous",
+        action="workdir.archived",
+        target=req.cwd,
+        details={"count": len(ids)},
+    ))
+    return {"status": "ok", "count": len(ids)}
 
 
 @router.websocket("/ws/run")
@@ -651,7 +893,13 @@ async def ws_run(websocket: WebSocket):
         await websocket.close(code=4001)
         return
 
-    cwd = get_user_workspace(user)
+    try:
+        cwd = _resolve_run_cwd(frame.cwd, frame.session_id, user)
+        add_dirs = _resolve_run_add_dirs(frame.add_dirs, cwd, frame.session_id)
+    except HTTPException as exc:
+        await websocket.send_json({"event": "error", "data": {"message": f"Validation failed: {exc.detail}"}})
+        await websocket.close(code=4000)
+        return
     username = user.username if user else None
 
     # The browser is always JWT-authenticated at the control-panel before the
@@ -800,6 +1048,7 @@ async def ws_run(websocket: WebSocket):
             username,
             frame.model,
             auth_method=auth_method,
+            add_dirs=add_dirs,
             emit=emit,
             cancelled=cancelled,
             coordinator_out=coordinator_out,

@@ -22,6 +22,20 @@ class ImageItem(BaseModel):
 class AgentRunRequest(BaseModel):
     message: str = Field(min_length=1)
     session_id: str | None = None
+    cwd: str | None = Field(
+        default=None,
+        description=(
+            "Working directory for the run. Honored for NEW sessions only; "
+            "on resume the session's recorded cwd is used and this is ignored."
+        ),
+    )
+    add_dirs: list[str] | None = Field(
+        default=None,
+        description=(
+            "Additional directories the agent may access (SDK --add-dir). "
+            "Omit (null) to recover the session's stored set; pass a list to override."
+        ),
+    )
     permission_mode: PermissionMode | None = None
     model: str | None = None
     attachments: list[AttachmentItem] | None = None
@@ -156,6 +170,8 @@ class SessionInfoResponse(BaseModel):
     cwd: str | None = None
     session_source: str | None = None
     tag: str | None = None
+    pinned: bool = False
+    archived: bool = False
     parent_session_id: str | None = None
     parent_message_uuid: str | None = None
     fork_count: int = 0
@@ -179,6 +195,37 @@ class SessionListResponse(BaseModel):
 
 class SessionMessagesResponse(BaseModel):
     messages: list[SessionMessageResponse]
+    # The session's stored additional directories (SDK --add-dir), recovered
+    # from the server-side sidecar so the UI chip hydrates on open/resume.
+    add_dirs: list[str] = Field(default_factory=list)
+
+
+class SessionGroupResponse(BaseModel):
+    """One cwd's slice of the grouped sessions list."""
+    cwd: str
+    total: int
+    sessions: list[SessionInfoResponse]
+    has_more: bool = False
+    last_activity: int = 0
+    pinned: bool = False  # workdir-level pin (floats the group toward the top)
+
+
+class GroupedSessionListResponse(BaseModel):
+    """Sessions grouped by cwd, groups sorted by recent activity.
+
+    The ``active_cwd`` group (the user's current workspace) is pinned first.
+    """
+    groups: list[SessionGroupResponse] = Field(default_factory=list)
+    active_cwd: str | None = None
+
+
+class FlatSessionListResponse(BaseModel):
+    """One cwd's paginated page — backs the per-group 'more in this dir' loader."""
+    cwd: str
+    sessions: list[SessionInfoResponse]
+    total: int = 0
+    limit: int = 20
+    offset: int = 0
 
 
 class AgentRunResponse(BaseModel):
@@ -207,6 +254,8 @@ class WsInitFrame(BaseModel):
     x_user_name: str | None = None
     message: str = Field(min_length=1)
     session_id: str | None = None
+    cwd: str | None = None
+    add_dirs: list[str] | None = None
     permission_mode: PermissionMode | None = None
     model: str | None = None
     attachments: list[AttachmentItem] | None = None
@@ -287,3 +336,30 @@ class RenameRequest(BaseModel):
 
 class TagRequest(BaseModel):
     tag: str | None = None
+
+
+class AddDirsRequest(BaseModel):
+    add_dirs: list[str] = Field(default_factory=list)
+
+
+class PinRequest(BaseModel):
+    pinned: bool
+
+
+class ArchiveRequest(BaseModel):
+    archived: bool
+
+
+class WorkdirPinRequest(BaseModel):
+    cwd: str
+    pinned: bool
+
+
+class WorkdirArchiveRequest(BaseModel):
+    cwd: str
+
+
+class ArchivedSessionListResponse(BaseModel):
+    """Flat list of every archived session (across all cwds) for the
+    Settings → Archived panel; each carries its ``cwd`` for display."""
+    sessions: list[SessionInfoResponse] = Field(default_factory=list)

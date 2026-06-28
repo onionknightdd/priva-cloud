@@ -1,11 +1,18 @@
 import { create } from 'zustand'
-import { fetchSessions as apiFetchSessions } from '../api/sessions'
+import {
+  fetchSessionsGrouped,
+  fetchCwdSessions,
+  pinSession,
+  archiveSession,
+  pinWorkdir,
+  archiveWorkdir,
+} from '../api/sessions'
 import { UnauthorizedError } from '@shared/api/client'
 import safeStorage from '@shared/utils/safeStorage'
 
 const STORAGE_KEY_WIDTH = 'sidebar-width'
 const STORAGE_KEY_COLLAPSED = 'sidebar-collapsed'
-const PAGE_SIZE = 20
+const GROUP_PAGE_SIZE = 20 // per "more in this dir" page
 
 const getStoredWidth = () => safeStorage.getNumber(STORAGE_KEY_WIDTH, 240, { min: 180, max: 480 })
 
@@ -34,6 +41,8 @@ function mapSession(s) {
     fileSize: s.file_size,
     sessionSource: s.session_source || 'project',
     tag: s.tag || null,
+    pinned: s.pinned || false,
+    archived: s.archived || false,
     parentSessionId: s.parent_session_id || null,
     parentMessageUuid: s.parent_message_uuid || null,
     forkCount: s.fork_count || 0,
@@ -43,15 +52,18 @@ function mapSession(s) {
 const useSidebarStore = create((set, get) => ({
   width: getStoredWidth(),
   collapsed: getStoredCollapsed(),
+  // Flat union of every loaded session (across all cwd groups). Kept flat so
+  // ChatPanel/FileBrowserPanel can find the active session's cwd and so
+  // rename/tag/delete/updateSession stay simple. The sidebar render groups it.
   sessions: [],
+  // Group metadata only: [{ cwd, total }] in display order (active cwd pinned
+  // first by the backend). `total` drives the per-group "more in this dir".
+  groups: [],
+  activeCwd: null,
+  expandedCwds: {}, // { [cwd]: bool } — active cwd defaults open, others closed
   activeSessionId: null,
-  // Pagination state
-  sessionsTotal: 0,
-  sessionsOffset: 0,
-  sessionsLoading: false,
-  sessionsHasMore: false,
-  // Source filter
-  sessionsSource: 'project',
+  sessionsLoading: false,   // initial grouped load
+  groupLoadingCwd: null,    // a single cwd's "more" load in flight
   // Tag filter (null = show all)
   activeTag: null,
   setActiveTag: (tag) => set({ activeTag: tag }),
@@ -74,34 +86,106 @@ const useSidebarStore = create((set, get) => ({
 
   setActiveSessionId: (id) => set({ activeSessionId: id }),
 
-  addSession: (session) => set((s) => ({
-    sessions: [session, ...s.sessions],
-    activeSessionId: session.id,
-    sessionsTotal: s.sessionsTotal + 1,
+  toggleGroup: (cwd) => set((s) => ({
+    expandedCwds: { ...s.expandedCwds, [cwd]: !s.expandedCwds[cwd] },
   })),
 
   updateSession: (id, data) => set((s) => ({
-    sessions: s.sessions.map((sess) =>
-      sess.id === id ? { ...sess, ...data } : sess
-    ),
+    sessions: s.sessions.map((sess) => (sess.id === id ? { ...sess, ...data } : sess)),
   })),
 
-  setSessionsSource: (source) => {
-    set({ sessionsSource: source, sessions: [], sessionsOffset: 0, sessionsHasMore: false })
-    get().fetchSessions()
+  // --- Pin / archive (API-first, then patch local state — no refetch, so
+  // expansion + already-loaded "more" pages are preserved). Render derives the
+  // visual order from these flags, matching the backend's ordering.
+
+  togglePinSession: async (id) => {
+    const sess = get().sessions.find((s) => s.id === id)
+    if (!sess) return
+    const pinned = !sess.pinned
+    try {
+      await pinSession(id, pinned)
+      set((s) => ({
+        sessions: s.sessions.map((x) => (x.id === id ? { ...x, pinned } : x)),
+      }))
+    } catch (err) {
+      if (err instanceof UnauthorizedError) return
+      console.error('Failed to pin session:', err)
+    }
+  },
+
+  archiveSessionLocal: async (id) => {
+    const sess = get().sessions.find((s) => s.id === id)
+    if (!sess) return
+    try {
+      await archiveSession(id, true)
+      set((s) => {
+        const sessions = s.sessions.filter((x) => x.id !== id)
+        const groups = s.groups
+          .map((g) => (g.cwd === sess.cwd ? { ...g, total: Math.max(0, g.total - 1) } : g))
+          // A workdir whose last visible session is archived disappears.
+          .filter((g) => sessions.some((x) => x.cwd === g.cwd))
+        return { sessions, groups }
+      })
+    } catch (err) {
+      if (err instanceof UnauthorizedError) return
+      console.error('Failed to archive session:', err)
+    }
+  },
+
+  togglePinWorkdir: async (cwd) => {
+    const group = get().groups.find((g) => g.cwd === cwd)
+    if (!group) return
+    const pinned = !group.pinned
+    try {
+      await pinWorkdir(cwd, pinned)
+      set((s) => ({
+        groups: s.groups.map((g) => (g.cwd === cwd ? { ...g, pinned } : g)),
+      }))
+    } catch (err) {
+      if (err instanceof UnauthorizedError) return
+      console.error('Failed to pin workdir:', err)
+    }
+  },
+
+  archiveWorkdirLocal: async (cwd) => {
+    try {
+      await archiveWorkdir(cwd)
+      set((s) => ({
+        sessions: s.sessions.filter((x) => x.cwd !== cwd),
+        groups: s.groups.filter((g) => g.cwd !== cwd),
+      }))
+    } catch (err) {
+      if (err instanceof UnauthorizedError) return
+      console.error('Failed to archive workdir:', err)
+    }
   },
 
   fetchSessions: async () => {
-    const { sessionsSource } = get()
     set({ sessionsLoading: true })
     try {
-      const data = await apiFetchSessions(PAGE_SIZE, 0, sessionsSource)
-      const sessions = (data.sessions || []).map(mapSession)
-      set({
-        sessions,
-        sessionsTotal: data.total || sessions.length,
-        sessionsOffset: sessions.length,
-        sessionsHasMore: sessions.length < (data.total || 0),
+      const data = await fetchSessionsGrouped()
+      const rawGroups = data.groups || []
+      const groups = rawGroups.map((g) => ({ cwd: g.cwd, total: g.total, pinned: g.pinned || false }))
+      const flat = []
+      const seen = new Set()
+      for (const g of rawGroups) {
+        for (const s of g.sessions || []) {
+          if (seen.has(s.session_id)) continue
+          seen.add(s.session_id)
+          flat.push(mapSession(s))
+        }
+      }
+      const activeCwd = data.active_cwd || null
+      set((s) => {
+        // Default expand: active cwd open, others collapsed. Preserve a user's
+        // existing toggle for groups that were already present.
+        const expandedCwds = {}
+        for (const g of groups) {
+          expandedCwds[g.cwd] = (g.cwd in s.expandedCwds)
+            ? s.expandedCwds[g.cwd]
+            : g.cwd === activeCwd
+        }
+        return { sessions: flat, groups, activeCwd, expandedCwds }
       })
     } catch (err) {
       if (err instanceof UnauthorizedError) return
@@ -111,36 +195,31 @@ const useSidebarStore = create((set, get) => ({
     }
   },
 
-  reset: () => set({
-    sessions: [], activeSessionId: null,
-    sessionsTotal: 0, sessionsOffset: 0, sessionsLoading: false,
-    sessionsHasMore: false, sessionsSource: 'project',
-  }),
-
-  fetchMoreSessions: async () => {
-    const { sessionsOffset, sessionsLoading, sessionsHasMore, sessionsSource } = get()
-    if (sessionsLoading || !sessionsHasMore) return
-    set({ sessionsLoading: true })
+  fetchMoreInGroup: async (cwd) => {
+    if (get().groupLoadingCwd) return
+    const loaded = get().sessions.filter((s) => s.cwd === cwd).length
+    set({ groupLoadingCwd: cwd })
     try {
-      const data = await apiFetchSessions(PAGE_SIZE, sessionsOffset, sessionsSource)
-      const newSessions = (data.sessions || []).map(mapSession)
+      const data = await fetchCwdSessions(cwd, GROUP_PAGE_SIZE, loaded)
+      const incoming = (data.sessions || []).map(mapSession)
       set((s) => {
-        const combined = [...s.sessions, ...newSessions]
-        const total = data.total || combined.length
-        return {
-          sessions: combined,
-          sessionsTotal: total,
-          sessionsOffset: combined.length,
-          sessionsHasMore: combined.length < total,
-        }
+        const have = new Set(s.sessions.map((x) => x.id))
+        const merged = [...s.sessions, ...incoming.filter((x) => !have.has(x.id))]
+        const groups = s.groups.map((g) => (g.cwd === cwd ? { ...g, total: data.total ?? g.total } : g))
+        return { sessions: merged, groups }
       })
     } catch (err) {
       if (err instanceof UnauthorizedError) return
-      console.error('Failed to fetch more sessions:', err)
+      console.error('Failed to load more sessions:', err)
     } finally {
-      set({ sessionsLoading: false })
+      set({ groupLoadingCwd: null })
     }
   },
+
+  reset: () => set({
+    sessions: [], groups: [], activeCwd: null, expandedCwds: {},
+    activeSessionId: null, sessionsLoading: false, groupLoadingCwd: null,
+  }),
 }))
 
 export default useSidebarStore

@@ -26,6 +26,7 @@
     "collapse": "收起",
     "loadMore": "加载更多",
     "showMore": "展开更多",
+    "moreInDir": "该目录还有 {{count}} 个",
     "loading": "加载中...",
     "today": "今天",
     "yesterday": "昨天",
@@ -45,7 +46,26 @@
     "renameFailed": "重命名失败",
     "tagPlaceholder": "标签...",
     "tagClear": "清除",
-    "tagSave": "保存"
+    "tagSave": "保存",
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "archive": "归档",
+    "pinWorkdir": "置顶工作目录",
+    "unpinWorkdir": "取消置顶",
+    "archiveWorkdir": "归档工作目录",
+    "archiveWorkdirConfirm": "归档此工作目录下的全部 {{count}} 个会话？它们将移至“设置 → 已归档”，可随时恢复。",
+    "workdirOptions": "工作目录选项",
+    "newChatHere": "在此工作目录新建对话"
+  },
+  "picker": {
+    "title": "选择目录",
+    "cwdTitle": "工作目录",
+    "addDirsTitle": "附加目录",
+    "pathPlaceholder": "输入或粘贴绝对路径…",
+    "go": "前往",
+    "use": "使用",
+    "cancel": "取消",
+    "selectedCount": "已选 {{count}} 个"
   },
   "chat": {
     "placeholder": "输入 / 选择技能\n输入 @ 附加已上传文件",
@@ -55,6 +75,9 @@
     "thinking": "思考中...",
     "thoughtComplete": "已思考",
     "session": "会话",
+    "addDirs": "目录",
+    "addDirsCount": "目录 ({{count}})",
+    "addDirsHint": "添加智能体可访问的目录",
     "usage": {
       "title": "{{name}}，接下来做什么？",
       "tab": {
@@ -811,6 +834,10 @@
     "errorFutureDate": "不能选择未来日期"
   },
   "settings": {
+    "archived": "已归档",
+    "archivedHint": "已归档的会话不会显示在侧边栏。恢复某个会话即可让它（及其工作目录）重新出现。",
+    "archivedEmpty": "暂无已归档会话",
+    "unarchive": "恢复",
     "apiKey": "API 密钥",
     "llmProvider": "LLM 供应商",
     "quickActions": "快捷操作",
