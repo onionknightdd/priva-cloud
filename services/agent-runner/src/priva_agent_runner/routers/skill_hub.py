@@ -23,7 +23,7 @@ from ..services.skill_hub import (
 
 logger = get_app_logger(__name__)
 
-router = APIRouter(prefix="/api/resource/skill-hub", tags=["skill-hub"])
+router = APIRouter(prefix="/api/sandbox/resource/skill-hub", tags=["skill-hub"])
 
 
 # --- upload must be registered before /{name} to avoid path conflict ---

@@ -17,7 +17,7 @@ from ..services.temp_files import (
 )
 from priva_common.user_store import UserRecord
 
-router = APIRouter(prefix="/api/files", tags=["files"])
+router = APIRouter(prefix="/api/sandbox/agent-attachments", tags=["agent-attachments"])
 
 
 @router.post("/upload")

@@ -1,7 +1,7 @@
-import { getJSON, postJSON, deleteJSON } from '@shared/api/client'
+import { sandboxGet, sandboxPost, sandboxDelete } from '@shared/api/client'
 import { getToken } from '@shared/api/tokenStore'
 
-const BASE_URL = '/api'
+const BASE_URL = '/api/sandbox'
 
 function getAuthHeaders() {
   const token = getToken()
@@ -11,16 +11,16 @@ function getAuthHeaders() {
   return {}
 }
 
-export const listHubSkills = () => getJSON('/resource/skill-hub/')
+export const listHubSkills = () => sandboxGet('/resource/skill-hub/')
 
 export const getHubSkillDetail = (name) =>
-  getJSON(`/resource/skill-hub/${encodeURIComponent(name)}`)
+  sandboxGet(`/resource/skill-hub/${encodeURIComponent(name)}`)
 
 export const getHubSkillFile = (name, path) =>
-  getJSON(`/resource/skill-hub/${encodeURIComponent(name)}/file?path=${encodeURIComponent(path)}`)
+  sandboxGet(`/resource/skill-hub/${encodeURIComponent(name)}/file?path=${encodeURIComponent(path)}`)
 
 export const deliverHubSkill = (name) =>
-  postJSON(`/resource/skill-hub/${encodeURIComponent(name)}/deliver`, {})
+  sandboxPost(`/resource/skill-hub/${encodeURIComponent(name)}/deliver`, {})
 
 export const uploadHubSkill = async (file) => {
   const formData = new FormData()
@@ -41,4 +41,4 @@ export const uploadHubSkill = async (file) => {
 }
 
 export const deleteHubSkill = (name) =>
-  deleteJSON(`/resource/skill-hub/${encodeURIComponent(name)}`)
+  sandboxDelete(`/resource/skill-hub/${encodeURIComponent(name)}`)

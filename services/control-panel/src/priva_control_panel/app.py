@@ -2,20 +2,22 @@
 
 Single origin: serves its own control-plane routes (auth/admin/admin_files/
 resource/metrics), owns the data-plane (``compose()``), serves the user SPA at ``/`` and
-the admin SPA at ``/admin``, and runs the ext_proc EndpointPicker (``extproc.py``) that
+``/sandbox`` and the admin SPA at ``/admin``, and runs the ext_proc EndpointPicker (``extproc.py``) that
 agentgateway consults to steer runtime requests to the per-account agent-runner pod.
 Runtime traffic does not pass through this app. No CORS (same-origin).
 """
 
 from __future__ import annotations
 
+import asyncio
 import mimetypes
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI
+import httpx
+from fastapi import FastAPI, Response
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -140,6 +142,39 @@ def create_app() -> FastAPI:
     async def _admin_index_redirect():
         return RedirectResponse(url="/admin/")
 
+    # Same story for the user SPA's /sandbox alias (it is also served at "/").
+    @app.get("/sandbox", include_in_schema=False)
+    async def _sandbox_index_redirect():
+        return RedirectResponse(url="/sandbox/")
+
+    # The agent-runner's OpenAPI docs (/sandbox/docs + the schema under it) are served
+    # HERE, not via the InferencePool: the GIE/EPP response path buffers bodies to ~8KB,
+    # which truncates the ~91KB schema. The schema is account-independent, so we proxy it
+    # from ANY ready runner (full body, like the SPA bundles this app already serves). The
+    # SPA's "API Doc" link opens /sandbox/docs in a new tab — a tokenless top-level nav,
+    # so this is unauthenticated; it exposes only the API shape, never user data. Must
+    # register BEFORE the "/sandbox" static mount so the SPA mount doesn't shadow it.
+    @app.get("/sandbox/docs", include_in_schema=False)
+    @app.get("/sandbox/docs/{sub:path}", include_in_schema=False)
+    async def _sandbox_docs_proxy(sub: str = ""):
+        from . import provisioner
+        endpoint = await asyncio.to_thread(provisioner.any_ready_runner_endpoint)
+        if not endpoint:
+            return Response("agent sandbox is waking, retry in a moment", status_code=503)
+        url = f"http://{endpoint}/sandbox/docs" + (f"/{sub}" if sub else "")
+        try:
+            # trust_env=False: in-cluster pod-to-pod hop must not honor any host/system proxy.
+            async with httpx.AsyncClient(trust_env=False, timeout=15.0) as cx:
+                r = await cx.get(url)
+        except Exception as exc:
+            return Response(f"docs upstream unavailable: {exc}", status_code=502)
+        # Forward caching headers so the browser caches the ~3.7MB Scalar bundle instead
+        # of re-fetching it (and this app re-proxying it) on every docs open.
+        passthru = {k: v for k, v in r.headers.items()
+                    if k.lower() in ("cache-control", "etag", "last-modified")}
+        return Response(content=r.content, status_code=r.status_code, headers=passthru,
+                        media_type=r.headers.get("content-type"))
+
     # --- CP-served routers ---
     from .routers.auth import router as auth_router
     from .routers.admin import router as admin_router
@@ -159,7 +194,10 @@ def create_app() -> FastAPI:
     # agentgateway routes them to the per-account pod via the InferencePool, steered
     # by CP's ext_proc EPP (extproc.py).
 
-    # --- SPA static serving: admin at /admin first, then user catch-all at / ---
+    # --- SPA static serving: admin at /admin, the user SPA at /sandbox AND the "/"
+    # catch-all. Most-specific mounts must register first; "/" stays last. The same
+    # build is served at both user paths — index.html uses absolute /assets/... refs
+    # (vite base "/"), which the "/" mount serves, so both /sandbox/ and / work. ---
     admin_dist = _dist_dir("PRIVA_WEB_DIST_ADMIN", "dist-admin", "web/admin/dist")
     user_dist = _dist_dir("PRIVA_WEB_DIST", "dist", "web/user/dist")
     if admin_dist.exists():
@@ -168,8 +206,9 @@ def create_app() -> FastAPI:
     else:
         logger.warning("admin SPA dist not found at {} (run `npm run build:admin`)", admin_dist)
     if user_dist.exists():
+        app.mount("/sandbox", StaticFiles(directory=user_dist, html=True), name="user-spa-sandbox")
         app.mount("/", StaticFiles(directory=user_dist, html=True), name="user-spa")
-        logger.info("user SPA mounted at / from {}", user_dist)
+        logger.info("user SPA mounted at /sandbox and / from {}", user_dist)
     else:
         logger.warning("user SPA dist not found at {} (run `npm run build`)", user_dist)
 

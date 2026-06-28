@@ -201,7 +201,7 @@ function AccountTab() {
   const { t } = useTranslation()
   const user = useAuthStore((s) => s.user)
   // The workspace path is agent-runtime state — sourced from the agent-runner
-  // (/api/user/stats), not the control-panel, which doesn't own it.
+  // (/api/sandbox/user/stats), not the control-panel, which doesn't own it.
   const workspace = useUserDataStore((s) => s.stats?.workspace)
   const fetchStats = useUserDataStore((s) => s.fetchStats)
   useEffect(() => { fetchStats() }, [fetchStats])

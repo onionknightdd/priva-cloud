@@ -1,21 +1,21 @@
-import { getJSON, postJSON, putJSON, deleteJSON, getAuthHeaders } from '@shared/api/client'
+import { sandboxGet, sandboxPost, sandboxPut, sandboxDelete, getAuthHeaders } from '@shared/api/client'
 
-const BASE_URL = '/api'
+const BASE_URL = '/api/sandbox'
 
-export const fetchAgents = () => getJSON('/subagents/list')
+export const fetchAgents = () => sandboxGet('/subagents/list')
 
 export const fetchAgent = (name) =>
-  getJSON(`/subagents/${encodeURIComponent(name)}`)
+  sandboxGet(`/subagents/${encodeURIComponent(name)}`)
 
-export const fetchCatalog = () => getJSON('/subagents/catalog')
+export const fetchCatalog = () => sandboxGet('/subagents/catalog')
 
-export const createAgent = (body) => postJSON('/subagents/', body)
+export const createAgent = (body) => sandboxPost('/subagents/', body)
 
 export const updateAgent = (name, body) =>
-  putJSON(`/subagents/${encodeURIComponent(name)}`, body)
+  sandboxPut(`/subagents/${encodeURIComponent(name)}`, body)
 
 export const deleteAgent = (name) =>
-  deleteJSON(`/subagents/${encodeURIComponent(name)}`)
+  sandboxDelete(`/subagents/${encodeURIComponent(name)}`)
 
 /**
  * Stream a one-shot test run against the named agent. Returns { abort } to cancel.

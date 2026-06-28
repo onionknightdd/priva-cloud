@@ -65,7 +65,32 @@
   refs; (5) **design-system** — migrated 6 native `<select>` + 5 `CategoryDropdown` to the shared
   `Dropdown`. Backend boot-green (hooks 12→9 routes), user SPA builds. Out of scope (flagged): `web/shared`
   orphaned plugin fns; `/rewind` 409 PTY/pending-approval gap (`agent-runner.md` A.3).
-- **Last updated:** 2026-06-27.
+- **agent-runner `/sandbox` namespace + OpenAPI docs (2026-06-28):** carved the per-account pod into a
+  self-describing namespace. (1) **All** agent-runner runtime API moved `/api/* → /api/sandbox/*` (every
+  router prefix + the inline health route + pty's full-path decorators), so the edge `HTTPRoute` collapses
+  from ~17 enumerated runtime prefixes to **one** `/api/sandbox` rule → InferencePool; control-plane
+  (`/api/auth`, `/api/admin`, `/api/resource/models`) stays on the `/` catch-all → control-panel. No
+  `root_path` — the gateway forwards the full unstripped path, so prefixes are real. (2) **User SPA served
+  at both `/` and `/sandbox`** (two control-panel `StaticFiles` mounts; vite `base` unchanged). (3)
+  **API reference enabled at `/sandbox/docs`** — a **Scalar** UI served **fully offline** from a vendored
+  3.7MB bundle (`withDefaultFonts:false` → zero external requests); the SPA's "API Doc" link repointed
+  there. Docs are **served by control-panel, not the pool** — the GIE/EPP response path buffers bodies to
+  ~8KB and truncates the ~91KB schema (and the bundle), so control-panel **proxies `/sandbox/docs*` from
+  any Ready runner** (`provisioner.any_ready_runner_endpoint()`; account-independent, unauthenticated — only
+  the API shape exposed; cache headers forwarded). (4) **Frontend**: `client.js` gained `SANDBOX_BASE` +
+  `sandbox{Get,Post,Put,Delete}` helpers; every agent-runner call site (incl. mixed modules
+  `settings.js`/`userData.js`/`admin.js` per-line) switched to them; WS/SSE + vite dev-proxy WS keys
+  repointed. Backend route-table verified (53 OpenAPI paths, all `/api/sandbox/*`); both SPAs build clean.
+  Follow-on (same day): renamed the two file groups for clarity — temp attachments `routers/files.py`
+  `/api/sandbox/files → /api/sandbox/agent-attachments` (tag `agent-attachments`), and the file explorer
+  `routers/user_files.py` `/api/sandbox/user/files → /api/sandbox/files` (tag `files`); frontend
+  `api/files.js`/`api/userFiles.js`/`FilePreview.jsx` repointed. Out of scope (flagged): `skillSyncStore`
+  remote-base is version-coupled; the docs proxy exposes the OpenAPI schema (shape only) at the edge; the
+  GIE/EPP response-body ~8KB buffer truncation is a pre-existing agentgateway limitation (any
+  `/api/sandbox/*` response >8KB) — worked around for docs, still open for large runtime responses; the
+  bundled `priva-user-manual` skill (`SKILL.md`, ~100 endpoints) still lists pre-namespace flat `/api/*`
+  paths (never updated for the namespace move) — needs a separate pass.
+- **Last updated:** 2026-06-28.
 
 ---
 

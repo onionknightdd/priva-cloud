@@ -1,25 +1,25 @@
-import { getJSON, postJSON, putJSON, deleteJSON } from '@shared/api/client'
+import { sandboxGet, sandboxPost, sandboxPut, sandboxDelete } from '@shared/api/client'
 
 // Catalog (built-in hooks)
-export const fetchCatalog = () => getJSON('/hooks/catalog')
+export const fetchCatalog = () => sandboxGet('/hooks/catalog')
 
 // Config (merged: admin + project + local)
-export const fetchConfig = () => getJSON('/hooks/config')
-export const updateConfig = (hooks) => putJSON('/hooks/config', { hooks })
+export const fetchConfig = () => sandboxGet('/hooks/config')
+export const updateConfig = (hooks) => sandboxPut('/hooks/config', { hooks })
 
 // Enable/disable a built-in hook
 export const enableBuiltInHook = (hookId) =>
-  postJSON(`/hooks/catalog/${encodeURIComponent(hookId)}/enable`, {})
+  sandboxPost(`/hooks/catalog/${encodeURIComponent(hookId)}/enable`, {})
 export const disableBuiltInHook = (hookId) =>
-  postJSON(`/hooks/catalog/${encodeURIComponent(hookId)}/disable`, {})
+  sandboxPost(`/hooks/catalog/${encodeURIComponent(hookId)}/disable`, {})
 
 // Test (dry-run) — user custom command hooks
 export const testHook = (eventType, handler, inputJson) =>
-  postJSON('/hooks/test', { event_type: eventType, handler, input_json: inputJson })
+  sandboxPost('/hooks/test', { event_type: eventType, handler, input_json: inputJson })
 
 // Test — built-in hooks
 export const testBuiltInHook = (hookId, eventType, inputJson) =>
-  postJSON('/hooks/test/builtin', { hook_id: hookId, event_type: eventType, input_json: inputJson })
+  sandboxPost('/hooks/test/builtin', { hook_id: hookId, event_type: eventType, input_json: inputJson })
 
 // Logs (cursor-paginated)
 export const fetchLogs = ({ eventType = null, limit = 50, before = null, after = null } = {}) => {
@@ -28,9 +28,9 @@ export const fetchLogs = ({ eventType = null, limit = 50, before = null, after =
   if (eventType) params.set('event_type', eventType)
   if (before) params.set('before', before)
   if (after) params.set('after', after)
-  return getJSON(`/hooks/logs?${params}`)
+  return sandboxGet(`/hooks/logs?${params}`)
 }
 
 // Script content — read a hook script file from the user's work dir
 export const fetchScriptContent = (path) =>
-  getJSON(`/hooks/script/content?path=${encodeURIComponent(path)}`)
+  sandboxGet(`/hooks/script/content?path=${encodeURIComponent(path)}`)

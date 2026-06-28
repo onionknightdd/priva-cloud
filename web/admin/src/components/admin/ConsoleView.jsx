@@ -6,7 +6,7 @@ import TerminalSession from '@shared/components/terminal/TerminalSession'
 import useAdminStore from '../../stores/adminStore'
 
 // Admin console: open a live shell into either
-//   • an AGENT-RUNNER pod (a selected account) — WS rides /api/pty/ws and the EPP
+//   • an AGENT-RUNNER pod (a selected account) — WS rides /api/sandbox/pty/ws and the EPP
 //     steers it to that account's pod (targetUsername), or
 //   • a CONTROL-PLANE pod (control-panel / operator / data-spine) — WS rides
 //     /api/admin/console/ws and the control-panel k8s-execs into the target pod.
@@ -15,7 +15,7 @@ import useAdminStore from '../../stores/adminStore'
 // Static control-plane targets (resolved server-side by `app` label).
 const CONTROL_PLANE = ['control-panel', 'operator', 'data-spine']
 const CP_PATH = '/api/admin/console/ws'
-const AR_PATH = '/api/pty/ws'
+const AR_PATH = '/api/sandbox/pty/ws'
 
 function StatusLabel({ meta, ready, closed }) {
   const { t } = useTranslation()

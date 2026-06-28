@@ -23,7 +23,7 @@ from priva_common.models.resource import (
 )
 from ..deps import require_user
 
-router = APIRouter(prefix="/api/resource", tags=["user-config"])
+router = APIRouter(prefix="/api/sandbox/resource", tags=["user-config"])
 
 
 # ── Quick actions ────────────────────────────────────────────────────

@@ -307,7 +307,7 @@ def _build_message_replay_metadata(cwd: str, session_id: str) -> dict[str, dict]
 
 logger = get_app_logger(__name__)
 
-router = APIRouter(prefix="/api/agent", tags=["agent"])
+router = APIRouter(prefix="/api/sandbox/agent", tags=["agent"])
 
 
 @router.post("/run", response_model=AgentRunResponse)

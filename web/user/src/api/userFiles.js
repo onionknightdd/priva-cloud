@@ -1,12 +1,12 @@
-import { getJSON, getAuthHeaders } from '@shared/api/client'
+import { sandboxGet, getAuthHeaders } from '@shared/api/client'
 import { getToken } from '@shared/api/tokenStore'
 
 export function listDirectory(path) {
-  return getJSON(`/user/files/list?path=${encodeURIComponent(path)}`)
+  return sandboxGet(`/files/list?path=${encodeURIComponent(path)}`)
 }
 
 export function previewFile(path) {
-  return getJSON(`/user/files/preview?path=${encodeURIComponent(path)}`)
+  return sandboxGet(`/files/preview?path=${encodeURIComponent(path)}`)
 }
 
 export async function downloadFile(path, options = {}) {
@@ -16,7 +16,7 @@ export async function downloadFile(path, options = {}) {
     query.set('_priva_refresh', String(cacheBustKey))
   }
 
-  const res = await fetch(`/api/user/files/download?${query.toString()}`, {
+  const res = await fetch(`/api/sandbox/files/download?${query.toString()}`, {
     headers: { ...getAuthHeaders() },
     cache: cacheMode || (cacheBustKey ? 'no-store' : 'default'),
   })
@@ -33,7 +33,7 @@ export async function downloadFile(path, options = {}) {
 export function uploadUserFile(directory, file, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', '/api/user/files/upload')
+    xhr.open('POST', '/api/sandbox/files/upload')
     const token = getToken()
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
 

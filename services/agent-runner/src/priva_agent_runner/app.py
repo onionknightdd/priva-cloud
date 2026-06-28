@@ -3,16 +3,21 @@
 Single-account runtime. Account pinning (CLAUDE_CONFIG_DIR / HOME / PRIVA_HOME /
 ACCOUNT_ID / USERNAME / WORKSPACE_DIR) happens in ``entry.py`` *before* this
 module is imported, so by the time the lifespan runs the process env already
-points at the one account's workspace. Serves JSON/WS only — no HTML (the
-control-panel is the single front door, agent-runner.md §0).
+points at the one account's workspace. Serves JSON/WS only — no app HTML (the
+control-panel is the single front door, agent-runner.md §0); the one exception is
+the self-describing OpenAPI surface at /sandbox/docs. All runtime routes live under
+the /api/sandbox/* namespace so the edge can steer them to the account's pod with a
+single gateway rule, distinct from the control-plane /api/* served by control-panel.
 """
 
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import Depends, FastAPI
+from fastapi.responses import FileResponse, HTMLResponse
 
 from priva_common.config import get_settings
 from priva_common.logging import AccessLogMiddleware, configure_logging, get_app_logger, shutdown_logging
@@ -95,11 +100,49 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Priva agent-runner",
         version=settings.app_version,
+        # The API reference UI is Scalar (not Swagger), served fully offline from a
+        # vendored bundle — see the /sandbox/docs routes below. docs_url=None disables
+        # FastAPI's built-in Swagger; openapi_url keeps the schema under /sandbox/docs so
+        # the Scalar page (and the control-panel docs proxy) reach everything on one prefix.
         docs_url=None,
+        redoc_url=None,
+        openapi_url="/sandbox/docs/openapi.json",
         lifespan=lifespan,
     )
     app.add_middleware(AccessLogMiddleware)
     app.add_middleware(ActivityMiddleware)
+
+    # --- Offline Scalar API reference (replaces Swagger UI) ---
+    # Served from a vendored, self-contained bundle (no CDN). withDefaultFonts:false
+    # disables Scalar's web-font fetch so the page renders with ZERO external requests
+    # (system fonts). control-panel proxies /sandbox/docs* from a ready runner, so these
+    # routes live on the pod alongside the OpenAPI schema (openapi_url, above).
+    _scalar_js = Path(__file__).resolve().parent / "_static" / "scalar.standalone.js"
+    _scalar_html = """<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Priva agent-runner — API reference</title>
+  </head>
+  <body>
+    <script id="api-reference" data-url="/sandbox/docs/openapi.json"
+            data-configuration='{"withDefaultFonts":false}'></script>
+    <script src="/sandbox/docs/scalar.js"></script>
+  </body>
+</html>"""
+
+    @app.get("/sandbox/docs", include_in_schema=False)
+    async def scalar_docs():
+        return HTMLResponse(_scalar_html)
+
+    @app.get("/sandbox/docs/scalar.js", include_in_schema=False)
+    async def scalar_bundle():
+        return FileResponse(
+            _scalar_js,
+            media_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     @app.get("/health", include_in_schema=False)
     async def health():
@@ -144,7 +187,7 @@ def create_app() -> FastAPI:
 
     from .deps import require_user
 
-    @app.get("/api/health", include_in_schema=False)
+    @app.get("/api/sandbox/health", include_in_schema=False)
     async def api_health(user: UserRecord = Depends(require_user)):
         """Per-account readiness + first-page bootstrap, reachable from the SPA via
         the gateway (the unauthenticated /health above is for the k8s probe only).

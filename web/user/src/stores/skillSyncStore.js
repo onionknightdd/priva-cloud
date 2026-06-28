@@ -36,12 +36,12 @@ function getLocalBearer(localApiKey) {
 
 function downloadCurl(baseUrl, localApiKey, skill) {
   const output = `${safeArchiveName(skill.name)}.tar.gz`
-  const endpoint = `${baseUrl}/api/resource/skills/${encodeURIComponent(skill.level)}/${encodeURIComponent(skill.name)}/download`
+  const endpoint = `${baseUrl}/api/sandbox/resource/skills/${encodeURIComponent(skill.level)}/${encodeURIComponent(skill.name)}/download`
   return `curl -L -H ${quoteCurl(`Authorization: Bearer ${getLocalBearer(localApiKey)}`)} -o ${quoteCurl(output)} ${quoteCurl(endpoint)}`
 }
 
 function uploadCurl(baseUrl, localApiKey) {
-  const endpoint = `${baseUrl}/api/resource/skills/upload`
+  const endpoint = `${baseUrl}/api/sandbox/resource/skills/upload`
   return [
     'curl -X POST',
     `  -H ${quoteCurl(`Authorization: Bearer ${getLocalBearer(localApiKey)}`)}`,
@@ -89,7 +89,7 @@ async function uploadToRemote(baseUrl, apiKey, level, name, blob) {
   formData.append('level', level)
   const headers = {}
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`
-  const res = await fetch(`${baseUrl}/api/resource/skills/upload`, {
+  const res = await fetch(`${baseUrl}/api/sandbox/resource/skills/upload`, {
     method: 'POST',
     headers,
     body: formData,

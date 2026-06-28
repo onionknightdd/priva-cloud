@@ -2,6 +2,11 @@ import useToastStore from '../stores/toastStore'
 import { getToken } from './tokenStore'
 
 const BASE_URL = '/api'
+// Agent-runner (per-account pod) runtime API. Distinct from the control-plane BASE_URL
+// so one client serves both faces: sandbox* helpers hit /api/sandbox/* (steered to the
+// pod by the edge EPP); getJSON/postJSON/... stay on /api/* (control-panel: auth/admin/
+// resource-models). Picking the helper at the call site IS the routing decision.
+export const SANDBOX_BASE = '/api/sandbox'
 
 export class UnauthorizedError extends Error {
   constructor(message = 'Unauthorized') {
@@ -146,8 +151,43 @@ export async function deleteJSON(path) {
   return handleAPIResponse(res)
 }
 
+// --- Agent-runner (sandbox) variants: identical helpers rooted at SANDBOX_BASE. They
+// reuse fetchWithWake, so the cold-start "waking"/"ready" UX applies to pod calls. ---
+export async function sandboxPost(path, body) {
+  const res = await fetchWithWake(`${SANDBOX_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(body),
+  })
+  return handleAPIResponse(res)
+}
+
+export async function sandboxGet(path) {
+  const res = await fetchWithWake(`${SANDBOX_BASE}${path}`, {
+    headers: { ...getAuthHeaders() },
+  })
+  return handleAPIResponse(res)
+}
+
+export async function sandboxPut(path, body) {
+  const res = await fetchWithWake(`${SANDBOX_BASE}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(body),
+  })
+  return handleAPIResponse(res)
+}
+
+export async function sandboxDelete(path) {
+  const res = await fetchWithWake(`${SANDBOX_BASE}${path}`, {
+    method: 'DELETE',
+    headers: { ...getAuthHeaders() },
+  })
+  return handleAPIResponse(res)
+}
+
 export async function agentRun(message, sessionId) {
-  return postJSON('/agent/run', { message, session_id: sessionId })
+  return sandboxPost('/agent/run', { message, session_id: sessionId })
 }
 
 /**

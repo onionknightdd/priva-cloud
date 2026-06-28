@@ -3,7 +3,7 @@ import { getAuthHeaders } from '@shared/api/client'
 import RichFilePreview from '../shared/RichFilePreview'
 
 async function fetchUserFile(uuid) {
-  const res = await fetch(`/api/files/${encodeURIComponent(uuid)}`, {
+  const res = await fetch(`/api/sandbox/agent-attachments/${encodeURIComponent(uuid)}`, {
     headers: { ...getAuthHeaders() },
   })
   if (!res.ok) {

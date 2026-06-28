@@ -343,7 +343,7 @@ export default function UsageStatsOverview() {
   const { t } = useTranslation()
   const themeKey = useThemeKey()
   const user = useAuthStore((s) => s.user)
-  // Usage data is agent-runtime state served by the agent-runner (/api/user/overview).
+  // Usage data is agent-runtime state served by the agent-runner (/api/sandbox/user/overview).
   // It is no longer embedded in /me, so fetch it here.
   const overview = useUserDataStore((s) => s.overview)
   const fetchOverview = useUserDataStore((s) => s.fetchOverview)

@@ -19,8 +19,8 @@ from ..deps import get_user_workspace, require_user
 logger = get_app_logger(__name__)
 
 router = APIRouter(
-    prefix="/api/user/files",
-    tags=["user-files"],
+    prefix="/api/sandbox/files",
+    tags=["files"],
     dependencies=[Depends(require_user)],
 )
 
@@ -191,9 +191,9 @@ async def preview_file(
             except PermissionError:
                 raise HTTPException(403, f"Access denied: {real_path}")
     elif is_image:
-        preview_url = f"/api/user/files/download?path={quote(real_path)}"
+        preview_url = f"/api/sandbox/files/download?path={quote(real_path)}"
     elif is_pdf:
-        preview_url = f"/api/user/files/download?path={quote(real_path)}"
+        preview_url = f"/api/sandbox/files/download?path={quote(real_path)}"
     elif st.st_size <= _MAX_PREVIEW_SIZE and _looks_like_text(real_path):
         try:
             with open(real_path, "r", encoding="utf-8", errors="replace") as f:

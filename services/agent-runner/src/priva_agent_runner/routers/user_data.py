@@ -27,7 +27,7 @@ from priva_common.workspace import get_user_workspace
 from ..deps import require_user
 from ..services.compute_user_stats import compute_user_stats
 
-router = APIRouter(prefix="/api/user", tags=["user-data"])
+router = APIRouter(prefix="/api/sandbox/user", tags=["user-data"])
 
 
 @router.get("/overview", response_model=UserOverviewResponse)

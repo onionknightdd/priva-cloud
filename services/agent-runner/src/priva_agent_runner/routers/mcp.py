@@ -25,7 +25,7 @@ from ..services.mcp.validator import test_mcp_tool, validate_mcp_server
 
 logger = get_app_logger(__name__)
 
-router = APIRouter(prefix="/api/resource/mcp", tags=["mcp"])
+router = APIRouter(prefix="/api/sandbox/resource/mcp", tags=["mcp"])
 
 
 def _config_to_detail(name: str, config: dict, level: str) -> McpServerDetail:

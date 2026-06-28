@@ -1,4 +1,4 @@
-import { getJSON, postJSON, putJSON, deleteJSON } from './client'
+import { getJSON, postJSON, putJSON, deleteJSON, sandboxGet, sandboxPut } from './client'
 
 export const listUsers = () => getJSON('/admin/users')
 export const createUser = (data) => postJSON('/admin/users', data)
@@ -56,7 +56,7 @@ export const updateRunnerDefaults = (data) => putJSON('/admin/runner-defaults', 
 export const getRunnerImages = () => getJSON('/admin/runner-images')
 
 // Per-account: served by the account's own agent-runner pod (gateway routes the
-// /api/pty prefix to it). Not admin-gated — each user configures their own pod.
-export const getPtyConfig = () => getJSON('/pty/config')
-export const updatePtyConfig = (data) => putJSON('/pty/config', data)
-export const getPtyFeature = () => getJSON('/pty/feature')
+// /api/sandbox/pty prefix to it). Not admin-gated — each user configures their own pod.
+export const getPtyConfig = () => sandboxGet('/pty/config')
+export const updatePtyConfig = (data) => sandboxPut('/pty/config', data)
+export const getPtyFeature = () => sandboxGet('/pty/feature')

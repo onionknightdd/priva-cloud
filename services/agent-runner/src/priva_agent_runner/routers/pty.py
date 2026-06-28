@@ -24,7 +24,7 @@ from priva_common.user_store import UserRecord
 
 logger = get_app_logger(__name__)
 
-router = APIRouter(tags=["pty"])
+router = APIRouter(prefix="/api/sandbox/pty", tags=["pty"])
 
 
 class PtyFeatureResponse(BaseModel):
@@ -46,18 +46,18 @@ class PtyConfigUpdate(BaseModel):
     shell: str | None = None
 
 
-@router.get("/api/pty/feature", response_model=PtyFeatureResponse)
+@router.get("/feature", response_model=PtyFeatureResponse)
 async def get_pty_feature(_: UserRecord = Depends(require_user)):
     cfg = get_pty_config()
     return PtyFeatureResponse(enabled=cfg.enabled)
 
 
-@router.get("/api/pty/config", response_model=PtySettings)
+@router.get("/config", response_model=PtySettings)
 async def get_pty_config_route(_: UserRecord = Depends(require_user)):
     return get_pty_config()
 
 
-@router.put("/api/pty/config", response_model=PtySettings)
+@router.put("/config", response_model=PtySettings)
 async def update_pty_config_route(
     request: PtyConfigUpdate,
     current_user: UserRecord = Depends(require_user),
@@ -99,7 +99,7 @@ async def _send_close(websocket: WebSocket, reason: str, code: int) -> None:
         pass
 
 
-@router.websocket("/api/pty/ws")
+@router.websocket("/ws")
 async def pty_ws(websocket: WebSocket):
     # Echo the SPA's `priva.ws.v1` subprotocol so the browser handshake completes
     # (the JWT rode a sibling `priva.token.<jwt>` offer; the edge already authed it).

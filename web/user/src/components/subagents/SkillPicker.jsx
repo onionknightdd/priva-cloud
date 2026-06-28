@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 
 const monoFont = "'JetBrains Mono', 'Source Han Mono SC', monospace"
 
-// Catalog entries from /api/subagents/catalog now arrive as { name, enabled }.
+// Catalog entries from /api/sandbox/subagents/catalog now arrive as { name, enabled }.
 // Older clients (or string-only fixtures) still work — normalize to the new
 // shape on read so the rest of the component is uniform.
 function normalize(entry) {

@@ -1,15 +1,15 @@
-import { getJSON } from '@shared/api/client'
+import { getJSON, sandboxGet } from '@shared/api/client'
 
 // Per-account readiness + first-page bootstrap (returns { workspace, username }).
 // Served by the agent-runner via the gateway; cold-starts wake the sandbox, which
-// getJSON's fetchWithWake surfaces as the "waking"/"ready" toasts.
-export const getAgentHealth = () => getJSON('/health')
+// sandboxGet's fetchWithWake surfaces as the "waking"/"ready" toasts.
+export const getAgentHealth = () => sandboxGet('/health')
 
 // Per-user usage overview (stats/heatmap/streaks/model usage). Agent-runtime
 // state served by the agent-runner from the account's /workspace PVC.
-export const getUserOverview = () => getJSON('/user/overview')
+export const getUserOverview = () => sandboxGet('/user/overview')
 
-export const getUserStats = () => getJSON('/user/stats')
+export const getUserStats = () => sandboxGet('/user/stats')
 
 function buildAuditQuery(params = {}) {
   const query = new URLSearchParams()
@@ -26,7 +26,7 @@ function buildAuditQuery(params = {}) {
 
 // Agent-runtime audit (runs, skills, tools, hooks, sessions) — served by the
 // agent-runner from the account's PVC.
-export const getUserAuditLog = (params = {}) => getJSON(`/user/audit?${buildAuditQuery(params)}`)
+export const getUserAuditLog = (params = {}) => sandboxGet(`/user/audit?${buildAuditQuery(params)}`)
 
 // Control-plane audit (login/auth/user-mgmt) — served by the control-panel from
 // its own store. Merged with the agent-runtime feed client-side so no history is
@@ -37,5 +37,5 @@ export const getUserAnalytics = (params) => {
   const query = new URLSearchParams()
   if (params?.start) query.set('start', params.start)
   if (params?.end) query.set('end', params.end)
-  return getJSON(`/user/analytics?${query}`)
+  return sandboxGet(`/user/analytics?${query}`)
 }

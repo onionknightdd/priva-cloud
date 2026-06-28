@@ -219,6 +219,32 @@ def list_gateway_pod_ips() -> list[str]:
             if p.status and p.status.phase == "Running" and p.status.pod_ip]
 
 
+def any_ready_runner_endpoint() -> str | None:
+    """Endpoint ``ip:port`` of ANY ready agent-runner pod, or None if none awake.
+
+    Used by control-panel's /sandbox/docs proxy (app.py): the OpenAPI schema is identical
+    on every account's pod and a tokenless top-level browser navigation can't resolve a
+    specific account, so control-panel proxies the docs from any Ready runner (the
+    GIE/EPP response path would truncate the ~91KB schema). Blocking kube call.
+    """
+    s = get_settings()
+    ns = s.kubernetes.namespace_tenants
+    port = s.kubernetes.runner_service_port
+    try:
+        resp = _core().list_namespaced_pod(ns, label_selector="app=agent-runner")
+    except client.ApiException:
+        return None
+    for p in resp.items:
+        st = p.status
+        if not st or st.phase != "Running" or not st.pod_ip:
+            continue
+        if p.metadata and p.metadata.deletion_timestamp is not None:
+            continue
+        if any(c.type == "Ready" and c.status == "True" for c in (st.conditions or [])):
+            return f"{st.pod_ip}:{port}"
+    return None
+
+
 def _parse_gateway_metrics(text: str) -> dict:
     """Sum agentgateway_requests_total (by status-class + backend) and downstream
     connections from a Prometheus exposition. Each sample line is ``name{labels} value``;

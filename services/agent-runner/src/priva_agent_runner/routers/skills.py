@@ -32,7 +32,7 @@ from ..services.skills import (
 
 logger = get_app_logger(__name__)
 
-router = APIRouter(prefix="/api/resource/skills", tags=["skills"])
+router = APIRouter(prefix="/api/sandbox/resource/skills", tags=["skills"])
 
 
 @router.get("/", response_model=SkillListResponse)

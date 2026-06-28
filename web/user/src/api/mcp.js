@@ -1,21 +1,21 @@
-import { getJSON, postJSON, putJSON, deleteJSON } from '@shared/api/client'
+import { sandboxGet, sandboxPost, sandboxPut, sandboxDelete } from '@shared/api/client'
 
-export const listMcpServers = () => getJSON('/resource/mcp/')
+export const listMcpServers = () => sandboxGet('/resource/mcp/')
 
 export const getMcpServerDetail = (level, name) =>
-  getJSON(`/resource/mcp/${encodeURIComponent(level)}/${encodeURIComponent(name)}`)
+  sandboxGet(`/resource/mcp/${encodeURIComponent(level)}/${encodeURIComponent(name)}`)
 
 export const getMcpServerCapabilities = (level, name) =>
-  getJSON(`/resource/mcp/${encodeURIComponent(level)}/${encodeURIComponent(name)}/capabilities`)
+  sandboxGet(`/resource/mcp/${encodeURIComponent(level)}/${encodeURIComponent(name)}/capabilities`)
 
-export const createMcpServer = (data) => postJSON('/resource/mcp/', data)
+export const createMcpServer = (data) => sandboxPost('/resource/mcp/', data)
 
 export const updateMcpServer = (level, name, data) =>
-  putJSON(`/resource/mcp/${encodeURIComponent(level)}/${encodeURIComponent(name)}`, data)
+  sandboxPut(`/resource/mcp/${encodeURIComponent(level)}/${encodeURIComponent(name)}`, data)
 
 export const deleteMcpServer = (level, name) =>
-  deleteJSON(`/resource/mcp/${encodeURIComponent(level)}/${encodeURIComponent(name)}`)
+  sandboxDelete(`/resource/mcp/${encodeURIComponent(level)}/${encodeURIComponent(name)}`)
 
-export const validateMcpServer = (data) => postJSON('/resource/mcp/validate', data)
+export const validateMcpServer = (data) => sandboxPost('/resource/mcp/validate', data)
 
-export const validateMcpTool = (data) => postJSON('/resource/mcp/validate/tool', data)
+export const validateMcpTool = (data) => sandboxPost('/resource/mcp/validate/tool', data)

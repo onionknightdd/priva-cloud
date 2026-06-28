@@ -1,11 +1,11 @@
-import { getAuthHeaders, deleteJSON, getJSON } from '@shared/api/client'
+import { getAuthHeaders, sandboxDelete, sandboxGet } from '@shared/api/client'
 
-const BASE_URL = '/api'
+const BASE_URL = '/api/sandbox'
 
 export async function uploadFile(file) {
   const formData = new FormData()
   formData.append('file', file)
-  const res = await fetch(`${BASE_URL}/files/upload`, {
+  const res = await fetch(`${BASE_URL}/agent-attachments/upload`, {
     method: 'POST',
     headers: { ...getAuthHeaders() },
     body: formData,
@@ -21,16 +21,16 @@ export async function uploadFile(file) {
 }
 
 export async function deleteUploadedFile(uuid) {
-  return deleteJSON(`/files/${encodeURIComponent(uuid)}`)
+  return sandboxDelete(`/agent-attachments/${encodeURIComponent(uuid)}`)
 }
 
 export async function listUploadedFiles(date) {
   const query = date ? `?date=${encodeURIComponent(date)}` : ''
-  return getJSON(`/files/${query}`)
+  return sandboxGet(`/agent-attachments/${query}`)
 }
 
 export async function downloadFile(uuid) {
-  const res = await fetch(`${BASE_URL}/files/${encodeURIComponent(uuid)}`, {
+  const res = await fetch(`${BASE_URL}/agent-attachments/${encodeURIComponent(uuid)}`, {
     headers: { ...getAuthHeaders() },
   })
   if (res.status === 401) {

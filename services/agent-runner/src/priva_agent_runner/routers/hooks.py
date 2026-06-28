@@ -27,7 +27,7 @@ from ..services.hooks.prefs import get_enabled_hook_ids as _shared_get_enabled_h
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from priva_common.user_store import UserRecord, get_user_store
 
-router = APIRouter(prefix="/api/hooks", tags=["hooks"])
+router = APIRouter(prefix="/api/sandbox/hooks", tags=["hooks"])
 
 
 # -- Helpers ----------------------------------------------------------------

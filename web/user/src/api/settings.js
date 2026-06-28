@@ -1,4 +1,4 @@
-import { getJSON, putJSON } from '@shared/api/client'
+import { getJSON, putJSON, sandboxGet, sandboxPut } from '@shared/api/client'
 
 export function getUserEnv() {
   return getJSON('/auth/me/env')
@@ -17,17 +17,17 @@ export function fetchModels() {
 }
 
 export function getQuickActions() {
-  return getJSON('/resource/quickactions')
+  return sandboxGet('/resource/quickactions')
 }
 
 export function updateQuickActions(quickactions) {
-  return putJSON('/resource/quickactions', { quickactions })
+  return sandboxPut('/resource/quickactions', { quickactions })
 }
 
 export function getVisionModel() {
-  return getJSON('/resource/vision-model')
+  return sandboxGet('/resource/vision-model')
 }
 
 export function updateVisionModel(visionModel) {
-  return putJSON('/resource/vision-model', { vision_model: visionModel })
+  return sandboxPut('/resource/vision-model', { vision_model: visionModel })
 }

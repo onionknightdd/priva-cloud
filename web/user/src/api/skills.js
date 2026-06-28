@@ -1,7 +1,7 @@
-import { getJSON, putJSON, deleteJSON, getBackendOrigin } from '@shared/api/client'
+import { sandboxGet, sandboxPut, sandboxDelete, getBackendOrigin } from '@shared/api/client'
 import { getToken } from '@shared/api/tokenStore'
 
-const BASE_URL = '/api'
+const BASE_URL = '/api/sandbox'
 
 function getAuthHeaders() {
   const token = getToken()
@@ -11,13 +11,13 @@ function getAuthHeaders() {
   return {}
 }
 
-export const listSkills = () => getJSON('/resource/skills/')
+export const listSkills = () => sandboxGet('/resource/skills/')
 
 export const getSkillDetail = (level, name) =>
-  getJSON(`/resource/skills/${encodeURIComponent(level)}/${encodeURIComponent(name)}`)
+  sandboxGet(`/resource/skills/${encodeURIComponent(level)}/${encodeURIComponent(name)}`)
 
 export const getSkillFile = (level, name, path) =>
-  getJSON(`/resource/skills/${encodeURIComponent(level)}/${encodeURIComponent(name)}/file?path=${encodeURIComponent(path)}`)
+  sandboxGet(`/resource/skills/${encodeURIComponent(level)}/${encodeURIComponent(name)}/file?path=${encodeURIComponent(path)}`)
 
 export const uploadSkill = async (level, file) => {
   const formData = new FormData()
@@ -39,7 +39,7 @@ export const uploadSkill = async (level, file) => {
 }
 
 export const deleteSkill = (level, name) =>
-  deleteJSON(`/resource/skills/${encodeURIComponent(level)}/${encodeURIComponent(name)}`)
+  sandboxDelete(`/resource/skills/${encodeURIComponent(level)}/${encodeURIComponent(name)}`)
 
 export async function downloadSkill(level, name) {
   const res = await fetch(`${BASE_URL}/resource/skills/${encodeURIComponent(level)}/${encodeURIComponent(name)}/download`, {
@@ -55,10 +55,10 @@ export async function downloadSkill(level, name) {
   return res.blob()
 }
 
-export const getSkillsConfig = () => getJSON('/resource/skills/config')
+export const getSkillsConfig = () => sandboxGet('/resource/skills/config')
 
 export const updateSkillsConfig = (skillExclude) =>
-  putJSON('/resource/skills/config', { skill_exclude: Array.isArray(skillExclude) ? skillExclude : [] })
+  sandboxPut('/resource/skills/config', { skill_exclude: Array.isArray(skillExclude) ? skillExclude : [] })
 
 export async function getHealthInfo() {
   const res = await fetch(`${getBackendOrigin()}/health`)

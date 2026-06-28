@@ -31,7 +31,7 @@ from ..services.subagents import (
 
 logger = get_app_logger(__name__)
 
-router = APIRouter(prefix="/api/subagents", tags=["subagents"])
+router = APIRouter(prefix="/api/sandbox/subagents", tags=["subagents"])
 
 
 @router.get("/catalog", response_model=SubAgentCatalogResponse)

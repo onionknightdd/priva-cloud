@@ -88,7 +88,7 @@ One scale-to-zero uvicorn pod per account. It keeps the JSON/WS API surface and 
 
 | Router (current `main.py`) | Disposition | Rationale |
 |---|---|---|
-| `agent_router` (`:206`, `/api/agent`) | **KEEP** | `/run`, `/run/stream`, `/permission/respond`, `/rewind`, `/fork`, session reads — the pod's reason to exist. |
+| `agent_router` (`:206`, `/api/sandbox/agent`) | **KEEP** | `/run`, `/run/stream`, `/permission/respond`, `/rewind`, `/fork`, session reads — the pod's reason to exist. |
 | `pty_router` (`:218`) | **KEEP** | PTY in-pod; live PTY is an idle gate (§8). |
 | `hooks_router` (`:212`), `mcp_router` (`:210`), `subagents_router` (`:209`), `skills_router`/`skill_hub_router` (`:207-208`) | **KEEP**, config re-pointed | Run inside the loop; backing stores → data-spine thin client. |
 | `files_router`/`user_files_router` (`:211,217`), `user_data_router` (`:213`), `resource_router` (`:214`) | **KEEP** | Per-account file ops over the pod's own `/workspace`; write paths that wake the pod. |
@@ -839,7 +839,7 @@ The operator scaling 0→1 (CR patch) is the **only** wake trigger. `Readyz` fli
 11. **[B7b] Construct `app.state.run_ctx`** (cap, locks, coordinators); install the SIGTERM handler (§8.4) and the ~30s heartbeat task.
 12. **[B7c] Drain `inbox:{account_id}` FIFO** — admit up to `cap` concurrent, **leave the remainder in the inbox** (non-destructive peek / ack-on-completion); excess over cap stays buffered.
 13. **[B8] Register liveness** — `HSET route:{account_id} {pod_ip,pod_name,state,updated_at}`; `SADD awake:set account_id`; start route/lock-mirror heartbeats.
-14. **[B9] READY** — `/readyz` green; serve `/api/*` + `/ws/*`; begin idle accounting (§8.1).
+14. **[B9] READY** — `/readyz` green; serve `/api/sandbox/*` + `/ws/*`; begin idle accounting (§8.1).
 
 Ordering invariants: B2→B5 precede any LLM call (the fail-closed credential read + the relaxed base_url check are hoisted to boot); the approval purge (B6c) precedes the inbox drain (B7c) so prior-death pin state is cleared before new state can be minted (the spend reconcile B6b is gone under M6); the CR patch is the only scale-up trigger (`wake:pod` pub/sub is a nudge).
 
@@ -902,11 +902,11 @@ All seven open questions were answered by the user on 2026-06-18 and are now loc
 
 ## Appendix A — API surface (as-built, 2026-06-27)
 
-The body above (esp. §1.2) describes the router census by *disposition* ("KEEP / STRIP / config re-pointed") but never enumerated the routes. This appendix is the authoritative as-built list: **71 endpoints** across 11 routers + 2 health routes, all mounted by `app.create_app()`. Base prefix `/api`; auth is `require_account` (exposed as the `require_user` / `get_current_user` aliases in `deps.py`) unless noted. The pod is single-account, so **there is no admin tier** — every route is the account acting on its own pod (see A.2).
+The body above (esp. §1.2) describes the router census by *disposition* ("KEEP / STRIP / config re-pointed") but never enumerated the routes. This appendix is the authoritative as-built list: **71 endpoints** across 11 routers + 2 health routes, all mounted by `app.create_app()`. Base prefix `/api/sandbox` (the runtime namespace the edge steers to the account's pod with a single gateway rule — see A.4; control-plane stays on `/api/*` at control-panel); auth is `require_account` (exposed as the `require_user` / `get_current_user` aliases in `deps.py`) unless noted. The pod is single-account, so **there is no admin tier** — every route is the account acting on its own pod (see A.2).
 
 ### A.1 Endpoints by router
 
-**Agent run & sessions** — `routers/agent.py` `/api/agent` → `services/claude_sdk/service.py`, `permission_coordinator.py`, `options.py`
+**Agent run & sessions** — `routers/agent.py` `/api/sandbox/agent` → `services/claude_sdk/service.py`, `permission_coordinator.py`, `options.py`
 
 | Method · Path | Ability | Handler |
 |---|---|---|
@@ -922,38 +922,38 @@ The body above (esp. §1.2) describes the router census by *disposition* ("KEEP 
 | `PATCH /sessions/{id}` | Rename a session | `rename_agent_session` |
 | `PUT /sessions/{id}/tag` | Set/clear a session tag | `tag_agent_session` |
 
-**File uploads (temp)** — `routers/files.py` `/api/files` → `services/temp_files.py`
+**Agent attachments (temp uploads)** — `routers/files.py` `/api/sandbox/agent-attachments` → `services/temp_files.py`
 `POST /upload` · `DELETE /{uuid}` · `GET /` · `GET /{uuid}` — upload / delete / list / download temp attachments.
 
-**File explorer** — `routers/user_files.py` `/api/user/files` (in-file `_canonicalize`; whole-pod-FS, OS-perm gated)
+**File explorer** — `routers/user_files.py` `/api/sandbox/files` (in-file `_canonicalize`; whole-pod-FS, OS-perm gated)
 `GET /list` · `GET /download` · `GET /preview` · `POST /upload` — browse / download / preview / **self-serve upload** to the account's own `/workspace`.
 
-**MCP servers** — `routers/mcp.py` `/api/resource/mcp` → `services/mcp/config_manager.py`, `validator.py`
+**MCP servers** — `routers/mcp.py` `/api/sandbox/resource/mcp` → `services/mcp/config_manager.py`, `validator.py`
 `GET /` · `GET /{lvl}/{name}` · `GET /{lvl}/{name}/capabilities` · `POST /` · `PUT /{lvl}/{name}` · `DELETE /{lvl}/{name}` · `POST /validate` · `POST /validate/tool` — list / detail / probe-capabilities / create / update / delete / validate-server / test-tool. **No admin gate** (A.2).
 
-**Hooks** — `routers/hooks.py` `/api/hooks` → `services/hooks/{registry,config_manager,executor,log_store,builder}.py`
+**Hooks** — `routers/hooks.py` `/api/sandbox/hooks` → `services/hooks/{registry,config_manager,executor,log_store,builder}.py`
 `GET /catalog` · `POST /catalog/{id}/enable` · `POST /catalog/{id}/disable` · `GET /config` · `PUT /config` · `POST /test` · `POST /test/builtin` · `GET /script/content` · `GET /logs` — list/enable/disable built-ins, read-merged/write-local bindings, dry-run, read script, execution log. **Admin-enforced-hooks management endpoints removed** (A.2); enforcement still applies via `builder.py` reading org-pushed `runtime.hooks`.
 
-**Skills** — `routers/skills.py` `/api/resource/skills` → `services/skills.py`, `priva_common.skill_exclude`
+**Skills** — `routers/skills.py` `/api/sandbox/resource/skills` → `services/skills.py`, `priva_common.skill_exclude`
 `GET /` · `GET /config` · `PUT /config` · `GET /{lvl}/{name}` · `GET /{lvl}/{name}/file` · `GET /{lvl}/{name}/download` · `POST /upload` · `DELETE /{lvl}/{name}` — list / read-exclude-config / write-config / detail / file / download-tar / upload / delete. **No admin gate** (A.2).
 
-**Skill Hub (bundled)** — `routers/skill_hub.py` `/api/resource/skill-hub` → `services/skill_hub.py`
+**Skill Hub (bundled)** — `routers/skill_hub.py` `/api/sandbox/resource/skill-hub` → `services/skill_hub.py`
 `POST /upload` · `GET /` · `GET /{name}` · `GET /{name}/file` · `POST /{name}/deliver` · `DELETE /{name}` — upload / list / detail / file / deliver-to-workspace / delete. **No admin gate** (A.2).
 
-**Subagents** — `routers/subagents.py` `/api/subagents` → `services/subagents.py`
+**Subagents** — `routers/subagents.py` `/api/sandbox/subagents` → `services/subagents.py`
 `GET /catalog` · `GET /list` · `GET /{name}` · `POST /` · `PUT /{name}` · `DELETE /{name}` · `POST /{name}/test/stream` — picker-catalog / list / detail / create / update / delete / stream-test.
 
 **PTY / web terminal** — `routers/pty.py` → `services/pty_session.py`
-`GET /api/pty/feature` · `GET /api/pty/config` · `PUT /api/pty/config` · `WS /api/pty/ws` — feature-flag / read-config / write-config / interactive shell.
+`GET /api/sandbox/pty/feature` · `GET /api/sandbox/pty/config` · `PUT /api/sandbox/pty/config` · `WS /api/sandbox/pty/ws` — feature-flag / read-config / write-config / interactive shell.
 
-**User dashboard data** — `routers/user_data.py` `/api/user` → `services/compute_user_stats.py`, `priva_common.audit_log`
+**User dashboard data** — `routers/user_data.py` `/api/sandbox/user` → `services/compute_user_stats.py`, `priva_common.audit_log`
 `GET /overview` · `GET /stats` · `GET /audit` · `GET /analytics` — usage-overview / counts+storage / audit feed / activity timeline.
 
-**User config** — `routers/user_config.py` `/api/resource` → `priva_common.skill_exclude`, `models.resource`
+**User config** — `routers/user_config.py` `/api/sandbox/resource` → `priva_common.skill_exclude`, `models.resource`
 `GET/PUT /quickactions` · `GET/PUT /vision-model` — quick-action templates / vision-model preference.
 
 **Health** — `app.py`
-`GET /health` (no auth) — k8s readiness + downstream/volume probe (the `/readyz` readiness check of §1.2 is folded in here). `GET /api/health` — per-account SPA bootstrap (counts as activity).
+`GET /health` (no auth) — k8s readiness + downstream/volume probe (the `/readyz` readiness check of §1.2 is folded in here). `GET /api/sandbox/health` — per-account SPA bootstrap (counts as activity).
 
 ### A.2 Enforcement model (single-account pod)
 
@@ -965,9 +965,15 @@ The **only** admin-enforcement concept that survives is **hook enforcement**: th
 
 ### A.3 De-history + enforcement cleanup (2026-06-27)
 
-- **Removed** the `GET/POST/DELETE /api/hooks/admin` management trio (no caller in the split; enforcement read-path retained).
+- **Removed** the `GET/POST/DELETE /api/sandbox/hooks/admin` management trio (no caller in the split; enforcement read-path retained).
 - **Dropped** admin-role gating on skills / MCP / skill-hub / `user_files` → all `require_user`. The `user_files` file explorer browses the **whole pod filesystem** (single-tenant pod; gated only by the sandbox uid's OS permissions), `~` landing on the user's workspace; removed `_validate_workspace_path` and the unused `require_admin` alias from `deps.py`.
-- **Self-serve file upload**: the user SPA File Explorer (UserData tab) now uploads via `POST /api/user/files/upload` for every account; the admin-only upload path + `web/user/src/api/adminFiles.js` were deleted.
+- **Self-serve file upload**: the user SPA File Explorer (UserData tab) now uploads via `POST /api/sandbox/files/upload` for every account; the admin-only upload path + `web/user/src/api/adminFiles.js` were deleted.
 - **Removed** dead-on-arrival frontend: Scheduler panel + Channels settings tab (Phase-4 deferred, no backend in the split) and the unrendered `PluginsTab`.
 - **De-shimmed** `services/claude_sdk/serialization.py` (re-export of `priva_common.serialization`); removed the per-build skill-symlink cleanup shim; neutralized deleted-monolith comment references.
 - **Known gap (not addressed here):** `/rewind` gates on a live run but not yet on a live PTY / pending approval as §4.3 specifies — design follow-up.
+
+### A.4 `/sandbox` namespace + OpenAPI docs (2026-06-28)
+
+All runtime routes moved from `/api/*` to **`/api/sandbox/*`** so the edge separates the two faces with one rule (`/api/sandbox` → InferencePool) instead of enumerating ~17 prefixes; control-plane (`/api/auth`, `/api/admin`, `/api/resource/models`, `/metrics`) stays on the `/` catch-all → control-panel. The pod's router prefixes carry the namespace directly (no `root_path` — the gateway forwards the full, unstripped path). The user SPA is now served at **both `/` and `/sandbox`** (control-panel static mounts; same build). The two file groups were also disambiguated by name: temp **agent attachments** (UUID-addressed, `routers/files.py`) → `/api/sandbox/agent-attachments`, and the **file explorer** (path-addressed, `routers/user_files.py`) → the freed `/api/sandbox/files` (was `/api/sandbox/user/files`).
+
+The API reference UI is **Scalar** (not Swagger), served **fully offline** from a vendored 3.7MB bundle (`_static/scalar.standalone.js`) with web-fonts disabled (`withDefaultFonts:false`) so the page renders with zero external requests. `docs_url=None` disables FastAPI's Swagger; the pod serves `GET /sandbox/docs` (Scalar HTML), `/sandbox/docs/scalar.js` (the bundle), and `/sandbox/docs/openapi.json` (`openapi_url`). These are **not** routed through the InferencePool — the GIE/EPP response path buffers bodies to ~8KB, which truncates the ~91KB schema (and the 3.7MB bundle). Instead **control-panel serves `/sandbox/docs*` by proxying from any Ready runner** (`provisioner.any_ready_runner_endpoint()`; account-independent, full body, cache headers forwarded) on the `/` catch-all, unauthenticated (only the API *shape* is exposed, never user data). The SPA's "API Doc" link (`SettingsPopover`) opens `/sandbox/docs` in a new tab.

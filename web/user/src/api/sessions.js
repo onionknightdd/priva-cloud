@@ -1,6 +1,6 @@
 import { getAuthHeaders, handleAPIResponse, fetchWithWake } from '@shared/api/client'
 
-const BASE_URL = '/api'
+const BASE_URL = '/api/sandbox'
 
 export async function fetchSessions(limit = 20, offset = 0, source = 'project') {
   const params = new URLSearchParams()

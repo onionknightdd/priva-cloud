@@ -4,7 +4,7 @@ import { getToken } from '@shared/api/tokenStore'
 import { wsProtocols } from '@shared/api/wsAuth'
 import i18n from '@shared/i18n'
 
-const BASE_URL = '/api'
+const BASE_URL = '/api/sandbox'
 
 const RECONNECT_BACKOFF = [1, 2, 4, 8, 16] // seconds — max 5 attempts
 const PROTOCOL_AUTH_CLOSE_CODES = new Set([1000, 1001, 4000, 4001])
@@ -77,7 +77,7 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
     // The edge (agentgateway ext_proc EPP) authenticates the WS on the UPGRADE
     // request, which carries no body — so the token rides the
     // `Sec-WebSocket-Protocol` handshake header (see wsAuth.js), not the URL.
-    const wsUrl = `${protocol}//${window.location.host}/api/agent/ws/run`
+    const wsUrl = `${protocol}//${window.location.host}/api/sandbox/agent/ws/run`
     ws = new WebSocket(wsUrl, wsProtocols())
 
     ws.onopen = () => {
