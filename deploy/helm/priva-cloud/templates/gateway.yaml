@@ -42,7 +42,7 @@ spec:
       number: 9000
     failureMode: FailClose
 ---
-# /api/sandbox/* + /sandbox/docs -> InferencePool (EPP steers to the account's pod);
+# /api/sandbox/* -> InferencePool (EPP steers to the account's pod);
 # everything else (SPAs at / and /sandbox, /admin, /api/auth, /api/admin,
 # /api/resource/models) -> control-panel HTTP face. Most-specific path wins.
 apiVersion: gateway.networking.k8s.io/v1
@@ -60,7 +60,7 @@ spec:
         # All agent-runner runtime API under one namespace -> one prefix to the pool
         # (the EPP picks the endpoint; /api/sandbox/health drives the cold-start toasts).
         # /api/resource/models is NOT here — a control-plane proxy on the "/" catch-all.
-        # /sandbox/docs is also NOT here — control-panel proxies the OpenAPI schema from
+        # /sandbox/apidocs is also NOT here — control-panel proxies the OpenAPI schema from
         # a ready runner (the GIE/EPP path buffers response bodies ~8KB) -> catch-all.
         - path: {type: PathPrefix, value: /api/sandbox}
       backendRefs:

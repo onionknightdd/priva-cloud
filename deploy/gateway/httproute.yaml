@@ -1,7 +1,7 @@
-# /api/sandbox/* + /sandbox/docs -> InferencePool (EPP steers to the account's pod);
-# everything else (SPAs at / and /sandbox, /admin, /api/auth, /api/admin,
-# /api/resource/models) -> control-panel HTTP face. Most-specific path wins, so these
-# take precedence over the "/" catch-all.
+# /api/sandbox/* -> InferencePool (EPP steers to the account's pod); everything else
+# (SPAs at / and /sandbox, /admin, /api/auth, /api/admin, /api/resource/models, and the
+# /sandbox/apidocs API reference which control-panel proxies from a runner) ->
+# control-panel HTTP face. Most-specific path wins, so /api/sandbox beats the "/" catch-all.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -17,7 +17,7 @@ spec:
         # is NOT here — it's a pure control-plane proxy that stays on the "/" catch-all.
         # A cold sandbox 503s here at the EPP until the pod answers; the SPA polls
         # /api/sandbox/health to drive the waking/ready toasts and render the first page.
-        # (/sandbox/docs is NOT here — control-panel serves it by proxying the OpenAPI
+        # (/sandbox/apidocs is NOT here — control-panel serves it by proxying the OpenAPI
         # schema from a ready runner, so it rides the "/" catch-all. The EPP/GIE path
         # buffers response bodies ~8KB, which would truncate the 91KB schema.)
         - path: {type: PathPrefix, value: /api/sandbox}

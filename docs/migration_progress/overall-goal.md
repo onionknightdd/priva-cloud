@@ -72,10 +72,10 @@
   (`/api/auth`, `/api/admin`, `/api/resource/models`) stays on the `/` catch-all → control-panel. No
   `root_path` — the gateway forwards the full unstripped path, so prefixes are real. (2) **User SPA served
   at both `/` and `/sandbox`** (two control-panel `StaticFiles` mounts; vite `base` unchanged). (3)
-  **API reference enabled at `/sandbox/docs`** — a **Scalar** UI served **fully offline** from a vendored
+  **API reference enabled at `/sandbox/apidocs`** — a **Scalar** UI served **fully offline** from a vendored
   3.7MB bundle (`withDefaultFonts:false` → zero external requests); the SPA's "API Doc" link repointed
   there. Docs are **served by control-panel, not the pool** — the GIE/EPP response path buffers bodies to
-  ~8KB and truncates the ~91KB schema (and the bundle), so control-panel **proxies `/sandbox/docs*` from
+  ~8KB and truncates the ~91KB schema (and the bundle), so control-panel **proxies `/sandbox/apidocs*` from
   any Ready runner** (`provisioner.any_ready_runner_endpoint()`; account-independent, unauthenticated — only
   the API shape exposed; cache headers forwarded). (4) **Frontend**: `client.js` gained `SANDBOX_BASE` +
   `sandbox{Get,Post,Put,Delete}` helpers; every agent-runner call site (incl. mixed modules

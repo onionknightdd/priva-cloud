@@ -147,21 +147,21 @@ def create_app() -> FastAPI:
     async def _sandbox_index_redirect():
         return RedirectResponse(url="/sandbox/")
 
-    # The agent-runner's OpenAPI docs (/sandbox/docs + the schema under it) are served
+    # The agent-runner's OpenAPI docs (/sandbox/apidocs + the schema under it) are served
     # HERE, not via the InferencePool: the GIE/EPP response path buffers bodies to ~8KB,
     # which truncates the ~91KB schema. The schema is account-independent, so we proxy it
     # from ANY ready runner (full body, like the SPA bundles this app already serves). The
-    # SPA's "API Doc" link opens /sandbox/docs in a new tab — a tokenless top-level nav,
+    # SPA's "API Doc" link opens /sandbox/apidocs in a new tab — a tokenless top-level nav,
     # so this is unauthenticated; it exposes only the API shape, never user data. Must
     # register BEFORE the "/sandbox" static mount so the SPA mount doesn't shadow it.
-    @app.get("/sandbox/docs", include_in_schema=False)
-    @app.get("/sandbox/docs/{sub:path}", include_in_schema=False)
+    @app.get("/sandbox/apidocs", include_in_schema=False)
+    @app.get("/sandbox/apidocs/{sub:path}", include_in_schema=False)
     async def _sandbox_docs_proxy(sub: str = ""):
         from . import provisioner
         endpoint = await asyncio.to_thread(provisioner.any_ready_runner_endpoint)
         if not endpoint:
             return Response("agent sandbox is waking, retry in a moment", status_code=503)
-        url = f"http://{endpoint}/sandbox/docs" + (f"/{sub}" if sub else "")
+        url = f"http://{endpoint}/sandbox/apidocs" + (f"/{sub}" if sub else "")
         try:
             # trust_env=False: in-cluster pod-to-pod hop must not honor any host/system proxy.
             async with httpx.AsyncClient(trust_env=False, timeout=15.0) as cx:

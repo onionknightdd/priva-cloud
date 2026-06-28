@@ -222,7 +222,7 @@ def list_gateway_pod_ips() -> list[str]:
 def any_ready_runner_endpoint() -> str | None:
     """Endpoint ``ip:port`` of ANY ready agent-runner pod, or None if none awake.
 
-    Used by control-panel's /sandbox/docs proxy (app.py): the OpenAPI schema is identical
+    Used by control-panel's /sandbox/apidocs proxy (app.py): the OpenAPI schema is identical
     on every account's pod and a tokenless top-level browser navigation can't resolve a
     specific account, so control-panel proxies the docs from any Ready runner (the
     GIE/EPP response path would truncate the ~91KB schema). Blocking kube call.

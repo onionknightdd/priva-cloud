@@ -86,7 +86,7 @@ export default function SettingsPopover() {
       ))}
       {/* Separator */}
       <div style={{ height: 1, background: 'var(--border)', margin: '2px 8px' }} />
-      {/* API Doc — opens /sandbox/docs in new tab */}
+      {/* API Doc — opens /sandbox/apidocs in new tab */}
       <button
         className="flex items-center gap-2 px-3 py-2 w-full text-sm"
         style={{
@@ -99,7 +99,7 @@ export default function SettingsPopover() {
           transition: 'background 150ms ease, color 150ms ease',
         }}
         onClick={() => {
-          window.open(`${getBackendOrigin()}/sandbox/docs`, '_blank', 'noopener,noreferrer')
+          window.open(`${getBackendOrigin()}/sandbox/apidocs`, '_blank', 'noopener,noreferrer')
           closePopover()
         }}
         onMouseEnter={(e) => {
