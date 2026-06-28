@@ -2,6 +2,7 @@ import { getAuthHeaders } from '@shared/api/client'
 import useConnectionStore from '../stores/connectionStore'
 import { getToken } from '@shared/api/tokenStore'
 import { wsProtocols } from '@shared/api/wsAuth'
+import { debugLog } from '@shared/utils/debugLog'
 import i18n from '@shared/i18n'
 
 const BASE_URL = '/api/sandbox'
@@ -25,6 +26,14 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
   let reconnectTimer = null
   let activeSessionId = sessionId
 
+  // Single outgoing-frame choke point so debug logging (Settings → Advanced →
+  // Developer Mode) covers every WS send: init, queue, queue_cancel,
+  // permission_response, abort.
+  const wsSend = (frame) => {
+    debugLog('send', `WS ▶ ${frame.type}`, frame)
+    ws.send(JSON.stringify(frame))
+  }
+
   const sendInit = () => {
     const token = getToken()
     const init = { type: 'init', message }
@@ -40,7 +49,7 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
     // WebUI can resolve prompts (permission card / AskUserQuestion), so opt in
     // to synchronous feedback. The API default is false (non-interactive safe).
     init.enable_permission_feedback = true
-    ws.send(JSON.stringify(init))
+    wsSend(init)
   }
 
   const finalize = () => {
@@ -92,6 +101,7 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
       try {
         const { event, data } = JSON.parse(evt.data)
         if (event === 'keepalive') return
+        debugLog('recv', `WS ◀ ${event}`, data)
         // Track the latest session_id so a reconnect resumes the same conversation.
         if (event === 'result' && data?.session_id) activeSessionId = data.session_id
         if (event === 'stream_init' && data?.stream_id) activeSessionId = data.stream_id
@@ -153,7 +163,7 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
       const frame = { type: 'permission_response', request_id: requestId, decision }
       if (msg) frame.message = msg
       if (updatedInput) frame.updated_input = updatedInput
-      ws.send(JSON.stringify(frame))
+      wsSend(frame)
     }
   }
 
@@ -162,13 +172,13 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
     const frame = { type: 'queue', id, text }
     if (attachments && attachments.length > 0) frame.attachments = attachments
     if (images && images.length > 0) frame.images = images
-    ws.send(JSON.stringify(frame))
+    wsSend(frame)
     return true
   }
 
   const sendQueueCancel = (id) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
-    ws.send(JSON.stringify({ type: 'queue_cancel', id }))
+    wsSend({ type: 'queue_cancel', id })
     return true
   }
 
@@ -180,7 +190,7 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
     }
     if (ws && ws.readyState === WebSocket.OPEN) {
       try {
-        ws.send(JSON.stringify({ type: 'abort' }))
+        wsSend({ type: 'abort' })
       } catch {
         // ignore send errors on closing socket
       }
@@ -221,6 +231,7 @@ export function streamAgentRun(message, sessionId, onEvent, permissionMode, onCo
     if (enableFileCheckpointing) {
       body.enable_file_checkpointing = true
     }
+    debugLog('send', `SSE ▶ POST ${BASE_URL}/agent/run/stream`, body)
     const res = await fetch(`${BASE_URL}/agent/run/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -258,6 +269,7 @@ export function streamAgentRun(message, sessionId, onEvent, permissionMode, onCo
         } else if (line.startsWith('data: ') && currentEvent) {
           try {
             const data = JSON.parse(line.slice(6))
+            debugLog('recv', `SSE ◀ ${currentEvent}`, data)
             onEvent(currentEvent, data)
           } catch {
             // skip malformed JSON

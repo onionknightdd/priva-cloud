@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import safeStorage from '@shared/utils/safeStorage'
+import { DEVELOPER_MODE_KEY, DEBUG_LOGGING_KEY } from '@shared/utils/debugLog'
 import {
   getUserEnv,
   updateUserEnv,
@@ -27,6 +28,10 @@ const useSettingsStore = create((set, get) => ({
   presetPromptLoading: false,
   visionModel: null,
   transport: safeStorage.getItem('priva-transport') || 'ws',
+  // Developer Mode is the master gate; Debug Logging is one switch under it.
+  // Persisted so the plain-JS API layer (debugLog) can read the flags directly.
+  developerMode: safeStorage.getItem(DEVELOPER_MODE_KEY) === '1',
+  debugMode: safeStorage.getItem(DEBUG_LOGGING_KEY) === '1',
 
   fetchEnvStatus: async () => {
     try {
@@ -105,6 +110,16 @@ const useSettingsStore = create((set, get) => ({
     set({ transport: t })
   },
 
+  setDeveloperMode: (on) => {
+    safeStorage.setItem(DEVELOPER_MODE_KEY, on ? '1' : '0')
+    set({ developerMode: on })
+  },
+
+  setDebugMode: (on) => {
+    safeStorage.setItem(DEBUG_LOGGING_KEY, on ? '1' : '0')
+    set({ debugMode: on })
+  },
+
   setSelectedModel: (model) => set({ selectedModel: model }),
 
   fetchApiKey: async () => {
@@ -175,6 +190,8 @@ const useSettingsStore = create((set, get) => ({
     presetPromptLoading: false,
     visionModel: null,
     transport: safeStorage.getItem('priva-transport') || 'ws',
+    developerMode: safeStorage.getItem(DEVELOPER_MODE_KEY) === '1',
+    debugMode: safeStorage.getItem(DEBUG_LOGGING_KEY) === '1',
   }),
 }))
 

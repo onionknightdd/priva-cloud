@@ -1,5 +1,6 @@
 import useToastStore from '../stores/toastStore'
 import { getToken } from './tokenStore'
+import { debugLog } from '../utils/debugLog'
 
 const BASE_URL = '/api'
 // Agent-runner (per-account pod) runtime API. Distinct from the control-plane BASE_URL
@@ -77,6 +78,12 @@ function notifyReady() {
 // is waking…" notice while it boots, then an "Agent is ready" confirmation once it
 // answers. Only the final response reaches handleAPIResponse.
 export async function fetchWithWake(url, init) {
+  // Debug logging (Settings → Advanced → Developer Mode): every outgoing request
+  // funnels through here, so one log call covers all REST helpers below.
+  let _loggedBody
+  try { _loggedBody = init?.body ? JSON.parse(init.body) : undefined } catch { _loggedBody = init?.body }
+  debugLog('send', `${init?.method || 'GET'} ${url}`, _loggedBody)
+
   let res
   let waited = false
   const markWaking = () => { waited = true; notifyWaking() }
@@ -115,7 +122,9 @@ export async function handleAPIResponse(res) {
     if (res.status !== 503) pushApiToast(res.status, text)
     throw new Error(`API error ${res.status}: ${text}`)
   }
-  return res.json()
+  const data = await res.json()
+  debugLog('recv', `${res.status} ${res.url}`, data)
+  return data
 }
 
 export async function postJSON(path, body) {

@@ -18,6 +18,7 @@ import {
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { getLucideIcon, ICON_NAMES } from '../../utils/lucideIconMap'
 import WebTerminalTab from './WebTerminalTab'
+import Toggle from '@shared/components/shared/Toggle'
 
 function FilterableModelSelect({ models, value, onChange, label, labelStyle, inputStyle, placeholder, filterPlaceholder, noMatchesText }) {
   const [open, setOpen] = useState(false)
@@ -1394,10 +1395,38 @@ function EditForm({ item, onSave, onCancel }) {
   )
 }
 
+function SettingRow({ label, desc, checked, onChange, disabled = false }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div
+        className="flex flex-col min-w-0"
+        style={{ opacity: disabled ? 0.55 : 1, transition: 'opacity 150ms ease' }}
+      >
+        <span
+          className="text-xs font-semibold uppercase"
+          style={{ color: 'var(--text-secondary)', letterSpacing: '0.06em' }}
+        >
+          {label}
+        </span>
+        <span className="text-xs font-light" style={{ color: 'var(--text-dim)', lineHeight: 1.5, marginTop: 4 }}>
+          {desc}
+        </span>
+      </div>
+      <div className="flex-shrink-0" style={{ paddingTop: 2 }}>
+        <Toggle checked={checked} onChange={onChange} disabled={disabled} ariaLabel={label} />
+      </div>
+    </div>
+  )
+}
+
 function AdvancedTab() {
   const { t } = useTranslation()
   const transport = useSettingsStore((s) => s.transport)
   const setTransport = useSettingsStore((s) => s.setTransport)
+  const developerMode = useSettingsStore((s) => s.developerMode)
+  const setDeveloperMode = useSettingsStore((s) => s.setDeveloperMode)
+  const debugMode = useSettingsStore((s) => s.debugMode)
+  const setDebugMode = useSettingsStore((s) => s.setDebugMode)
 
   const options = [
     { value: 'ws', label: t('settings.transportWs') },
@@ -1405,38 +1434,63 @@ function AdvancedTab() {
   ]
 
   return (
-    <div className="flex flex-col gap-4">
-      <label style={{ ...labelStyle, marginBottom: 0 }}>{t('settings.transportMode')}</label>
-      <div className="flex gap-2">
-        {options.map((opt) => {
-          const isActive = transport === opt.value
-          return (
-            <button
-              key={opt.value}
-              className="flex items-center gap-2 px-3 py-2 text-sm"
-              style={{
-                background: isActive ? 'var(--bg-elevated)' : 'var(--bg-surface)',
-                border: isActive ? '1px solid var(--blue)' : '1px solid var(--border)',
-                borderRadius: 4,
-                color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                fontWeight: isActive ? 600 : 400,
-                transition: 'background 150ms ease, border-color 150ms ease, color 150ms ease',
-              }}
-              onClick={() => setTransport(opt.value)}
-            >
-              {isActive && <Check size={14} strokeWidth={1.5} style={{ color: 'var(--blue)' }} />}
-              {opt.label}
-            </button>
-          )
-        })}
+    <div className="flex flex-col gap-5">
+      {/* Streaming transport */}
+      <div className="flex flex-col gap-4">
+        <label style={{ ...labelStyle, marginBottom: 0 }}>{t('settings.transportMode')}</label>
+        <div className="flex gap-2">
+          {options.map((opt) => {
+            const isActive = transport === opt.value
+            return (
+              <button
+                key={opt.value}
+                className="flex items-center gap-2 px-3 py-2 text-sm"
+                style={{
+                  background: isActive ? 'var(--bg-elevated)' : 'var(--bg-surface)',
+                  border: isActive ? '1px solid var(--blue)' : '1px solid var(--border)',
+                  borderRadius: 4,
+                  color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontWeight: isActive ? 600 : 400,
+                  transition: 'background 150ms ease, border-color 150ms ease, color 150ms ease',
+                }}
+                onClick={() => setTransport(opt.value)}
+              >
+                {isActive && <Check size={14} strokeWidth={1.5} style={{ color: 'var(--blue)' }} />}
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
+        <p className="text-xs" style={{ color: 'var(--text-dim)', lineHeight: 1.5 }}>
+          {t('settings.transportNote')}
+        </p>
       </div>
-      <p
-        className="text-xs"
-        style={{ color: 'var(--text-dim)', lineHeight: 1.5 }}
+
+      {/* Divider */}
+      <div style={{ borderBottom: '1px solid var(--border)' }} />
+
+      {/* Developer Mode — master gate for the dev switches below */}
+      <SettingRow
+        label={t('settings.developerMode')}
+        desc={t('settings.developerModeDesc')}
+        checked={developerMode}
+        onChange={setDeveloperMode}
+      />
+
+      {/* Dev switches — always shown, disabled until Developer Mode is on */}
+      <div
+        className="flex flex-col gap-4"
+        style={{ paddingLeft: 16, marginLeft: 2, borderLeft: '1px solid var(--border-subtle)' }}
       >
-        {t('settings.transportNote')}
-      </p>
+        <SettingRow
+          label={t('settings.debugLogging')}
+          desc={t('settings.debugLoggingDesc')}
+          checked={debugMode}
+          onChange={setDebugMode}
+          disabled={!developerMode}
+        />
+      </div>
     </div>
   )
 }
