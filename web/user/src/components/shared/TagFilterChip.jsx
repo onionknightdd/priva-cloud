@@ -13,22 +13,25 @@ export default function TagFilterChip({ active, label, onClick, showIcon = true 
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="inline-flex items-center gap-1 px-2 py-1 uppercase"
+      className="inline-flex items-center uppercase"
       style={{
+        gap: 3,
         background: active ? 'var(--bg-elevated)' : 'transparent',
         border: '1px solid var(--border-subtle)',
         borderLeft: active ? '2px solid var(--blue)' : '2px solid transparent',
         borderRadius: 2,
-        fontSize: 11,
-        letterSpacing: '0.06em',
+        padding: '1px 6px',
+        fontSize: 10,
+        letterSpacing: '0.05em',
         fontWeight: 600,
+        lineHeight: 1.4,
         color,
         cursor: 'pointer',
         transition: 'color 150ms ease, background 150ms ease',
       }}
     >
-      {showIcon && <Flag size={11} strokeWidth={1.5} />}
-      <span className="truncate" style={{ maxWidth: 120 }}>{label}</span>
+      {showIcon && <Flag size={10} strokeWidth={1.5} />}
+      <span className="truncate" style={{ maxWidth: 110 }}>{label}</span>
     </button>
   )
 }

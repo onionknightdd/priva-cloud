@@ -1,10 +1,11 @@
 import { Suspense, useEffect } from 'react'
-import { FileDiff, FolderTree, PanelRight } from 'lucide-react'
+import { FileDiff, FolderTree, PanelRight, SquareTerminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import useSandboxStore from '../../stores/sandboxStore'
 import useUiStore from '@shared/stores/uiStore'
+import CopyButton from '@shared/components/shared/CopyButton'
 import MessageListBoundary from './MessageListBoundary'
 import ChatInput from './ChatInput'
 import UsageStatsOverview from './UsageStatsOverview'
@@ -62,6 +63,12 @@ export default function ChatPanel() {
   const showCanvas = useUiStore((s) => s.showCanvas)
   const setCanvasMinimized = useUiStore((s) => s.setCanvasMinimized)
   const setActiveCanvasTab = useUiStore((s) => s.setActiveCanvasTab)
+  // Terminal toggle — relocated from the (removed) NavBar into the session header.
+  const terminalOpen = useUiStore((s) => s.terminalOpen)
+  const toggleTerminal = useUiStore((s) => s.toggleTerminal)
+  const terminalFeatureEnabled = useUiStore((s) => s.terminalFeatureEnabled)
+  const terminalSessionActive = useUiStore((s) => s.terminalSessionActive)
+  const terminalActiveCount = useUiStore((s) => s.terminalActiveCount) || (terminalSessionActive ? 1 : 0)
   const activeSidebarSession = sidebarSessions.find((s) => s.sessionId === sessionId || s.id === sessionId)
   const sessionTitle = activeSidebarSession?.name || (sessionId ? sessionId : '')
   const isEmpty = messages.length === 0
@@ -134,19 +141,77 @@ export default function ChatPanel() {
           background: 'var(--bg-surface)',
         }}
       >
-        <span
-          className="truncate"
-          style={{
-            color: 'var(--text-secondary)',
-            fontSize: 13,
-            minWidth: 0,
-            marginRight: 12,
-          }}
-          title={sessionTitle}
-        >
-          {sessionTitle}
-        </span>
+        <div className="flex items-center gap-1 min-w-0" style={{ marginRight: 12 }}>
+          <span
+            className="truncate"
+            style={{ color: 'var(--text-secondary)', fontSize: 13, minWidth: 0 }}
+            title={sessionTitle}
+          >
+            {sessionTitle}
+          </span>
+          {sessionId && (
+            <span className="flex-shrink-0" title={t('sidebar.copySessionId')}>
+              <CopyButton content={sessionId} inline />
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-1 flex-shrink-0">
+          {terminalFeatureEnabled && (
+            <button
+              type="button"
+              onClick={toggleTerminal}
+              title={terminalActiveCount > 0
+                ? t('terminal.openWithCount', { count: terminalActiveCount })
+                : t('terminal.open')}
+              style={{
+                position: 'relative',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 26,
+                height: 26,
+                border: 'none',
+                background: 'transparent',
+                color: terminalOpen || terminalActiveCount > 0 ? 'var(--red)' : 'var(--text-dim)',
+                cursor: 'pointer',
+                padding: 0,
+                transition: 'color 150ms ease, background 150ms ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = 'var(--red)'
+                e.currentTarget.style.background = 'var(--bg-elevated)'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = terminalOpen || terminalActiveCount > 0 ? 'var(--red)' : 'var(--text-dim)'
+                e.currentTarget.style.background = 'transparent'
+              }}
+            >
+              <SquareTerminal size={16} strokeWidth={1.5} />
+              {terminalActiveCount > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: -2,
+                    right: -2,
+                    minWidth: 14,
+                    height: 14,
+                    padding: '0 3px',
+                    borderRadius: 4,
+                    background: 'var(--red)',
+                    color: 'var(--text-inverse)',
+                    fontSize: 9,
+                    fontWeight: 700,
+                    lineHeight: '14px',
+                    textAlign: 'center',
+                    boxSizing: 'border-box',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {terminalActiveCount}
+                </span>
+              )}
+            </button>
+          )}
           <CheckpointToggle />
           <CanvasShortcut
             icon={PanelRight}

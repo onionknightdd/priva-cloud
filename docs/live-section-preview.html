@@ -1,0 +1,966 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live Section Preview - Data / Layout / Agent / Domain</title>
+  <style>
+    @font-face {
+      font-family: 'Noto Sans';
+      src: url('../web/shared/public/fonts/NotoSans-Variable.woff2') format('woff2');
+      font-weight: 300 700;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: 'JetBrains Mono';
+      src: url('../web/shared/public/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+      font-weight: 400;
+      font-display: swap;
+    }
+
+    :root {
+      --bg-base: #0d1117;
+      --bg-surface: #161b22;
+      --bg-elevated: #21262d;
+      --bg-overlay: #0d1117e6;
+      --border-subtle: #21262d;
+      --border: #30363d;
+      --border-strong: #484f58;
+      --text-primary: #e6edf3;
+      --text-secondary: #8b949e;
+      --text-dim: #6e7681;
+      --text-inverse: #0d1117;
+      --blue: #58a6ff;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --red: #f85149;
+      --purple: #bc8cff;
+      --cyan: #79c0ff;
+      --orange: #ffa657;
+      --status-running: var(--purple);
+      --status-success: var(--green);
+      --status-error: var(--red);
+      --status-pending: var(--yellow);
+      --status-idle: var(--border);
+    }
+
+    * {
+      box-sizing: border-box;
+      min-width: 0;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow-x: hidden;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      font-family: 'Noto Sans', sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 20px;
+      line-height: 1.2;
+      font-weight: 700;
+    }
+
+    h2 {
+      font-size: 16px;
+      line-height: 1.2;
+      font-weight: 700;
+    }
+
+    h3 {
+      font-size: 13px;
+      line-height: 1.3;
+      font-weight: 600;
+    }
+
+    .page {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .section {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      padding: 16px;
+      margin-bottom: 16px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .section-title {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .muted {
+      color: var(--text-secondary);
+    }
+
+    .label {
+      color: var(--text-dim);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+      gap: 12px;
+    }
+
+    .grid-wide {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+      gap: 12px;
+    }
+
+    .card {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .row,
+    .row-between {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .row-between {
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 5px 10px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 12px;
+      transition: color 150ms ease, border-color 150ms ease, background 150ms ease, opacity 150ms ease;
+    }
+
+    .button:hover {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      border-color: var(--border-strong);
+    }
+
+    .button.primary {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: var(--text-inverse);
+      font-weight: 600;
+    }
+
+    .button.danger {
+      background: var(--red);
+      border-color: var(--red);
+      color: var(--text-inverse);
+      font-weight: 600;
+    }
+
+    .icon-button {
+      width: 28px;
+      min-width: 28px;
+      padding: 0;
+    }
+
+    .action-icon {
+      width: 14px;
+      height: 14px;
+      display: block;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      padding: 2px 7px;
+      border: 1px solid currentColor;
+      border-radius: 4px;
+      color: var(--yellow);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .chip.green { color: var(--green); }
+    .chip.red { color: var(--red); }
+    .chip.blue { color: var(--blue); }
+    .chip.purple { color: var(--purple); }
+    .chip.cyan { color: var(--cyan); }
+
+    .path {
+      color: var(--cyan);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      word-break: break-all;
+    }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .data-table th,
+    .data-table td {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border-subtle);
+      text-align: left;
+      vertical-align: middle;
+      color: var(--text-secondary);
+    }
+
+    .data-table th {
+      color: var(--text-dim);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .data-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .key-value-list {
+      display: grid;
+      grid-template-columns: max-content minmax(0, 1fr);
+      gap: 8px 12px;
+      padding: 10px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .key-value-list dt {
+      color: var(--text-dim);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .key-value-list dd {
+      margin: 0;
+      color: var(--text-secondary);
+      word-break: break-word;
+    }
+
+    .copyable {
+      position: relative;
+      padding: 12px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-primary);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      opacity: 0;
+      padding: 2px;
+      min-height: 0;
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: opacity 150ms ease, color 150ms ease;
+    }
+
+    .copyable:hover .copy-btn,
+    .copy-btn.copied {
+      opacity: 1;
+    }
+
+    .copy-btn.copied {
+      color: var(--green);
+    }
+
+    .copy-btn .check-icon,
+    .copy-btn.copied .copy-icon {
+      display: none;
+    }
+
+    .copy-btn.copied .check-icon {
+      display: block;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 120px), 1fr));
+      gap: 8px;
+    }
+
+    .metric {
+      padding: 10px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-left: 2px solid var(--status-idle);
+      border-radius: 4px;
+    }
+
+    .metric.running { border-left-color: var(--purple); }
+    .metric.success { border-left-color: var(--green); }
+    .metric.warning { border-left-color: var(--yellow); }
+
+    .metric strong {
+      display: block;
+      color: var(--text-primary);
+      font-size: 16px;
+      line-height: 1.2;
+    }
+
+    .layout-shell {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      min-height: 280px;
+      overflow: hidden;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .demo-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 10px;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      transition: width 220ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .layout-shell.collapsed {
+      grid-template-columns: 52px minmax(0, 1fr);
+    }
+
+    .layout-shell.collapsed .nav-label,
+    .layout-shell.collapsed .sidebar-title {
+      display: none;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      padding: 6px 8px;
+      border: 0;
+      border-left: 2px solid transparent;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      text-align: left;
+      transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+    }
+
+    .nav-item:hover,
+    .nav-item.active {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+
+    .nav-item.active {
+      border-left-color: var(--blue);
+    }
+
+    .nav-icon {
+      width: 16px;
+      min-width: 16px;
+      color: currentColor;
+      font-family: 'JetBrains Mono', monospace;
+      text-align: center;
+    }
+
+    .content-panel {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .panel-header,
+    .panel-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-surface);
+    }
+
+    .panel-footer {
+      border-top: 1px solid var(--border);
+      border-bottom: 0;
+      justify-content: flex-end;
+    }
+
+    .breadcrumb {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+
+    .breadcrumb span + span::before {
+      content: '/';
+      margin-right: 6px;
+      color: var(--text-dim);
+    }
+
+    .split-pane {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      min-height: 180px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .split-main,
+    .split-side {
+      padding: 12px;
+    }
+
+    .split-side {
+      border-left: 1px solid var(--border);
+      background: var(--bg-surface);
+    }
+
+    .message-flow {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .message {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+    }
+
+    .avatar {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-secondary);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+    }
+
+    .message-body {
+      padding: 8px 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-left: 2px solid var(--status-idle);
+      border-radius: 4px;
+      color: var(--text-secondary);
+    }
+
+    .message.agent .message-body {
+      border-left-color: var(--purple);
+    }
+
+    .tool-card,
+    .approval-card,
+    .task-node {
+      padding: 10px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-left: 2px solid var(--status-idle);
+      border-radius: 4px;
+    }
+
+    .tool-card.running,
+    .task-node.running { border-left-color: var(--purple); }
+    .tool-card.success,
+    .task-node.success { border-left-color: var(--green); }
+    .approval-card.pending,
+    .task-node.pending { border-left-color: var(--yellow); }
+
+    .task-tree {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .task-node.child {
+      margin-left: 16px;
+    }
+
+    .domain-selector {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .selector-field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 6px 8px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .selector-field input {
+      flex: 1;
+      min-width: 80px;
+      background: transparent;
+      border: 0;
+      color: var(--text-primary);
+      outline: none;
+    }
+
+    .selector-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 190px;
+      overflow-y: auto;
+    }
+
+    .selector-option {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) max-content;
+      gap: 8px;
+      padding: 8px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-left: 2px solid transparent;
+      border-radius: 4px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .selector-option:hover,
+    .selector-option.selected {
+      border-left-color: var(--blue);
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+
+    .selector-option strong {
+      display: block;
+      color: var(--text-primary);
+    }
+
+    .option-desc {
+      display: block;
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+
+    .inventory {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .inventory th,
+    .inventory td {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border-subtle);
+      text-align: left;
+      vertical-align: top;
+      color: var(--text-secondary);
+    }
+
+    .inventory th {
+      color: var(--text-dim);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    @media (max-width: 760px) {
+      .page {
+        padding: 16px;
+      }
+
+      .layout-shell,
+      .layout-shell.collapsed,
+      .split-pane {
+        grid-template-columns: 1fr;
+      }
+
+      .demo-sidebar,
+      .split-side {
+        border-right: 0;
+        border-left: 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .data-table {
+        display: block;
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="section">
+      <div class="row-between">
+        <div>
+          <h1>Live Section Preview: Data / Layout / Agent / Domain</h1>
+          <p class="muted">Combined review for data display, navigation layout, agent workflow, and domain-specific selectors.</p>
+        </div>
+        <span class="chip">pending review</span>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Data Display</h2>
+        <p class="muted">Reusable ways to render tables, object metadata, copyable output, and compact metrics.</p>
+      </div>
+
+      <div class="grid-wide">
+        <div class="card">
+          <span class="label">DataTable</span>
+          <table class="data-table">
+            <thead>
+              <tr><th>Name</th><th>Status</th><th>Owner</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>enterprise-user-info</td><td><span class="chip green">online</span></td><td>mcp</td><td><button class="button">Open</button></td></tr>
+              <tr><td>model-router</td><td><span class="chip">pending</span></td><td>system</td><td><button class="button">Open</button></td></tr>
+              <tr><td>audit-sync</td><td><span class="chip red">failed</span></td><td>admin</td><td><button class="button">Retry</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <span class="label">KeyValueList</span>
+          <dl class="key-value-list">
+            <dt>Session</dt><dd>8ab9c-cba2-4204</dd>
+            <dt>Workspace</dt><dd>/workspace/admin</dd>
+            <dt>Transport</dt><dd>WebSocket</dd>
+            <dt>Model</dt><dd>Qwen3 6B</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="grid-wide">
+        <div class="card">
+          <span class="label">CopyableBlock / CodeBlockFrame</span>
+          <div class="copyable" data-copyable>{
+  "component": "CopyableBlock",
+  "state": "hover to reveal",
+  "source": "tool output"
+}<button class="copy-btn" data-copy aria-label="Copy content">
+  <svg class="action-icon copy-icon" viewBox="0 0 24 24" aria-hidden="true">
+    <rect x="8" y="8" width="11" height="11" rx="2"></rect>
+    <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
+  </svg>
+  <svg class="action-icon check-icon" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M20 6 9 17l-5-5"></path>
+  </svg>
+</button></div>
+        </div>
+
+        <div class="card">
+          <span class="label">MetricGrid</span>
+          <div class="metric-grid">
+            <div class="metric running"><span class="label">Running</span><strong>12</strong><p class="muted">active tasks</p></div>
+            <div class="metric success"><span class="label">Success</span><strong>98.4%</strong><p class="muted">last hour</p></div>
+            <div class="metric warning"><span class="label">Queue</span><strong>7</strong><p class="muted">pending jobs</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Navigation / Layout</h2>
+        <p class="muted">App shell pieces for sidebars, headers, breadcrumbs, toolbars, and split panels.</p>
+      </div>
+
+      <div class="layout-shell" id="layout-shell">
+        <aside class="demo-sidebar">
+          <div class="row-between">
+            <strong class="sidebar-title">Priva</strong>
+            <button class="button icon-button" id="sidebar-toggle" aria-label="Toggle sidebar">S</button>
+          </div>
+          <button class="nav-item active"><span class="nav-icon">D</span><span class="nav-label">Dashboard</span></button>
+          <button class="nav-item"><span class="nav-icon">C</span><span class="nav-label">Configuration</span></button>
+          <button class="nav-item"><span class="nav-icon">L</span><span class="nav-label">Logs</span></button>
+          <button class="nav-item"><span class="nav-icon">U</span><span class="nav-label">Users</span></button>
+        </aside>
+        <section class="content-panel">
+          <header class="panel-header">
+            <div>
+              <div class="breadcrumb"><span>Admin</span><span>Resources</span><span>Models</span></div>
+              <h3>PanelHeader</h3>
+            </div>
+            <div class="row">
+              <button class="button">Refresh</button>
+              <button class="button primary">Create</button>
+            </div>
+          </header>
+          <div class="split-pane">
+            <div class="split-main">
+              <span class="label">Main content</span>
+              <p class="muted">ResizableSidebar, NavItem, Breadcrumbs, PanelHeader, Toolbar, and SplitPane are layout-level candidates.</p>
+            </div>
+            <aside class="split-side">
+              <span class="label">Side panel</span>
+              <p class="muted">Use for detail inspectors, preview panes, and persistent context.</p>
+            </aside>
+          </div>
+          <footer class="panel-footer">
+            <button class="button">Cancel</button>
+            <button class="button primary">Apply</button>
+          </footer>
+        </section>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Agent Workflow Components</h2>
+        <p class="muted">Conversation, tool calls, approvals, and task progress surfaces used by agent screens.</p>
+      </div>
+
+      <div class="grid-wide">
+        <div class="card">
+          <span class="label">MessageBubble / ToolCallCard</span>
+          <div class="message-flow">
+            <div class="message user">
+              <span class="avatar">U</span>
+              <div class="message-body">Run the enterprise user info lookup and summarize the result.</div>
+            </div>
+            <div class="message agent">
+              <span class="avatar">A</span>
+              <div class="message-body">I will call the MCP tool, inspect the returned fields, and then summarize the user record.</div>
+            </div>
+            <div class="tool-card running">
+              <div class="row-between">
+                <strong>ToolCallCard</strong>
+                <span class="chip purple">running</span>
+              </div>
+              <p class="muted">enterprise_user_info.lookup({ user_id: "admin" })</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <span class="label">PlanApprovalCard / TaskTree</span>
+          <div class="approval-card pending">
+            <div class="row-between">
+              <strong>Plan approval required</strong>
+              <span class="chip">pending</span>
+            </div>
+            <p class="muted">Agent wants to modify shared UI docs and update live preview.</p>
+            <div class="row">
+              <button class="button primary">Approve</button>
+              <button class="button danger">Reject</button>
+            </div>
+          </div>
+          <div class="task-tree">
+            <div class="task-node success"><strong>Read component inventory</strong><p class="muted">Completed</p></div>
+            <div class="task-node running child"><strong>Build live preview</strong><p class="muted">Running</p></div>
+            <div class="task-node pending child"><strong>Merge after review</strong><p class="muted">Waiting</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Domain Components</h2>
+        <p class="muted">Domain-aware selectors for models, skills, tools, MCP servers, workspaces, and directories.</p>
+      </div>
+
+      <div class="grid">
+        <div class="card domain-selector" data-selector>
+          <span class="label">ModelSelector</span>
+          <div class="selector-field"><span class="chip blue">selected</span><input data-selector-filter placeholder="Filter models" value="qwen" /></div>
+          <div class="selector-list">
+            <button class="selector-option selected" data-name="Qwen3 6B"><span><strong>Qwen3 6B</strong><span class="option-desc">local, fast, coding capable</span></span><span class="chip green">ready</span></button>
+            <button class="selector-option" data-name="Claude Opus"><span><strong>Claude Opus</strong><span class="option-desc">remote provider</span></span><span class="chip">remote</span></button>
+            <button class="selector-option" data-name="GPT 4.1"><span><strong>GPT 4.1</strong><span class="option-desc">OpenAI provider</span></span><span class="chip">remote</span></button>
+          </div>
+        </div>
+
+        <div class="card domain-selector" data-selector>
+          <span class="label">SkillPicker</span>
+          <div class="selector-field"><span class="chip purple">2 selected</span><input data-selector-filter placeholder="Filter skills" /></div>
+          <div class="selector-list">
+            <button class="selector-option selected" data-name="browser"><span><strong>browser</strong><span class="option-desc">Inspect and verify file previews.</span></span><span class="chip green">on</span></button>
+            <button class="selector-option selected" data-name="pdf"><span><strong>pdf</strong><span class="option-desc">Read and render PDF documents.</span></span><span class="chip green">on</span></button>
+            <button class="selector-option" data-name="imagegen"><span><strong>imagegen</strong><span class="option-desc">Create bitmap visual assets.</span></span><span class="chip">off</span></button>
+          </div>
+        </div>
+
+        <div class="card domain-selector" data-selector>
+          <span class="label">ToolPicker</span>
+          <div class="selector-field"><span class="chip cyan">tools</span><input data-selector-filter placeholder="Filter tools" /></div>
+          <div class="selector-list">
+            <button class="selector-option selected" data-name="exec_command"><span><strong>exec_command</strong><span class="option-desc">Run local commands and checks.</span></span><span class="chip green">enabled</span></button>
+            <button class="selector-option" data-name="apply_patch"><span><strong>apply_patch</strong><span class="option-desc">Edit files with scoped patches.</span></span><span class="chip green">enabled</span></button>
+            <button class="selector-option" data-name="browser inspect"><span><strong>browser inspect</strong><span class="option-desc">Inspect in-app preview state.</span></span><span class="chip">available</span></button>
+          </div>
+        </div>
+
+        <div class="card domain-selector" data-selector>
+          <span class="label">MCPServerPicker / DirectoryPicker</span>
+          <div class="selector-field"><span class="chip">path</span><input data-selector-filter placeholder="Filter servers or paths" value="/workspace" /></div>
+          <div class="selector-list">
+            <button class="selector-option selected" data-name="/workspace/admin"><span><strong>/workspace/admin</strong><span class="option-desc">Current working directory.</span></span><span class="chip green">active</span></button>
+            <button class="selector-option" data-name="enterprise-user-info"><span><strong>enterprise-user-info</strong><span class="option-desc">MCP server for user profile data.</span></span><span class="chip green">online</span></button>
+            <button class="selector-option" data-name="audit-log"><span><strong>audit-log</strong><span class="option-desc">MCP server for activity history.</span></span><span class="chip">idle</span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Component Inventory</h2>
+        <p class="muted">Combined extraction candidates for this review pass.</p>
+      </div>
+      <table class="inventory">
+        <thead>
+          <tr><th>Group</th><th>Components</th><th>Status</th><th>Use when</th><th>Required states</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Data Display</td><td>DataTable / KeyValueList / CopyableBlock / MetricGrid</td><td><span class="chip">extract</span></td><td>Structured records, metadata, logs, JSON, and KPI summaries.</td><td>empty, loading, sorted, copied, semantic status</td></tr>
+          <tr><td>Navigation / Layout</td><td>ResizableSidebar / NavItem / PanelHeader / Breadcrumbs / SplitPane</td><td><span class="chip">extract</span></td><td>Admin and user shell layouts need consistent navigation and detail panels.</td><td>active, collapsed, resized, mobile stacked</td></tr>
+          <tr><td>Agent Workflow</td><td>MessageBubble / ToolCallCard / PlanApprovalCard / TaskTree</td><td><span class="chip purple">app-local</span></td><td>Conversation, tool calls, approvals, and active task progress.</td><td>streaming, running, success, error, approval pending</td></tr>
+          <tr><td>Domain Components</td><td>ModelSelector / SkillPicker / ToolPicker / MCPServerPicker / DirectoryPicker</td><td><span class="chip purple">app-local</span></td><td>Selecting domain resources with search, metadata, and state labels.</td><td>filter, selected, disabled, empty, online/offline</td></tr>
+        </tbody>
+      </table>
+      <div class="card">
+        <span class="label">Proposed path</span>
+        <span class="path">web/shared/components/shared/data-display</span>
+        <span class="path">web/shared/components/shared/layout</span>
+        <span class="path">web/user/src/components/chat</span>
+        <span class="path">web/user/src/components/canvas</span>
+        <span class="path">web/user/src/components/domain</span>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    document.querySelectorAll('[data-copy]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const copyable = button.closest('[data-copyable]')
+        const text = copyable.childNodes[0].nodeValue.trim()
+        button.classList.add('copied')
+        window.setTimeout(() => button.classList.remove('copied'), 800)
+        try {
+          if (navigator.clipboard) await navigator.clipboard.writeText(text)
+        } catch {
+          console.warn('Clipboard unavailable in this preview')
+        }
+      })
+    })
+
+    document.getElementById('sidebar-toggle').addEventListener('click', () => {
+      document.getElementById('layout-shell').classList.toggle('collapsed')
+    })
+
+    document.querySelectorAll('.nav-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        item.closest('.demo-sidebar').querySelectorAll('.nav-item').forEach((nav) => nav.classList.remove('active'))
+        item.classList.add('active')
+      })
+    })
+
+    document.querySelectorAll('[data-selector]').forEach((selector) => {
+      const filter = selector.querySelector('[data-selector-filter]')
+      const options = selector.querySelectorAll('.selector-option')
+
+      filter.addEventListener('input', () => {
+        const query = filter.value.toLowerCase()
+        options.forEach((option) => {
+          option.style.display = option.dataset.name.toLowerCase().includes(query) ? 'grid' : 'none'
+        })
+      })
+
+      options.forEach((option) => {
+        option.addEventListener('click', () => {
+          options.forEach((item) => item.classList.remove('selected'))
+          option.classList.add('selected')
+          filter.value = option.dataset.name
+        })
+      })
+    })
+  </script>
+</body>
+</html>

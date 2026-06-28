@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Key, Cpu, Zap, Settings2, Radio, FileText } from 'lucide-react'
+import { Key, Cpu, Zap, Settings2, Radio, FileText, Sun, Moon, Globe, Lightbulb } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useUiStore from '@shared/stores/uiStore'
 import { getBackendOrigin } from '@shared/api/client'
@@ -16,6 +16,11 @@ export default function SettingsPopover() {
   const open = useUiStore((s) => s.settingsPopoverOpen)
   const closePopover = useUiStore((s) => s.closeSettingsPopover)
   const openSettings = useUiStore((s) => s.openSettings)
+  const theme = useUiStore((s) => s.theme)
+  const toggleTheme = useUiStore((s) => s.toggleTheme)
+  const language = useUiStore((s) => s.language)
+  const toggleLanguage = useUiStore((s) => s.toggleLanguage)
+  const openIntro = useUiStore((s) => s.openIntro)
   const ref = useRef(null)
 
   useEffect(() => {
@@ -113,6 +118,65 @@ export default function SettingsPopover() {
       >
         <FileText size={14} strokeWidth={1.5} style={{ flexShrink: 0 }} />
         {t('settings.apiDoc')}
+      </button>
+
+      {/* Separator */}
+      <div style={{ height: 1, background: 'var(--border)', margin: '2px 8px' }} />
+
+      {/* Theme toggle */}
+      <button
+        className="flex items-center gap-2 px-3 py-2 w-full text-sm"
+        style={{
+          background: 'transparent', border: 'none', color: 'var(--text-secondary)',
+          cursor: 'pointer', fontSize: 13, textAlign: 'left',
+          transition: 'background 150ms ease, color 150ms ease',
+        }}
+        onClick={toggleTheme}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+      >
+        {theme === 'dark'
+          ? <Sun size={14} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+          : <Moon size={14} strokeWidth={1.5} style={{ flexShrink: 0 }} />}
+        <span className="flex-1">{t('settings.theme')}</span>
+        <span className="uppercase" style={{ color: 'var(--text-dim)', fontSize: 11, letterSpacing: '0.06em' }}>
+          {theme === 'dark' ? t('settings.themeDark') : t('settings.themeLight')}
+        </span>
+      </button>
+
+      {/* Language toggle */}
+      <button
+        className="flex items-center gap-2 px-3 py-2 w-full text-sm"
+        style={{
+          background: 'transparent', border: 'none', color: 'var(--text-secondary)',
+          cursor: 'pointer', fontSize: 13, textAlign: 'left',
+          transition: 'background 150ms ease, color 150ms ease',
+        }}
+        onClick={toggleLanguage}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+      >
+        <Globe size={14} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+        <span className="flex-1">{t('settings.language')}</span>
+        <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+          {language === 'zh' ? '中文' : 'EN'}
+        </span>
+      </button>
+
+      {/* Intro / help */}
+      <button
+        className="flex items-center gap-2 px-3 py-2 w-full text-sm"
+        style={{
+          background: 'transparent', border: 'none', color: 'var(--text-secondary)',
+          cursor: 'pointer', fontSize: 13, textAlign: 'left',
+          transition: 'background 150ms ease, color 150ms ease',
+        }}
+        onClick={() => { openIntro(); closePopover() }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+      >
+        <Lightbulb size={14} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+        {t('settings.intro')}
       </button>
     </div>
   )

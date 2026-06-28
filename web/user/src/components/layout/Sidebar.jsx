@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { PlusCircle, MessageSquare, PanelLeftClose, PanelLeft, Trash2, ChevronDown, ChevronRight, FolderBookmark, MoreHorizontal, RefreshCw, Settings, Search, X, Pencil, Flag, GitBranch, Pin, Archive, SlidersVertical, SquarePen } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import {
+  MessageSquare, Trash2, ChevronDown, ChevronRight, FolderBookmark, MoreHorizontal,
+  RefreshCw, Settings, Search, X, Pencil, Flag, GitBranch, Pin, Archive, SlidersVertical, SquarePen,
+  Bot, PanelLeftClose, Plus, CalendarClock, PackageSearch, ChartColumnBig,
+  Maximize2, Minimize2, FolderOpenDot, FolderGit2, LogOut,
+  BarChart3, TrendingUp, ScrollText, FileText, FolderOpen,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSidebarStore from '../../stores/sidebarStore'
 import useChatStore from '../../stores/chatStore'
 import useTaskStore from '../../stores/taskStore'
 import useUiStore from '@shared/stores/uiStore'
+import useAuthStore from '@shared/stores/authStore'
+import useUserDataStore from '../../stores/userDataStore'
 import useFileOpsStore from '../../stores/fileOpsStore'
 import useFileBrowserStore from '../../stores/fileBrowserStore'
 import useToastStore from '@shared/stores/toastStore'
@@ -19,7 +28,11 @@ import { hasCanvasInspectorItems, transformSessionMessages } from '../../utils/s
 import { stopActiveStream } from '../../hooks/useSSE'
 import SidebarResizer from './SidebarResizer'
 import SettingsPopover from '../settings/SettingsPopover'
-import CopyButton from '@shared/components/shared/CopyButton'
+import NavItem from '@shared/components/shared/NavItem'
+import PanelHeader from '@shared/components/shared/PanelHeader'
+import Chip from '@shared/components/shared/Chip'
+import { AnimatedCollapse } from '@shared/components/shared/Accordion'
+import DirectoryPicker from '../shared/DirectoryPicker'
 import TagFilterChip from '../shared/TagFilterChip'
 import safeStorage from '@shared/utils/safeStorage'
 
@@ -40,6 +53,15 @@ const WD_MENU_ITEM_STYLE = {
   paddingBottom: 6,
   transition: 'background 150ms ease',
 }
+
+// Data & Usage sub-sections (icons mirror the former UserDataPanel).
+const DATA_SECTIONS = [
+  { id: 'usage', icon: BarChart3, labelKey: 'userData.usage' },
+  { id: 'analytics', icon: TrendingUp, labelKey: 'userData.analytics' },
+  { id: 'audit', icon: ScrollText, labelKey: 'userData.auditLog' },
+  { id: 'files', icon: FileText, labelKey: 'userData.uploadedFiles' },
+  { id: 'fileexplorer', icon: FolderOpen, labelKey: 'userData.fileExplorer' },
+]
 
 function SessionItem({
   session, isActive, openMenuId, menuRef, onSelect, onMenuToggle,
@@ -367,11 +389,11 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
       />
       {recentTags.length > 0 && (
         <div className="flex flex-wrap gap-1" style={{ marginBottom: 6 }}>
-          {recentTags.slice(0, 6).map((t) => (
+          {recentTags.slice(0, 6).map((tag) => (
             <button
-              key={t}
+              key={tag}
               type="button"
-              onClick={() => setValue(t)}
+              onClick={() => setValue(tag)}
               style={{
                 background: 'var(--bg-surface)',
                 border: '1px solid var(--border-subtle)',
@@ -382,7 +404,7 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
                 padding: '1px 6px',
               }}
             >
-              {t}
+              {tag}
             </button>
           ))}
         </div>
@@ -438,11 +460,13 @@ export default function Sidebar() {
   const activeCwd = useSidebarStore((s) => s.activeCwd)
   const expandedCwds = useSidebarStore((s) => s.expandedCwds)
   const toggleGroup = useSidebarStore((s) => s.toggleGroup)
+  const setAllGroupsExpanded = useSidebarStore((s) => s.setAllGroupsExpanded)
   const fetchMoreInGroup = useSidebarStore((s) => s.fetchMoreInGroup)
   const groupLoadingCwd = useSidebarStore((s) => s.groupLoadingCwd)
   const activeSessionId = useSidebarStore((s) => s.activeSessionId)
   const setActiveSessionId = useSidebarStore((s) => s.setActiveSessionId)
   const toggleCollapsed = useSidebarStore((s) => s.toggleCollapsed)
+  const setCollapsed = useSidebarStore((s) => s.setCollapsed)
   const fetchSessions = useSidebarStore((s) => s.fetchSessions)
   const sessionsLoading = useSidebarStore((s) => s.sessionsLoading)
   const togglePinSession = useSidebarStore((s) => s.togglePinSession)
@@ -452,7 +476,6 @@ export default function Sidebar() {
   const clearMessages = useChatStore((s) => s.clearMessages)
   const setCwdDraft = useChatStore((s) => s.setCwdDraft)
   const loadSession = useChatStore((s) => s.loadSession)
-  const currentSessionId = useChatStore((s) => s.sessionId)
   const clearTasks = useTaskStore((s) => s.clearTasks)
   const clearFileOps = useFileOpsStore((s) => s.clearFileOps)
   const clearFileBrowser = useFileBrowserStore((s) => s.clear)
@@ -460,12 +483,23 @@ export default function Sidebar() {
   const toggleSettingsPopover = useUiStore((s) => s.toggleSettingsPopover)
   const clearPlanContent = useUiStore((s) => s.clearPlanContent)
   const hideCanvas = useUiStore((s) => s.hideCanvas)
+  const activeNavTab = useUiStore((s) => s.activeNavTab)
+  const setActiveNavTab = useUiStore((s) => s.setActiveNavTab)
+  const authUser = useAuthStore((s) => s.user)
+  const logout = useAuthStore((s) => s.logout)
+  const activeSection = useUserDataStore((s) => s.activeSection)
+  const setActiveSection = useUserDataStore((s) => s.setActiveSection)
   const listRef = useRef(null)
   const [openMenuId, setOpenMenuId] = useState(null)
   const [openWorkdirMenu, setOpenWorkdirMenu] = useState(null) // cwd whose workdir menu is open
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [dataMenuOpen, setDataMenuOpen] = useState(activeNavTab === 'userdata')
+  const [projectOpen, setProjectOpen] = useState(true)
+  const [cwdPickerOpen, setCwdPickerOpen] = useState(false)
   const menuRef = useRef(null)
   const workdirMenuRef = useRef(null)
+  const searchInputRef = useRef(null)
   const [renameEditingId, setRenameEditingId] = useState(null)
   const [tagPopoverSession, setTagPopoverSession] = useState(null)
   const [tagPopoverTop, setTagPopoverTop] = useState(120)
@@ -533,10 +567,31 @@ export default function Sidebar() {
   }, [sessions, groups, searchQuery, activeTag, activeCwd])
 
   const filtersActive = !!searchQuery.trim() || !!activeTag
+  const allGroupsExpanded = renderedGroups.length > 0 && renderedGroups.every((g) => !!expandedCwds[g.cwd])
+  // A nav menu being expanded (Data & Usage; Phase 2: Plugins) drops the PROJECT
+  // block to the sidebar bottom and collapses it; collapsing the menu restores it.
+  const menuExpanded = dataMenuOpen
+  const projectAtBottom = menuExpanded
 
   useEffect(() => {
     fetchSessions()
   }, [fetchSessions])
+
+  // Focus the search input as soon as it morphs open.
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus()
+  }, [searchOpen])
+
+  // Keep the Data & Usage submenu open whenever its view is active.
+  useEffect(() => {
+    if (activeNavTab === 'userdata') setDataMenuOpen(true)
+  }, [activeNavTab])
+
+  // Expanding a nav menu collapses the PROJECT list (it drops to the bottom);
+  // collapsing the menu restores PROJECT to its normal place and re-expands it.
+  useEffect(() => {
+    setProjectOpen(!menuExpanded)
+  }, [menuExpanded])
 
   // Close menu on outside click
   useEffect(() => {
@@ -617,6 +672,7 @@ export default function Sidebar() {
 
   const effectiveWidth = collapsed ? 48 : width
 
+  // Clear all chat/canvas state for a fresh conversation.
   const handleNewChat = () => {
     stopActiveStream()
     clearMessages()
@@ -627,11 +683,26 @@ export default function Sidebar() {
     hideCanvas()
   }
 
-  // Start a fresh chat pre-seeded to a workdir's cwd (the square-pen control).
+  // "New Session" — switch to the chat view and start fresh.
+  const handleNewSession = () => {
+    setActiveNavTab('priva')
+    handleNewChat()
+  }
+
+  // Start a fresh chat pre-seeded to a workdir's cwd (group square-pen + PROJECT
+  // new-workdir picker). Always returns to the chat view.
   const handleNewChatHere = (cwd) => {
     setOpenWorkdirMenu(null)
+    setActiveNavTab('priva')
     handleNewChat()
     setCwdDraft(cwd)
+  }
+
+  // Open a Data & Usage section in the content area.
+  const openDataSection = (id) => {
+    setActiveNavTab('userdata')
+    setActiveSection(id)
+    setDataMenuOpen(true)
   }
 
   const handlePinSession = (session) => togglePinSession(session.id)
@@ -653,6 +724,8 @@ export default function Sidebar() {
   }
 
   const handleSelectSession = async (session) => {
+    // Selecting a session always shows the chat view.
+    setActiveNavTab('priva')
     // Kill any in-flight stream first so its late events can't bleed into
     // the session we're about to load.
     stopActiveStream()
@@ -742,6 +815,24 @@ export default function Sidebar() {
     })
   }
 
+  // Small icon-button style shared by the brand collapse + bottom controls.
+  const iconBtn = {
+    width: 28,
+    height: 28,
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    color: 'var(--text-dim)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+    flexShrink: 0,
+    transition: 'color 150ms ease, background 150ms ease',
+  }
+  const iconBtnIn = (e) => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.background = 'var(--bg-elevated)' }
+  const iconBtnOut = (e) => { e.currentTarget.style.color = 'var(--text-dim)'; e.currentTarget.style.background = 'transparent' }
+
   return (
     <aside
       className="fixed flex flex-col overflow-hidden"
@@ -755,204 +846,186 @@ export default function Sidebar() {
         transition: 'width 220ms cubic-bezier(0.16, 1, 0.3, 1)',
       }}
     >
-      {collapsed ? (
-        /* Collapsed: icon-only new chat + bottom settings/collapse */
-        <div className="flex flex-col items-center p-2 flex-1">
-          <button
-            style={{
-              width: 32,
-              height: 32,
-              background: 'transparent',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              color: 'var(--text-dim)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'color 150ms ease',
-            }}
-            onClick={handleNewChat}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-            title={t('chat.newChat')}
-          >
-            <PlusCircle size={16} strokeWidth={1.5} />
+      {/* Brand + collapse toggle */}
+      <div
+        className="flex items-center flex-shrink-0"
+        style={{
+          height: 48,
+          padding: collapsed ? 0 : '0 8px 0 12px',
+          justifyContent: collapsed ? 'center' : 'space-between',
+          borderBottom: '1px solid var(--border-subtle)',
+        }}
+      >
+        {collapsed ? (
+          <button style={iconBtn} onClick={toggleCollapsed} title={t('sidebar.expand')} onMouseEnter={iconBtnIn} onMouseLeave={iconBtnOut}>
+            <Bot size={20} strokeWidth={1.5} style={{ color: 'var(--blue)' }} />
           </button>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 min-w-0">
+              <Bot size={20} strokeWidth={1.5} style={{ color: 'var(--blue)', flexShrink: 0 }} />
+              <span className="font-bold truncate" style={{ color: 'var(--text-primary)', fontSize: 16, letterSpacing: '-0.01em', minWidth: 0 }}>
+                {t('brand.title')}
+              </span>
+            </div>
+            <button style={iconBtn} onClick={toggleCollapsed} title={t('sidebar.collapse')} onMouseEnter={iconBtnIn} onMouseLeave={iconBtnOut}>
+              <PanelLeftClose size={16} strokeWidth={1.5} />
+            </button>
+          </>
+        )}
+      </div>
+
+      {collapsed ? (
+        /* Collapsed icon rail */
+        <div className="flex flex-col items-center flex-1 overflow-hidden" style={{ padding: '8px 0', gap: 2 }}>
+          <NavItem collapsed icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
+          <NavItem collapsed icon={CalendarClock} label={t('sidebar.scheduler')} disabled />
+          <NavItem collapsed icon={PackageSearch} label={t('sidebar.plugins')} title={t('sidebar.plugins')} onClick={() => {}} />
+          <NavItem collapsed icon={ChartColumnBig} label={t('sidebar.dataUsage')} active={activeNavTab === 'userdata'} onClick={() => openDataSection(activeSection || 'usage')} />
+          <div style={{ height: 1, width: 24, background: 'var(--border-subtle)', margin: '4px 0' }} />
+          <NavItem collapsed icon={Search} label={t('sidebar.search')} onClick={() => { setCollapsed(false); setSearchOpen(true) }} />
+          <NavItem collapsed icon={FolderGit2} label={t('sidebar.project')} onClick={() => setCollapsed(false)} />
           <div className="flex-1" />
-          {/* Settings icon */}
           <div className="relative flex flex-col items-center gap-1">
             <SettingsPopover />
-            <button
-              style={{
-                width: 32,
-                height: 32,
-                background: 'transparent',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                color: 'var(--text-dim)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'color 150ms ease',
-              }}
-              onClick={toggleSettingsPopover}
-              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-              title={t('sidebar.settings')}
-            >
-              <Settings size={16} strokeWidth={1.5} />
-            </button>
+            <NavItem collapsed icon={Settings} label={t('sidebar.settings')} onClick={toggleSettingsPopover} />
           </div>
         </div>
       ) : (
         <>
-          {/* New Chat Button */}
-          <div className="px-3 py-3">
-            <button
-              className="flex items-center gap-2 px-3 py-2 w-full"
-              style={{
-                background: 'transparent',
-                border: '1px solid var(--border)',
-                borderRadius: '4px',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer',
-                fontSize: 13,
-                transition: 'border-color 150ms ease, color 150ms ease',
-              }}
-              onClick={handleNewChat}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = 'var(--border-strong)'
-                e.currentTarget.style.color = 'var(--text-primary)'
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'var(--border)'
-                e.currentTarget.style.color = 'var(--text-secondary)'
-              }}
-            >
-              <PlusCircle size={13} strokeWidth={1.5} />
-              {t('sidebar.newChat')}
-            </button>
-          </div>
-
-          {/* Current Session Indicator */}
-          {currentSessionId && (
-            <>
-              <div className="px-3 py-2">
-                <div
-                  className="uppercase"
-                  style={{
-                    color: 'var(--text-dim)',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    letterSpacing: '0.06em',
-                    marginBottom: 4,
-                  }}
-                >
-                  {t('chat.session')}
-                </div>
-                <div className="flex items-center gap-2 min-w-0">
-                  <span
-                    className="flex-1 truncate"
-                    style={{
-                      color: 'var(--text-secondary)',
-                      fontSize: 12,
-                      fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-                      minWidth: 0,
-                    }}
-                    title={currentSessionId}
-                  >
-                    {currentSessionId}
-                  </span>
-                  <CopyButton content={currentSessionId} inline />
-                </div>
+          {/* Primary navigation — full-width rows so the active 2px bar sits flush at the left edge (like sessions) */}
+          <div style={{ padding: '6px 0 4px', flexShrink: 0 }}>
+            <NavItem icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
+            <NavItem icon={CalendarClock} label={t('sidebar.scheduler')} disabled />
+            <NavItem icon={PackageSearch} label={t('sidebar.plugins')} onClick={() => {}} />
+            <NavItem
+              icon={ChartColumnBig}
+              label={t('sidebar.dataUsage')}
+              active={activeNavTab === 'userdata'}
+              expandable
+              expanded={dataMenuOpen}
+              onClick={() => setDataMenuOpen((v) => !v)}
+            />
+            <AnimatedCollapse open={dataMenuOpen}>
+              <div>
+                {DATA_SECTIONS.map((sec) => (
+                  <NavItem
+                    key={sec.id}
+                    icon={sec.icon}
+                    label={t(sec.labelKey)}
+                    indent={16}
+                    active={activeNavTab === 'userdata' && activeSection === sec.id}
+                    onClick={() => openDataSection(sec.id)}
+                  />
+                ))}
               </div>
-              <div style={{ height: 1, background: 'var(--border-subtle)', margin: '0 12px' }} />
-            </>
-          )}
-
-          {/* Search + Refresh */}
-          <div className="flex items-center gap-2 px-3 py-1">
-            <div
-              className="flex items-center gap-2 flex-1"
-              style={{
-                background: 'var(--bg-elevated)',
-                border: '1px solid var(--border)',
-                borderRadius: 4,
-                padding: '4px 8px',
-                minWidth: 0,
-              }}
-            >
-              <Search size={12} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t('sidebar.searchPlaceholder')}
-                style={{
-                  flex: 1,
-                  background: 'transparent',
-                  border: 'none',
-                  outline: 'none',
-                  color: 'var(--text-primary)',
-                  fontSize: 12,
-                  fontFamily: "'Noto Sans', sans-serif",
-                  minWidth: 0,
-                }}
-              />
-              {searchQuery && (
-                <button
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--text-dim)',
-                    padding: 0,
-                    display: 'flex',
-                    transition: 'color 150ms ease',
-                  }}
-                  onClick={() => setSearchQuery('')}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-                >
-                  <X size={12} strokeWidth={1.5} />
-                </button>
-              )}
-            </div>
-            <button
-              style={{
-                background: 'transparent',
-                border: 'none',
-                cursor: sessionsLoading ? 'default' : 'pointer',
-                color: 'var(--text-dim)',
-                padding: 4,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                transition: 'color 150ms ease',
-              }}
-              onClick={fetchSessions}
-              disabled={sessionsLoading}
-              onMouseEnter={(e) => { if (!sessionsLoading) e.currentTarget.style.color = 'var(--text-secondary)' }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-            >
-              <RefreshCw
-                size={13}
-                strokeWidth={1.5}
-                style={{
-                  animation: sessionsLoading ? 'spin 1s linear infinite' : 'none',
-                }}
-              />
-            </button>
+            </AnimatedCollapse>
           </div>
 
-          {/* Tag filter bar (only when at least one tag exists) */}
+          {/* When a nav menu is expanded, push Search + PROJECT to the sidebar bottom */}
+          {projectAtBottom && <div style={{ flex: '1 1 0', minHeight: 0 }} />}
+
+          {/* Divider — separates the nav menu from Search + PROJECT */}
+          <div style={{ height: 1, background: 'var(--border-subtle)', margin: '4px 12px', flexShrink: 0 }} />
+
+          {/* Search — the nav row and the input box cross-animate (height) for a smooth morph.
+              Both stay mounted so AnimatedCollapse can run enter/exit transitions. */}
+          <div style={{ flexShrink: 0 }}>
+            <AnimatedCollapse open={!searchOpen}>
+              <NavItem icon={Search} label={t('sidebar.search')} onClick={() => setSearchOpen(true)} />
+            </AnimatedCollapse>
+            <AnimatedCollapse open={searchOpen}>
+              <div
+                className="flex items-center gap-2"
+                style={{
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 4,
+                  padding: '4px 8px',
+                  minWidth: 0,
+                  margin: '4px 8px',
+                }}
+              >
+                <Search size={12} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onBlur={() => { if (!searchQuery.trim()) setSearchOpen(false) }}
+                  placeholder={t('sidebar.searchPlaceholder')}
+                  style={{
+                    flex: 1,
+                    background: 'transparent',
+                    border: 'none',
+                    outline: 'none',
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                    fontFamily: "'Noto Sans', sans-serif",
+                    minWidth: 0,
+                  }}
+                />
+                {searchQuery && (
+                  <button
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--text-dim)',
+                      padding: 0,
+                      display: 'flex',
+                      transition: 'color 150ms ease',
+                    }}
+                    onClick={() => { setSearchQuery(''); searchInputRef.current?.focus() }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+                  >
+                    <X size={12} strokeWidth={1.5} />
+                  </button>
+                )}
+              </div>
+            </AnimatedCollapse>
+          </div>
+
+          {/* PROJECT header — collapse-all + refresh + expand/collapse-all + new-workdir */}
+          <div style={{ flexShrink: 0 }}>
+          <PanelHeader
+            label={t('sidebar.project')}
+            open={projectOpen}
+            title={projectOpen ? t('sidebar.collapse') : t('sidebar.expand')}
+            onClick={() => setProjectOpen((v) => !v)}
+            actions={[
+              {
+                key: 'refresh',
+                icon: RefreshCw,
+                title: t('sidebar.refresh'),
+                onClick: fetchSessions,
+                spinning: sessionsLoading,
+                disabled: sessionsLoading,
+              },
+              {
+                key: 'toggleAll',
+                icon: allGroupsExpanded ? Minimize2 : Maximize2,
+                title: allGroupsExpanded ? t('sidebar.collapseAll') : t('sidebar.expandAll'),
+                onClick: () => setAllGroupsExpanded(!allGroupsExpanded),
+              },
+              {
+                key: 'newWorkdir',
+                icon: FolderOpenDot,
+                title: t('sidebar.newWorkdir'),
+                onClick: () => setCwdPickerOpen(true),
+              },
+            ]}
+          />
+          </div>
+
+          {projectOpen && (
+            <>
+          {/* Tag filter bar (only when at least one tag exists) — indented to nest under PROJECT */}
           {availableTags.length > 0 && (
             <div
               className="flex flex-wrap gap-1 px-3 py-2"
-              style={{ borderBottom: '1px solid var(--border-subtle)' }}
+              style={{ borderBottom: '1px solid var(--border-subtle)', flexShrink: 0, paddingLeft: 28 }}
             >
               <TagFilterChip
                 active={activeTag === null}
@@ -987,8 +1060,13 @@ export default function Sidebar() {
             </div>
           )}
 
-          {/* Session List — grouped by cwd (accordion) */}
-          <div className="flex-1 overflow-y-auto py-1" ref={listRef}>
+          {/* Session List — grouped by cwd (accordion). Fills remaining height in chat
+              mode; sits compact at the bottom (scrolls) when a nav menu is expanded. */}
+          <div
+            className="overflow-y-auto py-1"
+            ref={listRef}
+            style={{ flex: projectAtBottom ? '0 1 auto' : '1 1 auto', minHeight: 0 }}
+          >
             {sessions.length === 0 && !sessionsLoading && (
               <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 13 }}>
                 {t('sidebar.noSessions')}
@@ -1160,113 +1238,71 @@ export default function Sidebar() {
               )
             })}
           </div>
+            </>
+          )}
+
+          {/* Chat mode with PROJECT manually collapsed: filler keeps the footer pinned to the bottom */}
+          {!projectAtBottom && !projectOpen && <div style={{ flex: '1 1 0', minHeight: 0 }} />}
         </>
       )}
 
-      {/* Bottom: Settings + Toggle */}
-      <div
-        className="p-2 flex items-center"
-        style={{
-          borderTop: '1px solid var(--border-subtle)',
-          justifyContent: collapsed ? 'center' : 'space-between',
-        }}
-      >
-        {collapsed ? (
-          /* Collapse toggle only — settings icon is in collapsed top section */
-          <button
-            style={{
-              width: 28,
-              height: 28,
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--text-dim)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: '4px',
-              transition: 'color 150ms ease, background 150ms ease',
-            }}
-            onClick={toggleCollapsed}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = 'var(--text-secondary)'
-              e.currentTarget.style.background = 'var(--bg-elevated)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'var(--text-dim)'
-              e.currentTarget.style.background = 'transparent'
-            }}
-            title={t('sidebar.expand')}
-          >
-            <PanelLeft size={16} strokeWidth={1.5} />
-          </button>
-        ) : (
-          <>
-            {/* Settings button with popover */}
-            <div className="relative">
-              <SettingsPopover />
-              <button
-                className="flex items-center gap-2"
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: 'var(--text-dim)',
-                  padding: '4px 6px',
-                  borderRadius: '4px',
-                  fontSize: 13,
-                  transition: 'color 150ms ease, background 150ms ease',
-                }}
-                onClick={toggleSettingsPopover}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.color = 'var(--text-secondary)'
-                  e.currentTarget.style.background = 'var(--bg-elevated)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = 'var(--text-dim)'
-                  e.currentTarget.style.background = 'transparent'
-                }}
-                title={t('sidebar.settings')}
-              >
-                <Settings size={14} strokeWidth={1.5} />
-                <span>{t('sidebar.settings')}</span>
-              </button>
-            </div>
-            {/* Collapse toggle */}
+      {/* Bottom: Settings + user + logout (expanded only) — always pinned to the bottom */}
+      {!collapsed && (
+        <div
+          className="p-2 flex items-center"
+          style={{ borderTop: '1px solid var(--border-subtle)', justifyContent: 'space-between', gap: 8 }}
+        >
+          <div className="relative flex-shrink-0">
+            <SettingsPopover />
             <button
-              style={{
-                width: 28,
-                height: 28,
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--text-dim)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: '4px',
-                transition: 'color 150ms ease, background 150ms ease',
-              }}
-              onClick={toggleCollapsed}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.color = 'var(--text-secondary)'
-                e.currentTarget.style.background = 'var(--bg-elevated)'
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = 'var(--text-dim)'
-                e.currentTarget.style.background = 'transparent'
-              }}
-              title={t('sidebar.collapse')}
+              style={iconBtn}
+              onClick={toggleSettingsPopover}
+              title={t('sidebar.settings')}
+              onMouseEnter={iconBtnIn}
+              onMouseLeave={iconBtnOut}
             >
-              <PanelLeftClose size={16} strokeWidth={1.5} />
+              <Settings size={16} strokeWidth={1.5} />
             </button>
-          </>
-        )}
-      </div>
+          </div>
+          <div className="flex items-center gap-2 min-w-0">
+            {authUser && (
+              <span className="truncate" style={{ color: 'var(--text-secondary)', fontSize: 12, minWidth: 0 }}>
+                {authUser.username}
+              </span>
+            )}
+            {authUser && authUser.role === 'admin' && (
+              <Chip color="var(--green)">ADMIN</Chip>
+            )}
+            <button
+              style={iconBtn}
+              onClick={logout}
+              title={t('sidebar.signOut')}
+              onMouseEnter={iconBtnIn}
+              onMouseLeave={iconBtnOut}
+            >
+              <LogOut size={14} strokeWidth={1.5} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {!collapsed && <SidebarResizer />}
 
-      {/* Group hover CSS for delete button */}
+      {/* DirectoryPicker for "open session in new workdir" — portaled to body so its
+          fixed full-screen overlay escapes the sidebar's (position:fixed) stacking context. */}
+      {createPortal(
+        <DirectoryPicker
+          open={cwdPickerOpen}
+          multiple={false}
+          title={t('picker.cwdTitle')}
+          initialPath={activeCwd || '/'}
+          onConfirm={(path) => { setCwdPickerOpen(false); handleNewChatHere(path) }}
+          onCancel={() => setCwdPickerOpen(false)}
+        />,
+        document.body,
+      )}
+
+      {/* Group hover CSS for delete button + spinner keyframe */}
       <style>{`
         .group:hover .group-hover-visible { opacity: 1 !important; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

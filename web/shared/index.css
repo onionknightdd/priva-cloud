@@ -144,7 +144,10 @@
   --ease-default: ease;
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
 
-  --navbar-height: 56px;
+  /* The global top NavBar was removed: navigation now lives in the persistent
+     full-height sidebar. Kept at 0 so existing `top/marginTop: var(--navbar-height)`
+     references resolve to the no-navbar layout without per-file edits. */
+  --navbar-height: 0px;
   --sidebar-width: 240px;
   --canvas-width: 380px;
 

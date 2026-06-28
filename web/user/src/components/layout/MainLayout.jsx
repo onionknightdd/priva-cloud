@@ -6,16 +6,12 @@ import useUiStore from '@shared/stores/uiStore'
 import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 
 const CanvasPanel = lazyWithChunkReload(() => import('./CanvasPanel'))
-const UserDataPanel = lazyWithChunkReload(() => import('../userdata/UserDataPanel'))
-const SkillsPanel = lazyWithChunkReload(() => import('../skills/SkillsPanel'))
-const MCPPanel = lazyWithChunkReload(() => import('../mcp/MCPPanel'))
-const HooksPanel = lazyWithChunkReload(() => import('../hooks/HooksPanel'))
-const SubAgentsPanel = lazyWithChunkReload(() => import('../subagents/SubAgentsPanel'))
+const DataUsageView = lazyWithChunkReload(() => import('../userdata/DataUsageView'))
 const WebTerminalDrawer = lazyWithChunkReload(() => import('../terminal/WebTerminalDrawer'))
 
 function LazyPanel({ children }) {
   return (
-    <Suspense fallback={<div style={{ minHeight: '100vh', background: 'var(--bg-base)' }} />}>
+    <Suspense fallback={<div className="flex-1" style={{ background: 'var(--bg-base)' }} />}>
       {children}
     </Suspense>
   )
@@ -28,27 +24,10 @@ export default function MainLayout() {
   const canvasVisible = useUiStore((s) => s.canvasVisible)
   const terminalOpen = useUiStore((s) => s.terminalOpen)
 
-  if (activeNavTab === 'userdata') {
-    return <LazyPanel><UserDataPanel /></LazyPanel>
-  }
-
-  if (activeNavTab === 'skills') {
-    return <LazyPanel><SkillsPanel /></LazyPanel>
-  }
-
-  if (activeNavTab === 'mcp') {
-    return <LazyPanel><MCPPanel /></LazyPanel>
-  }
-
-  if (activeNavTab === 'hooks') {
-    return <LazyPanel><HooksPanel /></LazyPanel>
-  }
-
-  if (activeNavTab === 'subagents') {
-    return <LazyPanel><SubAgentsPanel /></LazyPanel>
-  }
-
   const effectiveSidebarWidth = collapsed ? 48 : sidebarWidth
+  // The NavBar was removed; the sidebar is the only persistent chrome. The content
+  // area swaps between the chat view and the Data & Usage view (Phase 2 adds more).
+  const isData = activeNavTab === 'userdata'
 
   return (
     <div
@@ -62,6 +41,9 @@ export default function MainLayout() {
         minWidth: 0,
       }}
     >
+      {/* Persistent sidebar (position: fixed; offset above via marginLeft) */}
+      <Sidebar />
+
       <div
         className="flex"
         style={{
@@ -71,15 +53,20 @@ export default function MainLayout() {
           overflow: 'hidden',
         }}
       >
-        <Sidebar />
-        <ChatPanel />
-        {canvasVisible && (
-          <Suspense fallback={null}>
-            <CanvasPanel />
-          </Suspense>
+        {isData ? (
+          <LazyPanel><DataUsageView /></LazyPanel>
+        ) : (
+          <>
+            <ChatPanel />
+            {canvasVisible && (
+              <Suspense fallback={null}>
+                <CanvasPanel />
+              </Suspense>
+            )}
+          </>
         )}
       </div>
-      {terminalOpen && (
+      {!isData && terminalOpen && (
         <Suspense fallback={null}>
           <WebTerminalDrawer />
         </Suspense>

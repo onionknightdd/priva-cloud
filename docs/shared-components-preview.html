@@ -1,0 +1,3933 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Priva Shared Components Preview</title>
+  <style>
+    @font-face {
+      font-family: 'Noto Sans';
+      src: url('../web/shared/public/fonts/NotoSans-Variable.woff2') format('woff2');
+      font-weight: 300 700;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: 'JetBrains Mono';
+      src: url('../web/shared/public/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+      font-weight: 400;
+      font-display: swap;
+    }
+
+    :root {
+      --bg-base: #0d1117;
+      --bg-surface: #161b22;
+      --bg-elevated: #21262d;
+      --bg-overlay: #0d1117e6;
+      --border-subtle: #21262d;
+      --border: #30363d;
+      --border-strong: #484f58;
+      --text-primary: #e6edf3;
+      --text-secondary: #8b949e;
+      --text-dim: #6e7681;
+      --text-inverse: #0d1117;
+      --blue: #58a6ff;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --red: #f85149;
+      --purple: #bc8cff;
+      --cyan: #79c0ff;
+      --orange: #ffa657;
+      --status-running: var(--purple);
+      --status-success: var(--green);
+      --status-error: var(--red);
+      --status-pending: var(--yellow);
+      --status-idle: var(--border);
+    }
+
+    * {
+      box-sizing: border-box;
+      min-width: 0;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      font-family: 'Noto Sans', sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    body {
+      min-height: 100vh;
+    }
+
+    button,
+    input,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      user-select: none;
+    }
+
+    .page {
+      width: min(1240px, 100%);
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.2;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .header p,
+    .muted {
+      margin: 0;
+      color: var(--text-secondary);
+    }
+
+    .section {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 16px;
+      margin-bottom: 16px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .section h2 {
+      margin: 0;
+      color: var(--text-primary);
+      font-size: 16px;
+      line-height: 1.2;
+      font-weight: 700;
+    }
+
+    .section-title {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+      gap: 14px;
+    }
+
+    .grid-wide {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .row-between {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .actions-row {
+      justify-content: flex-end;
+    }
+
+    .label {
+      color: var(--text-dim);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 5px 10px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 12px;
+      text-decoration: none;
+      transition: color 150ms ease, border-color 150ms ease, background 150ms ease, opacity 150ms ease;
+    }
+
+    .button:hover {
+      color: var(--text-primary);
+      border-color: var(--border-strong);
+    }
+
+    .button.primary {
+      color: var(--text-inverse);
+      background: var(--blue);
+      border-color: var(--blue);
+      font-weight: 600;
+    }
+
+    .button.danger {
+      color: var(--text-inverse);
+      background: var(--red);
+      border-color: var(--red);
+      font-weight: 600;
+    }
+
+    .button.success {
+      border-color: var(--green);
+      color: var(--green);
+    }
+
+    .button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+
+    .icon-button {
+      width: 28px;
+      min-width: 28px;
+      padding: 0;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .action-icon {
+      width: 14px;
+      height: 14px;
+      display: block;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .tab-switch {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 3px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      width: fit-content;
+      max-width: 100%;
+    }
+
+    .tab-switch-indicator {
+      position: absolute;
+      top: 3px;
+      bottom: 3px;
+      left: 3px;
+      width: 64px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      pointer-events: none;
+      transform: translateX(0);
+      transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 0;
+    }
+
+    .tab-switch.index-1 .tab-switch-indicator {
+      transform: translateX(66px);
+    }
+
+    .tab-switch.index-2 .tab-switch-indicator {
+      transform: translateX(132px);
+    }
+
+    .tab-switch .button {
+      position: relative;
+      z-index: 1;
+      width: 64px;
+      border-color: transparent;
+      background: transparent;
+      color: var(--text-secondary);
+    }
+
+    .tab-switch .button.active {
+      background: transparent;
+      border-color: transparent;
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    .mode-switch {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      width: fit-content;
+      max-width: 100%;
+    }
+
+    .mode-switch-indicator {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 72px;
+      background: var(--bg-elevated);
+      border-radius: 3px 0 0 3px;
+      pointer-events: none;
+      transform: translateX(0);
+      transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1), border-radius 250ms cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 0;
+    }
+
+    .mode-switch.source .mode-switch-indicator {
+      border-radius: 0 3px 3px 0;
+      transform: translateX(72px);
+    }
+
+    .mode-switch-button {
+      position: relative;
+      z-index: 1;
+      width: 72px;
+      min-height: 28px;
+      padding: 5px 8px;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 12px;
+      transition: color 150ms ease;
+    }
+
+    .mode-switch-button.active,
+    .mode-switch-button:hover {
+      color: var(--text-primary);
+    }
+
+    .live-toggle-action {
+      position: relative;
+      background: var(--bg-surface);
+      border-color: var(--green);
+      border-left: 2px solid var(--green);
+      color: var(--green);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
+    }
+
+    .live-toggle-action:hover {
+      border-color: var(--green);
+      border-left-color: var(--green);
+    }
+
+    .live-toggle-action.paused {
+      background: transparent;
+      border-color: var(--border);
+      border-left-color: var(--border);
+      color: var(--text-secondary);
+    }
+
+    .live-toggle-action.paused:hover {
+      border-color: var(--border-strong);
+      border-left-color: var(--border-strong);
+    }
+
+    .live-toggle-action.error {
+      background: transparent;
+      border-color: var(--red);
+      border-left-color: var(--red);
+      color: var(--red);
+    }
+
+    .live-toggle-action.error:hover {
+      border-color: var(--red);
+      border-left-color: var(--red);
+    }
+
+    .live-refresh-icon {
+      display: inline-flex;
+      animation: fleet-spin 1s linear infinite;
+    }
+
+    .live-toggle-action.paused .live-refresh-icon,
+    .live-toggle-action.error .live-refresh-icon {
+      animation: none;
+    }
+
+    @keyframes fleet-spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .toggle-button[aria-pressed='true'] {
+      background: var(--bg-elevated);
+      border-left: 2px solid var(--blue);
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    .async-icon {
+      display: inline-flex;
+      width: 12px;
+      height: 12px;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      line-height: 1;
+    }
+
+    .async-action[data-state='running'] {
+      border-left: 2px solid var(--purple);
+      color: var(--purple);
+    }
+
+    .async-action[data-state='running'] .async-icon {
+      animation: action-spin 700ms linear infinite;
+    }
+
+    .async-action[data-state='success'] {
+      border-left: 2px solid var(--green);
+      color: var(--green);
+    }
+
+    .async-action[data-state='error'] {
+      border-left: 2px solid var(--red);
+      color: var(--red);
+    }
+
+    @keyframes action-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .action-menu-wrapper {
+      position: relative;
+      display: inline-flex;
+    }
+
+    .action-menu {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      z-index: 30;
+      display: none;
+      width: 168px;
+      padding: 4px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .action-menu.open {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .menu-item {
+      justify-content: flex-start;
+      width: 100%;
+      border-color: transparent;
+    }
+
+    .split-button {
+      display: inline-flex;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .split-button .button {
+      border: 0;
+      border-radius: 0;
+    }
+
+    .split-button .button + .button {
+      width: 30px;
+      min-width: 30px;
+      padding: 0;
+      border-left: 1px solid var(--border);
+    }
+
+    .confirm-panel-inline {
+      display: none;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: 10px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-left: 2px solid var(--red);
+      border-radius: 4px;
+    }
+
+    .confirm-panel-inline.open {
+      display: flex;
+    }
+
+    .icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      border: 1px solid var(--border-strong);
+      border-radius: 2px;
+      color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      line-height: 1;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      padding: 2px 7px;
+      border: 1px solid currentColor;
+      border-radius: 4px;
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .chip.green { color: var(--green); }
+    .chip.yellow { color: var(--yellow); }
+    .chip.red { color: var(--red); }
+    .chip.blue { color: var(--blue); }
+    .chip.purple { color: var(--purple); }
+
+    .list-input {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .chip-field {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-height: 38px;
+      padding: 6px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-primary);
+      transition: border-color 150ms ease;
+    }
+
+    .chip-field:focus,
+    .chip-field:focus-within {
+      border-color: var(--blue);
+    }
+
+    .chip-field-select {
+      width: 100%;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .chip-field-select:hover {
+      border-color: var(--border-strong);
+    }
+
+    .chip-placeholder {
+      color: var(--text-dim);
+      font-size: 13px;
+      padding: 2px 2px;
+    }
+
+    .chip-field.has-values .chip-placeholder {
+      display: none;
+    }
+
+    .chip-field-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      flex: 0 0 auto;
+    }
+
+    .chip-clear-inline {
+      min-height: 22px;
+      padding: 2px 6px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 11px;
+      transition: color 150ms ease, border-color 150ms ease, opacity 150ms ease;
+    }
+
+    .chip-clear-inline:hover {
+      color: var(--text-primary);
+      border-color: var(--border-strong);
+    }
+
+    .chip-clear-inline:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+
+    .field-chevron {
+      color: var(--text-dim);
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .value-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      max-width: 100%;
+      min-height: 22px;
+      padding: 2px 7px;
+      color: var(--cyan);
+      background: var(--bg-elevated);
+      border: 1px solid currentColor;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .value-chip span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chip-remove {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      padding: 0;
+      background: transparent;
+      border: 0;
+      color: currentColor;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+      opacity: 0.75;
+      transition: opacity 150ms ease;
+    }
+
+    .chip-remove:hover {
+      opacity: 1;
+    }
+
+    .chip-entry-input {
+      flex: 1 1 160px;
+      min-width: 120px;
+      padding: 3px 2px;
+      background: transparent;
+      border: 0;
+      color: var(--text-primary);
+      outline: none;
+      font-size: 13px;
+    }
+
+    .chip-dropdown {
+      width: 100%;
+    }
+
+    .dropdown {
+      position: relative;
+      width: min(240px, 100%);
+    }
+
+    .dropdown-trigger {
+      width: 100%;
+      justify-content: space-between;
+      background: var(--bg-surface);
+    }
+
+    .dropdown-menu {
+      position: absolute;
+      z-index: 20;
+      top: calc(100% + 4px);
+      left: 0;
+      width: max(100%, 180px);
+      max-height: 260px;
+      overflow: auto;
+      display: none;
+      flex-direction: column;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .dropdown.open .dropdown-menu {
+      display: flex;
+    }
+
+    .dropdown-option {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      background: transparent;
+      border: 0;
+      border-left: 2px solid transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      text-align: left;
+      font-size: 12px;
+      transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+    }
+
+    .dropdown-option:hover {
+      background: var(--bg-surface);
+      color: var(--text-primary);
+    }
+
+    .dropdown-option.active {
+      background: var(--bg-surface);
+      border-left-color: var(--cyan);
+      color: var(--text-primary);
+    }
+
+    .dropdown-empty {
+      display: none;
+      padding: 8px 10px;
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+
+    .dropdown-search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .dropdown-search input,
+    .field,
+    .textarea {
+      width: 100%;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-primary);
+      outline: none;
+      padding: 7px 9px;
+      transition: border-color 150ms ease;
+    }
+
+    .dropdown-search input {
+      background: transparent;
+      border: 0;
+      padding: 0;
+      font-size: 12px;
+    }
+
+    .field:focus,
+    .textarea:focus {
+      border-color: var(--blue);
+    }
+
+    .textarea {
+      min-height: 78px;
+      resize: vertical;
+    }
+
+    .form-section {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .field-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .field-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .field-label {
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .field-label.optional::after {
+      content: 'optional';
+      margin-left: 6px;
+      color: var(--text-dim);
+      font-size: 11px;
+      font-weight: 400;
+    }
+
+    .required {
+      color: var(--red);
+    }
+
+    .field-hint {
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+
+    .field-hint.success {
+      color: var(--green);
+    }
+
+    .field-hint.warning {
+      color: var(--yellow);
+    }
+
+    .field-error {
+      color: var(--red);
+      font-size: 12px;
+    }
+
+    .field-stack:not(.error) > .field-error {
+      display: none;
+    }
+
+    .field-control {
+      width: 100%;
+      min-height: 32px;
+      padding: 7px 9px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-primary);
+      outline: none;
+      transition: border-color 150ms ease, background 150ms ease;
+    }
+
+    .field-control:focus {
+      border-color: var(--blue);
+    }
+
+    .field-control::placeholder {
+      color: var(--text-dim);
+    }
+
+    .field-control:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+
+    .field-stack.error .field-control {
+      border-color: var(--red);
+    }
+
+    .field-stack.success .field-control {
+      border-color: var(--green);
+    }
+
+    .form-textarea {
+      min-height: 92px;
+      resize: vertical;
+    }
+
+    .control-shell {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      min-height: 32px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-primary);
+      transition: border-color 150ms ease;
+    }
+
+    .control-shell:focus-within {
+      border-color: var(--blue);
+    }
+
+    .control-shell .field-control {
+      min-height: 30px;
+      border: 0;
+      background: transparent;
+    }
+
+    .field-prefix,
+    .field-suffix {
+      flex: 0 0 auto;
+      padding: 0 9px;
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+
+    .primitive-strip {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .stepper {
+      display: inline-flex;
+      align-self: stretch;
+      border-left: 1px solid var(--border);
+    }
+
+    .stepper button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      min-width: 28px;
+      min-height: 30px;
+      padding: 0;
+      background: var(--bg-base);
+      border: 0;
+      border-left: 1px solid var(--border);
+      border-radius: 0;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      line-height: 1;
+      transition: color 150ms ease, background 150ms ease;
+    }
+
+    .stepper button:hover {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+
+    .setting-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      margin-left: 12px;
+      padding: 8px 0 8px 12px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .setting-row h3 {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .setting-row p {
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+
+    .toggle-label {
+      min-width: 26px;
+      text-align: right;
+      color: var(--text-dim);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      transition: color 150ms ease;
+    }
+
+    .toggle-track {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      flex: 0 0 auto;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      transition: background 150ms ease, border-color 150ms ease;
+    }
+
+    .toggle-thumb {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      background: var(--text-dim);
+      border-radius: 2px;
+      transition: left 150ms ease, background 150ms ease;
+    }
+
+    .toggle.on .toggle-label {
+      color: var(--green);
+    }
+
+    .toggle.on .toggle-track {
+      background: var(--blue);
+      border-color: var(--blue);
+    }
+
+    .toggle.on .toggle-thumb {
+      left: 18px;
+      background: var(--text-inverse);
+    }
+
+    .tabs {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab {
+      position: relative;
+      min-height: 34px;
+      padding: 6px 0;
+      background: transparent;
+      border: 0;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 13px;
+      transition: color 150ms ease;
+    }
+
+    .tab.active {
+      color: var(--text-primary);
+    }
+
+    .tab.active::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: -1px;
+      height: 2px;
+      background: var(--blue);
+    }
+
+    .segmented {
+      display: inline-flex;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      width: fit-content;
+      max-width: 100%;
+    }
+
+    .segmented .tab {
+      min-height: 26px;
+      padding: 3px 10px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+    }
+
+    .segmented .tab.active {
+      background: var(--bg-elevated);
+      border-color: var(--border);
+    }
+
+    .segmented .tab.active::after {
+      display: none;
+    }
+
+    .tab-panel {
+      display: none;
+      color: var(--text-secondary);
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    .copyable {
+      position: relative;
+      padding: 12px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-primary);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      opacity: 0;
+      padding: 2px;
+      min-height: 0;
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: opacity 150ms ease, color 150ms ease;
+    }
+
+    .copy-btn:hover {
+      color: var(--text-secondary);
+    }
+
+    .copyable:hover .copy-btn {
+      opacity: 1;
+    }
+
+    .copy-btn.copied {
+      opacity: 1;
+      color: var(--green);
+    }
+
+    .copy-btn .check-icon,
+    .copy-btn.copied .copy-icon {
+      display: none;
+    }
+
+    .copy-btn.copied .check-icon {
+      display: block;
+    }
+
+    .date-range {
+      display: flex;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .date-input {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: min(100%, 190px);
+    }
+
+    .accordion {
+      overflow: hidden;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .accordion-item + .accordion-item {
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .accordion-trigger {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      background: transparent;
+      border: 0;
+      color: var(--text-primary);
+      cursor: pointer;
+      font-weight: 600;
+      text-align: left;
+      transition: background 150ms ease;
+    }
+
+    .accordion-trigger:hover {
+      background: var(--bg-elevated);
+    }
+
+    .chevron {
+      color: var(--text-dim);
+      transition: transform 150ms ease;
+    }
+
+    .accordion-item.open .chevron {
+      transform: rotate(180deg);
+    }
+
+    .accordion-body {
+      display: none;
+      padding: 0 12px 12px;
+      color: var(--text-secondary);
+    }
+
+    .accordion-item.open .accordion-body {
+      display: block;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-height: 180px;
+      padding: 20px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      text-align: center;
+    }
+
+    .empty-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .feedback-block {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-left: 2px solid var(--status-idle);
+      border-radius: 4px;
+    }
+
+    .feedback-block.info { border-left-color: var(--blue); }
+    .feedback-block.success { border-left-color: var(--green); }
+    .feedback-block.warning { border-left-color: var(--yellow); }
+    .feedback-block.error { border-left-color: var(--red); }
+    .feedback-block.info h3 { color: var(--blue); }
+    .feedback-block.success h3 { color: var(--green); }
+    .feedback-block.warning h3 { color: var(--yellow); }
+    .feedback-block.error h3 { color: var(--red); }
+
+    .error-detail {
+      padding: 9px 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-secondary);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      word-break: break-word;
+    }
+
+    .status-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) max-content;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 10px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-left: 2px solid var(--status-idle);
+      border-radius: 4px;
+    }
+
+    .status-row.running { border-left-color: var(--status-running); }
+    .status-row.success { border-left-color: var(--status-success); }
+    .status-row.pending { border-left-color: var(--status-pending); }
+    .status-row.error { border-left-color: var(--status-error); }
+
+    .status-row h3 {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .status-row p {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+
+    .status-row .chip {
+      justify-self: end;
+      white-space: nowrap;
+    }
+
+    .live-chip {
+      gap: 5px;
+    }
+
+    .live-mark {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      border: 1px solid currentColor;
+      border-radius: 3px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      line-height: 1;
+      animation: live-spin 900ms linear infinite;
+    }
+
+    @keyframes live-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .status-compact-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .status-row.compact {
+      grid-template-columns: 54px minmax(0, 1fr) max-content;
+      gap: 8px;
+      padding: 6px 8px;
+    }
+
+    .compact-code {
+      color: var(--text-dim);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .compact-text {
+      color: var(--text-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-row.full {
+      grid-template-columns: 1fr;
+      align-items: stretch;
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .status-full-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) max-content;
+      align-items: start;
+      gap: 12px;
+    }
+
+    .status-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 12px;
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+
+    .status-meta span {
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .status-actions {
+      display: flex;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .status-collapse-toggle {
+      justify-self: end;
+      width: fit-content;
+    }
+
+    .status-collapse-toggle::after {
+      content: 'v';
+      color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      transition: transform 150ms ease;
+    }
+
+    .status-collapse-toggle[aria-expanded="false"]::after {
+      transform: rotate(-90deg);
+    }
+
+    .status-step-details {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow: hidden;
+    }
+
+    .status-step-details.collapsed {
+      display: none;
+    }
+
+    .status-step-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      padding: 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .status-step {
+      display: grid;
+      grid-template-columns: 26px minmax(0, 1fr);
+      gap: 10px;
+      min-height: 52px;
+    }
+
+    .status-step:last-child {
+      min-height: 24px;
+    }
+
+    .status-step-rail {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 52px;
+    }
+
+    .status-step-icon {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border: 0;
+      border-radius: 0;
+      color: var(--text-dim);
+    }
+
+    .status-step.done .status-step-icon {
+      color: var(--green);
+    }
+
+    .status-step.done .status-step-icon::before {
+      content: '';
+      width: 10px;
+      height: 5px;
+      border-left: 1.5px solid currentColor;
+      border-bottom: 1.5px solid currentColor;
+      transform: rotate(-45deg) translateY(-1px);
+    }
+
+    .status-step.running .status-step-icon {
+      color: var(--purple);
+      animation: live-spin 900ms linear infinite;
+    }
+
+    .status-step.running .status-step-icon::before {
+      content: '';
+      width: 12px;
+      height: 1.5px;
+      background: currentColor;
+    }
+
+    .status-step.pending .status-step-icon {
+      color: var(--text-dim);
+    }
+
+    .status-step.pending .status-step-icon::before {
+      content: '';
+      width: 8px;
+      border-top: 1.5px solid currentColor;
+    }
+
+    .status-step-connector {
+      flex: 1;
+      width: 0;
+      min-height: 24px;
+      margin-top: 4px;
+      border-left: 1px dashed var(--border-strong);
+    }
+
+    .status-step.done .status-step-connector {
+      border-left-style: solid;
+      border-left-color: var(--green);
+    }
+
+    .status-step-content {
+      padding-bottom: 10px;
+    }
+
+    .status-step-name {
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .status-step.running .status-step-name {
+      color: var(--purple);
+    }
+
+    .status-step-desc {
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+
+    .progress-strip {
+      display: flex;
+      overflow: hidden;
+      height: 8px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .progress-fill {
+      width: 64%;
+      background: var(--purple);
+    }
+
+    .shell-frame {
+      overflow: hidden;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .shell-header,
+    .shell-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      background: var(--bg-surface);
+    }
+
+    .shell-header {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .shell-footer {
+      border-top: 1px solid var(--border);
+      justify-content: flex-end;
+    }
+
+    .shell-body {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px;
+      color: var(--text-secondary);
+    }
+
+    .confirm-message {
+      padding: 10px 12px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-left: 2px solid var(--red);
+      border-radius: 4px;
+      color: var(--text-secondary);
+    }
+
+    .resizable-drawer {
+      width: 320px;
+      min-width: 240px;
+      max-width: 520px;
+      background: var(--bg-surface);
+      border-left: 1px solid var(--border);
+    }
+
+    .resizable-main {
+      flex: 1;
+      padding: 12px;
+      color: var(--text-secondary);
+    }
+
+    .popover-demo,
+    .tooltip-demo {
+      position: relative;
+      display: inline-flex;
+      width: fit-content;
+    }
+
+    .popover-panel {
+      position: absolute;
+      z-index: 30;
+      top: calc(100% + 6px);
+      left: 0;
+      display: none;
+      width: 240px;
+      overflow: hidden;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .popover-demo.open .popover-panel {
+      display: block;
+      animation: popover-in 150ms ease;
+    }
+
+    @keyframes popover-in {
+      from { transform: translateY(-4px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    .tooltip-bubble {
+      position: absolute;
+      z-index: 20;
+      left: 50%;
+      bottom: calc(100% + 6px);
+      width: max-content;
+      max-width: 220px;
+      transform: translateX(-50%);
+      padding: 5px 7px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 150ms ease, transform 150ms ease;
+    }
+
+    .tooltip-demo:hover .tooltip-bubble,
+    .tooltip-demo:focus-within .tooltip-bubble {
+      opacity: 1;
+      transform: translateX(-50%) translateY(-2px);
+    }
+
+    .modal-root {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: var(--bg-overlay);
+      backdrop-filter: blur(4px);
+    }
+
+    .modal-root.open {
+      display: flex;
+    }
+
+    .modal-panel {
+      width: min(420px, 100%);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      padding: 18px;
+      animation: scale-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes scale-in {
+      from { transform: scale(0.96); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+
+    .chart {
+      width: 100%;
+      height: 260px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 12px;
+    }
+
+    .chart svg {
+      width: 100%;
+      height: 210px;
+      display: block;
+    }
+
+    .legend {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      color: var(--text-secondary);
+      font-size: 11px;
+    }
+
+    .legend span::before {
+      content: '';
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      margin-right: 5px;
+      border-radius: 2px;
+      background: currentColor;
+    }
+
+    @keyframes skeleton-shimmer {
+      0% { background-position: -400px 0; }
+      100% { background-position: 400px 0; }
+    }
+
+    .skeleton {
+      border-radius: 2px;
+      background: linear-gradient(90deg, var(--bg-elevated) 25%, var(--bg-surface) 50%, var(--bg-elevated) 75%);
+      background-size: 800px 100%;
+      animation: skeleton-shimmer 1.4s ease infinite;
+    }
+
+    .skeleton-card {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .skeleton-table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .skeleton-table th,
+    .skeleton-table td {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border-subtle);
+      text-align: left;
+      color: var(--text-secondary);
+    }
+
+    .skeleton-table th {
+      color: var(--text-dim);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .skeleton-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .loading-demo.loaded [data-loading-rows] {
+      display: none;
+    }
+
+    .loading-demo:not(.loaded) [data-loaded-rows] {
+      display: none;
+    }
+
+    .resizable-shell {
+      display: flex;
+      min-height: 120px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .resizable-panel {
+      width: 280px;
+      padding: 12px;
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+    }
+
+    .resize-handle {
+      width: 4px;
+      flex: 0 0 auto;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      cursor: col-resize;
+      transition: background 150ms ease;
+    }
+
+    .resize-handle:hover,
+    .resize-handle.dragging {
+      background: var(--blue);
+    }
+
+    .drawer-demo {
+      display: grid;
+      grid-template-columns: 1fr minmax(220px, 320px);
+      min-height: 220px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .drawer-main {
+      padding: 12px;
+      color: var(--text-secondary);
+    }
+
+    .drawer-side {
+      border-left: 1px solid var(--border);
+      background: var(--bg-elevated);
+      padding: 12px;
+    }
+
+    .terminal {
+      min-height: 190px;
+      padding: 12px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-secondary);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+    }
+
+    .terminal .prompt {
+      color: var(--green);
+    }
+
+    .auth-card {
+      width: min(360px, 100%);
+      margin: 0 auto;
+      padding: 20px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .inventory {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .inventory th,
+    .inventory td {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border-subtle);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .inventory th {
+      color: var(--text-dim);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .inventory td {
+      color: var(--text-secondary);
+    }
+
+    .inventory tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .reference-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+      gap: 12px;
+    }
+
+    .reference-card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-left: 2px solid var(--status-idle);
+      border-radius: 4px;
+    }
+
+    .reference-card.shared { border-left-color: var(--green); }
+    .reference-card.candidate { border-left-color: var(--yellow); }
+    .reference-card.local { border-left-color: var(--purple); }
+    .reference-card.rule { border-left-color: var(--blue); }
+
+    .path {
+      color: var(--cyan);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      word-break: break-all;
+    }
+
+    .priority-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+      gap: 12px;
+      counter-reset: priority;
+    }
+
+    .priority-card {
+      counter-increment: priority;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px 12px 12px 42px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .priority-card::before {
+      content: counter(priority);
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border: 1px solid var(--yellow);
+      border-radius: 4px;
+      color: var(--yellow);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+    }
+
+    .compact-list {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--text-secondary);
+    }
+
+    .compact-list li + li {
+      margin-top: 4px;
+    }
+
+    @media (max-width: 760px) {
+      .page {
+        padding: 16px;
+      }
+
+      .header {
+        flex-direction: column;
+      }
+
+      .drawer-demo {
+        grid-template-columns: 1fr;
+      }
+
+      .drawer-side {
+        border-left: 0;
+        border-top: 1px solid var(--border);
+      }
+
+      .resizable-shell {
+        flex-direction: column;
+      }
+
+      .resizable-drawer {
+        width: 100%;
+        max-width: none;
+        border-left: 0;
+        border-top: 1px solid var(--border);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <div>
+        <h1>Priva Shared Components Preview</h1>
+        <p>Standalone HTML preview for the common UI components and extraction candidates found across admin UI and user UI.</p>
+      </div>
+      <div class="row">
+        <button class="button" id="language-toggle"><span class="icon">G</span><span id="language-label">EN</span></button>
+        <span class="chip blue">demo</span>
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Buttons / Actions</h2>
+        <p class="muted">Button, IconButton, TabSwitchButton, ModeSwitchButton, LiveToggleButton, CopyButton and action-menu patterns.</p>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <span class="label">Button</span>
+          <div class="row">
+            <button class="button primary">Primary</button>
+            <button class="button">Secondary</button>
+            <button class="button danger">Danger</button>
+            <button class="button" disabled>Disabled</button>
+          </div>
+          <p class="muted">Use for explicit commands. Danger actions still require ConfirmDialog.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">IconButton</span>
+          <div class="row">
+            <button class="button icon-button" aria-label="Copy">
+              <svg class="action-icon copy-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="8" y="8" width="11" height="11" rx="2"></rect>
+                <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
+              </svg>
+            </button>
+            <button class="button icon-button" aria-label="Refresh">R</button>
+            <button class="button icon-button" aria-label="Close">X</button>
+            <button class="button icon-button" aria-label="Settings">S</button>
+          </div>
+          <p class="muted">Use for compact toolbar actions. In React, replace letters with lucide icons at strokeWidth 1.5.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">TabSwitchButton</span>
+          <div class="tab-switch index-0" role="toolbar" aria-label="Tab switch" data-tab-switch>
+            <span class="tab-switch-indicator"></span>
+            <button class="button active" data-tab-switch-button data-index="0">Run</button>
+            <button class="button" data-tab-switch-button data-index="1">Logs</button>
+            <button class="button" data-tab-switch-button data-index="2">Files</button>
+          </div>
+          <p class="muted">Use for tight tab-like switching where full Tabs would be too large.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">ModeSwitchButton</span>
+          <div class="mode-switch preview" role="group" aria-label="Preview mode switch" data-mode-switch>
+            <span class="mode-switch-indicator"></span>
+            <button class="mode-switch-button active" data-mode-button data-mode="preview">Preview</button>
+            <button class="mode-switch-button" data-mode-button data-mode="source">Source</button>
+          </div>
+          <p class="muted">Use for preview/source switching in compact file viewers. Based on the Skill preview control with a smooth active indicator.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">LiveToggleButton</span>
+          <div class="row">
+            <button class="button live-toggle-action" id="actions-live-toggle" aria-pressed="true"><span class="live-refresh-icon">R</span><span class="live-label">Live</span></button>
+            <button class="button" id="actions-live-error">Set error</button>
+          </div>
+          <p class="muted">Use for live refresh controls in admin/resource views. Status is shown by the 2px left border.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">ToggleButton</span>
+          <div class="row">
+            <button class="button toggle-button" aria-pressed="true" data-toggle-button>Preview on</button>
+            <button class="button toggle-button" aria-pressed="false" data-toggle-button>Compact off</button>
+          </div>
+          <p class="muted">Use for one local pressed/unpressed tool state. Use Toggle for form settings.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">CopyButton</span>
+          <div class="copyable" data-action-copyable data-copy-text='{ "component": "CopyButton", "state": "hover to reveal" }'>{ "component": "CopyButton", "state": "hover to reveal" }
+            <button class="copy-btn" aria-label="Copy content" data-action-copy>
+              <svg class="action-icon copy-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="8" y="8" width="11" height="11" rx="2"></rect>
+                <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
+              </svg>
+              <svg class="action-icon check-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 6 9 17l-5-5"></path>
+              </svg>
+            </button>
+          </div>
+          <p class="muted">Hover reveals the action. Click copies and uses the button itself as feedback.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">AsyncActionButton</span>
+          <div class="row">
+            <button class="button async-action" data-async-action data-state="idle"><span class="async-icon">R</span><span class="async-label">Run task</span></button>
+            <button class="button async-action" data-async-action data-fail="true" data-state="idle"><span class="async-icon">R</span><span class="async-label">Retry sync</span></button>
+          </div>
+          <p class="muted">Use for actions with idle, running, success, error, and disabled states.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">MenuButton</span>
+          <div class="row">
+            <span class="action-menu-wrapper">
+              <button class="button" data-action-menu-trigger aria-expanded="false">More v</button>
+              <span class="action-menu" data-action-menu>
+                <button class="button menu-item">Rename</button>
+                <button class="button menu-item">Archive</button>
+                <button class="button menu-item danger">Delete</button>
+              </span>
+            </span>
+          </div>
+          <p class="muted">Use for secondary actions when the primary command should stay visible.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">SplitButton</span>
+          <div class="row">
+            <span class="action-menu-wrapper">
+              <span class="split-button">
+                <button class="button primary" data-split-primary>Run</button>
+                <button class="button primary" data-action-menu-trigger aria-expanded="false" aria-label="Open run options">v</button>
+              </span>
+              <span class="action-menu" data-action-menu>
+                <button class="button menu-item">Run once</button>
+                <button class="button menu-item">Run with logs</button>
+                <button class="button menu-item">Dry run</button>
+              </span>
+            </span>
+          </div>
+          <p class="muted">Use when one command has a default path plus adjacent execution variants.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">ConfirmActionButton</span>
+          <div class="row">
+            <button class="button danger" data-confirm-open>Delete history</button>
+          </div>
+          <div class="confirm-panel-inline" data-confirm-panel>
+            <span class="muted">Type DELETE</span>
+            <input class="field" data-confirm-input aria-label="Confirmation text" />
+            <button class="button danger" data-confirm-submit disabled>Confirm</button>
+            <button class="button" data-confirm-cancel>Cancel</button>
+          </div>
+          <p class="muted">Use for dangerous operations. The destructive command stays disabled until the confirmation text matches.</p>
+        </div>
+      </div>
+
+      <table class="inventory">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Status</th>
+            <th>Use when</th>
+            <th>Do not use when</th>
+            <th>Required states</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Button</td><td><span class="chip yellow">extract</span></td><td>Clear page-level command with text label.</td><td>Pure icon action fits better.</td><td>default, hover, focus, disabled, danger</td></tr>
+          <tr><td>IconButton</td><td><span class="chip yellow">extract</span></td><td>Compact copy, refresh, close, settings actions.</td><td>The command is ambiguous without text.</td><td>default, hover, focus, disabled, selected</td></tr>
+          <tr><td>TabSwitchButton</td><td><span class="chip yellow">extract</span></td><td>Dense local tab switch inside a tool surface.</td><td>Switching full page views; use Tabs.</td><td>active, hover, disabled</td></tr>
+          <tr><td>ModeSwitchButton</td><td><span class="chip yellow">extract</span></td><td>Preview/source switching inside a compact file viewer.</td><td>Switching major page views; use Tabs.</td><td>preview, source, disabled</td></tr>
+          <tr><td>LiveToggleButton</td><td><span class="chip yellow">move shared</span></td><td>Live refresh / retry control.</td><td>Ordinary boolean settings; use Toggle.</td><td>active, paused, error, refreshing</td></tr>
+          <tr><td>ToggleButton</td><td><span class="chip yellow">extract</span></td><td>One local pressed state inside a tool surface.</td><td>The value belongs to a form; use Toggle.</td><td>pressed, unpressed, disabled</td></tr>
+          <tr><td>CopyButton</td><td><span class="chip green">shared</span></td><td>Copying code, JSON, IDs, logs, or command output.</td><td>The action needs toast-level feedback or undo.</td><td>hidden, hover, copied, disabled</td></tr>
+          <tr><td>AsyncActionButton</td><td><span class="chip yellow">extract</span></td><td>Running commands that need transient status feedback.</td><td>The operation has a detailed workflow; use a status panel.</td><td>idle, running, success, error, disabled</td></tr>
+          <tr><td>MenuButton</td><td><span class="chip yellow">extract</span></td><td>Secondary actions need to stay compact.</td><td>Only one clear command exists.</td><td>closed, open, disabled, danger item</td></tr>
+          <tr><td>SplitButton</td><td><span class="chip yellow">extract</span></td><td>A primary command has adjacent execution variants.</td><td>All actions have equal weight; use MenuButton.</td><td>default, menu open, disabled</td></tr>
+          <tr><td>ConfirmActionButton</td><td><span class="chip yellow">extract</span></td><td>A danger action starts a required confirmation flow.</td><td>Confirmation content is complex; use ConfirmDialog.</td><td>idle, confirm open, text mismatch, confirmed</td></tr>
+        </tbody>
+      </table>
+
+      <div class="card">
+        <span class="label">Proposed path</span>
+        <span class="path">web/shared/components/shared/actions/Button.jsx</span>
+        <span class="path">web/shared/components/shared/actions/IconButton.jsx</span>
+        <span class="path">web/shared/components/shared/actions/TabSwitchButton.jsx</span>
+        <span class="path">web/shared/components/shared/actions/ModeSwitchButton.jsx</span>
+        <span class="path">web/shared/components/shared/actions/ToggleButton.jsx</span>
+        <span class="path">web/shared/components/shared/actions/AsyncActionButton.jsx</span>
+        <span class="path">web/shared/components/shared/actions/MenuButton.jsx</span>
+        <span class="path">web/shared/components/shared/actions/SplitButton.jsx</span>
+        <span class="path">web/shared/components/shared/actions/ConfirmActionButton.jsx</span>
+        <span class="path">web/shared/components/shared/CopyButton.jsx</span>
+        <span class="path">web/shared/components/shared/LiveToggleButton.jsx</span>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Controls</h2>
+        <p class="muted">Dropdown, CategoryDropdown, Toggle, Tabs, Chip, CopyButton and DateRangePicker.</p>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <span class="label">Dropdown</span>
+          <div class="row">
+            <div class="dropdown" data-dropdown>
+              <button class="button dropdown-trigger" data-dropdown-trigger><span data-dropdown-label>Session</span><span>v</span></button>
+              <div class="dropdown-menu">
+                <button class="dropdown-option" data-value="Login">Login</button>
+                <button class="dropdown-option active" data-value="Session">Session</button>
+                <button class="dropdown-option" data-value="Tool">Tool</button>
+                <button class="dropdown-option" data-value="Storage">Storage</button>
+              </div>
+            </div>
+
+            <div class="dropdown" data-dropdown>
+              <button class="button dropdown-trigger" data-dropdown-trigger><span data-dropdown-label>Qwen3 6B</span><span>v</span></button>
+              <div class="dropdown-menu">
+                <div class="dropdown-search"><span class="icon">S</span><input data-filter placeholder="Filter..." /></div>
+                <button class="dropdown-option active" data-value="Qwen3 6B">Qwen3 6B</button>
+                <button class="dropdown-option" data-value="GPT model">GPT model</button>
+                <button class="dropdown-option" data-value="Claude model">Claude model</button>
+              </div>
+            </div>
+
+            <div class="dropdown" data-dropdown>
+              <button class="button dropdown-trigger" data-dropdown-trigger><span data-dropdown-label>All</span><span>v</span></button>
+              <div class="dropdown-menu">
+                <button class="dropdown-option active" data-value="All">All</button>
+                <button class="dropdown-option" data-value="Active">Active</button>
+                <button class="dropdown-option" data-value="Archived">Archived</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <span class="label">Toggle</span>
+          <div class="row">
+            <button class="toggle on" role="switch" aria-checked="true" data-toggle>
+              <span class="toggle-label">ON</span>
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </button>
+            <button class="toggle" role="switch" aria-checked="false" data-toggle>
+              <span class="toggle-label">OFF</span>
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </button>
+            <button class="toggle on" role="switch" aria-checked="true" disabled style="opacity: 0.45;">
+              <span class="toggle-label">ON</span>
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <span class="label">Tabs</span>
+          <div class="tabs" data-tabs="main-tabs">
+            <button class="tab active" data-tab="overview">Overview</button>
+            <button class="tab" data-tab="events">Events</button>
+            <button class="tab" data-tab="settings">Settings</button>
+          </div>
+          <div class="tab-panel active" data-panel="main-tabs:overview">Shared tab primitive with underline indicator.</div>
+          <div class="tab-panel" data-panel="main-tabs:events">Event content area.</div>
+          <div class="tab-panel" data-panel="main-tabs:settings">Settings content area.</div>
+          <div class="segmented" data-tabs="frame-tabs">
+            <button class="tab" data-tab="frame">Frame</button>
+            <button class="tab active" data-tab="active">Active</button>
+            <button class="tab" data-tab="disabled" disabled>Disabled</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <span class="label">Chip and CopyButton</span>
+          <div class="row">
+            <span class="chip">default</span>
+            <span class="chip green">online</span>
+            <span class="chip yellow">pending</span>
+            <span class="chip red">failed</span>
+          </div>
+          <div class="copyable" data-copyable>{
+  "component": "CopyButton",
+  "state": "hover to reveal, click to copy",
+  "style": "CSS variables only"
+}<button class="copy-btn" data-copy aria-label="Copy content">
+  <svg class="action-icon copy-icon" viewBox="0 0 24 24" aria-hidden="true">
+    <rect x="8" y="8" width="11" height="11" rx="2"></rect>
+    <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
+  </svg>
+  <svg class="action-icon check-icon" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M20 6 9 17l-5-5"></path>
+  </svg>
+</button></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <span class="label">DateRangePicker</span>
+        <div class="date-range">
+          <div class="row">
+            <button class="button" data-range="24h">24h</button>
+            <button class="button" data-range="7d">7d</button>
+            <button class="button" data-range="30d">30d</button>
+            <button class="button" data-range="all">All</button>
+          </div>
+          <label class="date-input">
+            <span class="label">Start</span>
+            <input class="field" id="start-time" value="2026-06-27 09:00" />
+          </label>
+          <label class="date-input">
+            <span class="label">End</span>
+            <input class="field" id="end-time" value="2026-06-28 09:00" />
+          </label>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card list-input" data-chip-select>
+          <div class="section-title">
+            <span class="label">List input dropdown</span>
+            <p class="muted">Select values from a dropdown. Values render as removable chips.</p>
+          </div>
+          <div class="dropdown chip-dropdown" data-dropdown>
+            <div class="chip-field chip-field-select" data-chip-list data-dropdown-trigger role="button" tabindex="0" aria-label="Selected dropdown values">
+              <span class="value-chip" data-chip-value="Agent"><span>Agent</span><button class="chip-remove" data-remove-chip aria-label="Remove Agent">x</button></span>
+              <span class="value-chip" data-chip-value="MCP"><span>MCP</span><button class="chip-remove" data-remove-chip aria-label="Remove MCP">x</button></span>
+              <span class="chip-placeholder">Select value</span>
+              <span class="chip-field-actions">
+                <button class="chip-clear-inline" data-clear-chips>Clear all</button>
+                <span class="field-chevron">v</span>
+              </span>
+            </div>
+            <div class="dropdown-menu">
+              <button class="dropdown-option active" data-chip-option data-value="Agent">Agent</button>
+              <button class="dropdown-option active" data-chip-option data-value="MCP">MCP</button>
+              <button class="dropdown-option" data-chip-option data-value="Hooks">Hooks</button>
+              <button class="dropdown-option" data-chip-option data-value="Terminal">Terminal</button>
+              <button class="dropdown-option" data-chip-option data-value="Audit">Audit</button>
+              <button class="dropdown-option" data-chip-option data-value="Storage">Storage</button>
+              <div class="dropdown-empty" data-chip-empty>No available values</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card list-input" data-chip-entry>
+          <div class="section-title">
+            <span class="label">List input type</span>
+            <p class="muted">Type a value and press Enter. Values render as removable chips.</p>
+          </div>
+          <div class="chip-field" data-chip-list aria-label="Typed chip values">
+            <span class="value-chip" data-chip-value="Qwen3"><span>Qwen3</span><button class="chip-remove" data-remove-chip aria-label="Remove Qwen3">x</button></span>
+            <input class="chip-entry-input" data-chip-input placeholder="Type value and press Enter" />
+            <button class="chip-clear-inline" data-clear-chips>Clear all</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Form Primitives</h2>
+        <p class="muted">Field-level primitives and reusable form grouping patterns from the extraction list.</p>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <span class="label">FieldLabel</span>
+          <div class="primitive-strip">
+            <span class="field-label">Required label <span class="required">*</span></span>
+            <span class="field-label optional">Optional label</span>
+            <span class="field-label" style="color: var(--text-dim);">Disabled label</span>
+          </div>
+          <p class="muted">Use for every form control label. Keep labels compact and consistent.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">FieldHint / FieldError</span>
+          <div class="primitive-strip">
+            <span class="field-hint">Neutral hint for format, scope, or side effects.</span>
+            <span class="field-hint success">Validated successfully.</span>
+            <span class="field-hint warning">Changing this value may restart the service.</span>
+            <span class="field-error">Validation error message.</span>
+          </div>
+          <p class="muted">Use one feedback line per field. Prefer direct, state-specific messages.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">FieldControl</span>
+          <label class="field-stack">
+            <span class="field-label">Path with prefix</span>
+            <span class="control-shell">
+              <span class="field-prefix">/workspace/</span>
+              <input class="field-control" value="admin" />
+            </span>
+            <span class="field-hint">Use a shared shell when fields need prefix, suffix, or inline actions.</span>
+          </label>
+        </div>
+
+        <div class="card">
+          <span class="label">FieldPrefix / FieldSuffix</span>
+          <label class="field-stack">
+            <span class="field-label">Resource path</span>
+            <span class="control-shell">
+              <span class="field-prefix">GET</span>
+              <input class="field-control" value="/resource/models" />
+              <span class="field-suffix">JSON</span>
+            </span>
+            <span class="field-hint">Keep addons visually quiet and inside the control boundary.</span>
+          </label>
+        </div>
+
+        <div class="card">
+          <span class="label">TextField</span>
+          <label class="field-stack">
+            <span class="field-label">Model name <span class="required">*</span></span>
+            <input class="field-control" value="Qwen3 6B" />
+            <span class="field-hint">Use for ordinary single-line text input with optional hint text.</span>
+          </label>
+        </div>
+
+        <div class="card">
+          <span class="label">TextField states</span>
+          <label class="field-stack error">
+            <span class="field-label">Workspace path</span>
+            <input class="field-control" value="/workspace/missing" />
+            <span class="field-error">Path does not exist.</span>
+          </label>
+          <label class="field-stack success">
+            <span class="field-label">API endpoint</span>
+            <input class="field-control" value="/resource/models" />
+            <span class="field-hint">Validated endpoint.</span>
+          </label>
+          <label class="field-stack">
+            <span class="field-label">Disabled</span>
+            <input class="field-control" value="Managed by admin" disabled />
+          </label>
+        </div>
+
+        <div class="card">
+          <span class="label">PasswordField</span>
+          <label class="field-stack">
+            <span class="field-label">API key</span>
+            <span class="control-shell">
+              <input class="field-control" id="form-password-field" type="password" value="sk-local-demo" />
+              <button class="icon-button button" id="form-password-toggle" aria-label="Toggle password visibility">E</button>
+            </span>
+            <span class="field-hint">Use an icon button in React. This standalone demo uses E as the eye placeholder.</span>
+          </label>
+        </div>
+
+        <div class="card">
+          <span class="label">NumberField</span>
+          <label class="field-stack">
+            <span class="field-label">Memory limit</span>
+            <span class="control-shell">
+              <input class="field-control" id="form-memory-field" type="text" inputmode="numeric" value="2048" min="256" step="256" />
+              <span class="field-suffix">MB</span>
+              <span class="stepper">
+                <button type="button" data-form-step="-256" aria-label="Decrease memory">-</button>
+                <button type="button" data-form-step="256" aria-label="Increase memory">+</button>
+              </span>
+            </span>
+            <span class="field-hint">Use for quota/resource controls. Keep unit visible inside the control.</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="grid-wide">
+        <div class="card">
+          <span class="label">TextArea</span>
+          <label class="field-stack">
+            <span class="field-label">System prompt</span>
+            <textarea class="field-control form-textarea" id="form-textarea-field">You are a concise operator for admin workflows.</textarea>
+            <span class="field-hint"><span id="form-textarea-count">0</span> characters. Use for prompts, descriptions, hook scripts, and feedback.</span>
+          </label>
+        </div>
+
+        <div class="form-section">
+          <div>
+            <h2>FormSection</h2>
+            <p class="muted">Use as a full-width group inside drawers, settings panels, setup flows, and admin forms.</p>
+          </div>
+          <div class="field-row">
+            <label class="field-stack" style="flex: 1 1 180px;">
+              <span class="field-label">CPU</span>
+              <span class="control-shell">
+                <input class="field-control" value="2" />
+                <span class="field-suffix">cores</span>
+              </span>
+            </label>
+            <label class="field-stack" style="flex: 1 1 180px;">
+              <span class="field-label">Volume</span>
+              <span class="control-shell">
+                <input class="field-control" value="20" />
+                <span class="field-suffix">GB</span>
+              </span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-wide">
+        <div class="form-section">
+          <div>
+            <h2>SettingRow</h2>
+            <p class="muted">Use when a setting has title, description, and one control aligned at the row end.</p>
+          </div>
+          <div class="setting-row">
+            <div>
+              <h3>Developer mode</h3>
+              <p class="muted">Enable developer tools and debug switches for this session.</p>
+            </div>
+            <button class="toggle on" role="switch" aria-checked="true" data-toggle>
+              <span class="toggle-label">ON</span>
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </button>
+          </div>
+          <div class="setting-row">
+            <div>
+              <h3>Debug logging</h3>
+              <p class="muted">Print every API message and backend chunk to the browser console.</p>
+            </div>
+            <button class="toggle" role="switch" aria-checked="false" data-toggle>
+              <span class="toggle-label">OFF</span>
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div>
+            <h2>FieldGroup</h2>
+            <p class="muted">Use for tightly related inputs that should wrap cleanly on narrow screens.</p>
+          </div>
+          <div class="field-row">
+            <label class="field-stack" style="flex: 1 1 160px;">
+              <span class="field-label">Name</span>
+              <input class="field-control" value="enterprise-user-info" />
+            </label>
+            <label class="field-stack" style="flex: 1 1 160px;">
+              <span class="field-label">Level</span>
+              <input class="field-control" value="user" />
+            </label>
+          </div>
+          <div class="field-row actions-row">
+            <button class="button primary">Save</button>
+            <button class="button">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Overlay / Shell</h2>
+        <p class="muted">ModalFrame, ConfirmDialog, Drawer, ResizableDrawer, Popover, Tooltip and shared overlay header/footer patterns.</p>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <span class="label">ModalFrame</span>
+          <div class="shell-frame">
+            <div class="shell-header">
+              <strong>Modal title</strong>
+              <button class="button icon-button" aria-label="Close modal preview">X</button>
+            </div>
+            <div class="shell-body">
+              <p>Centered overlay for confirmations, setup flows, and compact forms.</p>
+              <input class="field-control" value="Modal field" />
+            </div>
+            <div class="shell-footer">
+              <button class="button">Cancel</button>
+              <button class="button primary">Save</button>
+            </div>
+          </div>
+          <button class="button" data-open-modal="confirm">Open ModalFrame</button>
+        </div>
+
+        <div class="card">
+          <span class="label">ConfirmDialog</span>
+          <div class="shell-frame">
+            <div class="shell-header">
+              <strong>Delete session</strong>
+              <button class="button icon-button" aria-label="Close confirm preview">X</button>
+            </div>
+            <div class="shell-body">
+              <div class="confirm-message">Dangerous operations require explicit confirmation before execution.</div>
+              <input class="field-control" value="type DELETE" aria-label="Confirm text preview" />
+            </div>
+            <div class="shell-footer">
+              <button class="button">Cancel</button>
+              <button class="button danger" disabled>Delete</button>
+            </div>
+          </div>
+          <button class="button danger" data-open-modal="danger">Open ConfirmDialog</button>
+        </div>
+
+        <div class="card">
+          <span class="label">Drawer</span>
+          <div class="shell-frame">
+            <div class="shell-header">
+              <strong>Drawer header</strong>
+              <button class="button icon-button" aria-label="Close drawer preview">X</button>
+            </div>
+            <div class="shell-body">
+              <p>Right-side shell for details, tools, file preview, and admin edit flows.</p>
+              <span class="path">width: 480px</span>
+            </div>
+            <div class="shell-footer">
+              <button class="button">Close</button>
+            </div>
+          </div>
+          <p class="muted">Use Drawer instead of ModalFrame when the user should keep page context visible.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">Popover</span>
+          <span class="popover-demo" data-overlay-popover>
+            <button class="button" data-overlay-popover-trigger aria-expanded="false">Open popover</button>
+            <span class="popover-panel">
+              <span class="shell-header"><strong>Quick actions</strong></span>
+              <span class="shell-body">
+                <button class="button">Rename</button>
+                <button class="button">Archive</button>
+                <button class="button danger">Delete</button>
+              </span>
+            </span>
+          </span>
+          <p class="muted">Use for small contextual controls. Larger content should use a drawer or modal.</p>
+        </div>
+
+        <div class="card">
+          <span class="label">Tooltip</span>
+          <span class="tooltip-demo">
+            <button class="button icon-button" aria-label="Refresh">R</button>
+            <span class="tooltip-bubble">Refresh current resource</span>
+          </span>
+          <p class="muted">Use for icon-only actions and dense controls. Tooltip text should be short.</p>
+        </div>
+      </div>
+
+      <div class="grid-wide">
+        <div class="card">
+          <span class="label">ResizableDrawer</span>
+          <div class="resizable-shell">
+            <div class="resizable-main">Main content area. Drawer width: <span id="overlay-drawer-width">320</span>px</div>
+            <button class="resize-handle" id="overlay-resize-handle" aria-label="Resize drawer"></button>
+            <aside class="resizable-drawer" id="overlay-resizable-drawer">
+              <div class="shell-header">
+                <strong>Inspector</strong>
+                <button class="button icon-button">X</button>
+              </div>
+              <div class="shell-body">
+                <p>Drag the handle to resize. Persist width in React only when user-resizable.</p>
+                <input class="field-control" value="/workspace/admin" />
+              </div>
+            </aside>
+          </div>
+        </div>
+
+        <div class="card">
+          <span class="label">ShellHeader / ShellFooter</span>
+          <div class="shell-frame">
+            <div class="shell-header">
+              <div>
+                <strong>Resource editor</strong>
+                <p class="muted">Header supports title, metadata, and close action.</p>
+              </div>
+              <button class="button icon-button">X</button>
+            </div>
+            <div class="shell-body">
+              <p>Body content is unopinionated. Avoid nesting cards inside this shell unless content is a repeated item.</p>
+            </div>
+            <div class="shell-footer">
+              <button class="button">Cancel</button>
+              <button class="button primary">Apply</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <table class="inventory">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Status</th>
+            <th>Use when</th>
+            <th>Do not use when</th>
+            <th>Required states</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>ModalFrame</td><td><span class="chip yellow">extract</span></td><td>Centered blocking overlay for short forms and confirmations.</td><td>The user needs to inspect page context while editing.</td><td>open, close, focus, escape, backdrop click</td></tr>
+          <tr><td>ConfirmDialog</td><td><span class="chip green">shared</span></td><td>Dangerous or irreversible actions require deliberate confirmation.</td><td>The action is low risk or undoable; use Button or ConfirmActionButton.</td><td>open, close, typed confirmation, disabled confirm, danger confirm</td></tr>
+          <tr><td>Drawer</td><td><span class="chip yellow">extract</span></td><td>Right-side details, edit forms, file previews, and tool drawers.</td><td>The content is a transient small menu.</td><td>open, close, mobile full-width</td></tr>
+          <tr><td>ResizableDrawer</td><td><span class="chip yellow">extract</span></td><td>User benefits from controlling side panel width.</td><td>The drawer is simple and fixed width is enough.</td><td>dragging, min/max, persisted width</td></tr>
+          <tr><td>Popover</td><td><span class="chip yellow">extract</span></td><td>Small contextual action menu near a trigger.</td><td>The content needs forms, scrolling, or complex layout.</td><td>open, close, outside click, keyboard</td></tr>
+          <tr><td>Tooltip</td><td><span class="chip yellow">extract</span></td><td>Icon-only controls need a short accessible label.</td><td>The content is required to complete a task.</td><td>hover, focus, hidden</td></tr>
+          <tr><td>ShellHeader / ShellFooter</td><td><span class="chip yellow">extract</span></td><td>Overlays need consistent title, metadata, close, and action areas.</td><td>The surface has no framed shell.</td><td>title, close, primary action, danger action</td></tr>
+        </tbody>
+      </table>
+
+      <div class="card">
+        <span class="label">Proposed path</span>
+        <span class="path">web/shared/components/shared/overlays/ModalFrame.jsx</span>
+        <span class="path">web/shared/components/shared/overlays/ConfirmDialog.jsx</span>
+        <span class="path">web/shared/components/shared/overlays/Drawer.jsx</span>
+        <span class="path">web/shared/components/shared/overlays/ResizableDrawer.jsx</span>
+        <span class="path">web/shared/components/shared/overlays/Popover.jsx</span>
+        <span class="path">web/shared/components/shared/overlays/Tooltip.jsx</span>
+        <span class="path">web/shared/components/shared/overlays/ShellHeader.jsx</span>
+        <span class="path">web/shared/components/shared/overlays/ShellFooter.jsx</span>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Disclosure</h2>
+        <p class="muted">Accordion, AnimatedCollapse and AnimatedChevron patterns.</p>
+      </div>
+      <div class="grid">
+        <div class="accordion" data-accordion>
+          <div class="accordion-item open">
+            <button class="accordion-trigger">Accordion item <span class="chevron">v</span></button>
+            <div class="accordion-body">Shared accordion keeps border radius, color and animation consistent.</div>
+          </div>
+          <div class="accordion-item">
+            <button class="accordion-trigger">Second item <span class="chevron">v</span></button>
+            <div class="accordion-body">Use this for locally scoped informational content.</div>
+          </div>
+        </div>
+
+        <div class="accordion" data-accordion>
+          <div class="accordion-item open">
+            <button class="accordion-trigger">Animated primitives <span class="chevron">v</span></button>
+            <div class="accordion-body">The shared React code exports lower-level collapse and chevron primitives for custom shells.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Feedback / Loading / Status</h2>
+        <p class="muted">Empty, error, alert, loading skeleton, and status display patterns for async screens.</p>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <span class="label">EmptyState</span>
+          <div class="empty-state">
+            <span class="empty-icon">E</span>
+            <h2>No sessions found</h2>
+            <p class="muted">Adjust filters or create a new session to continue.</p>
+            <button class="button primary">New session</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <span class="label">ErrorBlock</span>
+          <div class="feedback-block error" id="error-block">
+            <h3>Request failed</h3>
+            <p class="muted">The backend returned an error while loading MCP tools.</p>
+            <div class="error-detail">GET /resource/mcp-tools -> 502 Bad Gateway</div>
+            <div class="row">
+              <button class="button danger" id="retry-error">Retry</button>
+              <button class="button">View logs</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <span class="label">AlertNotice</span>
+          <div class="feedback-block warning">
+            <h3>Configuration changed</h3>
+            <p class="muted">Some changes restart the active worker after save.</p>
+          </div>
+          <div class="feedback-block info">
+            <h3>Network fallback</h3>
+            <p class="muted">SSE is available when WebSocket is blocked by the network.</p>
+          </div>
+          <div class="feedback-block success">
+            <h3>Sync complete</h3>
+            <p class="muted">All provider metadata is up to date.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-wide">
+        <div class="card">
+          <span class="label">StatusRow medium detail</span>
+          <div class="status-row running">
+            <div>
+              <h3>running</h3>
+              <p>Agent is executing a tool call.</p>
+            </div>
+            <span class="chip purple live-chip"><span class="live-mark">R</span>active</span>
+          </div>
+          <div class="status-row success">
+            <div>
+              <h3>success</h3>
+              <p>Operation finished successfully.</p>
+            </div>
+            <span class="chip green">done</span>
+          </div>
+          <div class="status-row pending">
+            <div>
+              <h3>pending</h3>
+              <p>Waiting for approval or backend state.</p>
+            </div>
+            <span class="chip">waiting</span>
+          </div>
+          <div class="status-row error">
+            <div>
+              <h3>error</h3>
+              <p>Failure state that needs attention.</p>
+            </div>
+            <span class="chip red">failed</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <span class="label">StatusRow compact</span>
+          <div class="status-compact-list">
+            <div class="status-row compact running">
+              <span class="compact-code">run</span>
+              <span class="compact-text">Tool call executing</span>
+              <span class="chip purple live-chip"><span class="live-mark">R</span>active</span>
+            </div>
+            <div class="status-row compact success">
+              <span class="compact-code">ok</span>
+              <span class="compact-text">Provider sync complete</span>
+              <span class="chip green">done</span>
+            </div>
+            <div class="status-row compact pending">
+              <span class="compact-code">wait</span>
+              <span class="compact-text">Approval required</span>
+              <span class="chip">waiting</span>
+            </div>
+            <div class="status-row compact error">
+              <span class="compact-code">err</span>
+              <span class="compact-text">Tool call failed</span>
+              <span class="chip red">failed</span>
+            </div>
+          </div>
+          <p class="muted">Use compact rows inside dense tables, sidebars, popovers, and task lists.</p>
+        </div>
+      </div>
+
+      <div class="grid-wide">
+        <div class="card">
+          <span class="label">StatusRow full detail with progress</span>
+          <div class="status-row full running">
+            <div class="status-full-header">
+              <div>
+                <h3>tool call running</h3>
+                <p>8 of 12 steps completed. Current step is invoking the MCP enterprise user info tool.</p>
+              </div>
+              <div class="row">
+                <span class="chip purple">8/12</span>
+                <span class="chip purple live-chip"><span class="live-mark">R</span>active</span>
+              </div>
+            </div>
+            <div class="status-meta">
+              <span>task: agent-runner-42</span>
+              <span>started: 09:42:18</span>
+              <span>worker: admin-ui</span>
+            </div>
+            <button class="button status-collapse-toggle" data-status-collapse aria-expanded="true" aria-controls="shared-full-status-steps">Step details</button>
+            <div class="status-step-details" id="shared-full-status-steps">
+              <div class="status-step-list">
+                <div class="status-step done">
+                  <div class="status-step-rail"><span class="status-step-icon" aria-label="Completed"></span><span class="status-step-connector"></span></div>
+                  <div class="status-step-content">
+                    <div class="status-step-name">Resolve request context</div>
+                    <div class="status-step-desc">Loaded workspace, session id, cwd, and selected model.</div>
+                  </div>
+                </div>
+                <div class="status-step done">
+                  <div class="status-step-rail"><span class="status-step-icon" aria-label="Completed"></span><span class="status-step-connector"></span></div>
+                  <div class="status-step-content">
+                    <div class="status-step-name">Prepare MCP call</div>
+                    <div class="status-step-desc">Validated tool schema and attached user identity parameters.</div>
+                  </div>
+                </div>
+                <div class="status-step running">
+                  <div class="status-step-rail"><span class="status-step-icon" aria-label="Running"></span><span class="status-step-connector"></span></div>
+                  <div class="status-step-content">
+                    <div class="status-step-name">Fetch user profile</div>
+                    <div class="status-step-desc">Waiting for backend chunk from enterprise user info service.</div>
+                  </div>
+                </div>
+                <div class="status-step pending">
+                  <div class="status-step-rail"><span class="status-step-icon" aria-label="Pending"></span><span class="status-step-connector"></span></div>
+                  <div class="status-step-content">
+                    <div class="status-step-name">Stream response</div>
+                    <div class="status-step-desc">Render partial response and tool result once data is available.</div>
+                  </div>
+                </div>
+                <div class="status-step pending">
+                  <div class="status-step-rail"><span class="status-step-icon" aria-label="Pending"></span></div>
+                  <div class="status-step-content">
+                    <div class="status-step-name">Persist session state</div>
+                    <div class="status-step-desc">Save message metadata and update active task status.</div>
+                  </div>
+                </div>
+              </div>
+              <p class="muted">Latest event: received tool parameters and waiting for backend chunk.</p>
+            </div>
+            <div class="progress-strip" aria-label="Full status progress">
+              <span class="progress-fill"></span>
+            </div>
+            <p class="muted">Use this full detail row anywhere ProgressSummary would otherwise be needed.</p>
+            <div class="status-actions">
+              <button class="button">View logs</button>
+              <button class="button">Open task</button>
+              <button class="button danger">Stop</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-wide">
+        <div class="card loading-demo" id="loading-demo">
+          <div class="row-between">
+            <span class="label">SkeletonTable</span>
+            <button class="button" id="toggle-loading">Show loaded</button>
+          </div>
+          <table class="skeleton-table">
+            <thead>
+              <tr><th>Name</th><th>Status</th><th>Updated</th><th>Actions</th></tr>
+            </thead>
+            <tbody data-loading-rows>
+              <tr><td><div class="skeleton" style="height: 14px;"></div></td><td><div class="skeleton" style="height: 14px;"></div></td><td><div class="skeleton" style="height: 14px;"></div></td><td><div class="skeleton" style="height: 14px;"></div></td></tr>
+              <tr><td><div class="skeleton" style="height: 14px;"></div></td><td><div class="skeleton" style="height: 14px;"></div></td><td><div class="skeleton" style="height: 14px;"></div></td><td><div class="skeleton" style="height: 14px;"></div></td></tr>
+              <tr><td><div class="skeleton" style="height: 14px;"></div></td><td><div class="skeleton" style="height: 14px;"></div></td><td><div class="skeleton" style="height: 14px;"></div></td><td><div class="skeleton" style="height: 14px;"></div></td></tr>
+            </tbody>
+            <tbody data-loaded-rows>
+              <tr><td>enterprise-user-info</td><td><span class="chip green">online</span></td><td>09:42</td><td><button class="button">Open</button></td></tr>
+              <tr><td>model-router</td><td><span class="chip">pending</span></td><td>09:39</td><td><button class="button">Open</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <span class="label">SkeletonCard / SkeletonLine</span>
+          <div class="skeleton-card">
+            <div class="row">
+              <div class="skeleton" style="width: 36px; height: 36px;"></div>
+              <div style="flex: 1;">
+                <div class="skeleton" style="width: 72%; height: 14px; margin-bottom: 8px;"></div>
+                <div class="skeleton" style="width: 48%; height: 12px;"></div>
+              </div>
+            </div>
+            <div class="skeleton" style="height: 12px;"></div>
+            <div class="skeleton" style="width: 86%; height: 12px;"></div>
+            <div class="skeleton" style="width: 62%; height: 12px;"></div>
+          </div>
+          <p class="muted">Skeleton shape must match loaded content. Avoid generic loading indicators.</p>
+        </div>
+      </div>
+
+      <table class="inventory">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Status</th>
+            <th>Use when</th>
+            <th>Do not use when</th>
+            <th>Required states</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>EmptyState</td><td><span class="chip yellow">extract</span></td><td>A list, table, search, or resource page has no visible records.</td><td>Data is still loading; use Skeleton.</td><td>empty, filtered empty, action, no action</td></tr>
+          <tr><td>ErrorBlock</td><td><span class="chip yellow">extract</span></td><td>A request or workflow failed and needs context plus recovery action.</td><td>The message is field-level; use FieldError.</td><td>message, detail, retry, dismiss</td></tr>
+          <tr><td>AlertNotice</td><td><span class="chip yellow">extract</span></td><td>Non-blocking information, warning, success, or policy notice.</td><td>The user must confirm before continuing; use ConfirmDialog.</td><td>info, success, warning, error, dismissible</td></tr>
+          <tr><td>StatusRow</td><td><span class="chip yellow">extract</span></td><td>Status needs title, description, progress, and scan-friendly severity.</td><td>The status is only metadata; use StatusChip.</td><td>compact, medium, full, progress summary, step list, collapsed details, running, success, pending, error, live active</td></tr>
+          <tr><td>StatusChip</td><td><span class="chip yellow">extract</span></td><td>Compact state label in tables, headers, and cards.</td><td>Status needs explanation or action.</td><td>semantic colors, uppercase, disabled</td></tr>
+          <tr><td>SkeletonLine / SkeletonCard / SkeletonTable</td><td><span class="chip yellow">extract</span></td><td>Initial data load for text, cards, panels, tables, or drawers.</td><td>Work is running after content is already visible.</td><td>shape match, shimmer, loaded</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Charts</h2>
+        <p class="muted">AuditCharts, ChartSkeleton and shared chart theme utilities represented without external libraries.</p>
+      </div>
+      <div class="grid-wide">
+        <div class="chart">
+          <div class="label">AuditCharts</div>
+          <svg viewBox="0 0 640 210" role="img" aria-label="Audit chart preview">
+            <g stroke="var(--border-subtle)" stroke-width="1">
+              <line x1="24" y1="40" x2="616" y2="40"></line>
+              <line x1="24" y1="80" x2="616" y2="80"></line>
+              <line x1="24" y1="120" x2="616" y2="120"></line>
+              <line x1="24" y1="160" x2="616" y2="160"></line>
+            </g>
+            <path d="M24 170 C92 142 120 120 176 132 C242 146 280 62 348 78 C432 98 464 42 616 64 L616 190 L24 190 Z" fill="var(--blue)" opacity="0.15"></path>
+            <path d="M24 170 C92 142 120 120 176 132 C242 146 280 62 348 78 C432 98 464 42 616 64" fill="none" stroke="var(--blue)" stroke-width="2"></path>
+            <path d="M24 152 C120 152 144 112 216 120 C278 126 312 136 380 96 C456 52 508 128 616 108" fill="none" stroke="var(--green)" stroke-width="2"></path>
+            <path d="M24 184 C120 178 156 166 220 172 C312 182 356 124 426 132 C500 140 548 116 616 128" fill="none" stroke="var(--purple)" stroke-width="2"></path>
+          </svg>
+          <div class="legend">
+            <span style="color: var(--blue);">session</span>
+            <span style="color: var(--green);">login</span>
+            <span style="color: var(--purple);">skill</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <span class="label">ChartSkeleton</span>
+          <div class="skeleton" style="height: 150px;"></div>
+          <div class="row">
+            <div class="skeleton" style="width: 68px; height: 10px;"></div>
+            <div class="skeleton" style="width: 58px; height: 10px;"></div>
+            <div class="skeleton" style="width: 78px; height: 10px;"></div>
+          </div>
+          <div class="skeleton" style="width: 88%; height: 16px;"></div>
+          <div class="skeleton" style="width: 62%; height: 16px;"></div>
+          <div class="skeleton" style="width: 74%; height: 16px;"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Shared Hooks And Candidate Shells</h2>
+        <p class="muted">useResizable plus component types that should be extracted next.</p>
+      </div>
+
+      <div class="grid-wide">
+        <div class="card">
+          <span class="label">useResizable</span>
+          <div class="resizable-shell">
+            <div class="resizable-panel" id="resizable-panel">
+              Drag the handle. Width: <span id="resize-width">280</span>px
+            </div>
+            <button class="resize-handle" id="resize-handle" aria-label="Resize panel"></button>
+            <div style="flex: 1; padding: 12px; color: var(--text-dim);">Shared hook demo surface</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <span class="label">Form primitives candidate</span>
+          <label>
+            <span class="label">TextField</span>
+            <input class="field" value="Qwen3 6B" />
+          </label>
+          <label>
+            <span class="label">TextArea</span>
+            <textarea class="textarea">Reusable field styling appears repeatedly in admin and user UI.</textarea>
+          </label>
+        </div>
+      </div>
+
+      <div class="drawer-demo">
+        <div class="drawer-main">
+          <span class="label">ResizableDrawer candidate</span>
+          <p class="muted">UserEditDrawer, MCPToolDrawer, FilePreviewDrawer and WebTerminalDrawer share a similar shell.</p>
+        </div>
+        <aside class="drawer-side">
+          <div class="row-between">
+            <strong>Drawer header</strong>
+            <button class="button">Close</button>
+          </div>
+          <p class="muted">Drawer body with sections, actions and copyable metadata.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Auth Components</h2>
+        <p class="muted">LoginPage and RegistrationWizardModal represented as direct preview states.</p>
+      </div>
+      <div class="grid-wide">
+        <div class="auth-card">
+          <div class="row" style="justify-content: center; margin-bottom: 12px;">
+            <span class="icon">B</span>
+            <strong style="font-size: 18px;">Sign in</strong>
+          </div>
+          <label>
+            <span class="label">Username</span>
+            <input class="field" value="admin" />
+          </label>
+          <div style="height: 10px;"></div>
+          <label>
+            <span class="label">Password</span>
+            <input class="field" type="password" value="password" />
+          </label>
+          <div style="height: 14px;"></div>
+          <button class="button primary" style="width: 100%;">Sign in</button>
+          <div style="height: 10px;"></div>
+          <button class="button" data-open-modal="registration" style="width: 100%;">Open RegistrationWizardModal</button>
+        </div>
+
+        <div class="card">
+          <span class="label">TerminalSession</span>
+          <div class="row">
+            <button class="button" id="terminal-toggle">Mount TerminalSession preview</button>
+            <span class="chip" id="terminal-chip">idle</span>
+          </div>
+          <div class="terminal" id="terminal-box">TerminalSession opens a live WebSocket in React. This standalone HTML keeps it as a manual placeholder.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Admin Local Candidate</h2>
+        <p class="muted">LiveToggleButton exists under admin today and is a good shared component candidate.</p>
+      </div>
+      <button class="button" id="live-toggle" aria-pressed="true" style="border-left: 2px solid var(--green); color: var(--green);">
+        <span class="icon">R</span>
+        <span>LIVE</span>
+      </button>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Agent Usage Rules</h2>
+        <p class="muted">Use this section before building a new admin or user UI view.</p>
+      </div>
+      <div class="reference-grid">
+        <div class="reference-card rule">
+          <span class="label">First lookup</span>
+          <strong>Check shared before creating UI</strong>
+          <p class="muted">Search <span class="path">web/shared/components</span> and this reference before adding a new component.</p>
+        </div>
+        <div class="reference-card rule">
+          <span class="label">Styling</span>
+          <strong>CSS variables only</strong>
+          <p class="muted">Do not hardcode colors. Border radius stays at 4px or less. No box-shadow.</p>
+        </div>
+        <div class="reference-card rule">
+          <span class="label">Icons</span>
+          <strong>Use lucide-react</strong>
+          <p class="muted">All icons use currentColor and strokeWidth 1.5. Prefer symbols over text-only controls.</p>
+        </div>
+        <div class="reference-card rule">
+          <span class="label">State coverage</span>
+          <strong>Default, hover, focus, disabled, loading, empty, error</strong>
+          <p class="muted">If a component can enter one of these states, the reference should show it.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Component Catalog</h2>
+        <p class="muted">Current shared components, app-local components worth sharing, and extraction candidates.</p>
+      </div>
+      <table class="inventory">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Component</th>
+            <th>Status</th>
+            <th>Path</th>
+            <th>Use when</th>
+            <th>Required states</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Action</td><td>Button / IconButton / TabSwitchButton</td><td><span class="chip yellow">extract</span></td><td class="path">candidate: web/shared/components/shared/actions</td><td>Page commands, compact action buttons, dense local switching.</td><td>default, hover, focus, disabled, active</td></tr>
+          <tr><td>Action</td><td>ModeSwitchButton / ToggleButton / LiveToggleButton</td><td><span class="chip yellow">extract</span></td><td class="path">candidate: shared actions + admin LiveToggleButton</td><td>Preview/source modes, local pressed state, live refresh controls.</td><td>pressed, paused, error, refreshing</td></tr>
+          <tr><td>Action</td><td>AsyncActionButton / MenuButton / SplitButton</td><td><span class="chip yellow">extract</span></td><td class="path">candidate: shared action primitives</td><td>Transient command status, overflow actions, default action plus variants.</td><td>running, success, error, menu open</td></tr>
+          <tr><td>Action</td><td>ConfirmActionButton</td><td><span class="chip yellow">extract</span></td><td class="path">candidate: shared danger action wrapper</td><td>Small danger action flows that require typed confirmation.</td><td>idle, confirm open, mismatch, confirmed</td></tr>
+          <tr><td>Control</td><td>Dropdown</td><td><span class="chip green">shared</span></td><td class="path">web/shared/components/shared/Dropdown.jsx</td><td>Single-value select, searchable select, compact toolbar select.</td><td>hover, focus, disabled, empty results</td></tr>
+          <tr><td>Control</td><td>Toggle</td><td><span class="chip green">shared</span></td><td class="path">web/shared/components/shared/Toggle.jsx</td><td>Boolean setting with ON/OFF state.</td><td>on, off, disabled</td></tr>
+          <tr><td>Control</td><td>ListInputDropdown / ListInputType</td><td><span class="chip yellow">extract</span></td><td class="path">candidate: shared form controls</td><td>Multi-value selection or typed token entry.</td><td>empty, selected, duplicate ignored, clear all</td></tr>
+          <tr><td>Control</td><td>Tabs</td><td><span class="chip green">shared</span></td><td class="path">web/shared/components/shared/Tabs.jsx</td><td>Switching views inside a panel or page.</td><td>active, hover, disabled</td></tr>
+          <tr><td>Form</td><td>FieldLabel / FieldHint / FieldError / FieldControl</td><td><span class="chip yellow">extract</span></td><td class="path">candidate: web/shared/components/shared/forms</td><td>Every field shell, addon, validation, and inline help message.</td><td>required, optional, focus, error, success</td></tr>
+          <tr><td>Form</td><td>TextField / PasswordField / NumberField / TextArea</td><td><span class="chip yellow">extract</span></td><td class="path">candidate: web/shared/components/shared/forms</td><td>Settings, admin drawers, MCP dialogs, setup forms, hook editors.</td><td>focus, disabled, error, hint, unit, reveal</td></tr>
+          <tr><td>Form</td><td>FormSection / SettingRow / FieldGroup</td><td><span class="chip yellow">extract</span></td><td class="path">candidate: web/shared/components/shared/forms</td><td>Grouped form layouts and title/description/control setting rows.</td><td>section header, actions, nested rows, mobile wrap</td></tr>
+          <tr><td>Feedback</td><td>ConfirmDialog</td><td><span class="chip green">shared</span></td><td class="path">web/shared/components/shared/ConfirmDialog.jsx</td><td>Danger actions, stop task, delete history, re-trigger task.</td><td>normal, danger, type-to-confirm</td></tr>
+          <tr><td>Feedback</td><td>EmptyState / ErrorBlock / AlertNotice</td><td><span class="chip yellow">extract</span></td><td class="path">candidate: shared feedback</td><td>No data, request failure, warning notice.</td><td>empty, warning, error, retry</td></tr>
+          <tr><td>Loading</td><td>ChartSkeleton</td><td><span class="chip green">shared</span></td><td class="path">web/shared/components/admin/charts/ChartSkeleton.jsx</td><td>Chart loading state.</td><td>skeleton only, no spinner</td></tr>
+          <tr><td>Loading</td><td>SkeletonLine / SkeletonTable / SkeletonCard</td><td><span class="chip yellow">extract</span></td><td class="path">candidate: shared skeletons</td><td>Initial page, table, card, drawer loading.</td><td>shape matches real content</td></tr>
+          <tr><td>Display</td><td>Chip</td><td><span class="chip green">shared</span></td><td class="path">web/shared/components/shared/Chip.jsx</td><td>Compact status or metadata labels.</td><td>semantic colors, uppercase label</td></tr>
+          <tr><td>Display</td><td>CopyButton / CopyableBlock / CodeBlockFrame</td><td><span class="chip yellow">mixed</span></td><td class="path">shared CopyButton, candidate blocks</td><td>Code, JSON, path, logs, tool parameters.</td><td>hover copy, copied check, error-safe</td></tr>
+          <tr><td>Display</td><td>StatusRow / StatusChip</td><td><span class="chip yellow">extract</span></td><td class="path">candidate: shared status</td><td>Running, success, pending, failed states.</td><td>2px left border, no status dots</td></tr>
+          <tr><td>Overlay</td><td>ModalFrame / ConfirmDialog / Drawer / ResizableDrawer / Popover / Tooltip</td><td><span class="chip yellow">mixed</span></td><td class="path">shared ConfirmDialog, candidate: shared shells</td><td>Settings modal, MCP drawer, file preview drawer, user edit drawer, contextual menus.</td><td>open, close, focus, resize, typed confirmation, outside click</td></tr>
+          <tr><td>Navigation</td><td>ResizableSidebar / NavItem / PanelHeader</td><td><span class="chip yellow">extract</span></td><td class="path">candidate: shared layout</td><td>Admin/user sidebars and dense panel headers.</td><td>active, collapsed, resize, tooltip</td></tr>
+          <tr><td>Charts</td><td>AuditCharts / ChartTheme</td><td><span class="chip green">shared</span></td><td class="path">web/shared/components/admin/charts</td><td>Audit timeline and chart theme consistency.</td><td>loading, empty, hidden series</td></tr>
+          <tr><td>Terminal</td><td>TerminalSession</td><td><span class="chip green">shared</span></td><td class="path">web/shared/components/terminal/TerminalSession.jsx</td><td>User terminal and admin console shell session.</td><td>connecting, ready, disconnected, reconnect</td></tr>
+          <tr><td>Auth</td><td>LoginPage / RegistrationWizardModal</td><td><span class="chip green">shared</span></td><td class="path">web/shared/components/auth</td><td>User/admin login and registration flows.</td><td>validation, submitting, error, submitted</td></tr>
+          <tr><td>Agent workflow</td><td>MessageBubble / ToolCallCard / PlanApprovalCard</td><td><span class="chip purple">app-local</span></td><td class="path">web/user/src/components/chat</td><td>Conversation and approval flows.</td><td>streaming, compact, error, approval pending</td></tr>
+          <tr><td>Agent workflow</td><td>TaskTree / TaskNode / CanvasPanel</td><td><span class="chip purple">app-local</span></td><td class="path">web/user/src/components/canvas</td><td>Agent progress canvas and active task tree.</td><td>running, success, error, minimized</td></tr>
+          <tr><td>Domain picker</td><td>ModelSelector / SkillPicker / ToolPicker / MCPServerPicker</td><td><span class="chip purple">app-local</span></td><td class="path">web/user/src/components</td><td>Domain-specific selectable resources.</td><td>search, empty, selected, disabled</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Extraction Priorities</h2>
+        <p class="muted">Extract these before building more screens with duplicated inline styles.</p>
+      </div>
+      <div class="priority-list">
+        <div class="priority-card">
+          <strong>Form primitives</strong>
+          <p class="muted">TextField, TextArea, NumberField, FieldLabel, FieldHint, SettingRow, FormSection.</p>
+          <span class="path">repeated in settings, user edit, MCP, setup flows</span>
+        </div>
+        <div class="priority-card">
+          <strong>Buttons and actions</strong>
+          <p class="muted">Button, IconButton, TabSwitchButton, ModeSwitchButton, LiveToggleButton, AsyncActionButton, MenuButton, SplitButton.</p>
+          <span class="path">prevents ad hoc button sizing and hover states</span>
+        </div>
+        <div class="priority-card">
+          <strong>List inputs</strong>
+          <p class="muted">ListInputDropdown and ListInputType for multi-value chips.</p>
+          <span class="path">use for models, skills, tools, tags, filters</span>
+        </div>
+        <div class="priority-card">
+          <strong>Overlay shells</strong>
+          <p class="muted">ModalFrame, ConfirmDialog, Drawer, ResizableDrawer, Popover, Tooltip.</p>
+          <span class="path">common across admin/user drawers and setup dialogs</span>
+        </div>
+        <div class="priority-card">
+          <strong>Empty/error/loading</strong>
+          <p class="muted">EmptyState, ErrorBlock, AlertNotice, SkeletonTable, SkeletonCard.</p>
+          <span class="path">required for robust async screens</span>
+        </div>
+        <div class="priority-card">
+          <strong>Copyable display</strong>
+          <p class="muted">CopyableBlock, CodeBlockFrame, JsonBlock, LogBlock, KeyValueList.</p>
+          <span class="path">tool calls, logs, files, params, API keys</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Page Recipes</h2>
+        <p class="muted">Reusable combinations an agent should prefer when composing new screens.</p>
+      </div>
+      <div class="reference-grid">
+        <div class="reference-card shared">
+          <span class="label">Settings page</span>
+          <strong>SectionHeader + SettingRow + Toggle/ListInput</strong>
+          <ul class="compact-list">
+            <li>Use full-width sections, not nested cards.</li>
+            <li>Put actions at row end.</li>
+            <li>Use ConfirmDialog for destructive changes.</li>
+          </ul>
+        </div>
+        <div class="reference-card shared">
+          <span class="label">Data page</span>
+          <strong>Toolbar + DateRangePicker + Table + EmptyState</strong>
+          <ul class="compact-list">
+            <li>Show skeleton before data loads.</li>
+            <li>Keep filters compact and scan-friendly.</li>
+            <li>Use CopyButton for IDs and paths.</li>
+          </ul>
+        </div>
+        <div class="reference-card local">
+          <span class="label">Agent workflow</span>
+          <strong>Message flow + CanvasPanel + TaskTree</strong>
+          <ul class="compact-list">
+            <li>Status uses 2px left border.</li>
+            <li>Tool output goes in CopyableBlock.</li>
+            <li>Approvals use explicit action cards.</li>
+          </ul>
+        </div>
+        <div class="reference-card candidate">
+          <span class="label">Drawer workflow</span>
+          <strong>ResizableDrawer + DrawerHeader + FormSection</strong>
+          <ul class="compact-list">
+            <li>Use for details, file preview, server tools.</li>
+            <li>Keep footer actions stable.</li>
+            <li>Persist width only when the drawer is user-resizable.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-root" id="confirm-modal" aria-hidden="true">
+    <div class="modal-panel">
+      <div class="row-between">
+        <strong id="confirm-title">Demo confirmation</strong>
+        <button class="button" data-close-modal>Close</button>
+      </div>
+      <p class="muted" id="confirm-message" style="margin: 12px 0;">This dialog is rendered by the shared ConfirmDialog pattern.</p>
+      <div id="confirm-type-wrap" style="display: none; margin-bottom: 12px;">
+        <span class="label">Type DELETE to confirm</span>
+        <input class="field" id="confirm-type" />
+      </div>
+      <div class="row" style="justify-content: flex-end;">
+        <button class="button" data-close-modal>Cancel</button>
+        <button class="button primary" id="confirm-action">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-root" id="registration-modal" aria-hidden="true">
+    <div class="modal-panel">
+      <div class="row-between">
+        <strong>RegistrationWizardModal</strong>
+        <button class="button" data-close-modal>Close</button>
+      </div>
+      <div style="height: 12px;"></div>
+      <div class="row">
+        <span class="chip blue">account</span>
+        <span class="chip">runner</span>
+        <span class="chip">review</span>
+      </div>
+      <div style="height: 12px;"></div>
+      <label>
+        <span class="label">Username</span>
+        <input class="field" value="new-user" />
+      </label>
+      <div style="height: 10px;"></div>
+      <label>
+        <span class="label">Runner type</span>
+        <input class="field" value="auto_scale" />
+      </label>
+      <div style="height: 14px;"></div>
+      <div class="row" style="justify-content: flex-end;">
+        <button class="button" data-close-modal>Cancel</button>
+        <button class="button primary">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.querySelectorAll('[data-tab-switch-button]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const tabSwitch = button.closest('[data-tab-switch]')
+        tabSwitch.querySelectorAll('[data-tab-switch-button]').forEach((item) => item.classList.remove('active'))
+        button.classList.add('active')
+        tabSwitch.classList.remove('index-0', 'index-1', 'index-2')
+        tabSwitch.classList.add(`index-${button.dataset.index}`)
+      })
+    })
+
+    document.querySelectorAll('[data-mode-button]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const switcher = button.closest('[data-mode-switch]')
+        const mode = button.dataset.mode
+        switcher.classList.toggle('source', mode === 'source')
+        switcher.classList.toggle('preview', mode === 'preview')
+        switcher.querySelectorAll('[data-mode-button]').forEach((item) => item.classList.remove('active'))
+        button.classList.add('active')
+      })
+    })
+
+    const actionsLiveToggle = document.getElementById('actions-live-toggle')
+    const actionsLiveError = document.getElementById('actions-live-error')
+    const actionsLiveLabel = actionsLiveToggle.querySelector('.live-label')
+
+    actionsLiveToggle.addEventListener('click', () => {
+      if (actionsLiveToggle.classList.contains('error')) {
+        actionsLiveToggle.classList.remove('error')
+        actionsLiveToggle.classList.remove('paused')
+        actionsLiveLabel.textContent = 'Live'
+        actionsLiveToggle.setAttribute('aria-pressed', 'true')
+        return
+      }
+      const active = actionsLiveToggle.getAttribute('aria-pressed') === 'true'
+      actionsLiveToggle.setAttribute('aria-pressed', String(!active))
+      actionsLiveToggle.classList.toggle('paused', active)
+      actionsLiveLabel.textContent = active ? 'Paused' : 'Live'
+    })
+
+    actionsLiveError.addEventListener('click', () => {
+      actionsLiveToggle.classList.add('error')
+      actionsLiveLabel.textContent = 'Retry'
+      actionsLiveToggle.setAttribute('aria-pressed', 'false')
+    })
+
+    document.querySelectorAll('[data-toggle-button]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const next = button.getAttribute('aria-pressed') !== 'true'
+        button.setAttribute('aria-pressed', String(next))
+        button.textContent = button.textContent.replace(next ? 'off' : 'on', next ? 'on' : 'off')
+      })
+    })
+
+    document.querySelectorAll('[data-action-copy]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const copyable = button.closest('[data-action-copyable]')
+        const text = copyable.dataset.copyText || ''
+        button.classList.add('copied')
+        window.setTimeout(() => {
+          button.classList.remove('copied')
+        }, 800)
+
+        try {
+          if (navigator.clipboard) await navigator.clipboard.writeText(text)
+        } catch (error) {
+          console.warn('Clipboard unavailable in this preview', error)
+        }
+      })
+    })
+
+    document.querySelectorAll('[data-async-action]').forEach((button) => {
+      button.addEventListener('click', () => {
+        if (button.dataset.state === 'running') return
+        const label = button.querySelector('.async-label')
+        const icon = button.querySelector('.async-icon')
+        button.dataset.state = 'running'
+        button.disabled = true
+        icon.textContent = 'R'
+        label.textContent = 'Running'
+
+        window.setTimeout(() => {
+          const failed = button.dataset.fail === 'true'
+          button.dataset.state = failed ? 'error' : 'success'
+          button.disabled = false
+          icon.textContent = failed ? '!' : 'OK'
+          label.textContent = failed ? 'Retry failed' : 'Done'
+
+          window.setTimeout(() => {
+            button.dataset.state = 'idle'
+            icon.textContent = 'R'
+            label.textContent = failed ? 'Retry sync' : 'Run task'
+          }, 1100)
+        }, 900)
+      })
+    })
+
+    document.querySelectorAll('[data-action-menu-trigger]').forEach((trigger) => {
+      trigger.addEventListener('click', (event) => {
+        event.stopPropagation()
+        const wrapper = trigger.closest('.action-menu-wrapper')
+        const menu = wrapper.querySelector('[data-action-menu]')
+        const willOpen = !menu.classList.contains('open')
+        document.querySelectorAll('[data-action-menu]').forEach((item) => item.classList.remove('open'))
+        document.querySelectorAll('[data-action-menu-trigger]').forEach((item) => item.setAttribute('aria-expanded', 'false'))
+        menu.classList.toggle('open', willOpen)
+        trigger.setAttribute('aria-expanded', String(willOpen))
+      })
+    })
+
+    document.querySelectorAll('.menu-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        item.closest('[data-action-menu]')?.classList.remove('open')
+        document.querySelectorAll('[data-action-menu-trigger]').forEach((trigger) => trigger.setAttribute('aria-expanded', 'false'))
+      })
+    })
+
+    document.addEventListener('click', () => {
+      document.querySelectorAll('[data-action-menu]').forEach((menu) => menu.classList.remove('open'))
+      document.querySelectorAll('[data-action-menu-trigger]').forEach((trigger) => trigger.setAttribute('aria-expanded', 'false'))
+    })
+
+    const splitPrimary = document.querySelector('[data-split-primary]')
+    splitPrimary.addEventListener('click', () => {
+      splitPrimary.textContent = 'Running'
+      window.setTimeout(() => {
+        splitPrimary.textContent = 'Run'
+      }, 900)
+    })
+
+    const confirmOpen = document.querySelector('[data-confirm-open]')
+    const confirmPanelInline = document.querySelector('[data-confirm-panel]')
+    const confirmInputInline = document.querySelector('[data-confirm-input]')
+    const confirmSubmitInline = document.querySelector('[data-confirm-submit]')
+    const confirmCancelInline = document.querySelector('[data-confirm-cancel]')
+
+    confirmOpen.addEventListener('click', () => {
+      confirmPanelInline.classList.add('open')
+      confirmInputInline.value = ''
+      confirmSubmitInline.disabled = true
+      confirmInputInline.focus()
+    })
+
+    confirmInputInline.addEventListener('input', () => {
+      confirmSubmitInline.disabled = confirmInputInline.value !== 'DELETE'
+    })
+
+    confirmCancelInline.addEventListener('click', () => {
+      confirmPanelInline.classList.remove('open')
+    })
+
+    confirmSubmitInline.addEventListener('click', () => {
+      confirmPanelInline.classList.remove('open')
+      confirmOpen.textContent = 'Deleted'
+      window.setTimeout(() => {
+        confirmOpen.textContent = 'Delete history'
+      }, 1100)
+    })
+
+    const closeAllDropdowns = (except) => {
+      document.querySelectorAll('[data-dropdown]').forEach((dropdown) => {
+        if (dropdown !== except) dropdown.classList.remove('open')
+      })
+    }
+
+    document.querySelectorAll('[data-dropdown]').forEach((dropdown) => {
+      const trigger = dropdown.querySelector('[data-dropdown-trigger]')
+      const label = dropdown.querySelector('[data-dropdown-label]')
+      const filter = dropdown.querySelector('[data-filter]')
+
+      trigger.addEventListener('click', (event) => {
+        if (event.target.closest('[data-remove-chip], [data-clear-chips], input, textarea')) return
+        event.stopPropagation()
+        const nextOpen = !dropdown.classList.contains('open')
+        closeAllDropdowns(dropdown)
+        dropdown.classList.toggle('open', nextOpen)
+        if (nextOpen && filter) filter.focus()
+      })
+
+      trigger.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        if (event.target.closest('[data-remove-chip], [data-clear-chips], input, textarea')) return
+        event.preventDefault()
+        event.stopPropagation()
+        const nextOpen = !dropdown.classList.contains('open')
+        closeAllDropdowns(dropdown)
+        dropdown.classList.toggle('open', nextOpen)
+        if (nextOpen && filter) filter.focus()
+      })
+
+      dropdown.querySelectorAll('.dropdown-option').forEach((option) => {
+        option.addEventListener('click', () => {
+          if (option.matches('[data-chip-option]')) return
+          dropdown.querySelectorAll('.dropdown-option').forEach((item) => item.classList.remove('active'))
+          option.classList.add('active')
+          if (label) label.textContent = option.dataset.value
+          dropdown.classList.remove('open')
+        })
+      })
+
+      if (filter) {
+        filter.addEventListener('input', () => {
+          const query = filter.value.toLowerCase()
+          dropdown.querySelectorAll('.dropdown-option').forEach((option) => {
+            option.style.display = option.textContent.toLowerCase().includes(query) ? 'flex' : 'none'
+          })
+        })
+      }
+    })
+
+    document.addEventListener('click', () => closeAllDropdowns())
+
+    const chipValues = (list) => Array.from(list.querySelectorAll('[data-chip-value]'))
+      .map((chip) => chip.dataset.chipValue)
+
+    const syncChipListState = (root) => {
+      const list = root.querySelector('[data-chip-list]')
+      if (!list) return
+      const hasValues = chipValues(list).length > 0
+      list.classList.toggle('has-values', hasValues)
+      const clearButton = root.querySelector('[data-clear-chips]')
+      if (clearButton) clearButton.disabled = !hasValues
+    }
+
+    const createChip = (value) => {
+      const chip = document.createElement('span')
+      chip.className = 'value-chip'
+      chip.dataset.chipValue = value
+
+      const text = document.createElement('span')
+      text.textContent = value
+      chip.appendChild(text)
+
+      const remove = document.createElement('button')
+      remove.type = 'button'
+      remove.className = 'chip-remove'
+      remove.dataset.removeChip = ''
+      remove.setAttribute('aria-label', `Remove ${value}`)
+      remove.textContent = 'x'
+      chip.appendChild(remove)
+
+      return chip
+    }
+
+    const addChipValue = (root, value) => {
+      const trimmed = value.trim()
+      if (!trimmed) return
+      const list = root.querySelector('[data-chip-list]')
+      if (chipValues(list).includes(trimmed)) return
+      const input = list.querySelector('[data-chip-input]')
+      const chip = createChip(trimmed)
+      if (input) list.insertBefore(chip, input)
+      else list.insertBefore(chip, list.querySelector('.chip-field-actions'))
+      syncChipListState(root)
+    }
+
+    const clearChipValues = (root) => {
+      root.querySelectorAll('[data-chip-value]').forEach((chip) => chip.remove())
+      root.querySelector('[data-chip-input]')?.focus()
+      syncChipListState(root)
+    }
+
+    const syncChipDropdownOptions = (root) => {
+      const selected = new Set(chipValues(root.querySelector('[data-chip-list]')))
+      let visibleCount = 0
+      root.querySelectorAll('[data-chip-option]').forEach((option) => {
+        const isSelected = selected.has(option.dataset.value)
+        option.classList.toggle('active', false)
+        option.style.display = isSelected ? 'none' : 'flex'
+        if (!isSelected) visibleCount += 1
+      })
+      const empty = root.querySelector('[data-chip-empty]')
+      if (empty) empty.style.display = visibleCount === 0 ? 'block' : 'none'
+    }
+
+    document.querySelectorAll('[data-chip-select]').forEach((root) => {
+      root.querySelectorAll('[data-chip-option]').forEach((option) => {
+        option.addEventListener('click', (event) => {
+          event.stopPropagation()
+          addChipValue(root, option.dataset.value)
+          syncChipDropdownOptions(root)
+        })
+      })
+
+      root.addEventListener('click', (event) => {
+        if (event.target.matches('[data-remove-chip]')) {
+          event.stopPropagation()
+          event.target.closest('[data-chip-value]')?.remove()
+          syncChipDropdownOptions(root)
+          syncChipListState(root)
+        }
+      })
+
+      root.querySelector('[data-clear-chips]').addEventListener('click', () => {
+        clearChipValues(root)
+        syncChipDropdownOptions(root)
+      })
+
+      syncChipDropdownOptions(root)
+      syncChipListState(root)
+    })
+
+    document.querySelectorAll('[data-chip-entry]').forEach((root) => {
+      const input = root.querySelector('[data-chip-input]')
+
+      input.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return
+        event.preventDefault()
+        addChipValue(root, input.value)
+        input.value = ''
+      })
+
+      root.addEventListener('click', (event) => {
+        if (event.target.matches('[data-remove-chip]')) {
+          event.target.closest('[data-chip-value]')?.remove()
+          input.focus()
+          syncChipListState(root)
+        }
+      })
+
+      root.querySelector('[data-clear-chips]').addEventListener('click', () => {
+        clearChipValues(root)
+      })
+
+      syncChipListState(root)
+    })
+
+    document.querySelectorAll('[data-toggle]').forEach((toggle) => {
+      toggle.addEventListener('click', () => {
+        if (toggle.disabled) return
+        const next = !toggle.classList.contains('on')
+        toggle.classList.toggle('on', next)
+        toggle.setAttribute('aria-checked', String(next))
+        toggle.querySelector('.toggle-label').textContent = next ? 'ON' : 'OFF'
+      })
+    })
+
+    document.querySelectorAll('[data-tabs]').forEach((tabs) => {
+      const group = tabs.dataset.tabs
+      tabs.querySelectorAll('[data-tab]').forEach((tab) => {
+        tab.addEventListener('click', () => {
+          if (tab.disabled) return
+          tabs.querySelectorAll('[data-tab]').forEach((item) => item.classList.remove('active'))
+          tab.classList.add('active')
+          document.querySelectorAll(`[data-panel^="${group}:"]`).forEach((panel) => panel.classList.remove('active'))
+          const panel = document.querySelector(`[data-panel="${group}:${tab.dataset.tab}"]`)
+          if (panel) panel.classList.add('active')
+        })
+      })
+    })
+
+    document.querySelectorAll('[data-accordion] .accordion-trigger').forEach((trigger) => {
+      trigger.addEventListener('click', () => {
+        trigger.closest('.accordion-item').classList.toggle('open')
+      })
+    })
+
+    document.querySelectorAll('[data-copy]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const copyable = button.closest('[data-copyable]')
+        const text = copyable.childNodes[0].nodeValue.trim()
+        button.classList.add('copied')
+        setTimeout(() => {
+          button.classList.remove('copied')
+        }, 800)
+
+        try {
+          await navigator.clipboard.writeText(text)
+        } catch {
+          console.warn('Clipboard unavailable in this preview')
+        }
+      })
+    })
+
+    const formPasswordField = document.getElementById('form-password-field')
+    const formPasswordToggle = document.getElementById('form-password-toggle')
+    formPasswordToggle.addEventListener('click', () => {
+      const hidden = formPasswordField.type === 'password'
+      formPasswordField.type = hidden ? 'text' : 'password'
+      formPasswordToggle.textContent = hidden ? 'H' : 'E'
+    })
+
+    const formMemoryField = document.getElementById('form-memory-field')
+    document.querySelectorAll('[data-form-step]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const step = Number(button.dataset.formStep)
+        const min = Number(formMemoryField.min)
+        const next = Math.max(min, Number(formMemoryField.value || min) + step)
+        formMemoryField.value = String(next)
+      })
+    })
+
+    const formTextareaField = document.getElementById('form-textarea-field')
+    const formTextareaCount = document.getElementById('form-textarea-count')
+    const syncFormTextareaCount = () => {
+      formTextareaCount.textContent = String(formTextareaField.value.length)
+    }
+    formTextareaField.addEventListener('input', syncFormTextareaCount)
+    syncFormTextareaCount()
+
+    document.querySelectorAll('[data-range]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const end = new Date()
+        const start = new Date(end)
+        const range = button.dataset.range
+        if (range === 'all') {
+          document.getElementById('start-time').value = ''
+          document.getElementById('end-time').value = ''
+          return
+        }
+        const hours = range === '24h' ? 24 : range === '7d' ? 168 : 720
+        start.setHours(start.getHours() - hours)
+        document.getElementById('start-time').value = start.toISOString().slice(0, 16).replace('T', ' ')
+        document.getElementById('end-time').value = end.toISOString().slice(0, 16).replace('T', ' ')
+      })
+    })
+
+    const confirmModal = document.getElementById('confirm-modal')
+    const confirmTitle = document.getElementById('confirm-title')
+    const confirmMessage = document.getElementById('confirm-message')
+    const confirmTypeWrap = document.getElementById('confirm-type-wrap')
+    const confirmType = document.getElementById('confirm-type')
+    const confirmAction = document.getElementById('confirm-action')
+
+    const openConfirm = (mode) => {
+      const danger = mode === 'danger'
+      confirmTitle.textContent = danger ? 'Danger confirmation' : 'Demo confirmation'
+      confirmMessage.textContent = danger ? 'Type DELETE to enable the confirm button.' : 'This dialog is rendered by the shared ConfirmDialog pattern.'
+      confirmTypeWrap.style.display = danger ? 'block' : 'none'
+      confirmType.value = ''
+      confirmAction.textContent = danger ? 'Delete' : 'Confirm'
+      confirmAction.classList.toggle('danger', danger)
+      confirmAction.classList.toggle('primary', !danger)
+      confirmAction.disabled = danger
+      confirmModal.classList.add('open')
+      confirmModal.setAttribute('aria-hidden', 'false')
+      if (danger) confirmType.focus()
+    }
+
+    document.querySelectorAll('[data-open-modal]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const target = button.dataset.openModal
+        if (target === 'registration') {
+          document.getElementById('registration-modal').classList.add('open')
+          document.getElementById('registration-modal').setAttribute('aria-hidden', 'false')
+        } else {
+          openConfirm(target)
+        }
+      })
+    })
+
+    document.querySelectorAll('[data-close-modal]').forEach((button) => {
+      button.addEventListener('click', () => {
+        button.closest('.modal-root').classList.remove('open')
+        button.closest('.modal-root').setAttribute('aria-hidden', 'true')
+      })
+    })
+
+    document.querySelectorAll('.modal-root').forEach((modal) => {
+      modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+          modal.classList.remove('open')
+          modal.setAttribute('aria-hidden', 'true')
+        }
+      })
+    })
+
+    confirmType.addEventListener('input', () => {
+      confirmAction.disabled = confirmType.value !== 'DELETE'
+    })
+
+    confirmAction.addEventListener('click', () => {
+      if (confirmAction.disabled) return
+      confirmModal.classList.remove('open')
+      confirmModal.setAttribute('aria-hidden', 'true')
+    })
+
+    const retryError = document.getElementById('retry-error')
+    const errorBlock = document.getElementById('error-block')
+    if (retryError && errorBlock) {
+      retryError.addEventListener('click', () => {
+        retryError.textContent = 'Retrying'
+        errorBlock.classList.remove('error')
+        errorBlock.classList.add('warning')
+        errorBlock.querySelector('h3').textContent = 'Retrying request'
+
+        window.setTimeout(() => {
+          retryError.textContent = 'Retry'
+          errorBlock.classList.remove('warning')
+          errorBlock.classList.add('error')
+          errorBlock.querySelector('h3').textContent = 'Request failed'
+        }, 1000)
+      })
+    }
+
+    const loadingDemo = document.getElementById('loading-demo')
+    const toggleLoading = document.getElementById('toggle-loading')
+    if (loadingDemo && toggleLoading) {
+      toggleLoading.addEventListener('click', () => {
+        const loaded = !loadingDemo.classList.contains('loaded')
+        loadingDemo.classList.toggle('loaded', loaded)
+        toggleLoading.textContent = loaded ? 'Show skeleton' : 'Show loaded'
+      })
+    }
+
+    document.querySelectorAll('[data-status-collapse]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const details = document.getElementById(button.getAttribute('aria-controls'))
+        const expanded = button.getAttribute('aria-expanded') === 'true'
+        button.setAttribute('aria-expanded', String(!expanded))
+        details.classList.toggle('collapsed', expanded)
+      })
+    })
+
+    document.querySelectorAll('[data-overlay-popover-trigger]').forEach((trigger) => {
+      trigger.addEventListener('click', (event) => {
+        event.stopPropagation()
+        const popover = trigger.closest('[data-overlay-popover]')
+        const nextOpen = !popover.classList.contains('open')
+        document.querySelectorAll('[data-overlay-popover]').forEach((item) => item.classList.remove('open'))
+        popover.classList.toggle('open', nextOpen)
+        trigger.setAttribute('aria-expanded', String(nextOpen))
+      })
+    })
+
+    document.addEventListener('click', () => {
+      document.querySelectorAll('[data-overlay-popover]').forEach((item) => item.classList.remove('open'))
+      document.querySelectorAll('[data-overlay-popover-trigger]').forEach((item) => item.setAttribute('aria-expanded', 'false'))
+    })
+
+    const overlayDrawer = document.getElementById('overlay-resizable-drawer')
+    const overlayDrawerWidth = document.getElementById('overlay-drawer-width')
+    const overlayResizeHandle = document.getElementById('overlay-resize-handle')
+    overlayResizeHandle.addEventListener('mousedown', (event) => {
+      event.preventDefault()
+      const startX = event.clientX
+      const startWidth = overlayDrawer.getBoundingClientRect().width
+      overlayResizeHandle.classList.add('dragging')
+
+      const onMove = (moveEvent) => {
+        const next = Math.max(240, Math.min(520, startWidth - (moveEvent.clientX - startX)))
+        overlayDrawer.style.width = `${next}px`
+        overlayDrawerWidth.textContent = String(Math.round(next))
+      }
+
+      const onUp = () => {
+        overlayResizeHandle.classList.remove('dragging')
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+      }
+
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+    })
+
+    const resizePanel = document.getElementById('resizable-panel')
+    const resizeWidth = document.getElementById('resize-width')
+    const resizeHandle = document.getElementById('resize-handle')
+    resizeHandle.addEventListener('mousedown', (event) => {
+      event.preventDefault()
+      const startX = event.clientX
+      const startWidth = resizePanel.getBoundingClientRect().width
+      resizeHandle.classList.add('dragging')
+
+      const onMove = (moveEvent) => {
+        const next = Math.max(180, Math.min(420, startWidth + moveEvent.clientX - startX))
+        resizePanel.style.width = `${next}px`
+        resizeWidth.textContent = Math.round(next)
+      }
+
+      const onUp = () => {
+        resizeHandle.classList.remove('dragging')
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+      }
+
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+    })
+
+    const terminalToggle = document.getElementById('terminal-toggle')
+    const terminalChip = document.getElementById('terminal-chip')
+    const terminalBox = document.getElementById('terminal-box')
+    terminalToggle.addEventListener('click', () => {
+      const mounted = terminalChip.textContent === 'mounted'
+      if (mounted) {
+        terminalChip.textContent = 'idle'
+        terminalChip.className = 'chip'
+        terminalToggle.textContent = 'Mount TerminalSession preview'
+        terminalBox.innerHTML = 'TerminalSession opens a live WebSocket in React. This standalone HTML keeps it as a manual placeholder.'
+      } else {
+        terminalChip.textContent = 'mounted'
+        terminalChip.className = 'chip green'
+        terminalToggle.textContent = 'Unmount TerminalSession preview'
+        terminalBox.innerHTML = '<span class="prompt">admin@priva</span>:~$ echo shared-terminal-session<br />shared-terminal-session<br /><span class="prompt">admin@priva</span>:~$'
+      }
+    })
+
+    const liveToggle = document.getElementById('live-toggle')
+    liveToggle.addEventListener('click', () => {
+      const active = liveToggle.getAttribute('aria-pressed') === 'true'
+      liveToggle.setAttribute('aria-pressed', String(!active))
+      liveToggle.style.borderLeftColor = active ? 'var(--border)' : 'var(--green)'
+      liveToggle.style.color = active ? 'var(--text-secondary)' : 'var(--green)'
+    })
+
+    const languageToggle = document.getElementById('language-toggle')
+    const languageLabel = document.getElementById('language-label')
+    languageToggle.addEventListener('click', () => {
+      languageLabel.textContent = languageLabel.textContent === 'EN' ? 'ZH' : 'EN'
+    })
+  </script>
+</body>
+</html>

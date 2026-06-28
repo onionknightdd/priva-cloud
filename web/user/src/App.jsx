@@ -1,5 +1,4 @@
 import { Suspense, useCallback, useEffect, useState } from 'react'
-import NavBar from './components/layout/NavBar'
 import MainLayout from './components/layout/MainLayout'
 import ConfirmDialog from './components/shared/ConfirmDialog'
 import ErrorBoundary from './components/shared/ErrorBoundary'
@@ -130,7 +129,6 @@ export default function App() {
     <>
       <ConnectionBanner />
       <ErrorBoundary resetKey={user?.username}>
-        <NavBar />
         <MainLayout />
       </ErrorBoundary>
       <ConfirmDialog />

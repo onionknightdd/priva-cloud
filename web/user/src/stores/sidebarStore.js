@@ -90,6 +90,17 @@ const useSidebarStore = create((set, get) => ({
     expandedCwds: { ...s.expandedCwds, [cwd]: !s.expandedCwds[cwd] },
   })),
 
+  // Expand or collapse every workdir group at once (PROJECT header toggle).
+  setAllGroupsExpanded: (expanded) => set((s) => {
+    const next = {}
+    for (const g of s.groups) next[g.cwd] = expanded
+    // Preserve cwds not yet in `groups` (e.g. a freshly created session).
+    for (const cwd of Object.keys(s.expandedCwds)) {
+      if (!(cwd in next)) next[cwd] = expanded
+    }
+    return { expandedCwds: next }
+  }),
+
   updateSession: (id, data) => set((s) => ({
     sessions: s.sessions.map((sess) => (sess.id === id ? { ...sess, ...data } : sess)),
   })),
