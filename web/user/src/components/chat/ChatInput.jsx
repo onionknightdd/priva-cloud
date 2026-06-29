@@ -158,6 +158,31 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
     }
   }, [pendingOptimize]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Seeded composer (e.g. "Create Skill with Agent"): prefill a skill chip +
+  // prompt text once this view is mounted. Payload is { skill?, text?, autoSend? }
+  // (a bare string is treated as auto-sent text for back-compat). When autoSend is
+  // not set, we just prefill so the user can refine the prompt before sending.
+  const pendingComposerSend = useChatStore((s) => s.pendingComposerSend)
+  const clearPendingComposerSend = useChatStore((s) => s.clearPendingComposerSend)
+  useEffect(() => {
+    if (!pendingComposerSend) return
+    const payload = typeof pendingComposerSend === 'string'
+      ? { text: pendingComposerSend, autoSend: true }
+      : (pendingComposerSend || {})
+    if ('skill' in payload) setSelectedSkill(payload.skill || null)
+    if (payload.text != null) setInputText(payload.text)
+    clearPendingComposerSend()
+    if (!payload.autoSend) return undefined
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => { handleSendRef.current?.() })
+      raf1._inner = raf2
+    })
+    return () => {
+      cancelAnimationFrame(raf1)
+      if (raf1._inner) cancelAnimationFrame(raf1._inner)
+    }
+  }, [pendingComposerSend]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Close permission menu on click outside
   useEffect(() => {
     if (!showPermissionMenu) return

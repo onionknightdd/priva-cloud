@@ -7,6 +7,7 @@ import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 
 const CanvasPanel = lazyWithChunkReload(() => import('./CanvasPanel'))
 const DataUsageView = lazyWithChunkReload(() => import('../userdata/DataUsageView'))
+const PluginsView = lazyWithChunkReload(() => import('../plugins/PluginsView'))
 const WebTerminalDrawer = lazyWithChunkReload(() => import('../terminal/WebTerminalDrawer'))
 
 function LazyPanel({ children }) {
@@ -26,8 +27,9 @@ export default function MainLayout() {
 
   const effectiveSidebarWidth = collapsed ? 48 : sidebarWidth
   // The NavBar was removed; the sidebar is the only persistent chrome. The content
-  // area swaps between the chat view and the Data & Usage view (Phase 2 adds more).
+  // area swaps between the chat view, Data & Usage, and Plugins/Customize.
   const isData = activeNavTab === 'userdata'
+  const isPlugins = activeNavTab === 'plugins'
 
   return (
     <div
@@ -55,6 +57,8 @@ export default function MainLayout() {
       >
         {isData ? (
           <LazyPanel><DataUsageView /></LazyPanel>
+        ) : isPlugins ? (
+          <LazyPanel><PluginsView /></LazyPanel>
         ) : (
           <>
             <ChatPanel />
@@ -66,7 +70,7 @@ export default function MainLayout() {
           </>
         )}
       </div>
-      {!isData && terminalOpen && (
+      {!isData && !isPlugins && terminalOpen && (
         <Suspense fallback={null}>
           <WebTerminalDrawer />
         </Suspense>

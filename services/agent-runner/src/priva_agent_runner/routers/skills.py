@@ -11,8 +11,8 @@ from priva_common.models.auth import UserRecord
 from priva_common.models.skills import (
     SkillDetailResponse,
     SkillFileResponse,
-    SkillLevel,
     SkillListResponse,
+    SkillScope,
     SkillUploadResponse,
     SkillsConfigRequest,
     SkillsConfigResponse,
@@ -21,7 +21,7 @@ from priva_common.audit_log import AuditEntry, get_audit_logger
 from ..deps import require_user
 from priva_common import skill_exclude as _skill_exclude
 from ..services.skills import (
-    _get_skills_dir,
+    _resolve_skills_dir,
     _safe_resolve,
     delete_skill,
     get_file_content,
@@ -66,32 +66,35 @@ async def update_skills_config(
     return SkillsConfigResponse(skill_exclude=list(request.skill_exclude or []))
 
 
-@router.get("/{level}/{name}", response_model=SkillDetailResponse)
+@router.get("/detail", response_model=SkillDetailResponse)
 async def get_skill(
-    level: SkillLevel,
     name: str,
+    scope: SkillScope,
+    cwd: str | None = None,
     user: UserRecord = Depends(require_user),
 ):
-    return get_skill_detail(level, name, user.username)
+    return get_skill_detail(scope, cwd, name, user.username)
 
 
-@router.get("/{level}/{name}/file", response_model=SkillFileResponse)
+@router.get("/file", response_model=SkillFileResponse)
 async def get_skill_file(
-    level: SkillLevel,
     name: str,
     path: str,
+    scope: SkillScope,
+    cwd: str | None = None,
     user: UserRecord = Depends(require_user),
 ):
-    return get_file_content(level, name, path, user.username)
+    return get_file_content(scope, cwd, name, path, user.username)
 
 
-@router.get("/{level}/{name}/download")
+@router.get("/download")
 async def download_skill_endpoint(
-    level: SkillLevel,
     name: str,
+    scope: SkillScope,
+    cwd: str | None = None,
     user: UserRecord = Depends(require_user),
 ):
-    skills_dir = _get_skills_dir(level, user.username)
+    skills_dir = _resolve_skills_dir(scope, cwd)
     _safe_resolve(skills_dir, name)
     skill_dir = skills_dir / name
     if not skill_dir.is_dir():
@@ -117,7 +120,7 @@ async def download_skill_endpoint(
             actor=user.username,
             action="skill.downloaded",
             target=name,
-            details={"level": level},
+            details={"scope": scope, "cwd": cwd},
         )
     )
 
@@ -135,11 +138,14 @@ async def download_skill_endpoint(
 @router.post("/upload", response_model=SkillUploadResponse)
 async def upload_skill_endpoint(
     file: UploadFile = File(...),
-    level: SkillLevel = Form("project"),
+    scope: SkillScope = Form("personal"),
+    cwd: str | None = Form(None),
     user: UserRecord = Depends(require_user),
 ):
     file_data = await file.read()
-    skill_name, skill_level = upload_skill(level, file_data, file.filename or "upload.zip", user.username)
+    skill_name, skill_scope, skill_cwd = upload_skill(
+        scope, cwd, file_data, file.filename or "upload.zip", user.username
+    )
 
     audit = get_audit_logger()
     audit.append(
@@ -147,24 +153,26 @@ async def upload_skill_endpoint(
             actor=user.username,
             action="skill.uploaded",
             target=skill_name,
-            details={"level": skill_level},
+            details={"scope": skill_scope, "cwd": skill_cwd},
         )
     )
 
     return SkillUploadResponse(
         name=skill_name,
-        level=skill_level,
+        scope=skill_scope,
+        cwd=skill_cwd,
         message=f"Skill '{skill_name}' uploaded successfully",
     )
 
 
-@router.delete("/{level}/{name}")
+@router.delete("/item")
 async def delete_skill_endpoint(
-    level: SkillLevel,
     name: str,
+    scope: SkillScope,
+    cwd: str | None = None,
     user: UserRecord = Depends(require_user),
 ):
-    delete_skill(level, name, user.username)
+    delete_skill(scope, cwd, name, user.username)
 
     audit = get_audit_logger()
     audit.append(
@@ -172,7 +180,7 @@ async def delete_skill_endpoint(
             actor=user.username,
             action="skill.deleted",
             target=name,
-            details={"level": level},
+            details={"scope": scope, "cwd": cwd},
         )
     )
 

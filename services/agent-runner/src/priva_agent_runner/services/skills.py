@@ -16,8 +16,10 @@ from priva_common.models.skills import (
     FileTreeNode,
     SkillDetailResponse,
     SkillFileResponse,
+    SkillGroup,
     SkillLevel,
     SkillListResponse,
+    SkillScope,
     SkillSummary,
 )
 from priva_common.config import get_settings
@@ -82,6 +84,57 @@ def _get_skills_dir(level: SkillLevel, username: str | None = None) -> Path:
         raise HTTPException(400, "Username required for project-level skills")
     # Maps to SDK setting_sources=["project"] → {cwd}/.claude/skills/
     return Path(base) / username / ".claude" / "skills"
+
+
+# ---------------------------------------------------------------------------
+# Per-workdir + personal discovery (the listing/CRUD API)
+#
+# ``personal`` skills live in ``~/.claude/skills`` (SDK setting_sources=["user"]).
+# ``workdir`` skills live in ``{cwd}/.claude/skills`` for each of the user's
+# project directories — enumerated the same way the sessions endpoint does
+# (``list_sessions(directory=None)`` distinct cwds ∪ the default workspace).
+# This is independent of the agent-run allowlist (``compute_enabled_skill_names``)
+# and the flat-by-name ``skill_exclude`` denylist, which are left unchanged.
+# ---------------------------------------------------------------------------
+
+def _personal_skills_dir() -> Path:
+    return Path.home() / ".claude" / "skills"
+
+
+def _default_workspace(username: str) -> str:
+    settings = get_settings()
+    base = os.path.expanduser(settings.server.work_dir)
+    return str(Path(base) / username)
+
+
+def _list_user_workdirs(username: str) -> list[str]:
+    """Distinct session cwds ∪ the user's default workspace, in stable order."""
+    cwds: list[str] = []
+    seen: set[str] = set()
+    default_ws = _default_workspace(username)
+    cwds.append(default_ws)
+    seen.add(default_ws)
+    try:
+        from claude_agent_sdk import list_sessions
+        for s in list_sessions(directory=None):
+            cwd = getattr(s, "cwd", None)
+            if cwd and cwd not in seen:
+                seen.add(cwd)
+                cwds.append(cwd)
+    except Exception:
+        logger.warning("list_sessions failed during skill workdir enumeration", exc_info=True)
+    return cwds
+
+
+def _resolve_skills_dir(scope: SkillScope, cwd: str | None) -> Path:
+    """Map a (scope, cwd) pair to the on-disk ``.claude/skills`` directory."""
+    if scope == "personal":
+        return _personal_skills_dir()
+    if scope == "workdir":
+        if not cwd or not os.path.isabs(cwd):
+            raise HTTPException(400, "An absolute 'cwd' is required for workdir-scoped skills")
+        return Path(cwd) / ".claude" / "skills"
+    raise HTTPException(400, f"Unknown skill scope: {scope}")
 
 
 def _get_skill_exclude(username: str) -> list[str]:
@@ -223,49 +276,64 @@ def _safe_resolve(base: Path, relative: str) -> Path:
     return resolved
 
 
+def _scan_skills_dir(
+    skills_dir: Path, scope: SkillScope, cwd: str | None, exclude: set[str]
+) -> list[SkillSummary]:
+    """List the skills directly under one ``.claude/skills`` directory."""
+    out: list[SkillSummary] = []
+    if not skills_dir.exists():
+        return out
+    personal_dir_str = str(_personal_skills_dir().resolve())
+    for entry in sorted(skills_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        # Skip workdir symlinks pointing into ~/.claude/skills — those are
+        # listed under the "personal" group instead.
+        if scope == "workdir" and entry.is_symlink():
+            try:
+                target = str(Path(os.readlink(entry)).resolve())
+                if target.startswith(personal_dir_str):
+                    continue
+            except (OSError, ValueError):
+                pass
+        skill_md = entry / "SKILL.md"
+        if not skill_md.exists():
+            continue
+        fm = _parse_frontmatter(skill_md)
+        out.append(
+            SkillSummary(
+                name=entry.name,
+                scope=scope,
+                cwd=cwd,
+                description=fm.get("description"),
+                file_count=_count_files(entry),
+                enabled=entry.name not in exclude,
+            )
+        )
+    return out
+
+
 def list_skills(username: str) -> SkillListResponse:
-    skills: list[SkillSummary] = []
+    """All skills for the user: personal (~/.claude/skills) + one group per
+    workdir ({cwd}/.claude/skills). Empty workdir groups are omitted."""
     exclude = set(_get_skill_exclude(username))
 
-    for level in ("project", "global"):
-        skills_dir = _get_skills_dir(level, username)
-        if not skills_dir.exists():
-            continue
-        for entry in sorted(skills_dir.iterdir()):
-            if not entry.is_dir():
-                continue
-            # Skip symlinks in project dir that point to global — they'll be
-            # listed under the "global" level instead.
-            if level == "project" and entry.is_symlink():
-                try:
-                    target = str(Path(os.readlink(entry)).resolve())
-                    global_dir_str = str(_get_skills_dir("global").resolve())
-                    if target.startswith(global_dir_str):
-                        continue
-                except (OSError, ValueError):
-                    pass
-            skill_md = entry / "SKILL.md"
-            if not skill_md.exists():
-                continue
-            fm = _parse_frontmatter(skill_md)
-            skills.append(
-                SkillSummary(
-                    name=entry.name,
-                    level=level,
-                    description=fm.get("description"),
-                    file_count=_count_files(entry),
-                    enabled=entry.name not in exclude,
-                )
-            )
+    personal = _scan_skills_dir(_personal_skills_dir(), "personal", None, exclude)
 
-    return SkillListResponse(skills=skills)
+    groups: list[SkillGroup] = []
+    for cwd in _list_user_workdirs(username):
+        skills = _scan_skills_dir(Path(cwd) / ".claude" / "skills", "workdir", cwd, exclude)
+        if skills:
+            groups.append(SkillGroup(cwd=cwd, skills=skills))
+
+    return SkillListResponse(personal=personal, groups=groups)
 
 
-def get_skill_detail(level: SkillLevel, name: str, username: str) -> SkillDetailResponse:
-    skills_dir = _get_skills_dir(level, username)
+def get_skill_detail(scope: SkillScope, cwd: str | None, name: str, username: str) -> SkillDetailResponse:
+    skills_dir = _resolve_skills_dir(scope, cwd)
     skill_path = _safe_resolve(skills_dir, name)
     if not skill_path.is_dir():
-        raise HTTPException(404, f"Skill '{name}' not found at {level} level")
+        raise HTTPException(404, f"Skill '{name}' not found")
 
     skill_md = skill_path / "SKILL.md"
     fm = _parse_frontmatter(skill_md) if skill_md.exists() else {}
@@ -273,7 +341,8 @@ def get_skill_detail(level: SkillLevel, name: str, username: str) -> SkillDetail
 
     return SkillDetailResponse(
         name=name,
-        level=level,
+        scope=scope,
+        cwd=cwd,
         description=fm.get("description"),
         frontmatter=fm if fm else None,
         tree=tree,
@@ -281,8 +350,8 @@ def get_skill_detail(level: SkillLevel, name: str, username: str) -> SkillDetail
     )
 
 
-def get_file_content(level: SkillLevel, name: str, path: str, username: str) -> SkillFileResponse:
-    skills_dir = _get_skills_dir(level, username)
+def get_file_content(scope: SkillScope, cwd: str | None, name: str, path: str, username: str) -> SkillFileResponse:
+    skills_dir = _resolve_skills_dir(scope, cwd)
     skill_path = _safe_resolve(skills_dir, name)
     if not skill_path.is_dir():
         raise HTTPException(404, f"Skill '{name}' not found")
@@ -306,7 +375,9 @@ def get_file_content(level: SkillLevel, name: str, path: str, username: str) -> 
     )
 
 
-def upload_skill(level: SkillLevel, file_data: bytes, filename: str, username: str) -> tuple[str, SkillLevel]:
+def upload_skill(
+    scope: SkillScope, cwd: str | None, file_data: bytes, filename: str, username: str
+) -> tuple[str, SkillScope, str | None]:
     # Validate file size
     if len(file_data) > MAX_UPLOAD_SIZE:
         raise HTTPException(413, f"File exceeds {MAX_UPLOAD_SIZE // (1024*1024)}MB size limit")
@@ -361,7 +432,7 @@ def upload_skill(level: SkillLevel, file_data: bytes, filename: str, username: s
     skill_name = fm["name"]
 
     # Extract to target directory
-    target_dir = _get_skills_dir(level, username)
+    target_dir = _resolve_skills_dir(scope, cwd)
     target_dir.mkdir(parents=True, exist_ok=True)
     dest = target_dir / skill_name
 
@@ -387,7 +458,7 @@ def upload_skill(level: SkillLevel, file_data: bytes, filename: str, username: s
             file_dest.parent.mkdir(parents=True, exist_ok=True)
             file_dest.write_bytes(content)
 
-    return skill_name, level
+    return skill_name, scope, cwd
 
 
 def _extract_zip(data: bytes) -> tuple[list[str], callable]:
@@ -426,10 +497,10 @@ def _extract_tar(data: bytes, mode: str) -> tuple[list[str], callable]:
     return members, read_file
 
 
-def delete_skill(level: SkillLevel, name: str, username: str) -> None:
-    skills_dir = _get_skills_dir(level, username)
+def delete_skill(scope: SkillScope, cwd: str | None, name: str, username: str) -> None:
+    skills_dir = _resolve_skills_dir(scope, cwd)
     skill_path = _safe_resolve(skills_dir, name)
     if not skill_path.is_dir():
-        raise HTTPException(404, f"Skill '{name}' not found at {level} level")
+        raise HTTPException(404, f"Skill '{name}' not found")
 
     shutil.rmtree(skill_path)

@@ -89,6 +89,112 @@ export default function ChatPanel() {
     return activeCanvasTab === tab
   }
 
+  // The chat header is a permanent fixture — rendered in both the empty/welcome
+  // state and the active conversation. The session name is simply empty when no
+  // session is active.
+  const headerBar = (
+    <div
+      className="flex items-center justify-between px-4 flex-shrink-0"
+      style={{
+        height: 40,
+        borderBottom: '1px solid var(--border-subtle)',
+        background: 'var(--bg-surface)',
+      }}
+    >
+      <div className="flex items-center gap-1 min-w-0" style={{ marginRight: 12 }}>
+        <span
+          className="truncate"
+          style={{ color: 'var(--text-secondary)', fontSize: 13, minWidth: 0 }}
+          title={sessionTitle}
+        >
+          {sessionTitle}
+        </span>
+        {sessionId && (
+          <span className="flex-shrink-0" title={t('sidebar.copySessionId')}>
+            <CopyButton content={sessionId} inline />
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {terminalFeatureEnabled && (
+          <button
+            type="button"
+            onClick={toggleTerminal}
+            title={terminalActiveCount > 0
+              ? t('terminal.openWithCount', { count: terminalActiveCount })
+              : t('terminal.open')}
+            style={{
+              position: 'relative',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 26,
+              height: 26,
+              border: 'none',
+              background: 'transparent',
+              color: terminalOpen || terminalActiveCount > 0 ? 'var(--red)' : 'var(--text-dim)',
+              cursor: 'pointer',
+              padding: 0,
+              transition: 'color 150ms ease, background 150ms ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = 'var(--red)'
+              e.currentTarget.style.background = 'var(--bg-elevated)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = terminalOpen || terminalActiveCount > 0 ? 'var(--red)' : 'var(--text-dim)'
+              e.currentTarget.style.background = 'transparent'
+            }}
+          >
+            <SquareTerminal size={16} strokeWidth={1.5} />
+            {terminalActiveCount > 0 && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: -2,
+                  right: -2,
+                  minWidth: 14,
+                  height: 14,
+                  padding: '0 3px',
+                  borderRadius: 4,
+                  background: 'var(--red)',
+                  color: 'var(--text-inverse)',
+                  fontSize: 9,
+                  fontWeight: 700,
+                  lineHeight: '14px',
+                  textAlign: 'center',
+                  boxSizing: 'border-box',
+                  pointerEvents: 'none',
+                }}
+              >
+                {terminalActiveCount}
+              </span>
+            )}
+          </button>
+        )}
+        <CheckpointToggle />
+        <CanvasShortcut
+          icon={PanelRight}
+          title={t('canvas.tasks')}
+          hidden={isCanvasTabVisible('tasks')}
+          onClick={() => activateCanvasTab('tasks')}
+        />
+        <CanvasShortcut
+          icon={FolderTree}
+          title={t('canvas.fileBrowser')}
+          hidden={isCanvasTabVisible('file-browser')}
+          onClick={() => activateCanvasTab('file-browser')}
+        />
+        <CanvasShortcut
+          icon={FileDiff}
+          title={t('canvas.changeReview')}
+          hidden={isCanvasTabVisible('changes')}
+          onClick={() => activateCanvasTab('changes')}
+        />
+      </div>
+    </div>
+  )
+
   if (isEmpty) {
     const TRACK_STYLE = { width: '70%', maxWidth: 1000, margin: '0 auto' }
 
@@ -97,6 +203,7 @@ export default function ChatPanel() {
         className="flex flex-col flex-1 min-w-0"
         style={{ background: 'var(--bg-base)' }}
       >
+        {headerBar}
         {/* Top: scrollable overview (card at half-track width) + chips */}
         <div
           className="flex-1 overflow-y-auto"
@@ -133,106 +240,7 @@ export default function ChatPanel() {
       className="flex flex-col flex-1 min-w-0"
       style={{ background: 'var(--bg-base)', height: '100%', minHeight: 0 }}
     >
-      <div
-        className="flex items-center justify-between px-4 flex-shrink-0"
-        style={{
-          height: 40,
-          borderBottom: '1px solid var(--border-subtle)',
-          background: 'var(--bg-surface)',
-        }}
-      >
-        <div className="flex items-center gap-1 min-w-0" style={{ marginRight: 12 }}>
-          <span
-            className="truncate"
-            style={{ color: 'var(--text-secondary)', fontSize: 13, minWidth: 0 }}
-            title={sessionTitle}
-          >
-            {sessionTitle}
-          </span>
-          {sessionId && (
-            <span className="flex-shrink-0" title={t('sidebar.copySessionId')}>
-              <CopyButton content={sessionId} inline />
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
-          {terminalFeatureEnabled && (
-            <button
-              type="button"
-              onClick={toggleTerminal}
-              title={terminalActiveCount > 0
-                ? t('terminal.openWithCount', { count: terminalActiveCount })
-                : t('terminal.open')}
-              style={{
-                position: 'relative',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 26,
-                height: 26,
-                border: 'none',
-                background: 'transparent',
-                color: terminalOpen || terminalActiveCount > 0 ? 'var(--red)' : 'var(--text-dim)',
-                cursor: 'pointer',
-                padding: 0,
-                transition: 'color 150ms ease, background 150ms ease',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.color = 'var(--red)'
-                e.currentTarget.style.background = 'var(--bg-elevated)'
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = terminalOpen || terminalActiveCount > 0 ? 'var(--red)' : 'var(--text-dim)'
-                e.currentTarget.style.background = 'transparent'
-              }}
-            >
-              <SquareTerminal size={16} strokeWidth={1.5} />
-              {terminalActiveCount > 0 && (
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: -2,
-                    right: -2,
-                    minWidth: 14,
-                    height: 14,
-                    padding: '0 3px',
-                    borderRadius: 4,
-                    background: 'var(--red)',
-                    color: 'var(--text-inverse)',
-                    fontSize: 9,
-                    fontWeight: 700,
-                    lineHeight: '14px',
-                    textAlign: 'center',
-                    boxSizing: 'border-box',
-                    pointerEvents: 'none',
-                  }}
-                >
-                  {terminalActiveCount}
-                </span>
-              )}
-            </button>
-          )}
-          <CheckpointToggle />
-          <CanvasShortcut
-            icon={PanelRight}
-            title={t('canvas.tasks')}
-            hidden={isCanvasTabVisible('tasks')}
-            onClick={() => activateCanvasTab('tasks')}
-          />
-          <CanvasShortcut
-            icon={FolderTree}
-            title={t('canvas.fileBrowser')}
-            hidden={isCanvasTabVisible('file-browser')}
-            onClick={() => activateCanvasTab('file-browser')}
-          />
-          <CanvasShortcut
-            icon={FileDiff}
-            title={t('canvas.changeReview')}
-            hidden={isCanvasTabVisible('changes')}
-            onClick={() => activateCanvasTab('changes')}
-          />
-        </div>
-      </div>
+      {headerBar}
       <RewindBanner />
       <MessageListBoundary resetKey={sessionId ? `${sessionId}:${messages.length}` : `draft:${messages.length}`}>
         <Suspense fallback={<div className="flex-1" style={{ background: 'var(--bg-base)' }} />}>

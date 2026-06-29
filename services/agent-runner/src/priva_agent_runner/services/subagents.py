@@ -358,9 +358,13 @@ def get_catalog(username: str) -> SubAgentCatalogResponse:
     try:
         from .skills import list_skills
         resp = list_skills(username)
-        # Dedup across project/global, prefer the enabled state if either side is on.
+        # Dedup across personal + every workdir, preferring the enabled state if
+        # any occurrence is on.
         by_name: dict[str, bool] = {}
-        for s in resp.skills:
+        all_skills = list(resp.personal)
+        for g in resp.groups:
+            all_skills.extend(g.skills)
+        for s in all_skills:
             by_name[s.name] = by_name.get(s.name, False) or bool(s.enabled)
         skill_entries = [
             SubAgentCatalogSkill(name=name, enabled=enabled)

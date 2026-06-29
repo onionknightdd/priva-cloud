@@ -106,6 +106,11 @@ const useChatStore = create((set, get) => ({
   pendingOptimize: null,
   setPendingOptimize: (data) => set({ pendingOptimize: data }),
   clearPendingOptimize: () => set({ pendingOptimize: null }),
+  // Pending composer text to prefill + auto-send once the chat view mounts
+  // (used by "Create Skill with Agent" to seed a /skill-creator prompt).
+  pendingComposerSend: null,
+  setPendingComposerSend: (text) => set({ pendingComposerSend: text }),
+  clearPendingComposerSend: () => set({ pendingComposerSend: null }),
   setInputText: (text) => set({ inputText: text }),
   addAttachment: (attachment) => set((s) => ({
     attachments: [...s.attachments, attachment],
@@ -394,7 +399,7 @@ const useChatStore = create((set, get) => ({
     fileReferenceTemplate: null, selectedXlsxReference: null, selectedFileReference: null, isCompacting: false,
     checkpoints: [], forkParentId: null, enableFileCheckpointing: false,
     rewindMarker: null, queuedUserMessages: [], retryState: null, lastUserPrompt: null,
-    cwdDraft: null, addDirs: [],
+    cwdDraft: null, addDirs: [], pendingComposerSend: null,
   }),
 
   reset: () => set({
@@ -408,7 +413,7 @@ const useChatStore = create((set, get) => ({
     enableFileCheckpointing: false, checkpoints: [], forkParentId: null,
     rewindMarker: null, queuedUserMessages: [], queueSender: null,
     retryState: null, lastUserPrompt: null,
-    cwdDraft: null, addDirs: [],
+    cwdDraft: null, addDirs: [], pendingComposerSend: null,
   }),
 
   // For loading a session

@@ -63,8 +63,8 @@ export default function SkillFileViewer({ animKey }) {
     ? `${skillDetail.base_path}/${selectedFile}`
     : selectedFile
 
-  // Handle text selection in the code area (project-level skills only)
-  const isProjectSkill = selectedSkill?.level === 'project'
+  // Handle text selection in the code area (editable workdir-scoped skills only)
+  const isProjectSkill = selectedSkill?.scope === 'workdir'
   // Timestamp guard: prevent selectionchange from racing with mouseup
   const tooltipSetAtRef = useRef(0)
 

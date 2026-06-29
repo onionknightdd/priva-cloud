@@ -85,6 +85,7 @@ const getStoredLanguage = () => safeStorage.getItem('language') || 'zh'
 
 const useUiStore = create((set, get) => ({
   activeNavTab: 'priva',
+  activePluginSection: 'skills', // 'skills' | 'mcp' | 'hooks' | 'subagents' | 'memory'
   canvasVisible: false,
   canvasWidth: getStoredCanvasWidth(),
   canvasMinimized: false,
@@ -110,7 +111,7 @@ const useUiStore = create((set, get) => ({
   terminalActiveCount: 0,
 
   reset: () => set({
-    activeNavTab: 'priva', canvasVisible: false, canvasMinimized: false,
+    activeNavTab: 'priva', activePluginSection: 'skills', canvasVisible: false, canvasMinimized: false,
     activeCanvasTab: 'tasks', confirmDialog: null, lastResult: null,
     planContent: null, planFilePath: null,
     settingsOpen: false, settingsActiveTab: 'api', settingsPopoverOpen: false,
@@ -124,6 +125,7 @@ const useUiStore = create((set, get) => ({
   closeIntro: () => set({ introOpen: false }),
 
   setActiveNavTab: (tab) => set({ activeNavTab: tab }),
+  setActivePluginSection: (section) => set({ activePluginSection: section }),
 
   openSettings: (tab) => set({ settingsOpen: true, settingsActiveTab: tab || get().settingsActiveTab || 'api', settingsPopoverOpen: false }),
   closeSettings: () => set({ settingsOpen: false }),

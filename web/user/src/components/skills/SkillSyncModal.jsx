@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSkillSyncStore from '../../stores/skillSyncStore'
-import useSkillsStore from '../../stores/skillsStore'
+import useSkillsStore, { skillKey } from '../../stores/skillsStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 
 function StatusIcon({ state }) {
@@ -67,7 +67,12 @@ export default function SkillSyncModal() {
   const getDownloadPrompt = useSkillSyncStore((s) => s.getDownloadPrompt)
   const getUploadPrompt = useSkillSyncStore((s) => s.getUploadPrompt)
 
-  const skills = useSkillsStore((s) => s.skills)
+  const personalSkillsAll = useSkillsStore((s) => s.personal)
+  const groups = useSkillsStore((s) => s.groups)
+  const skills = useMemo(
+    () => [...(personalSkillsAll || []), ...(groups || []).flatMap((g) => g.skills || [])],
+    [personalSkillsAll, groups],
+  )
   const [copiedKey, setCopiedKey] = useState(null)
 
   useEffect(() => {
@@ -82,8 +87,8 @@ export default function SkillSyncModal() {
     return skills.filter((s) => !q || s.name.toLowerCase().includes(q))
   }, [skills, searchQuery])
 
-  const projectSkills = filtered.filter((s) => s.level === 'project')
-  const globalSkills = filtered.filter((s) => s.level === 'global')
+  const personalSkills = filtered.filter((s) => s.scope === 'personal')
+  const workdirSkills = filtered.filter((s) => s.scope === 'workdir')
   const selectedCount = Object.keys(selected).length
   const totalCount = filtered.length
   const downloadPrompt = getDownloadPrompt()
@@ -172,8 +177,8 @@ export default function SkillSyncModal() {
         ) : (
           <div className="flex flex-1 overflow-hidden">
             <SkillSelectionPane
-              projectSkills={projectSkills}
-              globalSkills={globalSkills}
+              personalSkills={personalSkills}
+              workdirSkills={workdirSkills}
               filtered={filtered}
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
@@ -225,8 +230,8 @@ export default function SkillSyncModal() {
 }
 
 function SkillSelectionPane({
-  projectSkills,
-  globalSkills,
+  personalSkills,
+  workdirSkills,
   filtered,
   searchQuery,
   setSearchQuery,
@@ -279,31 +284,31 @@ function SkillSelectionPane({
       </div>
 
       <div className="flex-1 overflow-y-auto py-1">
-        {projectSkills.length > 0 && (
+        {personalSkills.length > 0 && (
           <>
-            <SkillGroupLabel>{t('skills.project')}</SkillGroupLabel>
-            {projectSkills.map((skill) => (
+            <SkillGroupLabel>{t('skills.personal')}</SkillGroupLabel>
+            {personalSkills.map((skill) => (
               <SyncRow
-                key={`project-${skill.name}`}
+                key={skillKey(skill)}
                 skill={skill}
-                checked={!!selected[`project::${skill.name}`]}
-                status={statuses[`project::${skill.name}`]}
-                onToggle={() => toggleOne('project', skill.name)}
+                checked={!!selected[skillKey(skill)]}
+                status={statuses[skillKey(skill)]}
+                onToggle={() => toggleOne(skill)}
                 disabled={syncing}
               />
             ))}
           </>
         )}
-        {globalSkills.length > 0 && (
+        {workdirSkills.length > 0 && (
           <>
-            <SkillGroupLabel offset={projectSkills.length > 0}>{t('skills.global')}</SkillGroupLabel>
-            {globalSkills.map((skill) => (
+            <SkillGroupLabel offset={personalSkills.length > 0}>{t('skills.project')}</SkillGroupLabel>
+            {workdirSkills.map((skill) => (
               <SyncRow
-                key={`global-${skill.name}`}
+                key={skillKey(skill)}
                 skill={skill}
-                checked={!!selected[`global::${skill.name}`]}
-                status={statuses[`global::${skill.name}`]}
-                onToggle={() => toggleOne('global', skill.name)}
+                checked={!!selected[skillKey(skill)]}
+                status={statuses[skillKey(skill)]}
+                onToggle={() => toggleOne(skill)}
                 disabled={syncing}
               />
             ))}

@@ -2,32 +2,35 @@ import { create } from 'zustand'
 import safeStorage from '@shared/utils/safeStorage'
 import * as skillsApi from '../api/skills'
 
+// Stable identity for a skill across the personal group + every workdir group.
+export const skillKey = (s) => (s ? `${s.scope}:${s.cwd || ''}:${s.name}` : '')
+
 const useSkillsStore = create((set, get) => ({
-  // Skill list
-  skills: [],
+  // Skill list — grouped: personal (~/.claude/skills) + one group per workdir.
+  personal: [],            // SkillSummary[]
+  groups: [],              // [{ cwd, skills: SkillSummary[] }]
   skillsLoading: true,
   searchQuery: '',
-  levelFilter: 'all', // 'all' | 'project' | 'global'
 
-  // Skill denylist: names excluded from agent runs.
+  // Skill denylist: names excluded from agent runs (flat, by name).
   skillExclude: [],
   configLoaded: false,
 
-  // Selected skill
-  selectedSkill: null, // { level, name }
+  // Selected (and inline-expanded) skill — one at a time.
+  selectedSkill: null,     // { scope, cwd, name }
   skillDetail: null,
   detailLoading: false,
 
-  // Selected file
-  selectedFile: null, // path string
+  // Selected file (shown in the viewer)
+  selectedFile: null,      // path string
   fileContent: null,
   fileLoading: false,
 
-  // File tree width (persisted)
-  fileTreeWidth: safeStorage.getNumber('skill-filetree-width', 260, { min: 180, max: 480 }),
+  // Left list column width (persisted)
+  listWidth: safeStorage.getNumber('skill-list-width', 300, { min: 220, max: 560 }),
 
-  // View mode
-  viewMode: 'preview', // 'preview' | 'source'
+  // View mode for markdown files
+  viewMode: 'preview',     // 'preview' | 'source'
 
   // Upload
   uploading: false,
@@ -36,7 +39,11 @@ const useSkillsStore = create((set, get) => ({
     set({ skillsLoading: true })
     try {
       const data = await skillsApi.listSkills()
-      set({ skills: data.skills, skillsLoading: false })
+      set({
+        personal: Array.isArray(data?.personal) ? data.personal : [],
+        groups: Array.isArray(data?.groups) ? data.groups : [],
+        skillsLoading: false,
+      })
     } catch {
       set({ skillsLoading: false })
     }
@@ -63,12 +70,12 @@ const useSkillsStore = create((set, get) => ({
       ? prev.filter((n) => n !== skillName)
       : [...prev, skillName]
 
-    // Optimistic update — and reflect on the skills list's enabled field.
-    set({ skillExclude: next })
+    // Optimistic update — reflect on the enabled field across all groups.
+    const mark = (list) => list.map((s) => (s.name === skillName ? { ...s, enabled: !next.includes(s.name) } : s))
     set((state) => ({
-      skills: state.skills.map((s) =>
-        s.name === skillName ? { ...s, enabled: !next.includes(s.name) } : s
-      ),
+      skillExclude: next,
+      personal: mark(state.personal),
+      groups: state.groups.map((g) => ({ ...g, skills: mark(g.skills) })),
     }))
 
     try {
@@ -79,16 +86,27 @@ const useSkillsStore = create((set, get) => ({
     }
   },
 
-  selectSkill: async (level, name) => {
+  // Toggle the inline tree for a skill. Selecting loads detail + auto-opens
+  // SKILL.md; clicking the already-selected skill collapses it.
+  selectSkill: async (scope, cwd, name) => {
+    const cur = get().selectedSkill
+    if (cur && cur.scope === scope && cur.cwd === (cwd ?? null) && cur.name === name) {
+      set({ selectedSkill: null, skillDetail: null, selectedFile: null, fileContent: null })
+      return
+    }
     set({
-      selectedSkill: { level, name },
+      selectedSkill: { scope, cwd: cwd ?? null, name },
       detailLoading: true,
+      skillDetail: null,
       selectedFile: null,
       fileContent: null,
     })
     try {
-      const detail = await skillsApi.getSkillDetail(level, name)
+      const detail = await skillsApi.getSkillDetail(scope, cwd, name)
       set({ skillDetail: detail, detailLoading: false })
+      // Auto-open the top-level SKILL.md so the viewer isn't empty.
+      const hasSkillMd = (detail?.tree || []).some((n) => n.type === 'file' && n.name === 'SKILL.md')
+      if (hasSkillMd) get().selectFile('SKILL.md')
     } catch {
       set({ detailLoading: false })
     }
@@ -99,19 +117,18 @@ const useSkillsStore = create((set, get) => ({
     if (!selectedSkill) return
     set({ selectedFile: path, fileLoading: true })
     try {
-      const data = await skillsApi.getSkillFile(selectedSkill.level, selectedSkill.name, path)
+      const data = await skillsApi.getSkillFile(selectedSkill.scope, selectedSkill.cwd, selectedSkill.name, path)
       set({ fileContent: data, fileLoading: false })
     } catch {
       set({ fileLoading: false })
     }
   },
 
-  uploadSkill: async (level, file) => {
+  uploadSkill: async (scope, cwd, file) => {
     set({ uploading: true })
     try {
-      await skillsApi.uploadSkill(level, file)
+      await skillsApi.uploadSkill(scope, cwd, file)
       set({ uploading: false })
-      // Refresh list
       get().fetchSkills()
     } catch (e) {
       set({ uploading: false })
@@ -119,8 +136,8 @@ const useSkillsStore = create((set, get) => ({
     }
   },
 
-  downloadSkill: async (level, name) => {
-    const blob = await skillsApi.downloadSkill(level, name)
+  downloadSkill: async (scope, cwd, name) => {
+    const blob = await skillsApi.downloadSkill(scope, cwd, name)
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -129,21 +146,20 @@ const useSkillsStore = create((set, get) => ({
     URL.revokeObjectURL(url)
   },
 
-  deleteSkill: async (level, name) => {
-    await skillsApi.deleteSkill(level, name)
+  deleteSkill: async (scope, cwd, name) => {
+    await skillsApi.deleteSkill(scope, cwd, name)
     const { selectedSkill } = get()
-    if (selectedSkill?.level === level && selectedSkill?.name === name) {
+    if (selectedSkill?.scope === scope && selectedSkill?.cwd === (cwd ?? null) && selectedSkill?.name === name) {
       set({ selectedSkill: null, skillDetail: null, selectedFile: null, fileContent: null })
     }
     get().fetchSkills()
   },
 
   setSearchQuery: (query) => set({ searchQuery: query }),
-  setLevelFilter: (filter) => set({ levelFilter: filter }),
   setViewMode: (mode) => set({ viewMode: mode }),
-  setFileTreeWidth: (width) => {
-    safeStorage.setItem('skill-filetree-width', String(width))
-    set({ fileTreeWidth: width })
+  setListWidth: (width) => {
+    safeStorage.setItem('skill-list-width', String(width))
+    set({ listWidth: width })
   },
 
   clearSelection: () => set({
@@ -154,7 +170,7 @@ const useSkillsStore = create((set, get) => ({
   }),
 
   reset: () => set({
-    skills: [], skillsLoading: true, searchQuery: '', levelFilter: 'all',
+    personal: [], groups: [], skillsLoading: true, searchQuery: '',
     selectedSkill: null, skillDetail: null, detailLoading: false,
     selectedFile: null, fileContent: null, fileLoading: false,
     viewMode: 'preview', uploading: false,

@@ -481,7 +481,16 @@
     "enableSkill": "Enable skill",
     "disableSkill": "Disable skill",
     "download": "Download skill",
-    "selectToView": "Select a skill to view"
+    "selectToView": "Select a skill to view",
+    "personal": "Personal",
+    "add": "Add skill",
+    "createWithAgent": "Create Skill with Agent",
+    "uploadSkill": "Upload a skill",
+    "createTitle": "Create a skill",
+    "createTarget": "Where should the skill live?",
+    "browse": "Browse…",
+    "refresh": "Refresh",
+    "createPrompt": "Help to create a skill in workdir: {{path}}"
   },
   "skillSync": {
     "title": "Sync Skills",
@@ -1812,5 +1821,8 @@
     "regBackToLogin": "Back to login",
     "back": "Back",
     "next": "Next"
+  },
+  "plugins": {
+    "comingSoon": "{{name}} — coming soon"
   }
 }

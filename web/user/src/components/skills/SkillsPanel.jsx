@@ -1,76 +1,59 @@
 import { useEffect } from 'react'
-import { useTranslation } from 'react-i18next'
-import useSidebarStore from '../../stores/sidebarStore'
+import { useResizable } from '@shared/hooks/useResizable'
 import useSkillsStore from '../../stores/skillsStore'
-import SidebarResizer from '../layout/SidebarResizer'
-import SkillListSidebar from './SkillListSidebar'
-import SkillFileTree from './SkillFileTree'
+import SkillList from './SkillList'
 import SkillFileViewer from './SkillFileViewer'
 import SkillHubModal from './SkillHubModal'
 import SkillSyncModal from './SkillSyncModal'
 
+// Content-only Skills view (rendered inside PluginsView). The skill list — now
+// grouped by Personal + workdir, with each skill's file tree inline — is the left
+// column; the file viewer fills the rest. No fixed sidebar / navbar coupling.
 export default function SkillsPanel() {
-  const { t } = useTranslation()
-  const width = useSidebarStore((s) => s.width)
-  const collapsed = useSidebarStore((s) => s.collapsed)
   const fetchSkills = useSkillsStore((s) => s.fetchSkills)
   const selectedSkill = useSkillsStore((s) => s.selectedSkill)
+  const listWidth = useSkillsStore((s) => s.listWidth)
+  const setListWidth = useSkillsStore((s) => s.setListWidth)
 
-  const effectiveWidth = collapsed ? 48 : width
+  const { dragging, onMouseDown } = useResizable({
+    initial: listWidth,
+    min: 220,
+    max: 560,
+    direction: 'right',
+    onResize: setListWidth,
+  })
 
   useEffect(() => {
     fetchSkills()
   }, [fetchSkills])
 
   return (
-    <>
-      {/* Sidebar — skill list */}
-      <aside
-        className="fixed flex flex-col overflow-hidden"
-        style={{
-          width: effectiveWidth,
-          top: 'var(--navbar-height)',
-          left: 0,
-          bottom: 0,
-          background: 'var(--bg-surface)',
-          borderRight: '1px solid var(--border)',
-          transition: 'width 220ms cubic-bezier(0.16, 1, 0.3, 1)',
-        }}
-      >
-        <SkillListSidebar />
-        {!collapsed && <SidebarResizer />}
-      </aside>
-
-      {/* Content area */}
+    <div className="flex flex-1" style={{ minWidth: 0, minHeight: 0, overflow: 'hidden', background: 'var(--bg-base)' }}>
+      {/* Left column — grouped skill list with inline file trees */}
       <div
-        className="flex"
-        style={{
-          position: 'fixed',
-          top: 'var(--navbar-height)',
-          left: effectiveWidth,
-          right: 0,
-          bottom: 0,
-          transition: 'left 220ms cubic-bezier(0.16, 1, 0.3, 1)',
-          overflow: 'hidden',
-        }}
+        className="flex flex-col flex-shrink-0 relative"
+        style={{ width: listWidth, background: 'var(--bg-surface)', borderRight: '1px solid var(--border)', minHeight: 0 }}
       >
-        {selectedSkill ? (
-          <>
-            <SkillFileTree animKey={selectedSkill.name} />
-            <SkillFileViewer animKey={selectedSkill.name} />
-          </>
-        ) : (
-          <div
-            className="flex-1 flex items-center justify-center"
-            style={{ background: 'var(--bg-base)', color: 'var(--text-dim)', fontSize: 13 }}
-          >
-            {t('skills.selectToView')}
-          </div>
-        )}
+        <SkillList />
+        {/* Resize handle */}
+        <div
+          onMouseDown={onMouseDown}
+          style={{
+            position: 'absolute', right: 0, top: 0, bottom: 0, width: 4,
+            cursor: 'col-resize', zIndex: 10,
+            background: dragging ? 'var(--blue)' : 'transparent',
+            transition: 'background 100ms ease',
+          }}
+          onMouseEnter={(e) => { if (!dragging) e.currentTarget.style.background = 'var(--blue)' }}
+          onMouseLeave={(e) => { if (!dragging) e.currentTarget.style.background = 'transparent' }}
+        />
       </div>
+
+      {/* Right column — file viewer */}
+      <SkillFileViewer animKey={selectedSkill ? `${selectedSkill.scope}:${selectedSkill.cwd || ''}:${selectedSkill.name}` : 'none'} />
 
       <SkillHubModal />
       <SkillSyncModal />
-    </>
+    </div>
   )
 }

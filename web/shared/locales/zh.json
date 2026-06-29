@@ -466,7 +466,16 @@
     "enableSkill": "启用技能",
     "disableSkill": "禁用技能",
     "download": "下载技能",
-    "selectToView": "选择一个技能查看"
+    "selectToView": "选择一个技能查看",
+    "personal": "个人",
+    "add": "添加技能",
+    "createWithAgent": "用智能体创建技能",
+    "uploadSkill": "上传技能",
+    "createTitle": "创建技能",
+    "createTarget": "技能创建在哪里？",
+    "browse": "浏览…",
+    "refresh": "刷新",
+    "createPrompt": "请帮我在该工作目录下创建一个技能：{{path}}"
   },
   "skillSync": {
     "title": "同步技能",
@@ -1797,5 +1806,8 @@
     "regBackToLogin": "返回登录",
     "back": "上一步",
     "next": "下一步"
+  },
+  "plugins": {
+    "comingSoon": "{{name}} — 即将推出"
   }
 }

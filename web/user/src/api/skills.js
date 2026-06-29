@@ -11,18 +11,30 @@ function getAuthHeaders() {
   return {}
 }
 
+// Build a ?scope=&cwd=&name=… query string. ``cwd`` is omitted for personal skills.
+function skillQuery({ scope, cwd, name, path } = {}) {
+  const params = new URLSearchParams()
+  if (name != null) params.set('name', name)
+  if (path != null) params.set('path', path)
+  if (scope != null) params.set('scope', scope)
+  if (cwd != null) params.set('cwd', cwd)
+  return params.toString()
+}
+
+// Returns { personal: SkillSummary[], groups: [{ cwd, skills: SkillSummary[] }] }
 export const listSkills = () => sandboxGet('/resource/skills/')
 
-export const getSkillDetail = (level, name) =>
-  sandboxGet(`/resource/skills/${encodeURIComponent(level)}/${encodeURIComponent(name)}`)
+export const getSkillDetail = (scope, cwd, name) =>
+  sandboxGet(`/resource/skills/detail?${skillQuery({ scope, cwd, name })}`)
 
-export const getSkillFile = (level, name, path) =>
-  sandboxGet(`/resource/skills/${encodeURIComponent(level)}/${encodeURIComponent(name)}/file?path=${encodeURIComponent(path)}`)
+export const getSkillFile = (scope, cwd, name, path) =>
+  sandboxGet(`/resource/skills/file?${skillQuery({ scope, cwd, name, path })}`)
 
-export const uploadSkill = async (level, file) => {
+export const uploadSkill = async (scope, cwd, file) => {
   const formData = new FormData()
   formData.append('file', file)
-  formData.append('level', level)
+  formData.append('scope', scope)
+  if (cwd != null) formData.append('cwd', cwd)
   const res = await fetch(`${BASE_URL}/resource/skills/upload`, {
     method: 'POST',
     headers: { ...getAuthHeaders() },
@@ -38,11 +50,11 @@ export const uploadSkill = async (level, file) => {
   return res.json()
 }
 
-export const deleteSkill = (level, name) =>
-  sandboxDelete(`/resource/skills/${encodeURIComponent(level)}/${encodeURIComponent(name)}`)
+export const deleteSkill = (scope, cwd, name) =>
+  sandboxDelete(`/resource/skills/item?${skillQuery({ scope, cwd, name })}`)
 
-export async function downloadSkill(level, name) {
-  const res = await fetch(`${BASE_URL}/resource/skills/${encodeURIComponent(level)}/${encodeURIComponent(name)}/download`, {
+export async function downloadSkill(scope, cwd, name) {
+  const res = await fetch(`${BASE_URL}/resource/skills/download?${skillQuery({ scope, cwd, name })}`, {
     headers: { ...getAuthHeaders() },
   })
   if (res.status === 401) {

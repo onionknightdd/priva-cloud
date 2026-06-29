@@ -5,19 +5,36 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+# Legacy axis — still used internally by the agent-run skill allowlist
+# (``compute_enabled_skill_names`` / ``_get_skills_dir``). The listing/CRUD API
+# below uses ``SkillScope`` + ``cwd`` instead.
 SkillLevel = Literal["project", "global"]
+
+# New axis for the per-user, per-workdir skills UI: ``personal`` =
+# ``~/.claude/skills``; ``workdir`` = ``{cwd}/.claude/skills`` for one of the
+# user's project directories.
+SkillScope = Literal["personal", "workdir"]
 
 
 class SkillSummary(BaseModel):
     name: str
-    level: SkillLevel
+    scope: SkillScope
+    cwd: str | None = None  # the workdir path; None for personal skills
     description: str | None = None
     file_count: int = 0
     enabled: bool = True
 
 
+class SkillGroup(BaseModel):
+    """All skills discovered under one workdir's ``.claude/skills``."""
+
+    cwd: str
+    skills: list[SkillSummary] = Field(default_factory=list)
+
+
 class SkillListResponse(BaseModel):
-    skills: list[SkillSummary]
+    personal: list[SkillSummary] = Field(default_factory=list)
+    groups: list[SkillGroup] = Field(default_factory=list)
 
 
 class FileTreeNode(BaseModel):
@@ -29,7 +46,8 @@ class FileTreeNode(BaseModel):
 
 class SkillDetailResponse(BaseModel):
     name: str
-    level: SkillLevel
+    scope: SkillScope
+    cwd: str | None = None
     description: str | None = None
     frontmatter: dict | None = None
     tree: list[FileTreeNode]
@@ -45,7 +63,8 @@ class SkillFileResponse(BaseModel):
 
 class SkillUploadResponse(BaseModel):
     name: str
-    level: SkillLevel
+    scope: SkillScope
+    cwd: str | None = None
     message: str
 
 

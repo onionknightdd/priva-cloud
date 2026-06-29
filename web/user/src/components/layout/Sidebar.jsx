@@ -6,6 +6,7 @@ import {
   Bot, PanelLeftClose, Plus, CalendarClock, PackageSearch, ChartColumnBig,
   Maximize2, Minimize2, FolderOpenDot, FolderGit2, LogOut,
   BarChart3, TrendingUp, ScrollText, FileText, FolderOpen,
+  Puzzle, Cable, Webhook, BrainCircuit, NotebookPen,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSidebarStore from '../../stores/sidebarStore'
@@ -61,6 +62,16 @@ const DATA_SECTIONS = [
   { id: 'audit', icon: ScrollText, labelKey: 'userData.auditLog' },
   { id: 'files', icon: FileText, labelKey: 'userData.uploadedFiles' },
   { id: 'fileexplorer', icon: FolderOpen, labelKey: 'userData.fileExplorer' },
+]
+
+// Plugins/Customize sub-sections. Skills is live (Phase 2); the rest render a
+// "coming soon" placeholder until each is redesigned one by one.
+const PLUGINS_SECTIONS = [
+  { id: 'skills', icon: Puzzle, labelKey: 'tabs.skills' },
+  { id: 'mcp', icon: Cable, labelKey: 'tabs.mcp' },
+  { id: 'hooks', icon: Webhook, labelKey: 'tabs.hooks' },
+  { id: 'subagents', icon: BrainCircuit, labelKey: 'tabs.subagents' },
+  { id: 'memory', icon: NotebookPen, labelKey: 'tabs.memory' },
 ]
 
 function SessionItem({
@@ -489,12 +500,15 @@ export default function Sidebar() {
   const logout = useAuthStore((s) => s.logout)
   const activeSection = useUserDataStore((s) => s.activeSection)
   const setActiveSection = useUserDataStore((s) => s.setActiveSection)
+  const activePluginSection = useUiStore((s) => s.activePluginSection)
+  const setActivePluginSection = useUiStore((s) => s.setActivePluginSection)
   const listRef = useRef(null)
   const [openMenuId, setOpenMenuId] = useState(null)
   const [openWorkdirMenu, setOpenWorkdirMenu] = useState(null) // cwd whose workdir menu is open
   const [searchQuery, setSearchQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [dataMenuOpen, setDataMenuOpen] = useState(activeNavTab === 'userdata')
+  const [pluginsMenuOpen, setPluginsMenuOpen] = useState(activeNavTab === 'plugins')
   const [projectOpen, setProjectOpen] = useState(true)
   const [cwdPickerOpen, setCwdPickerOpen] = useState(false)
   const menuRef = useRef(null)
@@ -568,9 +582,9 @@ export default function Sidebar() {
 
   const filtersActive = !!searchQuery.trim() || !!activeTag
   const allGroupsExpanded = renderedGroups.length > 0 && renderedGroups.every((g) => !!expandedCwds[g.cwd])
-  // A nav menu being expanded (Data & Usage; Phase 2: Plugins) drops the PROJECT
+  // A nav menu being expanded (Data & Usage or Plugins/Customize) drops the PROJECT
   // block to the sidebar bottom and collapses it; collapsing the menu restores it.
-  const menuExpanded = dataMenuOpen
+  const menuExpanded = dataMenuOpen || pluginsMenuOpen
   const projectAtBottom = menuExpanded
 
   useEffect(() => {
@@ -582,9 +596,10 @@ export default function Sidebar() {
     if (searchOpen) searchInputRef.current?.focus()
   }, [searchOpen])
 
-  // Keep the Data & Usage submenu open whenever its view is active.
+  // Keep the Data & Usage / Plugins submenu open whenever its view is active.
   useEffect(() => {
     if (activeNavTab === 'userdata') setDataMenuOpen(true)
+    if (activeNavTab === 'plugins') setPluginsMenuOpen(true)
   }, [activeNavTab])
 
   // Expanding a nav menu collapses the PROJECT list (it drops to the bottom);
@@ -703,6 +718,13 @@ export default function Sidebar() {
     setActiveNavTab('userdata')
     setActiveSection(id)
     setDataMenuOpen(true)
+  }
+
+  // Open a Plugins/Customize section in the content area.
+  const openPluginSection = (id) => {
+    setActiveNavTab('plugins')
+    setActivePluginSection(id)
+    setPluginsMenuOpen(true)
   }
 
   const handlePinSession = (session) => togglePinSession(session.id)
@@ -880,7 +902,7 @@ export default function Sidebar() {
         <div className="flex flex-col items-center flex-1 overflow-hidden" style={{ padding: '8px 0', gap: 2 }}>
           <NavItem collapsed icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
           <NavItem collapsed icon={CalendarClock} label={t('sidebar.scheduler')} disabled />
-          <NavItem collapsed icon={PackageSearch} label={t('sidebar.plugins')} title={t('sidebar.plugins')} onClick={() => {}} />
+          <NavItem collapsed icon={PackageSearch} label={t('sidebar.plugins')} title={t('sidebar.plugins')} active={activeNavTab === 'plugins'} onClick={() => openPluginSection(activePluginSection || 'skills')} />
           <NavItem collapsed icon={ChartColumnBig} label={t('sidebar.dataUsage')} active={activeNavTab === 'userdata'} onClick={() => openDataSection(activeSection || 'usage')} />
           <div style={{ height: 1, width: 24, background: 'var(--border-subtle)', margin: '4px 0' }} />
           <NavItem collapsed icon={Search} label={t('sidebar.search')} onClick={() => { setCollapsed(false); setSearchOpen(true) }} />
@@ -897,7 +919,28 @@ export default function Sidebar() {
           <div style={{ padding: '6px 0 4px', flexShrink: 0 }}>
             <NavItem icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
             <NavItem icon={CalendarClock} label={t('sidebar.scheduler')} disabled />
-            <NavItem icon={PackageSearch} label={t('sidebar.plugins')} onClick={() => {}} />
+            <NavItem
+              icon={PackageSearch}
+              label={t('sidebar.plugins')}
+              active={activeNavTab === 'plugins'}
+              expandable
+              expanded={pluginsMenuOpen}
+              onClick={() => setPluginsMenuOpen((v) => !v)}
+            />
+            <AnimatedCollapse open={pluginsMenuOpen}>
+              <div>
+                {PLUGINS_SECTIONS.map((sec) => (
+                  <NavItem
+                    key={sec.id}
+                    icon={sec.icon}
+                    label={t(sec.labelKey)}
+                    indent={16}
+                    active={activeNavTab === 'plugins' && activePluginSection === sec.id}
+                    onClick={() => openPluginSection(sec.id)}
+                  />
+                ))}
+              </div>
+            </AnimatedCollapse>
             <NavItem
               icon={ChartColumnBig}
               label={t('sidebar.dataUsage')}
@@ -1024,8 +1067,8 @@ export default function Sidebar() {
           {/* Tag filter bar (only when at least one tag exists) — indented to nest under PROJECT */}
           {availableTags.length > 0 && (
             <div
-              className="flex flex-wrap gap-1 px-3 py-2"
-              style={{ borderBottom: '1px solid var(--border-subtle)', flexShrink: 0, paddingLeft: 28 }}
+              className="flex flex-wrap gap-1 px-3"
+              style={{ borderBottom: '1px solid var(--border-subtle)', flexShrink: 0, paddingLeft: 28, paddingTop: 2, paddingBottom: 4 }}
             >
               <TagFilterChip
                 active={activeTag === null}

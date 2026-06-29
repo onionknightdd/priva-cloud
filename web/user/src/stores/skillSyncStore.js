@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import safeStorage from '@shared/utils/safeStorage'
 import { getMyApiKey } from '@shared/api/auth'
 import { downloadSkill as downloadLocalSkill, getHealthInfo } from '../api/skills'
+import { skillKey } from './skillsStore'
 
 const REMOTE_URL_KEY = 'skill-sync-remote-url'
 const LOCAL_API_KEY_PLACEHOLDER = '<PRIVA_API_KEY>'
@@ -36,7 +37,9 @@ function getLocalBearer(localApiKey) {
 
 function downloadCurl(baseUrl, localApiKey, skill) {
   const output = `${safeArchiveName(skill.name)}.tar.gz`
-  const endpoint = `${baseUrl}/api/sandbox/resource/skills/${encodeURIComponent(skill.level)}/${encodeURIComponent(skill.name)}/download`
+  const params = new URLSearchParams({ name: skill.name, scope: skill.scope || 'personal' })
+  if (skill.cwd) params.set('cwd', skill.cwd)
+  const endpoint = `${baseUrl}/api/sandbox/resource/skills/download?${params.toString()}`
   return `curl -L -H ${quoteCurl(`Authorization: Bearer ${getLocalBearer(localApiKey)}`)} -o ${quoteCurl(output)} ${quoteCurl(endpoint)}`
 }
 
@@ -45,7 +48,7 @@ function uploadCurl(baseUrl, localApiKey) {
   return [
     'curl -X POST',
     `  -H ${quoteCurl(`Authorization: Bearer ${getLocalBearer(localApiKey)}`)}`,
-    '  -F "level=project"',
+    '  -F "scope=personal"',
     '  -F "file=@/path/to/skill.tar.gz"',
     `  ${quoteCurl(endpoint)}`,
   ].join(' \\\n')
@@ -53,7 +56,7 @@ function uploadCurl(baseUrl, localApiKey) {
 
 function buildDownloadPrompt(skills, healthInfo, localApiKey) {
   const baseUrl = getPrivaBaseUrl(healthInfo)
-  const selected = skills.length > 0 ? skills : [{ level: 'project', name: '<skill a>' }]
+  const selected = skills.length > 0 ? skills : [{ scope: 'personal', cwd: null, name: '<skill a>' }]
   const curls = selected.map((skill) => downloadCurl(baseUrl, localApiKey, skill)).join('\n')
   const skillList = selected.map((skill) => `- ${skill.name}`).join('\n')
 
@@ -82,11 +85,13 @@ function buildUploadPrompt(skillNames, healthInfo, localApiKey) {
   ].join('\n')
 }
 
-async function uploadToRemote(baseUrl, apiKey, level, name, blob) {
+async function uploadToRemote(baseUrl, apiKey, name, blob) {
   const file = new File([blob], `${name}.tar.gz`, { type: 'application/gzip' })
   const formData = new FormData()
   formData.append('file', file)
-  formData.append('level', level)
+  // Push lands in the remote user's personal skills (~/.claude/skills). Old
+  // remotes ignore `scope` and default to their own level.
+  formData.append('scope', 'personal')
   const headers = {}
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`
   const res = await fetch(`${baseUrl}/api/sandbox/resource/skills/upload`, {
@@ -208,19 +213,19 @@ const useSkillSyncStore = create((set, get) => ({
     importSkillNames: s.importSkillNames.filter((item) => item !== name),
   })),
 
-  keyFor: (level, name) => `${level}::${name}`,
+  keyFor: (skill) => skillKey(skill),
 
-  toggleOne: (level, name) => set((s) => {
-    const k = `${level}::${name}`
+  toggleOne: (skill) => set((s) => {
+    const k = skillKey(skill)
     const next = { ...s.selected }
     if (next[k]) delete next[k]
-    else next[k] = { level, name }
+    else next[k] = { scope: skill.scope, cwd: skill.cwd ?? null, name: skill.name }
     return { selected: next }
   }),
 
   selectAll: (items) => set(() => {
     const next = {}
-    for (const it of items) next[`${it.level}::${it.name}`] = { level: it.level, name: it.name }
+    for (const it of items) next[skillKey(it)] = { scope: it.scope, cwd: it.cwd ?? null, name: it.name }
     return { selected: next }
   }),
 
@@ -254,18 +259,18 @@ const useSkillSyncStore = create((set, get) => ({
     }
 
     const initial = {}
-    for (const t of targets) initial[`${t.level}::${t.name}`] = { state: 'pending' }
+    for (const t of targets) initial[skillKey(t)] = { state: 'pending' }
     set({ syncing: true, statuses: initial, hint: { level: 'info', key: 'skillSync.hintRunning' } })
 
     let ok = 0
     let failed = 0
     for (const t of targets) {
-      const k = `${t.level}::${t.name}`
+      const k = skillKey(t)
       set((s) => ({ statuses: { ...s.statuses, [k]: { state: 'downloading' } } }))
       try {
-        const blob = await downloadLocalSkill(t.level, t.name)
+        const blob = await downloadLocalSkill(t.scope, t.cwd, t.name)
         set((s) => ({ statuses: { ...s.statuses, [k]: { state: 'uploading' } } }))
-        await uploadToRemote(base, apiKey, 'project', t.name, blob)
+        await uploadToRemote(base, apiKey, t.name, blob)
         set((s) => ({ statuses: { ...s.statuses, [k]: { state: 'done' } } }))
         ok += 1
       } catch (err) {
