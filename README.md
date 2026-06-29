@@ -15,11 +15,16 @@ and chat channels, all on infrastructure you control.
 
 ## Features
 
-- **Web console** (React + Vite) — chat with your agent and watch task progress live.
+- **Web console** (React + Vite) — a persistent sidebar shell: chat with your
+  agent and watch task progress live, with sessions grouped by working directory,
+  a **Plugins & Customize** hub (Skills · MCP · Hooks · SubAgents · Memory), and a
+  **Data & Usage** view.
 - **Agent runtime** on the Claude Agent SDK — tool use, streaming, multi‑turn sessions.
 - **Skills system** — bundled office skills (`docx`, `xlsx`, `pptx`, `pdf`),
   diagram tools (`mermaid-visualizer`, `excalidraw-diagram`), an `mcp-server-creator`
   and a `skill-creator`, plus a central Skill Hub (upload → review → distribute).
+  Skills are organized **per working directory** plus a **Personal** group, and you
+  can **create a skill with the agent** (opens a session seeded with `skill-creator`).
 - **MCP support** — connect Model Context Protocol servers as tools.
 - **IM channels** — talk to your assistant from messaging apps (WeCom included).
 - **Scheduler** — recurring / cron‑style agent jobs (APScheduler).
