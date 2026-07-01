@@ -285,7 +285,7 @@ export default function AgentRunnerSandbox() {
         .ars-skeleton { border-radius: 2px; background: linear-gradient(90deg, var(--bg-elevated) 25%, var(--bg-surface) 50%, var(--bg-elevated) 75%); background-size: 800px 100%; animation: ars-shimmer 1.4s ease infinite; }
       `}</style>
       {/* Page header */}
-      <div className="flex-shrink-0" style={{ padding: '20px 24px 12px 24px' }}>
+      <div className="flex-shrink-0" style={{ padding: '20px var(--admin-section-x) 12px var(--admin-section-x)' }}>
         <h2 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>{t('admin.sandboxTitle')}</h2>
         <p className="text-xs" style={{ color: 'var(--text-dim)', marginTop: 4 }}>
           {t('admin.sandboxDescription')}
@@ -300,7 +300,7 @@ export default function AgentRunnerSandbox() {
         {/* Index — top-aligned; active = elevated band + 2px blue left bar */}
         <div
           className="flex-shrink-0 overflow-y-auto"
-          style={{ width: 216, borderRight: '1px solid var(--border)', padding: '8px 0 8px 16px' }}
+          style={{ width: 240, borderRight: '1px solid var(--border)', padding: '8px 0 8px var(--admin-section-x)' }}
         >
           <SlidingTabGroup id="sandbox-index">
             <div className="flex flex-col gap-1">
@@ -346,7 +346,7 @@ export default function AgentRunnerSandbox() {
         </div>
 
         {/* Detail */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto" style={{ padding: '16px 24px 50vh 24px' }}>
+        <div ref={scrollRef} className="flex-1 overflow-y-auto" style={{ padding: '16px var(--admin-section-x) 50vh var(--admin-section-x)' }}>
           <div style={{ maxWidth: 560, margin: '0 auto' }}>
             {loading ? (
               <div className="flex flex-col gap-6">

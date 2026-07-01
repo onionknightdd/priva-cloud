@@ -18,6 +18,7 @@ import { AnimatedChevron } from './Accordion'
  *   expandable  show a trailing chevron
  *   expanded    chevron rotation state
  *   iconColor   override icon color (defaults to currentColor)
+ *   scale       visual size, "md" default or "lg" for primary rows
  *   onClick, title
  */
 export default function NavItem({
@@ -31,10 +32,12 @@ export default function NavItem({
   expandable = false,
   expanded = false,
   iconColor,
+  scale = 'md',
   onClick,
   title,
 }) {
   const baseColor = active ? 'var(--text-primary)' : 'var(--text-secondary)'
+  const large = scale === 'lg'
   return (
     <button
       type="button"
@@ -44,7 +47,7 @@ export default function NavItem({
       className="flex items-center w-full"
       style={{
         gap: 8,
-        minHeight: 32,
+        minHeight: large ? 34 : 32,
         paddingTop: 6,
         paddingBottom: 6,
         paddingRight: collapsed ? 0 : 8,
@@ -75,13 +78,13 @@ export default function NavItem({
     >
       {Icon && (
         <Icon
-          size={16}
+          size={large ? 18 : 16}
           strokeWidth={1.5}
           style={{ flexShrink: 0, color: iconColor || 'currentColor' }}
         />
       )}
       {!collapsed && (
-        <span className="flex-1 truncate" style={{ minWidth: 0, fontSize: 13 }}>{label}</span>
+        <span className="flex-1 truncate" style={{ minWidth: 0, fontSize: large ? 14 : 13 }}>{label}</span>
       )}
       {!collapsed && badge != null && (
         <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, color: 'var(--text-dim)' }}>
@@ -90,7 +93,7 @@ export default function NavItem({
       )}
       {!collapsed && expandable && (
         <AnimatedChevron open={expanded} style={{ color: 'var(--text-dim)' }}>
-          <ChevronDown size={14} strokeWidth={1.5} />
+          <ChevronDown size={large ? 16 : 14} strokeWidth={1.5} />
         </AnimatedChevron>
       )}
     </button>

@@ -25,7 +25,6 @@ __all__ = [
     "BindingRecord",
     "QuotaRecord",
     "RunPage",
-    "SecretRecord",
     "ResourceSpecRecord",
     "RunnerDefaultsRecord",
     "PendingRegistrationRecord",
@@ -34,7 +33,6 @@ __all__ = [
     "QuotaClient",
     "SchedulerClient",
     "AdminClient",
-    "SecretClient",
     "ResourceSpecClient",
     "RunnerDefaultsClient",
     "RegistrationClient",
@@ -69,13 +67,6 @@ class RunPage(BaseModel):
     next_cursor: str | None = None
     prev_cursor: str | None = None
     total: int | None = None  # None when a filter is active (total unknown)
-
-
-class SecretRecord(BaseModel):
-    account_id: str
-    bundle: dict[str, str] = {}  # decrypted env bundle, e.g. {ANTHROPIC_AUTH_TOKEN: ...}
-    generation: int = 1
-    updated_at: str | None = None
 
 
 class ResourceSpecRecord(BaseModel):
@@ -201,12 +192,6 @@ class AdminClient(Protocol):
     def stats(self) -> dict[str, int]: ...
 
 
-class SecretClient(Protocol):
-    def put(self, account_id: str, bundle: dict[str, str]) -> SecretRecord: ...
-    def get(self, account_id: str) -> SecretRecord | None: ...
-    def list_account_ids(self) -> list[str]: ...
-
-
 class ResourceSpecClient(Protocol):
     def get(self, account_id: str) -> ResourceSpecRecord | None: ...
     def set(
@@ -262,7 +247,6 @@ class DataplaneClient:
     quota: QuotaClient
     scheduler: SchedulerClient
     admin: AdminClient
-    secrets: SecretClient
     resource_specs: ResourceSpecClient
     runner_defaults: RunnerDefaultsClient
     registrations: RegistrationClient

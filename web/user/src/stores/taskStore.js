@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import useWorkflowStore from './workflowStore'
 
 const useTaskStore = create((set) => ({
   // Background-shell and OpenClaw task tracking. Kept for live BashOutput
@@ -59,12 +60,17 @@ const useTaskStore = create((set) => ({
     todoWriteInfo: { ...(s.todoWriteInfo || {}), ...info },
   })),
 
-  clearTasks: () => set({
-    tasks: {}, taskOrder: [], todos: [], todoWriteInfo: null,
-    activeTaskId: null, activeTodoId: null, activeSubagentId: null,
-    subagentFocusTargetId: null, subagentFocusRevision: 0,
-    inspectorFocusTarget: null, inspectorFocusRevision: 0,
-  }),
+  clearTasks: () => {
+    // Workflows are part of the same per-session transient run state — clear
+    // them at every session boundary (new chat / session switch / load).
+    useWorkflowStore.getState().clear()
+    set({
+      tasks: {}, taskOrder: [], todos: [], todoWriteInfo: null,
+      activeTaskId: null, activeTodoId: null, activeSubagentId: null,
+      subagentFocusTargetId: null, subagentFocusRevision: 0,
+      inspectorFocusTarget: null, inspectorFocusRevision: 0,
+    })
+  },
 
   abortRunningTasks: () => set((s) => {
     const tasks = { ...s.tasks }

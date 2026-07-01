@@ -13,14 +13,16 @@ import SystemTopologyDiagram from './SystemTopologyDiagram'
 
 const POLL_MS = 5000
 
-// Skeleton matching the diagram footprint (1000×700 → 70% aspect) on first load.
+// Skeleton shares the diagram's viewport-bounded layout so first load does not scroll.
 function DiagramSkeleton() {
   return (
-    <div className="w-full" style={{ minWidth: 0 }}>
-      <div className="skeleton" style={{ width: '100%', paddingTop: '70%', borderRadius: 4 }} />
-      <div className="flex items-center gap-4" style={{ marginTop: 12 }}>
-        {[1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="skeleton" style={{ width: 64, height: 11 }} />
+    <div className="grid w-full gap-3" style={{ minWidth: 0, height: '100%', overflow: 'hidden', gridTemplateColumns: 'minmax(0, 1fr) 210px' }}>
+      <div className="min-w-0" style={{ height: '100%', overflow: 'hidden' }}>
+        <div className="skeleton" style={{ width: '100%', height: '100%', borderRadius: 4 }} />
+      </div>
+      <div className="flex flex-col gap-2" style={{ minWidth: 0, paddingLeft: 12, borderLeft: '1px solid var(--border-subtle)' }}>
+        {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+          <div key={i} className="skeleton" style={{ width: i > 4 ? 132 : 88, height: 11 }} />
         ))}
       </div>
     </div>
@@ -63,9 +65,9 @@ export default function SystemMapView() {
   }
 
   return (
-    <div className="flex flex-col" style={{ height: '100%', overflow: 'hidden' }}>
+    <div className="flex flex-col" style={{ height: '100%', minHeight: 0, overflow: 'hidden' }}>
       {/* Header */}
-      <div className="flex items-center justify-between flex-shrink-0" style={{ padding: '20px 24px 0 24px' }}>
+      <div className="flex items-center justify-between flex-shrink-0" style={{ padding: '20px var(--admin-section-x) 0 var(--admin-section-x)' }}>
         <div>
           <h2 className="font-semibold text-lg flex items-center gap-2" style={{ color: 'var(--text-primary)', margin: 0 }}>
             <Network size={18} strokeWidth={1.5} />
@@ -85,8 +87,8 @@ export default function SystemMapView() {
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto" style={{ padding: '16px 24px 24px 24px' }}>
-        <div style={{ width: '100%', minWidth: 0 }}>
+      <div className="flex-1" style={{ minHeight: 0, overflow: 'hidden', padding: '28px var(--admin-section-x) 24px var(--admin-section-x)' }}>
+        <div style={{ width: '100%', minWidth: 0, height: '100%' }}>
           {initialLoad ? (
             <DiagramSkeleton />
           ) : (

@@ -3,6 +3,7 @@ import { streamAgentRun, streamAgentRunWS, respondPermission as respondPermissio
 import { setSessionAddDirs } from '../api/sessions'
 import useChatStore from '../stores/chatStore'
 import useTaskStore from '../stores/taskStore'
+import useWorkflowStore, { isTerminalRawStatus, rawToTaskStatus } from '../stores/workflowStore'
 import useUiStore from '@shared/stores/uiStore'
 import useSidebarStore from '../stores/sidebarStore'
 import useFileOpsStore from '../stores/fileOpsStore'
@@ -22,15 +23,29 @@ import {
   fileTabFromToolUse,
   fileTabsFromGeneratedFiles,
 } from '../utils/fileArtifacts'
+import { getSplitParams } from '../utils/splitMode'
 
 // Max characters of background-shell output kept in the task store; only the
 // tail is retained beyond this.
 const MAX_LIVE_OUTPUT = 200_000
 
+function broadcastSplitStop(sessionId) {
+  if (!sessionId || typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') return
+  const { paneId } = getSplitParams()
+  const channel = new BroadcastChannel(`priva-session:${sessionId}`)
+  channel.postMessage({
+    type: 'stop-request',
+    paneId: paneId || window.__PRIVA_TAB_ID || 'root',
+  })
+  window.setTimeout(() => channel.close(), 0)
+}
+
 // Module-level so session switches can kill the active stream without a
 // hook instance (e.g. from Sidebar before loading another session).
-export function stopActiveStream() {
-  const { streamAbort, setStreaming, setStreamAbort, setWsSendPermission, clearPermissions, abortRunningTools, bumpStreamGeneration } = useChatStore.getState()
+export function stopActiveStream(options = {}) {
+  const { broadcast = true } = options
+  const { sessionId, streamAbort, setStreaming, setStreamAbort, setWsSendPermission, clearPermissions, abortRunningTools, bumpStreamGeneration } = useChatStore.getState()
+  if (broadcast) broadcastSplitStop(sessionId)
   // Invalidate in-flight onEvent/onComplete callbacks even when the abort
   // handle is already gone.
   bumpStreamGeneration()
@@ -38,6 +53,7 @@ export function stopActiveStream() {
     streamAbort()
     abortRunningTools()
     useTaskStore.getState().abortRunningTasks()
+    useWorkflowStore.getState().abortRunning()
     setStreaming(false)
     setStreamAbort(null)
     setWsSendPermission(null)
@@ -279,9 +295,12 @@ export function useSSE() {
           // Increment round counter for file ops grouping
           incrementRound()
           if (!data.content) break
-          const assistantBlocks = data.content.filter((b) => (
-            b.type === 'thinking' || b.type === 'text'
-          ))
+          // Stamp arrival time so a thinking block can render "Thought for Xs"
+          // once it's finished (duration = gap before the block appeared).
+          const blockArrivalTs = Date.now()
+          const assistantBlocks = data.content
+            .filter((b) => b.type === 'thinking' || b.type === 'text')
+            .map((b) => ({ ...b, startTime: blockArrivalTs }))
 
           // Subagent assistant frame: route content to the subagent's bucket
           // keyed by parent_tool_use_id instead of the main thread.
@@ -344,6 +363,21 @@ export function useSSE() {
             const messageBlocks = []
 
             for (const block of toolBlocks) {
+              // Workflow → live multi-phase status card. Seed the workflow store
+              // (idempotent — task_started may arrive before or after this),
+              // render inline as a WorkflowCard, and reveal the canvas mirror.
+              if (block.name === 'Workflow') {
+                useWorkflowStore.getState().ensureWorkflow(block.id, {
+                  script: block.input?.script,
+                  workflowName: block.input?.name,
+                  status: 'pending',
+                })
+                showCanvas()
+                setActiveCanvasTab('tasks')
+                messageBlocks.push(block)
+                continue
+              }
+
               // AskUserQuestion → interactive card in chat (not a regular tool card)
               if (block.name === 'AskUserQuestion' && block.input?.questions) {
                 hiddenToolIds.add(block.id)
@@ -803,6 +837,19 @@ export function useSSE() {
         }
 
         case 'task_started': {
+          // Workflow task → dedicated workflow store (keyed accumulation).
+          if (data.task_type === 'local_workflow') {
+            const inner = data.data || {}
+            useWorkflowStore.getState().applyStart(data.tool_use_id, {
+              taskId: data.task_id,
+              description: data.description ?? inner.description,
+              workflowName: inner.workflow_name ?? data.workflow_name,
+              script: inner.prompt ?? data.prompt,
+            })
+            showCanvas()
+            setActiveCanvasTab('tasks')
+            break
+          }
           // Backend sends task_started as its own SSE event type
           // Fields are flat: data.tool_use_id, data.task_id, data.description, etc.
           const toolUseId = data.tool_use_id
@@ -833,6 +880,21 @@ export function useSSE() {
         }
 
         case 'task_progress': {
+          // Workflow progress → keyed accumulation in the workflow store.
+          const inner = data.data || {}
+          const wp = Array.isArray(inner.workflow_progress) ? inner.workflow_progress
+            : Array.isArray(data.workflow_progress) ? data.workflow_progress : null
+          if (wp) {
+            useWorkflowStore.getState().applyProgress(data.tool_use_id, {
+              taskId: data.task_id,
+              usage: data.usage ?? inner.usage,
+              summary: inner.summary ?? data.summary,
+              lastToolName: data.last_tool_name ?? inner.last_tool_name,
+              workflowProgress: wp,
+            })
+            showCanvas()
+            break
+          }
           const toolUseId = data.tool_use_id
           const taskId = data.task_id
           const currentTasks = useTaskStore.getState().tasks
@@ -849,6 +911,16 @@ export function useSSE() {
         }
 
         case 'task_notification': {
+          // Workflow completion (authoritative) → flip the workflow card.
+          const wfId = useWorkflowStore.getState().resolveId(data.tool_use_id, data.task_id)
+          if (wfId) {
+            useWorkflowStore.getState().markCompletion(wfId, {
+              rawStatus: data.status,
+              source: 'task_notification',
+              summary: data.summary,
+            })
+            break
+          }
           const toolUseId = data.tool_use_id
           const taskId = data.task_id
           const currentTasks = useTaskStore.getState().tasks
@@ -887,6 +959,19 @@ export function useSSE() {
           const subtype = data.subtype
           if (subtype === 'task_started') {
             const nested = data.data || {}
+            // Workflow task → dedicated workflow store.
+            if (nested.task_type === 'local_workflow') {
+              const inner = nested.data || {}
+              useWorkflowStore.getState().applyStart(nested.tool_use_id, {
+                taskId: nested.task_id,
+                description: nested.description ?? inner.description,
+                workflowName: inner.workflow_name ?? nested.workflow_name,
+                script: inner.prompt ?? nested.prompt,
+              })
+              showCanvas()
+              setActiveCanvasTab('tasks')
+              break
+            }
             const toolUseId = nested.tool_use_id
             const currentTasks = useTaskStore.getState().tasks
             if (toolUseId && currentTasks[toolUseId]) {
@@ -913,6 +998,21 @@ export function useSSE() {
             }
           } else if (subtype === 'task_progress') {
             const nested = data.data || {}
+            const inner = nested.data || {}
+            // Workflow progress → keyed accumulation in the workflow store.
+            const wp = Array.isArray(inner.workflow_progress) ? inner.workflow_progress
+              : Array.isArray(nested.workflow_progress) ? nested.workflow_progress : null
+            if (wp) {
+              useWorkflowStore.getState().applyProgress(nested.tool_use_id, {
+                taskId: nested.task_id,
+                usage: nested.usage ?? inner.usage,
+                summary: inner.summary ?? nested.summary,
+                lastToolName: nested.last_tool_name ?? inner.last_tool_name,
+                workflowProgress: wp,
+              })
+              showCanvas()
+              break
+            }
             const toolUseId = nested.tool_use_id
             const taskId = nested.task_id
             const currentTasks = useTaskStore.getState().tasks
@@ -927,6 +1027,16 @@ export function useSSE() {
             }
           } else if (subtype === 'task_notification') {
             const nested = data.data || {}
+            // Workflow completion (authoritative) → flip the workflow card.
+            const wfId = useWorkflowStore.getState().resolveId(nested.tool_use_id, nested.task_id)
+            if (wfId) {
+              useWorkflowStore.getState().markCompletion(wfId, {
+                rawStatus: nested.status,
+                source: 'task_notification',
+                summary: nested.summary,
+              })
+              break
+            }
             const toolUseId = nested.tool_use_id
             const taskId = nested.task_id
             const currentTasks = useTaskStore.getState().tasks
@@ -938,6 +1048,33 @@ export function useSSE() {
                 status: status === 'completed' ? 'success' : status,
                 summary: nested.summary,
                 endTime: Date.now(),
+              })
+            }
+          } else if (subtype === 'task_updated') {
+            // Workflow completion may arrive ONLY as task_updated (no tool_use_id)
+            // — correlate by task_id. Falls back to the generic taskStore.
+            const nested = data.data || {}
+            const patch = nested.patch || data.patch || {}
+            const taskId = nested.task_id || data.task_id
+            const wfId = useWorkflowStore.getState().resolveId(null, taskId)
+            if (wfId) {
+              useWorkflowStore.getState().markCompletion(wfId, {
+                rawStatus: patch.status,
+                source: 'task_updated',
+                endedAt: patch.end_time,
+              })
+              break
+            }
+            const currentTasks = useTaskStore.getState().tasks
+            const id = Object.keys(currentTasks).find((k) => currentTasks[k].task_id === taskId)
+            // Only a terminal patch.status finishes a generic task. task_updated
+            // fires on every state change (pending/running/paused) and may omit
+            // status entirely — never default an unknown status to 'success' or
+            // stamp endTime on a still-running task.
+            if (id && isTerminalRawStatus(patch.status)) {
+              updateTask(id, {
+                status: rawToTaskStatus(patch.status),
+                endTime: patch.end_time || Date.now(),
               })
             }
           } else if (subtype === 'status') {
@@ -1035,6 +1172,7 @@ export function useSSE() {
           setStreamAbort(null)
           useChatStore.getState().abortRunningTools()
           useTaskStore.getState().abortRunningTasks()
+          useWorkflowStore.getState().abortRunning()
           if (lastMsg && lastMsg.role === 'assistant') {
             useChatStore.setState({
               messages: [
@@ -1068,6 +1206,7 @@ export function useSSE() {
           setStreamAbort(null)
           useChatStore.getState().abortRunningTools()
           useTaskStore.getState().abortRunningTasks()
+          useWorkflowStore.getState().abortRunning()
           if (lastMsg && lastMsg.role === 'assistant') {
             useChatStore.setState({
               messages: [
@@ -1112,6 +1251,7 @@ export function useSSE() {
           setStreamAbort(null)
           useChatStore.getState().abortRunningTools()
           useTaskStore.getState().abortRunningTasks()
+          useWorkflowStore.getState().abortRunning()
           // Add error to last message
           if (lastMsg && lastMsg.role === 'assistant') {
             useChatStore.setState({
@@ -1148,6 +1288,10 @@ export function useSSE() {
       setWsSendPermission(null)
       setQueueSender(null)
       clearQueuedMessages()
+      // Stream-end fallback: finalize any still-'running' workflow honestly
+      // (completed only when all agents finished; else failed/stopped — never a
+      // false green DONE on a clean close; never touches 'pending').
+      useWorkflowStore.getState().finalizeRunning()
       // Successful turn: release the retained prompt payload (multi-MB image
       // base64). Failed turns keep it so ErrorBlock [Retry] can resend.
       const lastAssistant = [...doneMsgs].reverse().find((m) => m.role === 'assistant')

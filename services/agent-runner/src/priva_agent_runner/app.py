@@ -213,11 +213,12 @@ def create_app() -> FastAPI:
     from .routers.subagents import router as subagents_router
     from .routers.user_config import router as user_config_router
     from .routers.user_data import router as user_data_router
+    from .routers.credentials import router as credentials_router
 
     for r in (
         agent_router, pty_router, files_router, user_files_router,
         hooks_router, mcp_router, skills_router, skill_hub_router, subagents_router,
-        user_config_router, user_data_router,
+        user_config_router, user_data_router, credentials_router,
     ):
         app.include_router(r)
 

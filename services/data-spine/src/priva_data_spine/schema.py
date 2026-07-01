@@ -96,18 +96,7 @@ DDL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_run_account_started ON job_run_record(account_id, started_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_run_job_started     ON job_run_record(job_id, started_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_run_status          ON job_run_record(status) WHERE status = 'running'",
-    # 6 ── secret -----------------------------------------------------------
-    # Per-account credential bundle, Fernet-encrypted. The operator reads it at
-    # wake to materialize the per-pod K8s Secret (alpha: single shared key).
-    f"""
-    CREATE TABLE IF NOT EXISTS secret (
-      account_id TEXT PRIMARY KEY REFERENCES account(account_id) ON DELETE CASCADE,
-      bundle     TEXT NOT NULL,
-      generation INTEGER NOT NULL DEFAULT 1,
-      updated_at TEXT NOT NULL DEFAULT {NOW}
-    ) STRICT
-    """,
-    # 7 ── account_resource_spec --------------------------------------------
+    # 6 ── account_resource_spec --------------------------------------------
     # Per-account agent-runner pod sizing. The operator reads these (via the CR
     # the control-panel stamps) to set container resources + PVC size. volume_gb
     # is grow-only (K8s can't shrink a PVC). cpu_cores is fractional.
@@ -120,7 +109,7 @@ DDL: tuple[str, ...] = (
       updated_at TEXT    NOT NULL DEFAULT {NOW}
     ) STRICT
     """,
-    # 8 ── pending_registration ---------------------------------------------
+    # 7 ── pending_registration ---------------------------------------------
     # Self-service account requests awaiting admin approval. password_hash is the
     # bcrypt of the user-chosen password; on approval the account is created from
     # it directly. One open ('pending') request per username (partial unique idx).
@@ -142,7 +131,7 @@ DDL: tuple[str, ...] = (
     """,
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_username ON pending_registration(username) WHERE status = 'pending'",
     "CREATE INDEX IF NOT EXISTS ix_pending_status ON pending_registration(status, created_at DESC)",
-    # 9 ── runner_defaults --------------------------------------------------
+    # 8 ── runner_defaults --------------------------------------------------
     # Platform-wide GLOBAL defaults for per-account agent-runner pods (the admin
     # "Agent Runner Sandbox" panel). Single row (id=1), seeded from the cluster
     # settings on first read. An account whose AgentTenant CR omits a field
@@ -165,7 +154,7 @@ DDL: tuple[str, ...] = (
 
 TABLES = (
     "account", "channel_binding", "quota", "scheduled_job", "job_run_record",
-    "secret", "account_resource_spec", "pending_registration", "runner_defaults",
+    "account_resource_spec", "pending_registration", "runner_defaults",
 )
 
 # Idempotent column additions for DBs created before a column existed. CREATE

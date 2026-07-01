@@ -1,6 +1,6 @@
 """Idle-sleep ordering (#2): the CR is flipped not-routable (direct set_cr_status) BEFORE
-the deployment is scaled to 0 and the creds Secret deleted, so the EPP can't hand out a
-doomed endpoint during teardown."""
+the deployment is scaled to 0, so the EPP can't hand out a doomed endpoint during
+teardown."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ def test_set_not_routable_before_teardown(monkeypatch, patch_obj, stub_logger):
     monkeypatch.setattr(R.kube, "current_ready_pod_ip", lambda ns, aid: "10.0.0.1")
     monkeypatch.setattr(R.kube, "set_cr_status", lambda *a, **k: calls.append("set_cr_status"))
     monkeypatch.setattr(R.kube, "scale", lambda *a, **k: calls.append("scale"))
-    monkeypatch.setattr(R.secrets, "delete", lambda *a, **k: calls.append("delete"))
     monkeypatch.setattr(R.httpx, "get",
                         lambda *a, **k: _Resp({"active_runs": 0, "last_activity_ts": 0.0}))
 
@@ -32,10 +31,9 @@ def test_set_not_routable_before_teardown(monkeypatch, patch_obj, stub_logger):
         patch=patch_obj, logger=stub_logger,
     )
 
-    # The not-routable flip must precede both teardown steps.
-    assert calls == ["set_cr_status", "scale", "delete"]
+    # The not-routable flip must precede the scale-down teardown step.
+    assert calls == ["set_cr_status", "scale"]
     assert calls.index("set_cr_status") < calls.index("scale")
-    assert calls.index("set_cr_status") < calls.index("delete")
     # Trailing kopf patch re-asserts Zero + records idleSince.
     assert patch_obj.status["phase"] == "Zero"
     assert patch_obj.status["podIP"] is None

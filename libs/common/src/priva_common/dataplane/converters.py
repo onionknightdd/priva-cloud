@@ -8,15 +8,12 @@ return. A "not found" result rides as a message with an empty key field
 
 from __future__ import annotations
 
-import json
-
 from priva_common.dataplane.client import (
     BindingRecord,
     PendingRegistrationRecord,
     QuotaRecord,
     ResourceSpecRecord,
     RunnerDefaultsRecord,
-    SecretRecord,
 )
 from priva_common.models.auth import UserRecord
 
@@ -62,21 +59,6 @@ def binding_from_pb(m) -> BindingRecord | None:
         feishu_chat_id=m.feishu_chat_id or None,
         bound_at=m.bound_at or None,
         rebound_at=m.rebound_at or None,
-    )
-
-
-def secret_from_pb(m) -> SecretRecord | None:
-    if not m.account_id:
-        return None
-    try:
-        bundle = json.loads(m.bundle) if m.bundle else {}
-    except (ValueError, TypeError):
-        bundle = {}
-    return SecretRecord(
-        account_id=m.account_id,
-        bundle=bundle,
-        generation=m.generation,
-        updated_at=m.updated_at or None,
     )
 
 

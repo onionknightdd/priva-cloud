@@ -32,8 +32,6 @@ from priva_common.dataplane.v1 import (
     resource_spec_pb2_grpc,
     runner_defaults_pb2,
     runner_defaults_pb2_grpc,
-    secret_pb2,
-    secret_pb2_grpc,
 )
 from priva_common.logging import get_app_logger
 
@@ -88,17 +86,6 @@ def _binding_pb(b) -> binding_pb2.Binding:
         feishu_chat_id=b.feishu_chat_id or "",
         bound_at=b.bound_at or "",
         rebound_at=b.rebound_at or "",
-    )
-
-
-def _secret_pb(rec) -> secret_pb2.Secret:
-    if rec is None:
-        return secret_pb2.Secret()
-    return secret_pb2.Secret(
-        account_id=rec.account_id,
-        bundle=json.dumps(rec.bundle),
-        generation=rec.generation,
-        updated_at=rec.updated_at or "",
     )
 
 
@@ -267,24 +254,6 @@ class _AdminServicer(admin_pb2_grpc.AdminServiceServicer):
         return admin_pb2.StatsResponse(accounts=s.get("accounts", 0), jobs=s.get("jobs", 0), runs=s.get("runs", 0))
 
 
-class _SecretServicer(secret_pb2_grpc.SecretServiceServicer):
-    def __init__(self, svc):
-        self.svc = svc
-
-    def PutSecret(self, request, context):
-        try:
-            bundle = json.loads(request.bundle) if request.bundle else {}
-        except (ValueError, TypeError):
-            bundle = {}
-        return _secret_pb(self.svc.put(request.account_id, bundle))
-
-    def GetSecret(self, request, context):
-        return _secret_pb(self.svc.get(request.account_id))
-
-    def ListSecrets(self, request, context):
-        return secret_pb2.SecretAccountList(account_ids=self.svc.list_account_ids())
-
-
 class _ResourceSpecServicer(resource_spec_pb2_grpc.ResourceSpecServiceServicer):
     def __init__(self, svc):
         self.svc = svc
@@ -367,7 +336,6 @@ def build_server(settings, max_workers: int = 16) -> grpc.Server:
     binding_pb2_grpc.add_BindingServiceServicer_to_server(_BindingServicer(client.bindings), server)
     quota_pb2_grpc.add_QuotaServiceServicer_to_server(_QuotaServicer(client.quota), server)
     admin_pb2_grpc.add_AdminServiceServicer_to_server(_AdminServicer(client.admin), server)
-    secret_pb2_grpc.add_SecretServiceServicer_to_server(_SecretServicer(client.secrets), server)
     resource_spec_pb2_grpc.add_ResourceSpecServiceServicer_to_server(
         _ResourceSpecServicer(client.resource_specs), server)
     runner_defaults_pb2_grpc.add_RunnerDefaultsServiceServicer_to_server(

@@ -15,7 +15,7 @@ from fastapi import HTTPException
 
 from priva_common.models.agent import PermissionMode
 from priva_common.config import get_settings
-from priva_common.user_env import read_user_env
+from priva_common.user_env import read_settings_env
 
 _logger = None
 
@@ -145,38 +145,33 @@ async def build_agent_options(
         cwd = os.path.expanduser(settings.server.work_dir)
     os.makedirs(cwd, exist_ok=True)
 
-    # Read per-user env
+    # Cred gate. The BYOK creds live in the CLI's own *user* settings file
+    # ($CLAUDE_CONFIG_DIR/settings.json "env" block); the claude CLI reads and
+    # applies that block itself at run time (Object.assign(process.env, …)). We do
+    # NOT inject them into options.env or os.environ — here we only GATE the run so
+    # a missing base_url/auth_token is a fast 400 instead of an opaque mid-run auth
+    # failure. (This file-on-the-PVC home is also what fixes cred staleness: a change
+    # is honored on the next run with no re-wake and no per-pod Secret.)
     if username is None:
         raise HTTPException(400, "Authentication required for agent runs")
 
-    user_env = read_user_env(username) or {}
-
-    # AR-process override (§G-3): when the per-account settings file has no creds,
-    # fall back to ANTHROPIC_* exported into the agent-runner process so a dev can
-    # run the runner with the key in its environment. File values win when present.
-    _CRED_KEYS = (
-        "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
-        "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-    )
-    env_overlay = {k: os.environ[k] for k in _CRED_KEYS if os.environ.get(k)}
-    user_env = {**env_overlay, **{k: v for k, v in user_env.items() if v}}
-
-    # Check minimum required fields
-    if not user_env.get("ANTHROPIC_BASE_URL") or not user_env.get("ANTHROPIC_AUTH_TOKEN"):
+    creds = read_settings_env()
+    if not creds.get("ANTHROPIC_BASE_URL") or not creds.get("ANTHROPIC_AUTH_TOKEN"):
         raise HTTPException(400, "API credentials not configured. Please set up your API connection in Settings.")
 
-    # Apply model override if provided
-    env_dict = dict(user_env)
-    model = env_dict.get("ANTHROPIC_MODEL", "")
+    # options.model is still set explicitly (the CLI also honors ANTHROPIC_MODEL from
+    # settings.json, but a run may override it per-request).
+    model = creds.get("ANTHROPIC_MODEL", "")
     if model_override:
-        env_dict["ANTHROPIC_MODEL"] = model_override
         model = model_override
 
-    # Point the AGENT's python/pip at the per-account /workspace venv (persistent,
-    # survives restarts). This only mutates the per-run env_dict that becomes the CLI
-    # subprocess's options.env — the runner SERVICE's own os.environ is untouched, so a
-    # user-installed package can't shadow a dependency this service imports.
+    # options.env carries ONLY non-cred runtime keys — the cred keys are deliberately
+    # absent (the CLI reads them from settings.json). Point the AGENT's python/pip at
+    # the per-account /workspace venv (persistent, survives restarts). options.env is
+    # MERGED onto the CLI subprocess's inherited os.environ (per-key override), so the
+    # runner SERVICE's own os.environ is untouched and a user-installed package can't
+    # shadow a dependency this service imports.
+    env_dict: dict[str, str] = {}
     try:
         from ..sandbox_venv import venv_env_overlay
         env_dict.update(venv_env_overlay(env_dict))

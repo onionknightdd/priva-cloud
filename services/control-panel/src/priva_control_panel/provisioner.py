@@ -537,6 +537,43 @@ async def wake_and_wait(account_id: str) -> str | None:
     return await asyncio.shield(task)
 
 
+async def push_account_credentials(
+    account_id: str, username: str, env: dict, *, wake_attempts: int = 6
+) -> None:
+    """Forward BYOK creds (the 6 ``ANTHROPIC_*`` keys) to the account's agent-runner
+    so the pod persists them in its OWN ``settings.json`` — the single cred home.
+
+    Wakes the pod first (``wake_and_wait`` drives the operator's 0->1 scale and
+    returns the steer endpoint), then PUTs ``/api/sandbox/credentials`` directly to
+    the pod, authorized by a freshly-minted runner token (the same trust primitive
+    the EPP hands the gateway). control-panel→podIP is the same hop the fleet
+    /health probes already use. Raises on failure so callers can log; the
+    admin/setup callers treat it as best-effort — a slow cold pod must never fail
+    user creation, and the user can always set creds via the SPA.
+    """
+    from priva_common.runner_token import mint
+
+    endpoint = None
+    for _ in range(max(1, wake_attempts)):
+        endpoint = await wake_and_wait(account_id)
+        if endpoint:
+            break
+        await asyncio.sleep(1.0)
+    if not endpoint:
+        raise RuntimeError(f"agent-runner for account {account_id} did not wake in time")
+
+    # trust_env=False: internal pod hop must not route through a host proxy.
+    async with httpx.AsyncClient(trust_env=False) as cx:
+        r = await cx.put(
+            f"http://{endpoint}/api/sandbox/credentials",
+            json=env,
+            headers={"X-Priva-Runner-Token": mint(account_id, username)},
+            timeout=15.0,
+        )
+    r.raise_for_status()
+    logger.info("pushed creds to agent-runner account={} keys={}", account_id, sorted(env.keys()))
+
+
 def terminate(account_id: str) -> None:
     """Admin: scale the account's runner to zero now (alpha: direct scale)."""
     s = get_settings()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -14,7 +15,11 @@ from claude_agent_sdk import (
     rename_session as sdk_rename_session,
     tag_session as sdk_tag_session,
 )
-from claude_agent_sdk._internal.sessions import _canonicalize_path, _get_project_dir
+from claude_agent_sdk._internal.sessions import (
+    _canonicalize_path,
+    _get_claude_config_home_dir,
+    _get_project_dir,
+)
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import TypeAdapter, ValidationError
@@ -226,6 +231,101 @@ def _tool_use_result(raw: dict) -> dict | None:
     return result if isinstance(result, dict) else None
 
 
+_WORKFLOW_AGENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def _texts_from_blocks(blocks: list[dict]) -> str:
+    return "\n".join(
+        b["text"]
+        for b in blocks
+        if b.get("type") == "text" and isinstance(b.get("text"), str)
+    ).strip()
+
+
+def _extract_agent_prompt_result(path: Path) -> tuple[str | None, str | None]:
+    """Recover a workflow sub-agent's full prompt + result from its transcript.
+
+    The first ``user`` record is the prompt the agent was launched with. The
+    result is the agent's return value: for schema agents that's the final
+    ``StructuredOutput`` tool input, otherwise the last assistant text. The
+    streamed task_progress events only carry truncated previews of these.
+    """
+    prompt: str | None = None
+    structured: str | None = None
+    last_assistant_text: str | None = None
+    for raw in _iter_jsonl_dicts(path):
+        message = raw.get("message")
+        role = message.get("role") if isinstance(message, dict) else None
+        is_user = raw.get("type") == "user" or role == "user"
+        is_assistant = raw.get("type") == "assistant" or role == "assistant"
+        if prompt is None and is_user:
+            content = message.get("content") if isinstance(message, dict) else None
+            if isinstance(content, str) and content.strip():
+                prompt = content.strip()
+            else:
+                text = _texts_from_blocks(_message_content_blocks(raw))
+                if text:
+                    prompt = text
+        if is_assistant:
+            blocks = _message_content_blocks(raw)
+            text = _texts_from_blocks(blocks)
+            if text:
+                last_assistant_text = text
+            for block in blocks:
+                if block.get("type") == "tool_use" and block.get("name") == "StructuredOutput":
+                    payload = block.get("input")
+                    if isinstance(payload, dict):
+                        try:
+                            structured = json.dumps(payload, indent=2, ensure_ascii=False)
+                        except (TypeError, ValueError):
+                            structured = None
+    return prompt, (structured or last_assistant_text)
+
+
+def _read_workflow_agent_transcript(agent_id: str) -> dict | None:
+    """Locate ``agent-<id>.jsonl`` under the user's projects tree and pull the
+    full prompt + result out of it. ``None`` when no transcript exists yet."""
+    projects = _get_claude_config_home_dir() / "projects"
+    match = next(projects.rglob(f"agent-{agent_id}.jsonl"), None)
+    if match is None:
+        return None
+    prompt, result = _extract_agent_prompt_result(match)
+    return {"agentId": agent_id, "prompt": prompt, "result": result}
+
+
+_WORKFLOW_RUN_ID_RE = re.compile(r"^wf_[A-Za-z0-9_-]{1,64}$")
+
+# Fields the workflow inspector needs to repaint a card on session reload. The
+# on-disk snapshot (workflows/<runId>.json) also stores the full script, logs and
+# result — omitted here to keep the payload lean; workflowProgress is the bulk.
+_WORKFLOW_STATE_KEYS = (
+    "runId", "taskId", "status", "summary", "workflowName", "startTime",
+    "durationMs", "totalTokens", "totalToolCalls", "agentCount",
+    "phases", "workflowProgress",
+)
+
+
+def _read_workflow_state(run_id: str) -> dict | None:
+    """Load the persisted workflow snapshot ``workflows/<run_id>.json``.
+
+    task_progress/task_notification events are NOT written to the session
+    transcript, so a reloaded session has no per-agent detail. The workflow
+    engine persists the full running state (phases + agents + status, same shape
+    as the live task_progress stream) to this snapshot — the inspector reads it
+    to rehydrate on reload. ``None`` when no snapshot exists."""
+    projects = _get_claude_config_home_dir() / "projects"
+    match = next(projects.rglob(f"workflows/{run_id}.json"), None)
+    if match is None:
+        return None
+    try:
+        data = json.loads(match.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {k: data.get(k) for k in _WORKFLOW_STATE_KEYS}
+
+
 def _build_subagent_parent_map(cwd: str, session_id: str) -> dict[str, str]:
     """Map sidechain agent ids back to the top-level Agent/Task tool_use id."""
     parent_by_agent_id: dict[str, str] = {}
@@ -394,6 +494,47 @@ def _build_message_replay_metadata(cwd: str, session_id: str) -> dict[str, dict]
 logger = get_app_logger(__name__)
 
 router = APIRouter(prefix="/api/sandbox/agent", tags=["agent"])
+
+
+@router.get("/workflow-agent/{agent_id}", response_model=None)
+async def get_workflow_agent_transcript(
+    agent_id: str,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    """Full prompt + result for a workflow sub-agent.
+
+    The streamed task_progress events only carry truncated
+    promptPreview/resultPreview; this reads the complete text from the agent's
+    on-disk transcript (``agent-<id>.jsonl`` — the same data the
+    ``claude /workflows`` drill-down shows). Fetched lazily by the Canvas
+    workflow inspector when an agent row is expanded.
+    """
+    if not _WORKFLOW_AGENT_ID_RE.match(agent_id):
+        raise HTTPException(400, "invalid agent id")
+    data = await asyncio.to_thread(_read_workflow_agent_transcript, agent_id)
+    if data is None:
+        raise HTTPException(404, "agent transcript not found")
+    return data
+
+
+@router.get("/workflow-state/{run_id}", response_model=None)
+async def get_workflow_state(
+    run_id: str,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    """Persisted workflow snapshot for a run (phases + agents + status).
+
+    task_progress events aren't saved to the session transcript, so a reloaded
+    session has no per-agent detail. The Canvas inspector fetches this snapshot
+    to rehydrate the workflow card the same way the live task_progress stream
+    populated it. Rides the control-panel "/" lane (snapshots run tens of KB).
+    """
+    if not _WORKFLOW_RUN_ID_RE.match(run_id):
+        raise HTTPException(400, "invalid run id")
+    data = await asyncio.to_thread(_read_workflow_state, run_id)
+    if data is None:
+        raise HTTPException(404, "workflow state not found")
+    return data
 
 
 @router.post("/run", response_model=AgentRunResponse)

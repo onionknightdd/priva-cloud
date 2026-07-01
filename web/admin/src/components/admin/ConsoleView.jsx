@@ -91,7 +91,7 @@ export default function ConsoleView() {
     <div className="flex flex-col" style={{ height: '100%', overflow: 'hidden' }}>
       <style>{`@keyframes cv-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 flex-shrink-0" style={{ padding: '20px 24px 0 24px' }}>
+      <div className="flex items-center justify-between gap-4 flex-shrink-0" style={{ padding: '20px var(--admin-section-x) 0 var(--admin-section-x)' }}>
         <div style={{ minWidth: 0 }}>
           <h2 className="font-semibold text-lg flex items-center gap-2" style={{ color: 'var(--text-primary)', margin: 0 }}>
             <SquareTerminal size={18} strokeWidth={1.5} className="flex-shrink-0" />
@@ -136,7 +136,7 @@ export default function ConsoleView() {
       </div>
 
       {/* Body — terminal fills the area; TerminalSession positions itself inset:0. */}
-      <div className="flex-1" style={{ padding: '16px 24px 24px 24px', minHeight: 0 }}>
+      <div className="flex-1" style={{ padding: '16px var(--admin-section-x) 24px var(--admin-section-x)', minHeight: 0 }}>
         {meta ? (
           <div style={{ position: 'relative', height: '100%', border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden', background: 'var(--bg-base)' }}>
             <TerminalSession

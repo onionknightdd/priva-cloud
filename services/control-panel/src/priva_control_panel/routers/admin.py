@@ -41,7 +41,6 @@ from priva_common.models.auth import UserCreate, UserPublic, UserUpdate
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from ..services.auth import require_admin, user_record_to_public
 from priva_common.config import get_settings
-from ..services.secret_env import write_user_env
 from priva_common.logging import get_app_logger
 from priva_common.user_store import UserRecord, get_user_store
 
@@ -191,11 +190,18 @@ async def create_user(
     except Exception as exc:  # pragma: no cover
         logger.warning("provision tenant failed for {}: {}", user.username, exc)
 
-    # Write env if provided
+    # Seed creds (if provided) into the new account's agent-runner settings.json, by
+    # waking its pod (provisioned just above) and PUTting through the runner token.
+    # Best-effort: a slow cold pod must not fail user creation — the user can set
+    # creds in the SPA.
     if request.env:
         env_dict = request.env.model_dump(exclude_none=True)
         if env_dict:
-            write_user_env(request.username, env_dict)
+            try:
+                from ..provisioner import push_account_credentials
+                await push_account_credentials(user.account_id, user.username, env_dict)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("create_user: push creds failed for {}: {}", user.username, exc)
 
     audit = get_audit_logger()
     audit.append(AuditEntry(
@@ -276,11 +282,18 @@ async def update_user(
                 details={"old": existing.agent_runner_type, "new": request.agent_runner_type},
             ))
 
-    # Write env if provided
+    # Write creds (if provided) into the account's agent-runner settings.json by
+    # waking its pod and PUTting through the runner token. Best-effort: a slow cold
+    # pod must not fail the admin edit. The account already exists (`existing`), so
+    # its tenant/pod is provisioned; account_id is stable across the update.
     if request.env:
         env_dict = request.env.model_dump(exclude_none=True)
         if env_dict:
-            write_user_env(username, env_dict)
+            try:
+                from ..provisioner import push_account_credentials
+                await push_account_credentials(existing.account_id, username, env_dict)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("update_user: push creds failed for {}: {}", username, exc)
 
     try:
         user = store.update_user(username, **kwargs)

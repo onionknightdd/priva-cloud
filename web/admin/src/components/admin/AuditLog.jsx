@@ -210,7 +210,7 @@ export default function AuditLog() {
   }
 
   return (
-    <div className="flex flex-col gap-4" style={{ padding: '32px 56px' }}>
+    <div className="flex flex-col gap-4" style={{ padding: '32px var(--admin-section-x-wide)' }}>
       <div className="flex items-center gap-3">
         <h2 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>
           {t('admin.auditLog')}

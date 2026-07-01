@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import MarkdownRenderer from '../markdown/MarkdownRenderer'
 import ToolCallCard from './ToolCallCard'
 import SubagentFrame from './SubagentFrame'
+import WorkflowCard from './WorkflowCard'
 import ToolRunSection from './ToolRunSection'
 import TodoWriteCard from './TodoWriteCard'
 import AskUserQuestionCard from './AskUserQuestionCard'
@@ -64,7 +65,8 @@ function contentHasThinking(contentBlocks) {
   })
 }
 
-function ThinkingBlock({ content, t, streaming = false }) {
+function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
+  const durationStr = durationMs ? formatDuration(durationMs) : null
   return (
     <details className="thinking-block">
       <summary
@@ -89,7 +91,7 @@ function ThinkingBlock({ content, t, streaming = false }) {
         ) : (
           <>
             <Check size={10} strokeWidth={1.5} style={{ color: 'var(--purple)', flexShrink: 0 }} />
-            {t('chat.thoughtComplete')}
+            {durationStr ? t('chat.thoughtFor', { duration: durationStr }) : t('chat.thoughtComplete')}
             <ChevronRight size={10} strokeWidth={1.5} className="thinking-chevron" style={{ color: 'var(--text-dim)', flexShrink: 0, transition: 'transform 150ms ease' }} />
           </>
         )}
@@ -1027,6 +1029,8 @@ function isCollapsibleToolBlock(block) {
   // out of the outer tool-steps section so they render as top-level nodes.
   if (block.name === 'Agent' || block.name === 'Task') return false
   if (block.name === 'TodoWrite') return false
+  // WorkflowCard manages its own collapse UX — render as a top-level node.
+  if (block.name === 'Workflow') return false
   return true
 }
 
@@ -1236,6 +1240,10 @@ export default memo(function MessageBubble({
       if (block.name === 'Agent' || block.name === 'Task') {
         return <SubagentFrame key={block.id || i} block={block} reverted={reverted} />
       }
+      // Workflow → live multi-phase / multi-agent status card.
+      if (block.name === 'Workflow') {
+        return <WorkflowCard key={block.id || i} block={block} reverted={reverted} />
+      }
       // TodoWrite renders as a plan widget — latest is full, earlier collapse.
       if (block.name === 'TodoWrite') {
         const isLatest = latestTodoWriteId && latestTodoWriteId === block.id
@@ -1257,12 +1265,34 @@ export default memo(function MessageBubble({
       return <FileOpRefIndicator key={block.id || i} block={block} reverted={reverted} />
     }
     if (block.type === 'thinking' && block.thinking?.trim()) {
+      // A thinking block is "done" the moment any later non-empty block appears
+      // (blocks arrive complete, not token-streamed) or the stream ends — only
+      // the trailing block of a still-streaming message is actively "Thinking…".
+      let hasLater = false
+      for (let j = i + 1; j < contentBlocks.length; j += 1) {
+        const b = contentBlocks[j]
+        if (b?.type === 'text' && !b.text?.trim()) continue
+        hasLater = true
+        break
+      }
+      const finished = hasLater || !isStreaming
+      // Duration ≈ the gap before this block appeared (previous block's arrival
+      // → this thinking block's arrival), i.e. the time spent thinking.
+      let durationMs = null
+      if (finished && block.startTime) {
+        let prevStart = message.timestamp
+        for (let j = i - 1; j >= 0; j -= 1) {
+          if (contentBlocks[j]?.startTime) { prevStart = contentBlocks[j].startTime; break }
+        }
+        if (prevStart) durationMs = Math.max(0, block.startTime - prevStart)
+      }
       return (
         <ThinkingBlock
           key={block.id || i}
           content={block.thinking}
           t={t}
-          streaming={isStreaming}
+          streaming={!finished}
+          durationMs={durationMs}
         />
       )
     }

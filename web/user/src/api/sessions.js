@@ -1,13 +1,12 @@
-import { getAuthHeaders, handleAPIResponse, fetchWithWake } from '@shared/api/client'
+import { getAuthHeaders, handleAPIResponse, fetchWithWake, sandboxRead } from '@shared/api/client'
 
 const BASE_URL = '/api/sandbox'
 
 // Grouped-by-cwd listing (no cwd param) — { groups: [{cwd,total,sessions,has_more,last_activity}], active_cwd }.
+// sandboxRead: a busy account's grouped list runs well past ~8KB; ride the
+// control-panel lane so the GIE/EPP ext_proc doesn't truncate it.
 export async function fetchSessionsGrouped() {
-  const res = await fetchWithWake(`${BASE_URL}/agent/sessions`, {
-    headers: { ...getAuthHeaders() },
-  })
-  return handleAPIResponse(res)
+  return sandboxRead('/agent/sessions')
 }
 
 // One cwd's page — backs the per-group "more in this dir" loader.
@@ -17,10 +16,7 @@ export async function fetchCwdSessions(cwd, limit = 20, offset = 0) {
   params.set('cwd', cwd)
   params.set('limit', String(limit))
   params.set('offset', String(offset))
-  const res = await fetchWithWake(`${BASE_URL}/agent/sessions?${params}`, {
-    headers: { ...getAuthHeaders() },
-  })
-  return handleAPIResponse(res)
+  return sandboxRead(`/agent/sessions?${params}`)
 }
 
 // Persist a session's additional directories (SDK --add-dir), saved server-side
@@ -50,11 +46,29 @@ export async function fetchSessionMessages(sessionId, limit, offset) {
   if (limit != null) params.set('limit', String(limit))
   if (offset != null && offset !== 0) params.set('offset', String(offset))
   const qs = params.toString()
-  const res = await fetchWithWake(
-    `${BASE_URL}/agent/sessions/${encodeURIComponent(sessionId)}/messages${qs ? '?' + qs : ''}`,
-    { headers: { ...getAuthHeaders() } }
-  )
-  return handleAPIResponse(res)
+  const suffix = `${encodeURIComponent(sessionId)}/messages${qs ? '?' + qs : ''}`
+  // Large/workflow transcripts run 35-300KB. sandboxRead rides the control-panel
+  // "/" lane (no GIE/EPP ~8KB ext_proc truncation), falling back to the direct
+  // sandbox lane on 404 (route not deployed yet) or network error.
+  return sandboxRead(`/agent/sessions/${suffix}`)
+}
+
+// Full prompt + result for one workflow sub-agent, recovered from its on-disk
+// transcript (agent-<id>.jsonl). The live task_progress stream only carries
+// truncated promptPreview/resultPreview; the Canvas inspector fetches this
+// lazily on row-expand to show the complete text. Rides the control-panel "/"
+// lane (full body, no GIE/EPP ~8KB truncation), falling back to the direct
+// sandbox lane on 404 (route not deployed yet) — returns { agentId, prompt, result }.
+export async function fetchWorkflowAgentTranscript(agentId) {
+  return sandboxRead(`/agent/workflow-agent/${encodeURIComponent(agentId)}`)
+}
+
+// Persisted workflow snapshot (phases + agents + status) for one run, from
+// workflows/<runId>.json. task_progress events aren't saved to the transcript,
+// so on session reload the workflow card rehydrates from this. Rides the
+// control-panel "/" lane (snapshots run tens of KB, past the ~8KB EPP cap).
+export async function fetchWorkflowState(runId) {
+  return sandboxRead(`/agent/workflow-state/${encodeURIComponent(runId)}`)
 }
 
 async function handleJson(res) {
@@ -153,9 +167,7 @@ export async function archiveWorkdir(cwd) {
 }
 
 // Every archived session across all cwds — backs Settings → Archived.
+// sandboxRead: the full archive can be large; ride the control-panel lane.
 export async function fetchArchivedSessions() {
-  const res = await fetchWithWake(`${BASE_URL}/agent/sessions?archived=true`, {
-    headers: { ...getAuthHeaders() },
-  })
-  return handleAPIResponse(res)
+  return sandboxRead('/agent/sessions?archived=true')
 }

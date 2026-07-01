@@ -1,12 +1,16 @@
 """kopf reconcile handlers for AgentTenant — the sole scaler (0<->1).
 
 - create/resume: ensure Deployment(0) + Service + PVC exist (idempotent).
-- spec.wake.requestedAt change: materialize the creds Secret from data-spine,
-  scale 0->1, wait for the pod, record podIP/startedAt on status (the EPP reads it).
-  When already scaled to 1, resolve the *real* Ready pod IP instead of trusting status.
+- spec.wake.requestedAt change: scale 0->1, wait for the pod, record podIP/startedAt
+  on status (the EPP reads it). When already scaled to 1, resolve the *real* Ready
+  pod IP instead of trusting status.
 - timer: a periodic reconcile (status is derived, not authoritative) that heals
-  status.podIP against pod reality, GCs the creds Secret when scaled down, then runs
-  the idle /health sweep that scales 1->0 once idle past grace.
+  status.podIP against pod reality, then runs the idle /health sweep that scales
+  1->0 once idle past grace.
+
+Creds are NOT injected by the operator: each account's BYOK creds live in its own
+``/workspace/.claude/settings.json`` on the PVC (written + read by the pod itself),
+so there is no per-pod Secret to materialize at wake or GC at sleep.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ import httpx
 import kopf
 
 from priva_common.config import get_settings
-from priva_operator import GROUP, PLURAL, VERSION, kube, names, secrets, storage_backend
+from priva_operator import GROUP, PLURAL, VERSION, kube, names, storage_backend
 
 
 def _ids(spec, name):
@@ -67,8 +71,6 @@ def ensure(spec, name, namespace, uid, status, patch, logger, **_):
             # while at 0 (free; the running-pod case below is left untouched).
             kube.patch_deployment_runtime(
                 namespace, account_id, kube.resolve_resources(spec, s, defaults), image)
-            # Materialize creds first so the pod is request-ready the moment it's Running.
-            secrets.materialize(namespace, account_id, owner)
             kube.scale(namespace, account_id, 1)
         pod_ip = kube.wait_pod_ready(namespace, account_id, timeout=float(s.kubernetes.wake_timeout_seconds))
         if pod_ip:
@@ -92,11 +94,10 @@ def ensure(spec, name, namespace, uid, status, patch, logger, **_):
 def on_wake(spec, name, namespace, uid, status, patch, logger, **_):
     s = get_settings()
     account_id, _username = _ids(spec, name)
-    owner = names.owner_ref(name, uid)
 
     # Reality-based guard (#1/#4): when the Deployment is already scaled to 1, don't
-    # re-materialize the Secret or re-scale — resolve the *real* Ready pod IP and write
-    # it. Trusting status.podIP here would re-bless a dead/replaced pod; resolving from
+    # re-scale — resolve the *real* Ready pod IP and write it. Trusting status.podIP
+    # here would re-bless a dead/replaced pod; resolving from
     # pod reality makes the wake path itself self-correcting, so correctness no longer
     # depends on the timer cadence (the timer only shrinks the EPP warm-path stale window).
     if kube.get_replicas(namespace, account_id) == 1:
@@ -123,7 +124,6 @@ def on_wake(spec, name, namespace, uid, status, patch, logger, **_):
     kube.patch_deployment_runtime(
         namespace, account_id, kube.resolve_resources(spec, s, defaults),
         kube.resolve_image(spec, s, defaults))
-    n = secrets.materialize(namespace, account_id, owner)
     kube.scale(namespace, account_id, 1)
     patch.status["phase"] = "Waking"
     pod_ip = kube.wait_pod_ready(namespace, account_id, timeout=float(s.kubernetes.wake_timeout_seconds))
@@ -136,15 +136,15 @@ def on_wake(spec, name, namespace, uid, status, patch, logger, **_):
     patch.status["readyReplicas"] = 1
     patch.status["startedAt"] = time.time()
     patch.status["idleSince"] = None
-    logger.info("woke account=%s pod=%s creds=%d keys", account_id, pod_ip, n)
+    logger.info("woke account=%s pod=%s", account_id, pod_ip)
 
 
 @kopf.timer(GROUP, VERSION, PLURAL, interval=10.0, sharp=False)
 def reconcile_runtime(spec, name, namespace, status, patch, logger, **_):
     """Periodic reconcile — status is *derived, not authoritative*, so re-derive it each
-    tick: (1) GC the creds Secret when scaled down, (2) heal status.podIP against the
-    real Ready pod, (3) idle-sweep 1->0 past grace. Cheap pod-list, so the interval is
-    short for fast self-heal of a dead/replaced pod (#1)."""
+    tick: (1) heal status.podIP against the real Ready pod, (2) idle-sweep 1->0 past
+    grace. Cheap pod-list, so the interval is short for fast self-heal of a dead/replaced
+    pod (#1)."""
     s = get_settings()
     account_id, _ = _ids(spec, name)
     replicas = kube.get_replicas(namespace, account_id)
@@ -166,15 +166,10 @@ def reconcile_runtime(spec, name, namespace, status, patch, logger, **_):
             patch.status["storageWarning"] = f"quota reconcile failed: {exc}"
             logger.warning("quota reconcile failed account=%s: %s", account_id, exc)
 
-    # --- #7: GC the plaintext creds Secret when the runtime is scaled down -----------
-    # Reconcile Secret existence against replicas==0, NOT podIP=None: on a *replacement*
-    # the Deployment is still at 1 and the new pod needs the Secret via envFrom. Only a
-    # genuinely zero-replica runtime (idle-slept, or scaled down out-of-band/offboarded)
-    # should lose its Secret.
+    # Scaled down (idle-slept / scaled out-of-band / offboarded): nothing on the pod to
+    # reconcile. Creds live in the account's settings.json on the PVC — there is no
+    # per-pod Secret to GC.
     if replicas <= 0:
-        if secrets.exists(namespace, account_id):
-            secrets.delete(namespace, account_id)
-            logger.info("gc'd creds secret (replicas=%d) account=%s", replicas, account_id)
         return
 
     if replicas != 1:
@@ -246,7 +241,6 @@ def reconcile_runtime(spec, name, namespace, status, patch, logger, **_):
         # resourceVersion bump can 409 → kopf retries the whole handler).
         kube.set_cr_status(namespace, account_id, phase="Zero", podIP=None, readyReplicas=0)
         kube.scale(namespace, account_id, 0)
-        secrets.delete(namespace, account_id)
         patch.status["phase"] = "Zero"
         patch.status["podIP"] = None
         patch.status["readyReplicas"] = 0
@@ -264,10 +258,8 @@ def on_runner_type_change(spec, name, namespace, uid, old, new, patch, logger, *
         return
     s = get_settings()
     account_id, _ = _ids(spec, name)
-    owner = names.owner_ref(name, uid)
     if new == "persistent" and spec.get("desiredState", "active") == "active":
         if kube.get_replicas(namespace, account_id) != 1:
-            secrets.materialize(namespace, account_id, owner)
             kube.scale(namespace, account_id, 1)
             patch.status["phase"] = "Waking"
             patch.status["startedAt"] = time.time()

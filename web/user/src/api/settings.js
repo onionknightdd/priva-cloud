@@ -1,19 +1,21 @@
-import { getJSON, putJSON, sandboxGet, sandboxPut } from '@shared/api/client'
+import { sandboxGet, sandboxPut } from '@shared/api/client'
 
+// BYOK creds now live in the account's agent-runner (settings.json), reached
+// through agentgateway via the /api/sandbox/* face — not the control-panel.
 export function getUserEnv() {
-  return getJSON('/auth/me/env')
+  return sandboxGet('/credentials')
 }
 
 export function updateUserEnv(env) {
-  return putJSON('/auth/me/env', env)
+  return sandboxPut('/credentials', env)
 }
 
 export function getUserEnvStatus() {
-  return getJSON('/auth/me/env/status')
+  return sandboxGet('/credentials/status')
 }
 
 export function fetchModels() {
-  return getJSON('/resource/models')
+  return sandboxGet('/credentials/models')
 }
 
 export function getQuickActions() {

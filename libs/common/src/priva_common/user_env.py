@@ -1,12 +1,26 @@
+"""Per-account BYOK credentials live in the claude CLI's native *user* settings
+file — ``$CLAUDE_CONFIG_DIR/settings.json`` (``/workspace/.claude/settings.json``
+on the agent-runner pod). The CLI reads that file's top-level ``env`` block and
+applies it via ``Object.assign(process.env, …)`` on every invocation, so the
+agent-runner is the single owner: it merge-writes the 6 ``ENV_KEYS`` here and the
+CLI honors them at run time — no process-env injection, no data-spine, no
+wake-time Secret (which is also why a cred change is picked up with no re-wake).
+
+The ``env`` block is one key among many (``hooks``/``mcpServers``/``permissions``
+…), so reads/writes touch ONLY the top-level ``env`` key and preserve everything
+else. Writes are atomic under ``flock(LOCK_EX)`` spanning the read-modify-write
+and the file is kept ``0600`` (the auth token lives in it).
+"""
+
 from __future__ import annotations
 
 import fcntl
 import json
+import os
 import threading
 from pathlib import Path
 
 from .logging import get_app_logger
-from .config import get_settings
 
 logger = get_app_logger(__name__)
 
@@ -22,19 +36,22 @@ ENV_KEYS = [
 ]
 
 
-def _get_work_dir() -> Path:
-    settings = get_settings()
-    return Path(settings.server.work_dir).expanduser()
+def settings_json_path() -> Path:
+    """The claude CLI's *user* settings file: ``$CLAUDE_CONFIG_DIR/settings.json``.
+
+    On the agent-runner pod the operator sets ``CLAUDE_CONFIG_DIR=/workspace/.claude``
+    (per-account NFS subPath), so this resolves to the same file the CLI reads and
+    the hooks builder writes. Falls back to ``~/.claude`` for local dev where the
+    runner shares the host home.
+    """
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude"
+    return Path(base).expanduser() / "settings.json"
 
 
-def get_user_env_path(username: str) -> Path:
-    return _get_work_dir() / username / ".claude" / "settings.local.json"
-
-
-def read_user_env(username: str) -> dict | None:
-    path = get_user_env_path(username)
+def _read_settings(path: Path) -> dict:
+    """Load the whole settings.json (shared lock); ``{}`` if absent/corrupt."""
     if not path.exists():
-        return None
+        return {}
     try:
         with open(path, "r") as f:
             fcntl.flock(f, fcntl.LOCK_SH)
@@ -42,57 +59,67 @@ def read_user_env(username: str) -> dict | None:
                 data = json.load(f)
             finally:
                 fcntl.flock(f, fcntl.LOCK_UN)
-        env = data.get("env")
-        if not isinstance(env, dict):
-            return None
-        return env
+        return data if isinstance(data, dict) else {}
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Failed to read user env for {}: {}", username, e)
-        return None
+        logger.warning("Failed to read settings.json at {}: {}", path, e)
+        return {}
 
 
-def write_user_env(username: str, env: dict) -> None:
-    path = get_user_env_path(username)
+def read_settings_env(path: Path | None = None) -> dict:
+    """Return the top-level ``env`` block (the cred dict), or ``{}`` if unset."""
+    data = _read_settings(path or settings_json_path())
+    env = data.get("env")
+    return dict(env) if isinstance(env, dict) else {}
+
+
+def write_settings_env(creds: dict, path: Path | None = None) -> None:
+    """Merge the provided ANTHROPIC_* creds into the ``env`` block of settings.json.
+
+    Atomic read-modify-write: ``flock(LOCK_EX)`` is held across the read AND the
+    write (opened ``O_RDWR``, NOT truncate-on-open) so a concurrent writer can't
+    interleave. Only ``ENV_KEYS`` are touched — a provided non-None value is set,
+    and any ENV_KEY never seen is seeded ``""``; every OTHER top-level key
+    (``hooks``/``mcpServers``/…) is preserved. The file is kept ``0600``.
+    """
+    path = path or settings_json_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Read existing data to preserve non-env fields
-    existing = {}
-    if path.exists():
-        try:
-            with open(path, "r") as f:
-                fcntl.flock(f, fcntl.LOCK_SH)
-                try:
-                    existing = json.load(f)
-                finally:
-                    fcntl.flock(f, fcntl.LOCK_UN)
-        except (json.JSONDecodeError, OSError):
-            existing = {}
-
-    # Merge env: only update provided keys
-    current_env = existing.get("env", {}) if isinstance(existing.get("env"), dict) else {}
-    for key in ENV_KEYS:
-        if key in env and env[key] is not None:
-            current_env[key] = env[key]
-        elif key not in current_env:
-            current_env[key] = ""
-
-    existing["env"] = current_env
-
     with _lock:
-        with open(path, "w") as f:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "r+") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
             try:
-                json.dump(existing, f, indent=2)
+                raw = f.read()
+                try:
+                    data = json.loads(raw) if raw.strip() else {}
+                except (ValueError, TypeError):
+                    data = {}
+                if not isinstance(data, dict):
+                    data = {}
+                current_env = data.get("env")
+                if not isinstance(current_env, dict):
+                    current_env = {}
+                for key in ENV_KEYS:
+                    if key in creds and creds[key] is not None:
+                        current_env[key] = creds[key]
+                    elif key not in current_env:
+                        current_env[key] = ""
+                data["env"] = current_env
+                f.seek(0)
+                f.truncate()
+                json.dump(data, f, indent=2)
                 f.write("\n")
             finally:
                 fcntl.flock(f, fcntl.LOCK_UN)
+    # Pre-existing files may carry looser perms; the token lives here, so enforce 0600.
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
-def has_user_env(username: str) -> bool:
-    env = read_user_env(username)
-    if env is None:
-        return False
-    # Must have at least base_url and auth_token
+def has_settings_env(path: Path | None = None) -> bool:
+    """True when both required creds (base_url + auth_token) are present."""
+    env = read_settings_env(path)
     return bool(env.get("ANTHROPIC_BASE_URL")) and bool(env.get("ANTHROPIC_AUTH_TOKEN"))
 
 

@@ -606,7 +606,7 @@ export default function WebTerminalDrawer() {
           onClick={() => setMode(lastNonExpandedRef.current || 'float')}
         />
       )}
-      <div key="terminal-frame" className="flex flex-col" style={frameStyle}>
+      <div key="terminal-frame" className="user-main-scope flex flex-col" style={frameStyle}>
         {/* Dock-mode top edge resize handle */}
         <div
           key="dock-handle"

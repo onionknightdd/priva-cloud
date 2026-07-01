@@ -178,6 +178,20 @@ export async function sandboxGet(path) {
   return handleAPIResponse(res)
 }
 
+// Large-body-safe GET: rides the control-panel "/" lane (no GIE/EPP ~8KB ext_proc
+// truncation), falling back to the direct sandbox lane on 404 (route not deployed)
+// or network error. Same signature as sandboxGet(path) — rerouting a >8KB-risk read
+// is a drop-in sandboxGet → sandboxRead swap. Writes/streams/downloads stay on
+// sandboxGet/sandboxPost/etc (the InferencePool lane never truncates those).
+export async function sandboxRead(path) {
+  try {
+    const res = await fetchWithWake(`/api/cp-proxy${path}`, { headers: { ...getAuthHeaders() } })
+    if (res.status !== 404) return handleAPIResponse(res)
+  } catch { /* network error → fall back to the direct lane */ }
+  const res = await fetchWithWake(`${SANDBOX_BASE}${path}`, { headers: { ...getAuthHeaders() } })
+  return handleAPIResponse(res)
+}
+
 export async function sandboxPut(path, body) {
   const res = await fetchWithWake(`${SANDBOX_BASE}${path}`, {
     method: 'PUT',

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import {
   MessageSquare, Trash2, ChevronDown, ChevronRight, FolderBookmark, MoreHorizontal,
   RefreshCw, Settings, Search, X, Pencil, Flag, GitBranch, Pin, Archive, SlidersVertical, SquarePen,
@@ -13,6 +13,7 @@ import useSidebarStore from '../../stores/sidebarStore'
 import useChatStore from '../../stores/chatStore'
 import useTaskStore from '../../stores/taskStore'
 import useUiStore from '@shared/stores/uiStore'
+import useSplitStore from '../../stores/splitStore'
 import useAuthStore from '@shared/stores/authStore'
 import useUserDataStore from '../../stores/userDataStore'
 import useFileOpsStore from '../../stores/fileOpsStore'
@@ -77,7 +78,7 @@ const PLUGINS_SECTIONS = [
 function SessionItem({
   session, isActive, openMenuId, menuRef, onSelect, onMenuToggle,
   onDelete, onRenameStart, onTagStart, onPinToggle, onArchive, renameEditingId,
-  onRenameCommit, onRenameCancel, t, indent = 0,
+  onRenameCommit, onRenameCancel, onDragStartSession, onDragEndSession, t, indent = 0,
 }) {
   const [renameValue, setRenameValue] = useState(session.name || '')
   useEffect(() => {
@@ -98,6 +99,7 @@ function SessionItem({
   return (
     <div
       className="flex flex-col gap-1 px-3 group"
+      draggable={!editing}
       style={{
         position: 'relative',
         paddingTop: 4,
@@ -111,6 +113,34 @@ function SessionItem({
         cursor: editing ? 'default' : 'pointer',
         fontSize: 13,
         transition: 'background 150ms ease',
+      }}
+      onDragStart={(e) => {
+        if (editing) {
+          e.preventDefault()
+          return
+        }
+        e.dataTransfer.effectAllowed = 'copy'
+        e.dataTransfer.setData('application/priva-session', JSON.stringify({
+          sessionId: session.sessionId || session.id,
+          name: session.name,
+          cwd: session.cwd,
+        }))
+        e.dataTransfer.setData('text/plain', JSON.stringify({
+          sessionId: session.sessionId || session.id,
+          name: session.name,
+          cwd: session.cwd,
+        }))
+        const dragSession = {
+          sessionId: session.sessionId || session.id,
+          name: session.name,
+          cwd: session.cwd,
+        }
+        flushSync(() => {
+          onDragStartSession?.(dragSession)
+        })
+      }}
+      onDragEnd={() => {
+        onDragEndSession?.()
       }}
       onClick={() => { if (!editing) onSelect(session) }}
       onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--bg-elevated)' }}
@@ -496,6 +526,11 @@ export default function Sidebar() {
   const hideCanvas = useUiStore((s) => s.hideCanvas)
   const activeNavTab = useUiStore((s) => s.activeNavTab)
   const setActiveNavTab = useUiStore((s) => s.setActiveNavTab)
+  const splitPanes = useSplitStore((s) => s.panes)
+  const openSessionInActivePane = useSplitStore((s) => s.openSessionInActivePane)
+  const resetSplit = useSplitStore((s) => s.reset)
+  const beginSessionDrag = useSplitStore((s) => s.beginSessionDrag)
+  const endSessionDrag = useSplitStore((s) => s.endSessionDrag)
   const authUser = useAuthStore((s) => s.user)
   const logout = useAuthStore((s) => s.logout)
   const activeSection = useUserDataStore((s) => s.activeSection)
@@ -700,6 +735,7 @@ export default function Sidebar() {
 
   // "New Session" — switch to the chat view and start fresh.
   const handleNewSession = () => {
+    resetSplit()
     setActiveNavTab('priva')
     handleNewChat()
   }
@@ -708,6 +744,7 @@ export default function Sidebar() {
   // new-workdir picker). Always returns to the chat view.
   const handleNewChatHere = (cwd) => {
     setOpenWorkdirMenu(null)
+    resetSplit()
     setActiveNavTab('priva')
     handleNewChat()
     setCwdDraft(cwd)
@@ -748,6 +785,14 @@ export default function Sidebar() {
   const handleSelectSession = async (session) => {
     // Selecting a session always shows the chat view.
     setActiveNavTab('priva')
+    if (splitPanes.length > 0) {
+      const activePane = useSplitStore.getState().getActivePane()
+      openSessionInActivePane(session.sessionId || session.id)
+      if (!activePane?.local) {
+        setActiveSessionId(session.id)
+        return
+      }
+    }
     // Kill any in-flight stream first so its late events can't bleed into
     // the session we're about to load.
     stopActiveStream()
@@ -916,10 +961,11 @@ export default function Sidebar() {
       ) : (
         <>
           {/* Primary navigation — full-width rows so the active 2px bar sits flush at the left edge (like sessions) */}
-          <div style={{ padding: '6px 0 4px', flexShrink: 0 }}>
-            <NavItem icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
-            <NavItem icon={CalendarClock} label={t('sidebar.scheduler')} disabled />
+          <div style={{ padding: '6px 16px 4px', flexShrink: 0 }}>
+            <NavItem scale="lg" icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
+            <NavItem scale="lg" icon={CalendarClock} label={t('sidebar.scheduler')} disabled />
             <NavItem
+              scale="lg"
               icon={PackageSearch}
               label={t('sidebar.plugins')}
               active={activeNavTab === 'plugins'}
@@ -931,6 +977,7 @@ export default function Sidebar() {
               <div>
                 {PLUGINS_SECTIONS.map((sec) => (
                   <NavItem
+                    scale="lg"
                     key={sec.id}
                     icon={sec.icon}
                     label={t(sec.labelKey)}
@@ -942,6 +989,7 @@ export default function Sidebar() {
               </div>
             </AnimatedCollapse>
             <NavItem
+              scale="lg"
               icon={ChartColumnBig}
               label={t('sidebar.dataUsage')}
               active={activeNavTab === 'userdata'}
@@ -953,6 +1001,7 @@ export default function Sidebar() {
               <div>
                 {DATA_SECTIONS.map((sec) => (
                   <NavItem
+                    scale="lg"
                     key={sec.id}
                     icon={sec.icon}
                     label={t(sec.labelKey)}
@@ -1243,6 +1292,8 @@ export default function Sidebar() {
                           renameEditingId={renameEditingId}
                           onRenameCommit={handleRenameCommit}
                           onRenameCancel={handleRenameCancel}
+                          onDragStartSession={beginSessionDrag}
+                          onDragEndSession={endSessionDrag}
                           t={t}
                           indent={28}
                         />

@@ -156,7 +156,7 @@ export default function ResourceQuotaView() {
   return (
     <div className="flex flex-col" style={{ height: '100%', overflow: 'hidden' }}>
       {/* Header */}
-      <div className="flex items-center justify-between flex-shrink-0" style={{ padding: '20px 24px 0 24px' }}>
+      <div className="flex items-center justify-between flex-shrink-0" style={{ padding: '20px var(--admin-section-x) 0 var(--admin-section-x)' }}>
         <div>
           <h2 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>{t('admin.resourceQuotaTitle')}</h2>
           <p className="text-xs" style={{ color: 'var(--text-dim)', marginTop: 4 }}>
@@ -173,7 +173,7 @@ export default function ResourceQuotaView() {
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto" style={{ padding: '16px 24px 24px 24px' }}>
+      <div className="flex-1 overflow-y-auto" style={{ padding: '16px var(--admin-section-x) 24px var(--admin-section-x)' }}>
         {/* Fleet-wide summary card */}
         {initialLoad ? (
           <SummarySkeleton />

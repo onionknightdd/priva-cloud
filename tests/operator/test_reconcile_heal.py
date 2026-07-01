@@ -1,6 +1,6 @@
 """reconcile_runtime self-heal (#1): a stale status.podIP heals to the real pod IP (with
 startedAt reset on change), the replacement gap flips the CR not-routable and returns
-BEFORE the idle probe, and a matched IP proceeds to the idle logic. kube/secrets/httpx
+BEFORE the idle probe, and a matched IP proceeds to the idle logic. kube/httpx
 are faked."""
 
 from __future__ import annotations
@@ -24,8 +24,6 @@ def _run_reconcile(monkeypatch, patch_obj, stub_logger, *, replicas, real_ip,
     monkeypatch.setattr(R.kube, "current_ready_pod_ip", lambda ns, aid: real_ip)
     monkeypatch.setattr(R.kube, "scale", lambda *a, **k: None)
     monkeypatch.setattr(R.kube, "set_cr_status", lambda *a, **k: None)
-    monkeypatch.setattr(R.secrets, "delete", lambda *a, **k: None)
-    monkeypatch.setattr(R.secrets, "exists", lambda *a, **k: False)
 
     def _get(url, **k):
         if health is None:  # the test asserts the idle probe is NOT reached

@@ -13,6 +13,7 @@ import useUiStore from '@shared/stores/uiStore'
 import useUserDataStore from './stores/userDataStore'
 import useHooksStore from './stores/hooksStore'
 import useSkillHubStore from './stores/skillHubStore'
+import useSplitStore from './stores/splitStore'
 import App from './App'
 import '@shared/index.css'
 
@@ -29,6 +30,7 @@ setResetStores([
   useUserDataStore,
   useHooksStore,
   useSkillHubStore,
+  useSplitStore,
 ])
 
 ReactDOM.createRoot(document.getElementById('root')).render(

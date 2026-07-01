@@ -305,7 +305,16 @@ export default function AdminApp() {
       />
 
       {/* Content */}
-      <main className="flex-1 flex flex-col" style={{ minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+      <main
+        className="flex-1 flex flex-col"
+        style={{
+          minWidth: 0,
+          minHeight: 0,
+          overflow: 'hidden',
+          '--admin-section-x': '40px',
+          '--admin-section-x-wide': '64px',
+        }}
+      >
         {activeTab === 'dashboard' && section === 'fleet' && <FleetView />}
         {activeTab === 'dashboard' && section === 'resource-quota' && <ResourceQuotaView />}
         {activeTab === 'dashboard' && section === 'system-map' && <SystemMapView />}

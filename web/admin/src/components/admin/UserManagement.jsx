@@ -469,7 +469,7 @@ export default function UserManagement() {
       {/* Header — spans full width */}
       <div
         className="flex items-center justify-between flex-shrink-0"
-        style={{ padding: '20px 24px 0 24px' }}
+        style={{ padding: '20px var(--admin-section-x) 0 var(--admin-section-x)' }}
       >
         <h2 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>
           {t('admin.userManagement')}
@@ -498,7 +498,7 @@ export default function UserManagement() {
       {/* Tab switch — Registered Users / Pending Approval */}
       <div
         className="flex items-center flex-shrink-0"
-        style={{ padding: '0 24px', marginTop: 12 }}
+        style={{ padding: '0 var(--admin-section-x)', marginTop: 12 }}
       >
         <Tabs
           tabs={TABS}
@@ -518,7 +518,7 @@ export default function UserManagement() {
 
       {/* Pending Approval tab */}
       {selectedTab === 'pending' && (
-        <div className="flex flex-col flex-1 min-h-0" style={{ marginTop: 8 }}>
+        <div className="flex flex-col flex-1 min-h-0" style={{ marginTop: 8, padding: '0 var(--admin-section-x) 24px var(--admin-section-x)' }}>
           <PendingApprovalPane />
         </div>
       )}
@@ -526,7 +526,7 @@ export default function UserManagement() {
       {/* Registered Users tab */}
       <div
         className="flex flex-1 min-h-0"
-        style={{ marginTop: 8, display: selectedTab === 'registered' ? 'flex' : 'none' }}
+        style={{ marginTop: 8, display: selectedTab === 'registered' ? 'flex' : 'none', padding: '0 var(--admin-section-x) 24px var(--admin-section-x)' }}
       >
         {/* Users table */}
         <div

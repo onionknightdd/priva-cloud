@@ -17,7 +17,6 @@ from priva_common.models.auth import (
     SetupStatus,
     UserPublic,
 )
-from priva_common.models.user_env import UserEnvResponse, UserEnvSettings, UserEnvUpdateRequest
 from ..services.auth import (
     create_jwt,
     decode_jwt,
@@ -27,8 +26,6 @@ from ..services.auth import (
 )
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from priva_common.config import get_settings
-from priva_common.user_env import mask_token
-from ..services.secret_env import has_user_env, read_user_env, write_user_env
 from priva_common.user_store import get_user_store, UserRecord
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -62,11 +59,20 @@ async def setup_admin(request: SetupRequest):
     # Provision the per-account agent-runner (operator reconciles the AgentTenant CR).
     _provision_tenant(user)
 
-    # Write env if provided
+    # Seed creds (if provided) into the new account's agent-runner settings.json, by
+    # waking its pod (provisioned just above) and PUTting through the runner token.
+    # Best-effort: a slow cold pod must not fail setup — creds can be re-entered in
+    # the SPA. (await: the pod must exist before the write, so order matters.)
     if request.env:
         env_dict = request.env.model_dump(exclude_none=True)
         if env_dict:
-            write_user_env(request.username, env_dict)
+            try:
+                from ..provisioner import push_account_credentials
+                await push_account_credentials(user.account_id, user.username, env_dict)
+            except Exception as exc:  # pragma: no cover
+                from priva_common.logging import get_app_logger
+                get_app_logger(__name__).warning(
+                    "setup: push creds failed for {}: {}", user.username, exc)
 
     public = user_record_to_public(user)
     return LoginResponse(access_token=token, user=public)
@@ -291,34 +297,8 @@ async def change_my_password(
 
     return {"status": "ok"}
 
-
-@router.get("/me/env", response_model=UserEnvResponse)
-async def get_my_env(user: UserRecord = Depends(require_user)):
-    env = read_user_env(user.username)
-    if env is None:
-        return UserEnvResponse(has_env=False)
-
-    return UserEnvResponse(
-        has_env=has_user_env(user.username),
-        env=UserEnvSettings(**env),
-    )
-
-
-@router.put("/me/env", response_model=UserEnvResponse)
-async def update_my_env(request: UserEnvUpdateRequest, user: UserRecord = Depends(require_user)):
-    env_dict = request.model_dump(exclude_none=True)
-    if not env_dict:
-        raise HTTPException(400, "No env fields provided")
-
-    write_user_env(user.username, env_dict)
-
-    env = read_user_env(user.username)
-    return UserEnvResponse(
-        has_env=has_user_env(user.username),
-        env=UserEnvSettings(**env) if env else None,
-    )
-
-
-@router.get("/me/env/status")
-async def get_my_env_status(user: UserRecord = Depends(require_user)):
-    return {"has_env": has_user_env(user.username)}
+# NOTE: the per-account BYOK creds endpoints (GET/PUT /me/env, /me/env/status) and
+# the model-list proxy moved OFF the control-panel. Creds now live in the account's
+# agent-runner settings.json — the SPA reads/writes them through agentgateway at
+# /api/sandbox/credentials* (served by routers/credentials.py on the pod). The
+# control-panel no longer touches ANTHROPIC_* config.

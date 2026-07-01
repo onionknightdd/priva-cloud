@@ -171,7 +171,8 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                         "envFrom": [
                             {"configMapRef": {"name": "priva-config"}},
                             {"secretRef": {"name": "priva-shared-secret"}},
-                            {"secretRef": {"name": names.secret_name(account_id), "optional": True}},
+                            # No per-account creds Secret: BYOK creds live in the pod's own
+                            # /workspace/.claude/settings.json on the PVC, read by the CLI.
                         ],
                         "volumeMounts": [
                             _data_volume_mount(mount_info),

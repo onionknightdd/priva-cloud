@@ -6,7 +6,7 @@ deferred) and converts proto ↔ DTO so callers see the same Protocols as the
 in-process transport. The client is cached per-DSN so get_client() is cheap.
 
 scheduler is intentionally NOT served over gRPC this phase (deferred to Phase 4);
-its store raises NotImplementedError. accounts/quota/admin/bindings/secrets are full.
+its store raises NotImplementedError. accounts/quota/admin/bindings are full.
 """
 
 from __future__ import annotations
@@ -45,8 +45,6 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         resource_spec_pb2_grpc,
         runner_defaults_pb2,
         runner_defaults_pb2_grpc,
-        secret_pb2,
-        secret_pb2_grpc,
     )
 
     channel = grpc.insecure_channel(dsn)
@@ -198,21 +196,6 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
             r = self._s.Stats(common_pb2.Empty())
             return {"accounts": r.accounts, "jobs": r.jobs, "runs": r.runs}
 
-    class _Secrets:
-        def __init__(self):
-            self._s = secret_pb2_grpc.SecretServiceStub(channel)
-
-        def put(self, account_id, bundle):
-            import json
-            return cv.secret_from_pb(self._s.PutSecret(
-                secret_pb2.PutSecretRequest(account_id=account_id, bundle=json.dumps(bundle or {}))))
-
-        def get(self, account_id):
-            return cv.secret_from_pb(self._s.GetSecret(secret_pb2.GetSecretRequest(account_id=account_id)))
-
-        def list_account_ids(self):
-            return list(self._s.ListSecrets(common_pb2.Empty()).account_ids)
-
     class _ResourceSpecs:
         def __init__(self):
             self._s = resource_spec_pb2_grpc.ResourceSpecServiceStub(channel)
@@ -313,7 +296,6 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         quota=_Quota(),
         scheduler=_SchedulerDeferred(),
         admin=_Admin(),
-        secrets=_Secrets(),
         resource_specs=_ResourceSpecs(),
         runner_defaults=_RunnerDefaults(),
         registrations=_Registrations(),

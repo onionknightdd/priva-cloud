@@ -56,7 +56,7 @@ only decides.
 | Component | Port(s) | Role | Inbound transport | Notes |
 |---|---|---|---|---|
 | **agentgateway** (`priva-gateway`) | `:80` | edge / data plane; carries the runtime bytes | (P) from browser | third-party Rust proxy (Gateway API); auto-provisioned from the `Gateway` CR |
-| **control-panel** | `:8080` HTTP, `:9000` ext_proc | SPAs + auth + admin + config **and** the EPP brain + provisioner | (P) `:8080`, **(T) `:9000`** | EPP resolves account → wakes pod → returns endpoint + signed runner token |
+| **control-panel** | `:8080` HTTP, `:9000` ext_proc | SPAs + auth + admin + config **and** the EPP brain + provisioner; also the `/api/cp-proxy` large-read proxy lane | (P) `:8080`, **(T) `:9000`** | EPP resolves account → wakes pod → returns endpoint + signed runner token |
 | **operator** (kopf) | — | `AgentTenant` CRD reconcile; **sole scaler 0↔1**; injects per-pod creds Secret at wake | (K) watch/patch | idle sweep scales back to 0 |
 | **data-spine** | `:50051` gRPC | accounts / quota / **secrets (Fernet)** + SQLite (RWO PVC) | (G) plaintext | single writer (`replicas:1`, `Recreate`) |
 | **agent-runner** `ar-<account>` | `:8091` HTTP | one scale-to-zero runtime pod per account; spawns the `claude` CLI | (P) from gateway, (G) to data-spine | trusts the EPP-injected HS256 signed `account_id`; creds from the mounted Secret |
@@ -94,6 +94,70 @@ pod is an isolated sandbox, so the operator sets `IS_SANDBOX=1` in the AR pod en
    injects the creds Secret), and returns `x-gateway-destination-endpoint = <pod>:8091` + a signed runner token.
 4. agentgateway streams the request straight to the woken `agent-runner` pod, which trusts the token and runs.
 5. Idle past grace → the operator scales the pod back to 0. (Cold start re-wakes in ~4s; warm is instant.)
+
+## Large reads ride `/api/cp-proxy` (the EPP truncates response bodies at ~8KB)
+
+The InferencePool/EPP lane that carries an agent turn is the **only** path agentgateway exposes
+for `/api/sandbox/*`, and it has a hard cap on **response** bodies: agentgateway v1.3.0's GIE
+`InferenceRouting::build()` routes every response through the EPP ext_proc with
+`response_body_mode = FullDuplexStreamed` **hardcoded** (`allow_mode_override=false`). It is not a
+tunable buffer and has no upstream fix (byte-identical on `main` and `v1.3.1`), and the EPP cannot
+recover the bytes (its own `mode_override=NONE` is ignored). The effect: any GET response over
+~8KB is cut mid-body, so `JSON.parse` on the client dies with `Unterminated string`. This bites
+the large reads — session transcripts (35–300KB), file previews (≤1MB), and big list/JSON bodies.
+
+The fix is a second **read** lane that never touches the EPP: a generic control-panel
+reverse-proxy that rides the `/` catch-all (which carries no ext_proc, so it returns full bodies —
+the same lane that already serves the SPA bundles and the `/sandbox/apidocs` schema). `/api/cp-proxy`
+is **not** under `/api/sandbox`, so Gateway-API most-specific-prefix routing sends it to the `/`
+catch-all → control-panel automatically — no `deploy/gateway` / `HTTPRoute` change.
+
+```
+                            ┌─────────┐
+                            │ BROWSER │
+                            └────┬────┘
+        GET /api/sandbox/*       │       GET /api/cp-proxy/{path}
+  (+ writes · streams · WS ·     │       (large reads only)
+   blob downloads)               ▼
+                            agentgateway
+              ┌──────────────────┴──────────────────┐
+   most-specific prefix:                   "/" catch-all (NO ext_proc):
+   /api/sandbox/* → InferencePool          → control-panel :8080
+       → EPP ext_proc                          auth bearer → wake pod → mint
+       (FullDuplexStreamed, hardcoded)         per-account runner token
+       → ✂ truncates > ~8KB                    → (P) httpx GET (trust_env=False)
+       ▼                                        → http://<pod>:8091/api/sandbox/{path}
+   agent-runner :8091                           ▼
+   (body cut at ~8KB)                       agent-runner :8091
+                                            (FULL body, returned verbatim)
+```
+
+`GET /api/cp-proxy/{path}` re-does the EPP's per-account steering in plain Python (`_proxy_runner_get`
+in `control-panel/app.py`): authenticate the user's bearer token (`authenticate_raw_token`; no
+account → 401, revoked / non-`active` → 403), `wake_and_wait` their pod (exception or no endpoint →
+503), mint a **per-account** runner token, and proxy `GET http://<pod>:8091/api/sandbox/{path}` over
+plaintext httpx (upstream failure → 502), returning the full `r.content` verbatim. Security parity
+with the EPP: identical auth/wake/mint gating, GET-only, the per-account token means a caller
+reaches only their **own** pod, and any `..` in the path is rejected (400) so there is no escape
+above `/api/sandbox/`.
+
+**Never rerouted** — these stay on the `/api/sandbox` InferencePool lane and are never truncated:
+all **writes** (POST/PUT/DELETE/PATCH); all **streams** (the agent-run WS, run/stream SSE, the
+terminal pty WS — the EPP is consulted only at WS *setup* for steering, not in the byte path, so
+frames tunnel through intact); **blob downloads** (`.blob()`, streamed); the control-plane reads
+(`/api/auth/audit`) and the `/health` readiness poll (must hit the pod directly); and always-tiny
+configs. The truncation is a *buffered-body* defect, not a per-frame one, which is why streaming
+responses are exempt.
+
+On the client (`web/shared/api/client.js`), `sandboxRead(path)` tries `/api/cp-proxy` + path and
+falls back to the direct `/api/sandbox` lane on a 404 (route not deployed) or a network error, so it
+degrades gracefully. It shares `sandboxGet(path)`'s signature, so rerouting a >8KB-risk read is a
+drop-in `sandboxGet → sandboxRead` swap. **Step 1 (shipped, via a control-panel image rebuild —
+the backend is not hotloadable)** rerouted only `web/user/src/api/sessions.js`: the grouped/cwd/
+archived session lists plus session transcripts (via `/api/cp-proxy/agent/sessions/{id}/messages`);
+the original `/api/session-history/{id}/messages` route is now a thin back-compat **alias** onto the
+same helper. The remaining >8KB-risk reads (files, hooks, MCP, skills, subagents, settings, user
+data) move over in **Step 2** (frontend-only, hotloadable, pending).
 
 ## Accessing it from a browser (minikube on macOS)
 

@@ -12,6 +12,7 @@ import UsageStatsOverview from './UsageStatsOverview'
 import QuickActionChips from './QuickActionChips'
 import CheckpointToggle from './CheckpointToggle'
 import RewindBanner from './RewindBanner'
+import { isSplitPane } from '../../utils/splitMode'
 import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 
 const MessageList = lazyWithChunkReload(() => import('./MessageList'))
@@ -52,6 +53,7 @@ function CanvasShortcut({ icon: Icon, title, hidden, onClick }) {
 
 export default function ChatPanel() {
   const { t } = useTranslation()
+  const embeddedPane = isSplitPane()
   const sessionId = useChatStore((s) => s.sessionId)
   const messages = useChatStore((s) => s.messages)
   const sidebarSessions = useSidebarStore((s) => s.sessions)
@@ -116,7 +118,7 @@ export default function ChatPanel() {
         )}
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
-        {terminalFeatureEnabled && (
+        {!embeddedPane && terminalFeatureEnabled && (
           <button
             type="button"
             onClick={toggleTerminal}

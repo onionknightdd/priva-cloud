@@ -23,7 +23,6 @@ from priva_common.dataplane import (
     ResourceSpecRecord,
     RunnerDefaultsRecord,
     RunPage,
-    SecretRecord,
     UNSET,
     set_inprocess_handlers,
 )
@@ -440,43 +439,6 @@ class AdminService:
         }
 
 
-# --- Secret ----------------------------------------------------------------
-
-class SecretService:
-    """Per-account credential bundle, Fernet-encrypted at rest. `put` takes a
-    plaintext env dict; `get` returns it decrypted (the operator injects it as a
-    per-pod K8s Secret at wake)."""
-
-    def __init__(self, repo: Repository):
-        self.repo = repo
-
-    @staticmethod
-    def _to_record(row: dict | None) -> SecretRecord | None:
-        if row is None:
-            return None
-        raw = decrypt_value(row["bundle"])
-        try:
-            bundle = json.loads(raw) if raw else {}
-        except (ValueError, TypeError):
-            bundle = {}
-        return SecretRecord(
-            account_id=row["account_id"],
-            bundle=bundle,
-            generation=row["generation"],
-            updated_at=row.get("updated_at"),
-        )
-
-    def put(self, account_id, bundle):
-        ciphertext = encrypt_value(json.dumps(bundle or {}))
-        return self._to_record(self.repo.secret_upsert(account_id, ciphertext))
-
-    def get(self, account_id):
-        return self._to_record(self.repo.secret_get(account_id))
-
-    def list_account_ids(self):
-        return self.repo.secret_list_account_ids()
-
-
 # --- ResourceSpec ----------------------------------------------------------
 
 class ResourceSpecService:
@@ -651,7 +613,6 @@ def build_inprocess_client(repo: Repository, settings) -> DataplaneClient:
         quota=QuotaService(repo),
         scheduler=SchedulerService(repo),
         admin=AdminService(repo),
-        secrets=SecretService(repo),
         resource_specs=ResourceSpecService(repo),
         runner_defaults=RunnerDefaultsService(repo, settings),
         registrations=RegistrationService(repo),

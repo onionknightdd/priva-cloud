@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -195,11 +195,74 @@ def create_app() -> FastAPI:
         return Response(content=r.content, status_code=r.status_code, headers=passthru,
                         media_type=r.headers.get("content-type"))
 
+    # Large sandbox GETs are fetched HERE, not via the InferencePool, for the
+    # same reason as /sandbox/apidocs: the GIE/EPP response path buffers bodies
+    # to ~8KB (agentgateway hardcodes the EPP ext_proc to FullDuplexStreamed —
+    # not a tunable buffer, no upstream fix), which truncates any response larger
+    # than that (workflow session transcripts run 35-300KB, file previews up to
+    # 1MB, big skill/log/listing bodies) and breaks JSON.parse on the client
+    # ("Unterminated string"). This shared helper rides the "/" catch-all
+    # (control-panel face, no ext_proc), so it returns the full body. It re-does
+    # the EPP's per-account steering: auth the user's bearer token, wake their
+    # pod, mint a per-account runner token, and proxy GET-only — so a caller
+    # reaches only their OWN pod. Writes/streams/SSE keep using /api/sandbox.
+    async def _proxy_runner_get(request: Request, sandbox_path: str) -> Response:
+        from . import provisioner
+        from .services.auth import authenticate_raw_token
+        from priva_common.runner_token import mint
+
+        auth = request.headers.get("authorization", "")
+        token = auth[7:] if auth.lower().startswith("bearer ") else None
+        try:
+            user = await authenticate_raw_token(token, request.headers.get("x-user-name"))
+        except Exception:
+            user = None
+        if user is None or not getattr(user, "account_id", None):
+            return Response("Authentication required", status_code=401)
+        if getattr(user, "status", "active") != "active":
+            return Response("account access revoked", status_code=403)
+
+        try:
+            endpoint = await provisioner.wake_and_wait(user.account_id)
+        except Exception as exc:
+            return Response(f"agent sandbox unavailable: {exc}", status_code=503)
+        if not endpoint:
+            return Response("agent sandbox is waking, retry in a moment", status_code=503)
+
+        qs = request.url.query
+        url = f"http://{endpoint}/api/sandbox/{sandbox_path}" + (f"?{qs}" if qs else "")
+        headers = {"X-Priva-Runner-Token": mint(user.account_id, user.username)}
+        try:
+            # trust_env=False: in-cluster pod-to-pod hop must not honor any host/system proxy.
+            # httpx buffers r.content fully — fine for the ≤1MB max file preview.
+            async with httpx.AsyncClient(trust_env=False, timeout=30.0) as cx:
+                r = await cx.get(url, headers=headers)
+        except Exception as exc:
+            return Response(f"runner upstream unavailable: {exc}", status_code=502)
+        return Response(content=r.content, status_code=r.status_code,
+                        media_type=r.headers.get("content-type", "application/json"))
+
+    # Generic large-body-safe read lane: any GET /api/cp-proxy/<path> is proxied to
+    # the caller's pod at /api/sandbox/<path>. Not under /api/sandbox, so Gateway-API
+    # most-specific-prefix routing sends it to the "/" catch-all (control-panel)
+    # automatically — no deploy/gateway change needed. The SPA points its >8KB-risk
+    # reads here (web/shared/api/client.js sandboxRead).
+    @app.get("/api/cp-proxy/{sandbox_path:path}", include_in_schema=False)
+    async def _cp_proxy_get(sandbox_path: str, request: Request):
+        if ".." in sandbox_path:  # defense-in-depth: no path escape above /api/sandbox/
+            return Response("invalid path", status_code=400)
+        return await _proxy_runner_get(request, sandbox_path)
+
+    # Back-compat alias for the original session-transcript proxy, now sharing the
+    # helper above (the SPA's primary path is the generic /api/cp-proxy lane).
+    @app.get("/api/session-history/{session_id}/messages", include_in_schema=False)
+    async def _session_messages_proxy(session_id: str, request: Request):
+        return await _proxy_runner_get(request, f"agent/sessions/{session_id}/messages")
+
     # --- CP-served routers ---
     from .routers.auth import router as auth_router
     from .routers.admin import router as admin_router
     from .routers.admin_files import router as admin_files_router
-    from .routers.resource import router as resource_router
     from .routers.metrics import router as metrics_router
     from .routers.console import router as console_router
 
@@ -207,7 +270,9 @@ def create_app() -> FastAPI:
     # is served by the agent-runner from its /workspace PVC, not here. The CP only
     # retains control-plane audit, exposed at GET /api/auth/audit (auth router).
     # console_router: admin web terminal INTO control-plane pods (k8s exec bridge).
-    for r in (auth_router, admin_router, admin_files_router, resource_router, metrics_router, console_router):
+    # (The old /api/resource/models proxy is gone — the model-list connection test
+    # is served pod-side at /api/sandbox/credentials/models, alongside the creds.)
+    for r in (auth_router, admin_router, admin_files_router, metrics_router, console_router):
         app.include_router(r)
 
     # Runtime routes (/api/agent, /api/files, /api/pty, ...) are NOT served by CP:

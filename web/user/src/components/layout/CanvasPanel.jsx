@@ -10,26 +10,40 @@ import { useResizable } from '@shared/hooks/useResizable'
 import ErrorBoundary from '../shared/ErrorBoundary'
 import CanvasHeader from '../canvas/CanvasHeader'
 import SubagentInspector from '../canvas/SubagentInspector'
+import WorkflowTree from '../canvas/WorkflowTree'
 import FileOpsPanel from '../canvas/FileOpsPanel'
 import FileBrowserPanel from '../canvas/FileBrowserPanel'
 import PlanReviewPanel from '../canvas/PlanReviewPanel'
 import BrowserDebugPanel from '../canvas/BrowserDebugPanel'
+import { isSplitPane } from '../../utils/splitMode'
 
 const CANVAS_MIN_WIDTH = 280
+const EMBEDDED_CANVAS_MIN_WIDTH = 160
 const MIN_CHAT_WIDTH = 360
+const EMBEDDED_MIN_CHAT_WIDTH = 220
 
 // Combined budget: sidebar + canvas may never squeeze the chat column below
 // MIN_CHAT_WIDTH. Also keeps the historical 60vw ceiling.
-function getCanvasMax(sidebarWidth, collapsed) {
+function getCanvasMax(sidebarWidth, collapsed, embedded = false, minWidth = CANVAS_MIN_WIDTH) {
+  if (typeof window === 'undefined') return minWidth
+  if (embedded) {
+    const paneWidth = window.innerWidth
+    const reservedChat = Math.min(MIN_CHAT_WIDTH, Math.max(EMBEDDED_MIN_CHAT_WIDTH, paneWidth * 0.5))
+    return Math.max(
+      minWidth,
+      Math.min(paneWidth * 0.45, paneWidth - reservedChat),
+    )
+  }
   const sidebar = collapsed ? 48 : sidebarWidth
   return Math.max(
-    CANVAS_MIN_WIDTH,
+    minWidth,
     Math.min(window.innerWidth * 0.6, window.innerWidth - sidebar - MIN_CHAT_WIDTH),
   )
 }
 
 export default function CanvasPanel() {
   const { t } = useTranslation()
+  const embeddedPane = isSplitPane()
   const canvasVisible = useUiStore((s) => s.canvasVisible)
   const canvasWidth = useUiStore((s) => s.canvasWidth)
   const canvasMinimized = useUiStore((s) => s.canvasMinimized)
@@ -49,18 +63,19 @@ export default function CanvasPanel() {
   const todoTotal = todos ? todos.length : 0
   const todoCompleted = todos ? todos.filter((t) => t.status === 'completed').length : 0
 
-  const [canvasMax, setCanvasMax] = useState(() => getCanvasMax(sidebarWidth, sidebarCollapsed))
+  const canvasMin = embeddedPane ? EMBEDDED_CANVAS_MIN_WIDTH : CANVAS_MIN_WIDTH
+  const [canvasMax, setCanvasMax] = useState(() => getCanvasMax(sidebarWidth, sidebarCollapsed, embeddedPane, canvasMin))
 
   // Re-budget on window resize and on sidebar width/collapse changes.
   useEffect(() => {
     const update = () => {
       const sb = useSidebarStore.getState()
-      setCanvasMax(getCanvasMax(sb.width, sb.collapsed))
+      setCanvasMax(getCanvasMax(sb.width, sb.collapsed, embeddedPane, canvasMin))
     }
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
-  }, [sidebarWidth, sidebarCollapsed])
+  }, [canvasMin, embeddedPane, sidebarWidth, sidebarCollapsed])
 
   // Clamp DOWNWARD only — never grow the canvas automatically, which would
   // feed back into another resize.
@@ -68,9 +83,11 @@ export default function CanvasPanel() {
     if (canvasWidth > canvasMax) setCanvasWidth(canvasMax)
   }, [canvasMax, canvasWidth, setCanvasWidth])
 
+  const effectiveCanvasWidth = Math.min(canvasWidth, canvasMax)
+
   const { dragging, onMouseDown } = useResizable({
-    initial: canvasWidth,
-    min: CANVAS_MIN_WIDTH,
+    initial: effectiveCanvasWidth,
+    min: canvasMin,
     max: canvasMax,
     direction: 'left',
     onResize: setCanvasWidth,
@@ -80,15 +97,15 @@ export default function CanvasPanel() {
 
   // Minimized rail
   if (canvasMinimized) {
-    const label = activeCanvasTab === 'plan'
-      ? 'PLAN'
+    const rail = activeCanvasTab === 'plan'
+      ? { label: t('canvas.rail.plan'), count: null }
       : activeCanvasTab === 'file-browser'
-        ? `${fileBrowserCount}F`
+        ? { label: t('canvas.rail.files'), count: fileBrowserCount || null }
         : activeCanvasTab === 'changes' || activeCanvasTab === 'files'
-          ? `${changeOpsCount}Δ`
-        : activeCanvasTab === 'browser'
-          ? 'WEB'
-        : `${todoCompleted}/${todoTotal}`
+          ? { label: t('canvas.rail.changes'), count: changeOpsCount || null }
+          : activeCanvasTab === 'browser'
+            ? { label: t('canvas.rail.browser'), count: null }
+            : { label: t('canvas.rail.tasks'), count: todoTotal ? `${todoCompleted}/${todoTotal}` : null }
     return (
       <div
         className="flex flex-col items-center justify-center flex-shrink-0"
@@ -112,7 +129,7 @@ export default function CanvasPanel() {
             setCanvasMinimized(false)
           }
         }}
-        title={t('canvas.expand')}
+        title={`${t('canvas.expand')} · ${rail.label}`}
       >
         <span
           className="text-xs font-semibold"
@@ -120,10 +137,32 @@ export default function CanvasPanel() {
             color: 'var(--text-secondary)',
             writingMode: 'vertical-rl',
             textOrientation: 'mixed',
+            letterSpacing: 0,
           }}
         >
-          {label}
+          {rail.label}
         </span>
+        {rail.count && (
+          <span
+            style={{
+              marginTop: 6,
+              minWidth: 16,
+              height: 16,
+              padding: '0 3px',
+              border: '1px solid var(--border)',
+              borderRadius: 4,
+              color: 'var(--text-secondary)',
+              fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+              fontSize: 10,
+              fontWeight: 600,
+              lineHeight: '14px',
+              textAlign: 'center',
+              boxSizing: 'border-box',
+            }}
+          >
+            {rail.count}
+          </span>
+        )}
       </div>
     )
   }
@@ -132,7 +171,7 @@ export default function CanvasPanel() {
     <div
       className="flex flex-col flex-shrink-0 relative"
       style={{
-        width: canvasWidth,
+        width: effectiveCanvasWidth,
         height: '100%',
         minHeight: 0,
         background: 'var(--bg-surface)',
@@ -170,8 +209,10 @@ export default function CanvasPanel() {
         ) : activeCanvasTab === 'browser' ? (
           <BrowserDebugPanel />
         ) : (
-          // Default inspector view: execution artifacts grouped by conversation turn.
+          // Default inspector view: live workflows + execution artifacts grouped
+          // by conversation turn. Both render null when empty (zero layout cost).
           <div className="flex-1 overflow-y-auto overflow-x-hidden">
+            <WorkflowTree />
             <SubagentInspector />
           </div>
         )}

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { listSkills } from '../api/skills'
 import safeStorage from '@shared/utils/safeStorage'
+import useWorkflowStore from './workflowStore'
 
 const CKPT_STORAGE_PREFIX = 'priva-ckpt:'
 const REWIND_STORAGE_PREFIX = 'priva-rewind:'
@@ -424,6 +425,12 @@ const useChatStore = create((set, get) => ({
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.revertedToolUseIds)) {
       rewindMarker = parsed
     }
+    // Reset the workflow store atomically with the message swap. handleSelectSession
+    // clears it earlier, but old WorkflowCards still mounted during the async
+    // fetch re-seed themselves on that clear — this final clear (batched with the
+    // new messages) wipes those stragglers so a prior session's workflow can't
+    // leak into the recovered one. The freshly-mounted cards re-seed cleanly.
+    useWorkflowStore.getState().clear()
     set((s) => ({
       sessionId,
       messages,

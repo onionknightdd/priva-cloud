@@ -63,18 +63,6 @@ def test_account_api_key_unset_set_clear(client):
     assert client.accounts.find_by_api_key("sk-key") is None
 
 
-def test_secret_store_roundtrip(client):
-    aid = client.accounts.create("carol", "pw").account_id
-    sec = client.secrets.put(aid, {"ANTHROPIC_AUTH_TOKEN": "t", "ANTHROPIC_MODEL": "claude-opus-4-8"})
-    assert sec.generation == 1
-    got = client.secrets.get(aid)
-    assert got.bundle["ANTHROPIC_AUTH_TOKEN"] == "t"
-    assert got.bundle["ANTHROPIC_MODEL"] == "claude-opus-4-8"
-    assert client.secrets.put(aid, {"ANTHROPIC_AUTH_TOKEN": "t2"}).generation == 2
-    assert client.secrets.list_account_ids() == [aid]
-    assert client.secrets.get("missing") is None
-
-
 def test_quota_ensure_and_set(client):
     aid = client.accounts.create("dave", "pw").account_id
     assert client.quota.ensure(aid).max_concurrent_sessions == 3

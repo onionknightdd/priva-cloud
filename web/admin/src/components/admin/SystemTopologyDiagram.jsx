@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next'
 
 const VIEW_W = 1000
 const VIEW_H = 700
+const DIAGRAM_SCALE = 0.92
 const PARTICLE_MS = 2600       // constant per-edge traversal time (NOT req/s-scaled)
 const PARTICLES_PER_EDGE = 3
 const STACK_OFFSET = 12        // cascade offset for the agent-runner pod stack
@@ -330,16 +331,17 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
   }, [flowSig]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="grid w-full gap-3" style={{ minWidth: 0, gridTemplateColumns: 'minmax(0, 1fr) 210px' }}>
-      <div className="min-w-0">
+    <div className="grid w-full gap-3" style={{ minWidth: 0, height: `${DIAGRAM_SCALE * 100}%`, overflow: 'hidden', gridTemplateColumns: 'minmax(0, 1fr) 210px' }}>
+      <div className="min-w-0" style={{ height: '100%', overflow: 'hidden' }}>
         <svg
-        viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-        width="100%"
-        preserveAspectRatio="xMidYMid meet"
-        style={{ display: 'block', width: '100%', height: 'auto' }}
-        role="img"
-        aria-label={t('admin.systemTopologyAria')}
-      >
+          viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+          width="100%"
+          height="100%"
+          preserveAspectRatio="xMinYMin meet"
+          style={{ display: 'block', width: '100%', height: '100%', maxHeight: '100%', overflow: 'hidden' }}
+          role="img"
+          aria-label={t('admin.systemTopologyAria')}
+        >
         {/* Plane bands */}
         {PLANES.map((p) => (
           <g key={p.id}>
@@ -408,7 +410,7 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
 
       {/* Legend */}
       <aside className="flex flex-col items-start gap-2" aria-label={t('admin.topologyLegend')}
-        style={{ minWidth: 0, paddingLeft: 12, borderLeft: '1px solid var(--border-subtle)' }}>
+        style={{ minWidth: 0, minHeight: 0, overflow: 'hidden', paddingLeft: 12, borderLeft: '1px solid var(--border-subtle)' }}>
         {[
           { c: 'var(--green)', labelKey: 'admin.statusUp' },
           { c: 'var(--status-pending)', labelKey: 'admin.statusDegraded' },

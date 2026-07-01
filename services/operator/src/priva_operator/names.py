@@ -19,10 +19,6 @@ def account_subpath(account_id: str) -> str:
     return account_id
 
 
-def secret_name(account_id: str) -> str:
-    return f"ar-{account_id}-creds"
-
-
 def labels(account_id: str) -> dict[str, str]:
     # app=agent-runner is the InferencePool selector; the account label lets the
     # operator/EPP find the one pod for an account.
