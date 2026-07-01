@@ -6,7 +6,7 @@ import SetupPage from './components/auth/SetupPage'
 import LoginPage from '@shared/components/auth/LoginPage'
 import useAuthStore from '@shared/stores/authStore'
 import useSettingsStore from './stores/settingsStore'
-import useUiStore from '@shared/stores/uiStore'
+import useUiStore, { THEME_CHANNEL } from '@shared/stores/uiStore'
 import SettingsOverlay from './components/settings/SettingsOverlay'
 import ToastStack from './components/ui/ToastStack'
 import ConnectionBanner from './components/ui/ConnectionBanner'
@@ -35,13 +35,42 @@ export default function App() {
   const fetchVisionModel = useSettingsStore((s) => s.fetchVisionModel)
   const openIntro = useUiStore((s) => s.openIntro)
   const introOpen = useUiStore((s) => s.introOpen)
+  const setTheme = useUiStore((s) => s.setTheme)
   const setTerminalFeatureEnabled = useUiStore((s) => s.setTerminalFeatureEnabled)
   const [showSetupWizard, setShowSetupWizard] = useState(false)
 
   useEffect(() => {
-    const stored = safeStorage.getItem('theme') || 'light'
-    document.documentElement.dataset.theme = stored
-  }, [])
+    const params = new URLSearchParams(window.location.search)
+    const requestedTheme = params.get('theme')
+    setTheme(requestedTheme || safeStorage.getItem('theme') || 'light', {
+      persist: !requestedTheme,
+      broadcast: false,
+    })
+
+    const onStorage = (event) => {
+      if (event.key !== 'theme' || !event.newValue) return
+      setTheme(event.newValue, { persist: false, broadcast: false })
+    }
+    window.addEventListener('storage', onStorage)
+
+    let channel = null
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        channel = new BroadcastChannel(THEME_CHANNEL)
+        channel.onmessage = (event) => {
+          if (event.data?.type !== 'theme') return
+          setTheme(event.data.theme, { persist: false, broadcast: false })
+        }
+      } catch {
+        channel = null
+      }
+    }
+
+    return () => {
+      window.removeEventListener('storage', onStorage)
+      channel?.close()
+    }
+  }, [setTheme])
 
   useEffect(() => {
     initialize()

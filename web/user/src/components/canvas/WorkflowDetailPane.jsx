@@ -18,8 +18,7 @@ import {
   PreviewBlock,
 } from '../chat/WorkflowStatusRow'
 
-// Side-by-side phase-nav + detail above this width; stacked below it (the
-// canvas default is 380px and drag-expands to 60vw).
+// Side-by-side phase-nav + detail above this width; stacked below it.
 const SIDE_BY_SIDE_MIN = 520
 
 /**

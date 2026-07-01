@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Columns2, Rows2, Grid2X2, PanelLeft, PanelRight, SquareTerminal, X } from 'lucide-react'
+import { Columns2, Rows2, Grid2X2, PanelLeft, PanelRight } from 'lucide-react'
 import useSplitStore from '../../stores/splitStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import useChatStore from '../../stores/chatStore'
-import useUiStore from '@shared/stores/uiStore'
 import { applySessionSnapshot, sessionSnapshot, subscribeSessionSnapshot } from '../../utils/sessionSnapshot'
 import { stopActiveStream } from '../../hooks/useSSE'
 
@@ -29,6 +28,8 @@ function paneSrc(pane) {
   params.set('splitPane', '1')
   params.set('sessionId', pane.sessionId)
   params.set('paneId', pane.id)
+  const theme = document.documentElement.dataset.theme
+  if (theme) params.set('theme', theme)
   return `${window.location.origin}${window.location.pathname}?${params.toString()}`
 }
 
@@ -140,11 +141,7 @@ function getControlMetrics(layout, ratios, rootSize, count) {
   const top = SESSION_HEADER_HEIGHT + (tiny ? 3 : 6)
   return {
     buttonSize,
-    terminalSize: buttonSize + 4,
-    closeSize: buttonSize,
     iconSize: tiny ? 12 : 14,
-    closeIconSize: tiny ? 10 : 12,
-    closeTop: Math.max(4, Math.round((SESSION_HEADER_HEIGHT - buttonSize) / 2)),
     panelPadding,
     gap,
     top,
@@ -347,68 +344,6 @@ function SplitLayoutSwitcher({ count, layout, onLayout, metrics }) {
   )
 }
 
-function SplitTerminalButton({ count, open, activeCount, onClick, metrics }) {
-  const choices = layoutControlChoices(count)
-  const switcherWidth = choices.length > 1
-    ? metrics.panelPadding * 2 + choices.length * metrics.buttonSize + Math.max(0, choices.length - 1) * metrics.gap
-    : 0
-  const offset = choices.length > 1 ? metrics.left + switcherWidth + (metrics.tiny ? 4 : 6) : metrics.left
-  return (
-    <button
-      type="button"
-      title="打开终端"
-      onClick={onClick}
-      className="absolute inline-flex items-center justify-center"
-      style={{
-        top: metrics.top,
-        left: offset,
-        zIndex: 6,
-        width: metrics.terminalSize,
-        height: metrics.terminalSize,
-        background: 'var(--bg-surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 4,
-        color: open || activeCount > 0 ? 'var(--red)' : 'var(--text-dim)',
-        cursor: 'pointer',
-        transition: 'background 150ms ease, color 150ms ease, border-color 150ms ease',
-      }}
-      onMouseEnter={(event) => {
-        event.currentTarget.style.color = open || activeCount > 0 ? 'var(--red)' : 'var(--text-secondary)'
-        event.currentTarget.style.borderColor = 'var(--border-strong)'
-      }}
-      onMouseLeave={(event) => {
-        event.currentTarget.style.color = open || activeCount > 0 ? 'var(--red)' : 'var(--text-dim)'
-        event.currentTarget.style.borderColor = 'var(--border)'
-      }}
-    >
-      <SquareTerminal size={metrics.iconSize} strokeWidth={1.5} />
-      {activeCount > 0 && (
-        <span
-          style={{
-            position: 'absolute',
-            top: -4,
-            right: -4,
-            minWidth: 14,
-            height: 14,
-            padding: '0 3px',
-            borderRadius: 4,
-            background: 'var(--red)',
-            color: 'var(--text-inverse)',
-            fontSize: 9,
-            fontWeight: 700,
-            lineHeight: '14px',
-            textAlign: 'center',
-            boxSizing: 'border-box',
-            pointerEvents: 'none',
-          }}
-        >
-          {activeCount}
-        </span>
-      )}
-    </button>
-  )
-}
-
 function SplitResizeHandles({ layout, ratios, resizingAxis, hoveredAxis, onHover, onStart }) {
   const hasColumnHandle = layout === 'two-columns' || layout === 'three-left' || layout === 'three-right' || layout === 'four'
   const hasRowHandle = layout === 'two-rows' || layout === 'three-left' || layout === 'three-right' || layout === 'four'
@@ -545,11 +480,6 @@ export default function SplitSessionView({ fallback }) {
   const endSessionDrag = useSplitStore((s) => s.endSessionDrag)
   const currentSessionId = useChatStore((s) => s.sessionId)
   const sessions = useSidebarStore((s) => s.sessions)
-  const terminalOpen = useUiStore((s) => s.terminalOpen)
-  const toggleTerminal = useUiStore((s) => s.toggleTerminal)
-  const terminalFeatureEnabled = useUiStore((s) => s.terminalFeatureEnabled)
-  const terminalSessionActive = useUiStore((s) => s.terminalSessionActive)
-  const terminalActiveCount = useUiStore((s) => s.terminalActiveCount) || (terminalSessionActive ? 1 : 0)
   const splitRootRef = useRef(null)
   const [dragOverActive, setDragOverActive] = useState(false)
   const [splitRatios, setSplitRatios] = useState({ column: 50, row: 50 })
@@ -569,12 +499,17 @@ export default function SplitSessionView({ fallback }) {
   useEffect(() => {
     const handler = (event) => {
       if (event.origin !== window.location.origin) return
-      if (event.data?.type !== 'priva:split-pane-focus') return
-      setActivePane(event.data.paneId)
+      if (event.data?.type === 'priva:split-pane-focus') {
+        setActivePane(event.data.paneId)
+        return
+      }
+      if (event.data?.type === 'priva:split-pane-close') {
+        closePane(event.data.paneId)
+      }
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [setActivePane])
+  }, [closePane, setActivePane])
 
   useEffect(() => {
     const node = splitRootRef.current
@@ -726,42 +661,6 @@ export default function SplitSessionView({ fallback }) {
                   }}
                 />
               )}
-              {panes.length > 1 && (
-                <button
-                  type="button"
-                  title="关闭窗格"
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    closePane(pane.id)
-                  }}
-                  className="inline-flex items-center justify-center"
-                  style={{
-                    position: 'absolute',
-                    top: controlMetrics.closeTop,
-                    right: controlMetrics.left,
-                    zIndex: 8,
-                    width: controlMetrics.closeSize,
-                    height: controlMetrics.closeSize,
-                    background: 'var(--bg-surface)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 4,
-                    color: 'var(--text-dim)',
-                    cursor: 'pointer',
-                    opacity: active ? 1 : 0.55,
-                    transition: 'opacity 150ms ease, color 150ms ease, border-color 150ms ease',
-                  }}
-                  onMouseEnter={(event) => {
-                    event.currentTarget.style.color = 'var(--text-primary)'
-                    event.currentTarget.style.borderColor = 'var(--border-strong)'
-                  }}
-                  onMouseLeave={(event) => {
-                    event.currentTarget.style.color = 'var(--text-dim)'
-                    event.currentTarget.style.borderColor = 'var(--border)'
-                  }}
-                >
-                  <X size={controlMetrics.closeIconSize} strokeWidth={1.5} />
-                </button>
-              )}
             </div>
           )
         })}
@@ -775,15 +674,6 @@ export default function SplitSessionView({ fallback }) {
         onStart={handleResizeStart}
       />
       <SplitLayoutSwitcher count={panes.length} layout={layout} onLayout={setLayout} metrics={controlMetrics} />
-      {terminalFeatureEnabled && (
-        <SplitTerminalButton
-          count={panes.length}
-          open={terminalOpen}
-          activeCount={terminalActiveCount}
-          onClick={toggleTerminal}
-          metrics={controlMetrics}
-        />
-      )}
       {!!(draggingSession || dragOverActive) && (
         <SplitDropOverlay paneCount={panes.length} onChoose={handleDropChoice} />
       )}

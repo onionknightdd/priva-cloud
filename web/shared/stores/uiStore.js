@@ -3,17 +3,40 @@ import i18n from '../i18n'
 import safeStorage from '../utils/safeStorage'
 
 const STORAGE_KEY_CANVAS_WIDTH = 'canvas-width'
+const STORAGE_KEY_THEME = 'theme'
 const STORAGE_KEY_TERMINAL_HEIGHT = 'terminal-height'
 const STORAGE_KEY_TERMINAL_MODE = 'terminal-mode'
 const STORAGE_KEY_TERMINAL_BOUNDS = 'terminal-bounds'
+const CANVAS_MAX_PANE_RATIO = 2 / 3
+export const THEME_CHANNEL = 'priva-theme'
 
 const TERMINAL_MIN_WIDTH = 320
 const TERMINAL_MIN_HEIGHT = 160
 const TERMINAL_DEFAULT_BOUNDS = { x: 120, y: 120, width: 720, height: 420 }
 
+export function normalizeTheme(value) {
+  return value === 'dark' ? 'dark' : 'light'
+}
+
+function applyDocumentTheme(theme) {
+  if (typeof document === 'undefined') return
+  document.documentElement.dataset.theme = normalizeTheme(theme)
+}
+
+function publishTheme(theme) {
+  if (typeof BroadcastChannel === 'undefined') return
+  try {
+    const channel = new BroadcastChannel(THEME_CHANNEL)
+    channel.postMessage({ type: 'theme', theme: normalizeTheme(theme) })
+    channel.close()
+  } catch {
+    // BroadcastChannel can be unavailable in embedded/private contexts.
+  }
+}
+
 const getStoredCanvasWidth = () => safeStorage.getNumber(STORAGE_KEY_CANVAS_WIDTH, 380, {
   min: 280,
-  max: typeof window !== 'undefined' ? window.innerWidth * 0.6 : 380,
+  max: typeof window !== 'undefined' ? window.innerWidth * CANVAS_MAX_PANE_RATIO : 380,
 })
 
 const getStoredTerminalHeight = () => safeStorage.getNumber(STORAGE_KEY_TERMINAL_HEIGHT, 280, {
@@ -80,7 +103,7 @@ const _persistTerminalBounds = (value) => {
   }, 200)
 }
 
-const getStoredTheme = () => safeStorage.getItem('theme') || 'light'
+const getStoredTheme = () => normalizeTheme(safeStorage.getItem(STORAGE_KEY_THEME))
 const getStoredLanguage = () => safeStorage.getItem('language') || 'zh'
 
 const useUiStore = create((set, get) => ({
@@ -155,12 +178,14 @@ const useUiStore = create((set, get) => ({
   setPlanContent: (content, filePath) => set({ planContent: content, planFilePath: filePath }),
   clearPlanContent: () => set({ planContent: null, planFilePath: null }),
 
-  toggleTheme: () => {
-    const next = get().theme === 'dark' ? 'light' : 'dark'
-    safeStorage.setItem('theme', next)
-    document.documentElement.dataset.theme = next
+  setTheme: (theme, options = {}) => {
+    const next = normalizeTheme(theme)
+    if (options.persist !== false) safeStorage.setItem(STORAGE_KEY_THEME, next)
+    applyDocumentTheme(next)
     set({ theme: next })
+    if (options.broadcast !== false) publishTheme(next)
   },
+  toggleTheme: () => get().setTheme(get().theme === 'dark' ? 'light' : 'dark'),
 
   toggleLanguage: () => {
     const next = get().language === 'en' ? 'zh' : 'en'
