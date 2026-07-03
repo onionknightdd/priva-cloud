@@ -1,4 +1,4 @@
-import { sandboxGet, sandboxPost, sandboxDelete } from '@shared/api/client'
+import { sandboxGet, sandboxRead, sandboxPost, sandboxDelete } from '@shared/api/client'
 import { getToken } from '@shared/api/tokenStore'
 
 const BASE_URL = '/api/sandbox'
@@ -16,8 +16,9 @@ export const listHubSkills = () => sandboxGet('/resource/skill-hub/')
 export const getHubSkillDetail = (name) =>
   sandboxGet(`/resource/skill-hub/${encodeURIComponent(name)}`)
 
+// sandboxRead: bundled-skill file content runs up to 1MB — far past the ~8KB EPP cap.
 export const getHubSkillFile = (name, path) =>
-  sandboxGet(`/resource/skill-hub/${encodeURIComponent(name)}/file?path=${encodeURIComponent(path)}`)
+  sandboxRead(`/resource/skill-hub/${encodeURIComponent(name)}/file?path=${encodeURIComponent(path)}`)
 
 export const deliverHubSkill = (name) =>
   sandboxPost(`/resource/skill-hub/${encodeURIComponent(name)}/deliver`, {})

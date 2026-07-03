@@ -1,4 +1,4 @@
-import { sandboxGet, sandboxPut } from '@shared/api/client'
+import { sandboxGet, sandboxRead, sandboxPut } from '@shared/api/client'
 
 // BYOK creds now live in the account's agent-runner (settings.json), reached
 // through agentgateway via the /api/sandbox/* face — not the control-panel.
@@ -14,8 +14,9 @@ export function getUserEnvStatus() {
   return sandboxGet('/credentials/status')
 }
 
+// sandboxRead: aggregator providers return hundreds of model ids — can exceed the ~8KB EPP cap.
 export function fetchModels() {
-  return sandboxGet('/credentials/models')
+  return sandboxRead('/credentials/models')
 }
 
 export function getQuickActions() {

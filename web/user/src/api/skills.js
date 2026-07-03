@@ -1,4 +1,4 @@
-import { sandboxGet, sandboxPut, sandboxDelete, getBackendOrigin } from '@shared/api/client'
+import { sandboxGet, sandboxRead, sandboxPut, sandboxDelete, getBackendOrigin } from '@shared/api/client'
 import { getToken } from '@shared/api/tokenStore'
 
 const BASE_URL = '/api/sandbox'
@@ -22,13 +22,15 @@ function skillQuery({ scope, cwd, name, path } = {}) {
 }
 
 // Returns { personal: SkillSummary[], groups: [{ cwd, skills: SkillSummary[] }] }
-export const listSkills = () => sandboxGet('/resource/skills/')
+// Skill lists/details can exceed the agentgateway ext_proc response buffer when
+// SKILL.md bodies are included, so read them through the control-panel proxy.
+export const listSkills = () => sandboxRead('/resource/skills/')
 
 export const getSkillDetail = (scope, cwd, name) =>
-  sandboxGet(`/resource/skills/detail?${skillQuery({ scope, cwd, name })}`)
+  sandboxRead(`/resource/skills/detail?${skillQuery({ scope, cwd, name })}`)
 
 export const getSkillFile = (scope, cwd, name, path) =>
-  sandboxGet(`/resource/skills/file?${skillQuery({ scope, cwd, name, path })}`)
+  sandboxRead(`/resource/skills/file?${skillQuery({ scope, cwd, name, path })}`)
 
 export const uploadSkill = async (scope, cwd, file) => {
   const formData = new FormData()

@@ -72,3 +72,6 @@ default `standard` SC is **not** expandable.
 ## Deferred (prod hardening)
 NetworkPolicies, mTLS/JWKS pod trust (alpha uses an HS256 signed header), per-account
 DEK/KMS, edge TLS, Redis-based wake/idle coordination, separate audit PVC. See plan §L.
+Scaling control-panel: bump `replicas` only — never `uvicorn --workers` (the same process
+binds the `:9000` EPP) — and move its control-plane audit (per-pod local JSONL under
+`priva_home()`) into data-spine first, or replicas fork the audit history.

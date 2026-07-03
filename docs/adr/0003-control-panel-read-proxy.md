@@ -15,8 +15,8 @@ So we build **one** generic control-panel reverse-proxy lane, `GET /api/cp-proxy
 Incremental, covering only >8KB-risk reads.
 
 - **Step 1 (shipped)** — rerouted `web/user/src/api/sessions.js` only (grouped/cwd/archived session lists + transcripts). Shipped via a control-panel image rebuild, since the backend is not hotloadable.
-- **Step 2 (pending; frontend-only, hotloadable)** — reroute the remaining large reads (files, hooks, mcp, skills, subagents, settings models, user data).
-- **Never rerouted** — writes, streams/SSE/WS, blob downloads, `/api/auth/audit`, the `/health` poll, and tiny configs.
+- **Step 2 (shipped 2026-07-03; frontend-only, hotloadable)** — a full audit of both SPAs found exactly **13** remaining >8KB-risk `sandboxGet` reads, all in the user SPA, now rerouted: files list (unpaginated dirs) / preview (≤1MB) · hooks catalog (ships each hook's `source_code`) / logs (≤200 entries) / script content (≤512KB) · MCP capabilities (per-tool `input_schema`) · skill-hub file (≤1MB) · user overview (183-day heatmap + daily model tokens) / audit (≤200 entries) / analytics (≤500-entry timeline) · credentials models · agent-attachments index (grows with account age) · subagent detail (full prompt body). Skills list/detail/file had already moved with the skills redesign. The **admin SPA audited clean**: its only sandbox-lane reads are the tiny `/pty/config` + `/pty/feature`; every `/api/admin/*` read rides the control-panel face directly.
+- **Never rerouted** — writes, streams/SSE/WS, blob downloads, `/api/auth/audit`, the `/health` poll (it drives the wake/toast UX on the pool lane), and tiny configs.
 
 ## Consequences
 

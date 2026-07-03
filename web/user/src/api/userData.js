@@ -1,4 +1,4 @@
-import { getJSON, sandboxGet } from '@shared/api/client'
+import { getJSON, sandboxGet, sandboxRead } from '@shared/api/client'
 
 // Per-account readiness + first-page bootstrap (returns { workspace, username }).
 // Served by the agent-runner via the gateway; cold-starts wake the sandbox, which
@@ -7,7 +7,8 @@ export const getAgentHealth = () => sandboxGet('/health')
 
 // Per-user usage overview (stats/heatmap/streaks/model usage). Agent-runtime
 // state served by the agent-runner from the account's /workspace PVC.
-export const getUserOverview = () => sandboxGet('/user/overview')
+// sandboxRead: the 183-day heatmap + daily model-token series run past the ~8KB EPP cap.
+export const getUserOverview = () => sandboxRead('/user/overview')
 
 export const getUserStats = () => sandboxGet('/user/stats')
 
@@ -26,16 +27,18 @@ function buildAuditQuery(params = {}) {
 
 // Agent-runtime audit (runs, skills, tools, hooks, sessions) — served by the
 // agent-runner from the account's PVC.
-export const getUserAuditLog = (params = {}) => sandboxGet(`/user/audit?${buildAuditQuery(params)}`)
+// sandboxRead: pages carry up to 200 entries with details — can exceed the ~8KB EPP cap.
+export const getUserAuditLog = (params = {}) => sandboxRead(`/user/audit?${buildAuditQuery(params)}`)
 
 // Control-plane audit (login/auth/user-mgmt) — served by the control-panel from
 // its own store. Merged with the agent-runtime feed client-side so no history is
 // lost when both views are shown together.
 export const getControlPlaneAudit = (params = {}) => getJSON(`/auth/audit?${buildAuditQuery(params)}`)
 
+// sandboxRead: the timeline carries up to 500 audit entries — well past the ~8KB EPP cap.
 export const getUserAnalytics = (params) => {
   const query = new URLSearchParams()
   if (params?.start) query.set('start', params.start)
   if (params?.end) query.set('end', params.end)
-  return sandboxGet(`/user/analytics?${query}`)
+  return sandboxRead(`/user/analytics?${query}`)
 }

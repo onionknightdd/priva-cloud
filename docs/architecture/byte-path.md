@@ -156,8 +156,13 @@ drop-in `sandboxGet → sandboxRead` swap. **Step 1 (shipped, via a control-pane
 the backend is not hotloadable)** rerouted only `web/user/src/api/sessions.js`: the grouped/cwd/
 archived session lists plus session transcripts (via `/api/cp-proxy/agent/sessions/{id}/messages`);
 the original `/api/session-history/{id}/messages` route is now a thin back-compat **alias** onto the
-same helper. The remaining >8KB-risk reads (files, hooks, MCP, skills, subagents, settings, user
-data) move over in **Step 2** (frontend-only, hotloadable, pending).
+same helper. **Step 2 (shipped 2026-07-03, frontend-only — hotloadable)** rerouted the rest after a
+full audit of both SPAs: files list/preview, hooks catalog/logs/script content, MCP capabilities,
+skill-hub file, user overview/audit/analytics, credentials models, the agent-attachments index, and
+subagent detail — 13 reads, all in the user SPA (skills reads had already moved with the skills
+redesign). Every other `/api/sandbox` read was verified small/bounded or streaming, and the
+**admin SPA audited clean** (its only sandbox-lane reads are the tiny `/pty/*` configs; all
+`/api/admin/*` reads ride the control-panel face directly). See ADR 0003 for the rollout record.
 
 ## Accessing it from a browser (minikube on macOS)
 

@@ -1,12 +1,13 @@
-import { sandboxGet, sandboxPost, sandboxPut, sandboxDelete } from '@shared/api/client'
+import { sandboxGet, sandboxRead, sandboxPost, sandboxPut, sandboxDelete } from '@shared/api/client'
 
 export const listMcpServers = () => sandboxGet('/resource/mcp/')
 
 export const getMcpServerDetail = (level, name) =>
   sandboxGet(`/resource/mcp/${encodeURIComponent(level)}/${encodeURIComponent(name)}`)
 
+// sandboxRead: capabilities ship every tool's input_schema — routinely past the ~8KB EPP cap.
 export const getMcpServerCapabilities = (level, name) =>
-  sandboxGet(`/resource/mcp/${encodeURIComponent(level)}/${encodeURIComponent(name)}/capabilities`)
+  sandboxRead(`/resource/mcp/${encodeURIComponent(level)}/${encodeURIComponent(name)}/capabilities`)
 
 export const createMcpServer = (data) => sandboxPost('/resource/mcp/', data)
 

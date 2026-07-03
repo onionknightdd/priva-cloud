@@ -1,11 +1,12 @@
-import { sandboxGet, sandboxPost, sandboxPut, sandboxDelete, getAuthHeaders } from '@shared/api/client'
+import { sandboxGet, sandboxRead, sandboxPost, sandboxPut, sandboxDelete, getAuthHeaders } from '@shared/api/client'
 
 const BASE_URL = '/api/sandbox'
 
 export const fetchAgents = () => sandboxGet('/subagents/list')
 
+// sandboxRead: detail carries the agent's full prompt body — can exceed the ~8KB EPP cap.
 export const fetchAgent = (name) =>
-  sandboxGet(`/subagents/${encodeURIComponent(name)}`)
+  sandboxRead(`/subagents/${encodeURIComponent(name)}`)
 
 export const fetchCatalog = () => sandboxGet('/subagents/catalog')
 

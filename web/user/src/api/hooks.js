@@ -1,7 +1,8 @@
-import { sandboxGet, sandboxPost, sandboxPut, sandboxDelete } from '@shared/api/client'
+import { sandboxGet, sandboxRead, sandboxPost, sandboxPut, sandboxDelete } from '@shared/api/client'
 
 // Catalog (built-in hooks)
-export const fetchCatalog = () => sandboxGet('/hooks/catalog')
+// sandboxRead: every hook ships its full source_code — well past the ~8KB EPP cap.
+export const fetchCatalog = () => sandboxRead('/hooks/catalog')
 
 // Config (merged: admin + project + local)
 export const fetchConfig = () => sandboxGet('/hooks/config')
@@ -22,15 +23,17 @@ export const testBuiltInHook = (hookId, eventType, inputJson) =>
   sandboxPost('/hooks/test/builtin', { hook_id: hookId, event_type: eventType, input_json: inputJson })
 
 // Logs (cursor-paginated)
+// sandboxRead: pages carry up to 200 entries — can exceed the ~8KB EPP cap.
 export const fetchLogs = ({ eventType = null, limit = 50, before = null, after = null } = {}) => {
   const params = new URLSearchParams()
   params.set('limit', String(limit))
   if (eventType) params.set('event_type', eventType)
   if (before) params.set('before', before)
   if (after) params.set('after', after)
-  return sandboxGet(`/hooks/logs?${params}`)
+  return sandboxRead(`/hooks/logs?${params}`)
 }
 
 // Script content — read a hook script file from the user's work dir
+// sandboxRead: scripts run up to 512KB — far past the ~8KB EPP cap.
 export const fetchScriptContent = (path) =>
-  sandboxGet(`/hooks/script/content?path=${encodeURIComponent(path)}`)
+  sandboxRead(`/hooks/script/content?path=${encodeURIComponent(path)}`)

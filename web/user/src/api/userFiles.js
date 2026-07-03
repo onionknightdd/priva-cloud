@@ -1,12 +1,14 @@
-import { sandboxGet, getAuthHeaders } from '@shared/api/client'
+import { sandboxRead, getAuthHeaders } from '@shared/api/client'
 import { getToken } from '@shared/api/tokenStore'
 
+// sandboxRead: big directories (node_modules-scale) run well past the ~8KB EPP cap.
 export function listDirectory(path) {
-  return sandboxGet(`/files/list?path=${encodeURIComponent(path)}`)
+  return sandboxRead(`/files/list?path=${encodeURIComponent(path)}`)
 }
 
+// sandboxRead: text previews carry up to 1MB of file content in JSON.
 export function previewFile(path) {
-  return sandboxGet(`/files/preview?path=${encodeURIComponent(path)}`)
+  return sandboxRead(`/files/preview?path=${encodeURIComponent(path)}`)
 }
 
 export async function downloadFile(path, options = {}) {

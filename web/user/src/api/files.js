@@ -1,4 +1,4 @@
-import { getAuthHeaders, sandboxDelete, sandboxGet } from '@shared/api/client'
+import { getAuthHeaders, sandboxDelete, sandboxRead } from '@shared/api/client'
 
 const BASE_URL = '/api/sandbox'
 
@@ -24,9 +24,10 @@ export async function deleteUploadedFile(uuid) {
   return sandboxDelete(`/agent-attachments/${encodeURIComponent(uuid)}`)
 }
 
+// sandboxRead: the unfiltered attachment index grows with account age past the ~8KB EPP cap.
 export async function listUploadedFiles(date) {
   const query = date ? `?date=${encodeURIComponent(date)}` : ''
-  return sandboxGet(`/agent-attachments/${query}`)
+  return sandboxRead(`/agent-attachments/${query}`)
 }
 
 export async function downloadFile(uuid) {
