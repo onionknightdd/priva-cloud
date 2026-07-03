@@ -52,6 +52,7 @@ class SkillDetailResponse(BaseModel):
     frontmatter: dict | None = None
     tree: list[FileTreeNode]
     base_path: str | None = None
+    skill_md_content: str | None = None
 
 
 class SkillFileResponse(BaseModel):

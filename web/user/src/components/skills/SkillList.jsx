@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useMemo, useCallback, useLayoutEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'framer-motion'
 import {
-  Search, RefreshCw, Plus, ArrowDownUp, Package, ToggleLeft, ToggleRight,
+  Search, RefreshCw, Plus, ArrowDownUp, Package,
   Download, Trash2, ChevronDown, Folder, FolderOpen, FileText,
   NotebookPen, FolderGit2, Sparkles, Upload,
 } from 'lucide-react'
@@ -51,9 +52,49 @@ const menuItemStyle = {
 }
 const menuItemIn = (e) => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.color = 'var(--text-primary)' }
 const menuItemOut = (e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }
+const TREE_LAYOUT_TRANSITION = { type: 'tween', duration: 0.32, ease: [0.16, 1, 0.3, 1] }
+const TREE_EXPAND_TRANSITION = { type: 'tween', duration: 0.32, ease: [0.16, 1, 0.3, 1] }
+const TREE_COLLAPSE_TRANSITION = { type: 'tween', duration: 0.42, ease: [0.16, 1, 0.3, 1] }
+const TREE_ROW_HEIGHT = 26
+const TREE_INLINE_PADDING_BOTTOM = 4
 
-export default function SkillList() {
+function useMeasuredHeight(deps) {
+  const ref = useRef(null)
+  const [height, setHeight] = useState(0)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) {
+      setHeight(0)
+      return undefined
+    }
+
+    let frame = 0
+    const measure = () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        setHeight(Math.ceil(el.scrollHeight || el.getBoundingClientRect().height || 0))
+      })
+    }
+
+    measure()
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
+    observer?.observe(el)
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      observer?.disconnect()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+
+  return [ref, height]
+}
+
+export default function SkillList({ headerStart = null }) {
   const { t } = useTranslation()
+  const shouldReduceMotion = useReducedMotion()
 
   const personal = useSkillsStore((s) => s.personal)
   const groups = useSkillsStore((s) => s.groups)
@@ -63,10 +104,9 @@ export default function SkillList() {
   const selectedSkill = useSkillsStore((s) => s.selectedSkill)
   const skillDetail = useSkillsStore((s) => s.skillDetail)
   const detailLoading = useSkillsStore((s) => s.detailLoading)
-  const selectedFile = useSkillsStore((s) => s.selectedFile)
+  const detailError = useSkillsStore((s) => s.detailError)
   const selectFile = useSkillsStore((s) => s.selectFile)
   const selectSkill = useSkillsStore((s) => s.selectSkill)
-  const toggleSkill = useSkillsStore((s) => s.toggleSkill)
   const fetchSkills = useSkillsStore((s) => s.fetchSkills)
   const fetchSkillsConfig = useSkillsStore((s) => s.fetchSkillsConfig)
   const uploadSkill = useSkillsStore((s) => s.uploadSkill)
@@ -91,7 +131,9 @@ export default function SkillList() {
   const syncRef = useRef(null)
   const fileInputRef = useRef(null)
   const uploadTargetRef = useRef(null)
+  const suppressFileActiveTimerRef = useRef(null)
   const [menuPosition, setMenuPosition] = useState({ sync: null, add: null })
+  const [suppressFileActive, setSuppressFileActive] = useState(false)
 
   useEffect(() => { fetchSkillsConfig() }, [fetchSkillsConfig])
 
@@ -104,6 +146,10 @@ export default function SkillList() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [showAddMenu, showSyncMenu])
+
+  useEffect(() => () => {
+    if (suppressFileActiveTimerRef.current) window.clearTimeout(suppressFileActiveTimerRef.current)
+  }, [])
 
   // Build display sections (Personal + workdirs), filtered by search.
   const sections = useMemo(() => {
@@ -187,6 +233,16 @@ export default function SkillList() {
   const isSelected = (s) =>
     selectedSkill && selectedSkill.scope === s.scope && (selectedSkill.cwd || null) === (s.cwd || null) && selectedSkill.name === s.name
 
+  const handleSelectSkill = useCallback((s) => {
+    setSuppressFileActive(true)
+    if (suppressFileActiveTimerRef.current) window.clearTimeout(suppressFileActiveTimerRef.current)
+    suppressFileActiveTimerRef.current = window.setTimeout(() => {
+      setSuppressFileActive(false)
+      suppressFileActiveTimerRef.current = null
+    }, 380)
+    selectSkill(s.scope, s.cwd, s.name)
+  }, [selectSkill])
+
   const handleDelete = (s) => {
     showConfirmDialog({
       title: t('skills.deleteTitle'),
@@ -244,10 +300,15 @@ export default function SkillList() {
       {/* Header */}
       <div className="flex-shrink-0" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
         {/* Title + actions */}
-        <div className="flex items-center justify-between px-3 pt-2 pb-1">
-          <span className="uppercase font-semibold" style={{ color: 'var(--text-dim)', letterSpacing: '0.06em', fontSize: 11 }}>
-            {t('tabs.skills')}
-          </span>
+        <div
+          className="flex items-center justify-between px-3"
+          style={headerStart ? { height: 40 } : { paddingTop: 8, paddingBottom: 4 }}
+        >
+          {headerStart || (
+            <span className="uppercase font-semibold" style={{ color: 'var(--text-dim)', letterSpacing: '0.06em', fontSize: 11 }}>
+              {t('tabs.skills')}
+            </span>
+          )}
           <div className="flex items-center" style={{ gap: 2 }}>
             <button style={iconBtn} onClick={fetchSkills} onMouseEnter={iconBtnIn} onMouseLeave={iconBtnOut} title={t('skills.refresh')}>
               <RefreshCw size={14} strokeWidth={1.5} style={{ animation: skillsLoading ? 'spin 1s linear infinite' : 'none' }} />
@@ -329,50 +390,57 @@ export default function SkillList() {
             {t('skills.noSkills')}
           </div>
         ) : (
-          sections.map((sec) => {
-            const open = !collapsedGroups[sec.key]
-            const Icon = sec.icon
-            return (
-              <div key={sec.key}>
-                <button
-                  className="flex items-center gap-1 w-full px-2 py-1"
-                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}
-                  title={sec.title}
-                  onClick={() => setCollapsedGroups((m) => ({ ...m, [sec.key]: open }))}
+          <LayoutGroup id="skills-inline-tree">
+            {sections.map((sec) => {
+              const open = !collapsedGroups[sec.key]
+              const Icon = sec.icon
+              return (
+                <motion.div
+                  key={sec.key}
+                  layout="position"
+                  transition={{ layout: shouldReduceMotion ? { duration: 0 } : TREE_LAYOUT_TRANSITION }}
                 >
-                  <AnimatedChevron open={open} style={{ color: 'var(--text-dim)' }}>
-                    <ChevronDown size={12} strokeWidth={1.5} />
-                  </AnimatedChevron>
-                  <Icon size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: sec.iconColor }} />
-                  <span className="uppercase font-semibold truncate flex-1" style={{ color: 'var(--text-dim)', letterSpacing: '0.05em', fontSize: 11 }}>
-                    {sec.label}
-                  </span>
-                  <span style={{ flexShrink: 0, fontSize: 11, color: 'var(--text-dim)' }}>{sec.skills.length}</span>
-                </button>
-                <AnimatedCollapse open={open}>
-                  <div>
-                    {sec.skills.map((s) => (
-                      <SkillRow
-                        key={skillKey(s)}
-                        skill={s}
-                        selected={isSelected(s)}
-                        detail={isSelected(s) ? skillDetail : null}
-                        detailLoading={isSelected(s) && detailLoading}
-                        selectedFile={selectedFile}
-                        onSelect={() => selectSkill(s.scope, s.cwd, s.name)}
-                        onSelectFile={selectFile}
-                        onToggle={() => toggleSkill(s.name)}
-                        onDownload={() => downloadSkill(s.scope, s.cwd, s.name)}
-                        onDelete={() => handleDelete(s)}
-                        canDelete={s.scope === 'workdir' || isAdmin}
-                        t={t}
-                      />
-                    ))}
-                  </div>
-                </AnimatedCollapse>
-              </div>
-            )
-          })
+                  <button
+                    className="flex items-center gap-1 w-full px-2 py-1"
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                    title={sec.title}
+                    onClick={() => setCollapsedGroups((m) => ({ ...m, [sec.key]: open }))}
+                  >
+                    <AnimatedChevron open={open} style={{ color: 'var(--text-dim)' }}>
+                      <ChevronDown size={12} strokeWidth={1.5} />
+                    </AnimatedChevron>
+                    <Icon size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: sec.iconColor }} />
+                    <span className="uppercase font-semibold truncate flex-1" style={{ color: 'var(--text-dim)', letterSpacing: '0.05em', fontSize: 11 }}>
+                      {sec.label}
+                    </span>
+                    <span style={{ flexShrink: 0, fontSize: 11, color: 'var(--text-dim)' }}>{sec.skills.length}</span>
+                  </button>
+                  <AnimatedCollapse open={open}>
+                    <div>
+                      {sec.skills.map((s) => (
+                        <SkillRow
+                          key={skillKey(s)}
+                          skill={s}
+                          selected={isSelected(s)}
+                          detail={isSelected(s) ? skillDetail : null}
+                          detailLoading={isSelected(s) && detailLoading}
+                          detailError={isSelected(s) ? detailError : null}
+                          suppressFileActive={suppressFileActive}
+                          onSelect={() => handleSelectSkill(s)}
+                          onSelectFile={selectFile}
+                          onDownload={() => downloadSkill(s.scope, s.cwd, s.name)}
+                          onDelete={() => handleDelete(s)}
+                          canDelete={s.scope === 'workdir' || isAdmin}
+                          reduceMotion={shouldReduceMotion}
+                          t={t}
+                        />
+                      ))}
+                    </div>
+                  </AnimatedCollapse>
+                </motion.div>
+              )
+            })}
+          </LayoutGroup>
         )}
       </div>
 
@@ -382,15 +450,63 @@ export default function SkillList() {
         onConfirm={handleDialogConfirm}
         onCancel={() => setDialogMode(null)}
       />
+
+      <style>{`
+        .skill-inline-content {
+          contain: layout paint style;
+          transform-origin: top left;
+        }
+      `}</style>
     </div>
   )
 }
 
-function SkillRow({ skill, selected, detail, detailLoading, selectedFile, onSelect, onSelectFile, onToggle, onDownload, onDelete, canDelete, t }) {
+function SkillRow({ skill, selected, detail, detailLoading, detailError, suppressFileActive, onSelect, onSelectFile, onDownload, onDelete, canDelete, reduceMotion, t }) {
   const [hovered, setHovered] = useState(false)
+  const [expandedPaths, setExpandedPaths] = useState(() => new Set())
+  const [activeFilePath, setActiveFilePath] = useState(null)
   const enabled = skill.enabled !== false
+  const visibleActiveFile = selected && !suppressFileActive ? activeFilePath : null
+  const hasActiveFile = !!visibleActiveFile
+  const [inlineTreeMeasureRef, inlineTreeHeight] = useMeasuredHeight([
+    selected,
+    detailLoading,
+    detailError,
+    detail?.tree,
+    expandedPaths,
+  ])
+
+  useLayoutEffect(() => {
+    setActiveFilePath(null)
+    if (!selected) {
+      setExpandedPaths(new Set())
+    }
+  }, [selected])
+
+  const toggleDirectory = useCallback((path) => {
+    setExpandedPaths((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }, [])
+
+  const handleSelectFile = useCallback((path) => {
+    setActiveFilePath(path)
+    onSelectFile(path)
+  }, [onSelectFile])
+
   return (
-    <div>
+    <motion.div
+      layout="position"
+      transition={{ layout: reduceMotion ? { duration: 0 } : TREE_LAYOUT_TRANSITION }}
+      style={{
+        '--skill-inline-active-bg': hasActiveFile ? 'var(--bg-elevated)' : 'transparent',
+        '--skill-inline-active-border': hasActiveFile ? 'var(--cyan)' : 'transparent',
+        '--skill-inline-active-color': hasActiveFile ? 'var(--text-primary)' : 'var(--text-secondary)',
+      }}
+    >
       <div
         className="flex items-center gap-1 px-2 py-1"
         style={{
@@ -433,86 +549,175 @@ function SkillRow({ skill, selected, detail, detailLoading, selectedFile, onSele
             )}
           </>
         )}
-        <button
-          className="flex items-center justify-center flex-shrink-0"
-          style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: enabled ? 'var(--green)' : 'var(--text-dim)', padding: 0 }}
-          onClick={(e) => { e.stopPropagation(); onToggle() }}
-          title={enabled ? t('skills.disableSkill') : t('skills.enableSkill')}
-        >
-          {enabled ? <ToggleRight size={20} strokeWidth={1.5} /> : <ToggleLeft size={20} strokeWidth={1.5} />}
-        </button>
       </div>
 
       {/* Inline file tree for the selected skill */}
-      <AnimatedCollapse open={selected} animateHeight={false}>
-        <div style={{ paddingBottom: 4 }}>
-          {detailLoading ? (
-            <div className="flex flex-col gap-1 px-3 py-1">
-              {[1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: 20, borderRadius: 2 }} />)}
+      <AnimatePresence initial={false}>
+        {selected && (
+          <motion.div
+            key="inline-tree"
+            layout="position"
+            className="skill-inline-content"
+            initial={reduceMotion ? false : { height: 0, pointerEvents: 'none' }}
+            animate={{ height: inlineTreeHeight, pointerEvents: inlineTreeHeight > 0 ? 'auto' : 'none' }}
+            exit={{ height: 0, pointerEvents: 'none', transition: { duration: 0 } }}
+            transition={reduceMotion ? { duration: 0 } : TREE_EXPAND_TRANSITION}
+            style={{ overflow: 'hidden', transformOrigin: 'top left', willChange: 'height' }}
+          >
+            <div ref={inlineTreeMeasureRef} style={{ paddingBottom: TREE_INLINE_PADDING_BOTTOM }}>
+              {detailLoading ? null : detailError ? (
+                <div
+                  className="px-3 py-2"
+                  title={detailError}
+                  style={{ color: 'var(--red)', fontSize: 12, overflowWrap: 'break-word' }}
+                >
+                  {t('skills.loadFailed', { defaultValue: 'Failed to load files' })}
+                </div>
+              ) : detail?.tree?.length ? (
+                detail.tree.map((node) => (
+                  <InlineTreeNode
+                    key={node.name}
+                    node={node}
+                    depth={0}
+                    parentPath=""
+                    selectedFile={visibleActiveFile}
+                    onSelectFile={handleSelectFile}
+                    expandedPaths={expandedPaths}
+                    onToggleDirectory={toggleDirectory}
+                    suppressFileActive={suppressFileActive}
+                    reduceMotion={reduceMotion}
+                  />
+                ))
+              ) : (
+                <div className="px-3 py-2" style={{ color: 'var(--text-dim)', fontSize: 12 }}>
+                  {t('skills.noFiles', { defaultValue: 'No files' })}
+                </div>
+              )}
             </div>
-          ) : detail?.tree?.length ? (
-            detail.tree.map((node) => (
-              <InlineTreeNode key={node.name} node={node} depth={0} parentPath="" selectedFile={selectedFile} onSelectFile={onSelectFile} />
-            ))
-          ) : null}
-        </div>
-      </AnimatedCollapse>
-    </div>
+          </motion.div>
+          )}
+      </AnimatePresence>
+    </motion.div>
   )
 }
 
-function InlineTreeNode({ node, depth, parentPath, selectedFile, onSelectFile }) {
-  const [expanded, setExpanded] = useState(false)
-  const path = parentPath ? `${parentPath}/${node.name}` : node.name
-  const pad = 22 + depth * 14
-
+function InlineTreeNode({ node, depth, parentPath, selectedFile, onSelectFile, expandedPaths, onToggleDirectory, suppressFileActive, reduceMotion }) {
   if (node.type === 'directory') {
     return (
-      <>
-        <button
-          className="flex items-center gap-1 w-full pr-2 py-1"
-          style={{ paddingLeft: pad, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 12, textAlign: 'left', transition: 'background 150ms ease' }}
-          onClick={() => setExpanded((v) => !v)}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-        >
-          <AnimatedChevron open={expanded} style={{ color: 'var(--text-dim)', flexShrink: 0 }}>
-            <ChevronDown size={11} strokeWidth={1.5} />
-          </AnimatedChevron>
-          {expanded
-            ? <FolderOpen size={12} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />
-            : <Folder size={12} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />}
-          <span className="truncate">{node.name}</span>
-        </button>
-        <AnimatedCollapse open={expanded} animateHeight={false}>
-          <div>
-            {(node.children || []).map((c) => (
-              <InlineTreeNode key={c.name} node={c} depth={depth + 1} parentPath={path} selectedFile={selectedFile} onSelectFile={onSelectFile} />
-            ))}
-          </div>
-        </AnimatedCollapse>
-      </>
+      <InlineTreeDirectory
+        node={node}
+        depth={depth}
+        parentPath={parentPath}
+        selectedFile={selectedFile}
+        onSelectFile={onSelectFile}
+        expandedPaths={expandedPaths}
+        onToggleDirectory={onToggleDirectory}
+        suppressFileActive={suppressFileActive}
+        reduceMotion={reduceMotion}
+      />
     )
   }
 
-  const active = selectedFile === path
   return (
-    <button
-      className="flex items-center gap-1 w-full pr-2 py-1"
-      style={{
-        paddingLeft: pad + 13,
-        background: active ? 'var(--bg-elevated)' : 'transparent',
-        border: '2px solid transparent',
-        borderLeftColor: active ? 'var(--cyan)' : 'transparent',
-        cursor: 'pointer', color: active ? 'var(--text-primary)' : 'var(--text-secondary)', fontSize: 12,
-        textAlign: 'left', transition: 'background 150ms ease',
-      }}
-      onClick={() => onSelectFile(path)}
-      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--bg-elevated)' }}
-      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent' }}
-    >
-      <FileText size={12} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />
-      <span className="truncate">{node.name}</span>
-    </button>
+    <InlineTreeFile
+      node={node}
+      depth={depth}
+      parentPath={parentPath}
+      selectedFile={selectedFile}
+      onSelectFile={onSelectFile}
+      suppressFileActive={suppressFileActive}
+      reduceMotion={reduceMotion}
+    />
+  )
+}
+
+function InlineTreeDirectory({ node, depth, parentPath, selectedFile, onSelectFile, expandedPaths, onToggleDirectory, suppressFileActive, reduceMotion }) {
+  const path = parentPath ? `${parentPath}/${node.name}` : node.name
+  const pad = 22 + depth * 14
+  const expanded = expandedPaths.has(path)
+  const [childrenMeasureRef, childrenHeight] = useMeasuredHeight([
+    expanded,
+    node.children,
+    expandedPaths,
+  ])
+
+  return (
+    <motion.div layout="position" transition={{ layout: reduceMotion ? { duration: 0 } : TREE_LAYOUT_TRANSITION }}>
+      <button
+        className="flex items-center gap-1 w-full pr-2 py-1"
+        style={{ paddingLeft: pad, height: TREE_ROW_HEIGHT, minHeight: TREE_ROW_HEIGHT, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 12, textAlign: 'left', transition: 'background 150ms ease' }}
+        onClick={() => onToggleDirectory(path)}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+      >
+        <AnimatedChevron open={expanded} style={{ color: 'var(--text-dim)', flexShrink: 0 }}>
+          <ChevronDown size={11} strokeWidth={1.5} />
+        </AnimatedChevron>
+        {expanded
+          ? <FolderOpen size={12} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />
+          : <Folder size={12} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />}
+        <span className="truncate">{node.name}</span>
+      </button>
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            key="children"
+            layout="position"
+            className="skill-inline-content"
+            initial={reduceMotion ? false : { height: 0, pointerEvents: 'none' }}
+            animate={{ height: childrenHeight, pointerEvents: childrenHeight > 0 ? 'auto' : 'none' }}
+            exit={reduceMotion ? { height: 0, pointerEvents: 'none' } : { height: 0, pointerEvents: 'none', transition: TREE_COLLAPSE_TRANSITION }}
+            transition={reduceMotion ? { duration: 0 } : TREE_EXPAND_TRANSITION}
+            style={{ overflow: 'hidden', transformOrigin: 'top left', willChange: 'height' }}
+          >
+            <div ref={childrenMeasureRef}>
+              {(node.children || []).map((c) => (
+                <InlineTreeNode
+                  key={c.name}
+                  node={c}
+                  depth={depth + 1}
+                  parentPath={path}
+                  selectedFile={selectedFile}
+                  onSelectFile={onSelectFile}
+                  expandedPaths={expandedPaths}
+                  onToggleDirectory={onToggleDirectory}
+                  suppressFileActive={suppressFileActive}
+                  reduceMotion={reduceMotion}
+                />
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  )
+}
+
+function InlineTreeFile({ node, depth, parentPath, selectedFile, onSelectFile, suppressFileActive, reduceMotion }) {
+  const path = parentPath ? `${parentPath}/${node.name}` : node.name
+  const pad = 22 + depth * 14
+  const active = !suppressFileActive && selectedFile === path
+  return (
+    <motion.div layout="position" transition={{ layout: reduceMotion ? { duration: 0 } : TREE_LAYOUT_TRANSITION }}>
+      <button
+        className="flex items-center gap-1 w-full pr-2 py-1"
+        style={{
+          paddingLeft: pad + 13,
+          height: TREE_ROW_HEIGHT,
+          minHeight: TREE_ROW_HEIGHT,
+          background: active ? 'var(--skill-inline-active-bg)' : 'transparent',
+          border: '2px solid transparent',
+          borderLeftColor: active ? 'var(--skill-inline-active-border)' : 'transparent',
+          cursor: 'pointer', color: active ? 'var(--skill-inline-active-color)' : 'var(--text-secondary)', fontSize: 12,
+          textAlign: 'left', transition: 'background 150ms ease',
+        }}
+        onClick={() => onSelectFile(path)}
+        onMouseEnter={(e) => { if (!active && !suppressFileActive) e.currentTarget.style.background = 'var(--bg-elevated)' }}
+        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent' }}
+      >
+        <FileText size={12} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />
+        <span className="truncate">{node.name}</span>
+      </button>
+    </motion.div>
   )
 }

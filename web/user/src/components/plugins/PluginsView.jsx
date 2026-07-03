@@ -18,7 +18,7 @@ function Placeholder({ labelKey }) {
   )
 }
 
-export default function PluginsView() {
+export default function PluginsView({ backTitle, onBack }) {
   const section = useUiStore((s) => s.activePluginSection)
 
   return (
@@ -26,7 +26,7 @@ export default function PluginsView() {
       className="flex flex-1"
       style={{ background: 'var(--bg-base)', minHeight: 0, minWidth: 0, overflow: 'hidden' }}
     >
-      {section === 'skills' && <SkillsPanel />}
+      {section === 'skills' && <SkillsPanel backTitle={backTitle} onBack={onBack} />}
       {section === 'mcp' && <Placeholder labelKey="tabs.mcp" />}
       {section === 'hooks' && <Placeholder labelKey="tabs.hooks" />}
       {section === 'subagents' && <Placeholder labelKey="tabs.subagents" />}

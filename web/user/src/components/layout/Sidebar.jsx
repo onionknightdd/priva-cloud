@@ -6,7 +6,7 @@ import {
   Bot, PanelLeftClose, Plus, CalendarClock, PackageSearch, ChartColumnBig,
   Maximize2, Minimize2, FolderOpenDot, FolderGit2, LogOut,
   BarChart3, TrendingUp, ScrollText, FileText, FolderOpen,
-  Puzzle, Cable, Webhook, BrainCircuit, NotebookPen,
+  Cable, Webhook, BrainCircuit, NotebookPen,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSidebarStore from '../../stores/sidebarStore'
@@ -68,7 +68,7 @@ const DATA_SECTIONS = [
 // Plugins/Customize sub-sections. Skills is live (Phase 2); the rest render a
 // "coming soon" placeholder until each is redesigned one by one.
 const PLUGINS_SECTIONS = [
-  { id: 'skills', icon: Puzzle, labelKey: 'tabs.skills' },
+  { id: 'skills', icon: ScrollText, labelKey: 'tabs.skills' },
   { id: 'mcp', icon: Cable, labelKey: 'tabs.mcp' },
   { id: 'hooks', icon: Webhook, labelKey: 'tabs.hooks' },
   { id: 'subagents', icon: BrainCircuit, labelKey: 'tabs.subagents' },
@@ -1363,9 +1363,6 @@ export default function Sidebar() {
               <span className="truncate" style={{ color: 'var(--text-secondary)', fontSize: 12, minWidth: 0 }}>
                 {authUser.username}
               </span>
-            )}
-            {authUser && authUser.role === 'admin' && (
-              <Chip color="var(--green)">ADMIN</Chip>
             )}
             <button
               style={iconBtn}

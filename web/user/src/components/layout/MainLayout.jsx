@@ -24,7 +24,7 @@ function LazyPanel({ children }) {
   )
 }
 
-function ContentOverlay({ title, onBack, children }) {
+function ContentOverlay({ title, onBack, showHeader = true, children }) {
   return (
     <div
       className="absolute inset-0 flex flex-col"
@@ -35,44 +35,44 @@ function ContentOverlay({ title, onBack, children }) {
         minHeight: 0,
       }}
     >
-      <div
-        className="flex items-center gap-2 px-3 flex-shrink-0"
-        style={{
-          height: 40,
-          background: 'var(--bg-surface)',
-          borderBottom: '1px solid var(--border-subtle)',
-        }}
-      >
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex items-center gap-2"
+      {showHeader && (
+        <div
+          className="flex items-center px-3 flex-shrink-0"
           style={{
-            height: 28,
-            padding: '0 8px',
-            background: 'transparent',
-            border: '1px solid var(--border)',
-            borderRadius: 4,
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-            fontSize: 12,
-            transition: 'color 150ms ease, border-color 150ms ease, background 150ms ease',
-          }}
-          onMouseEnter={(event) => {
-            event.currentTarget.style.color = 'var(--text-primary)'
-            event.currentTarget.style.borderColor = 'var(--border-strong)'
-            event.currentTarget.style.background = 'var(--bg-elevated)'
-          }}
-          onMouseLeave={(event) => {
-            event.currentTarget.style.color = 'var(--text-secondary)'
-            event.currentTarget.style.borderColor = 'var(--border)'
-            event.currentTarget.style.background = 'transparent'
+            height: 40,
+            background: 'var(--bg-base)',
           }}
         >
-          <ArrowLeft size={14} strokeWidth={1.5} />
-          <span>{title}</span>
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center justify-center"
+            aria-label={title}
+            title={title}
+            style={{
+              width: 28,
+              height: 28,
+              padding: 0,
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 4,
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              transition: 'color 150ms ease, background 150ms ease',
+            }}
+            onMouseEnter={(event) => {
+              event.currentTarget.style.color = 'var(--text-primary)'
+              event.currentTarget.style.background = 'var(--bg-elevated)'
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.color = 'var(--text-secondary)'
+              event.currentTarget.style.background = 'transparent'
+            }}
+          >
+            <ArrowLeft size={16} strokeWidth={1.5} />
+          </button>
+        </div>
+      )}
       <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
         {children}
       </div>
@@ -86,6 +86,7 @@ export default function MainLayout() {
   const sidebarWidth = useSidebarStore((s) => s.width)
   const collapsed = useSidebarStore((s) => s.collapsed)
   const activeNavTab = useUiStore((s) => s.activeNavTab)
+  const activePluginSection = useUiStore((s) => s.activePluginSection)
   const canvasVisible = useUiStore((s) => s.canvasVisible)
   const terminalOpen = useUiStore((s) => s.terminalOpen)
   const terminalMode = useUiStore((s) => s.terminalMode)
@@ -98,7 +99,10 @@ export default function MainLayout() {
   // area swaps between the chat view, Data & Usage, and Plugins/Customize.
   const isData = activeNavTab === 'userdata'
   const isPlugins = activeNavTab === 'plugins'
+  const isSkillsPlugin = isPlugins && activePluginSection === 'skills'
   const splitActive = panes.length > 0
+  const backToSessionsTitle = t('split.backToSessions', { defaultValue: '返回 session view' })
+  const backToSessions = () => setActiveNavTab('priva')
 
   useEffect(() => {
     if (embedded) return
@@ -169,18 +173,19 @@ export default function MainLayout() {
         <SplitSessionView fallback={sessionFallback} />
         {isData && (
           <ContentOverlay
-            title={t('split.backToSessions', { defaultValue: '返回 session view' })}
-            onBack={() => setActiveNavTab('priva')}
+            title={backToSessionsTitle}
+            onBack={backToSessions}
           >
             <LazyPanel><DataUsageView /></LazyPanel>
           </ContentOverlay>
         )}
         {isPlugins && (
           <ContentOverlay
-            title={t('split.backToSessions', { defaultValue: '返回 session view' })}
-            onBack={() => setActiveNavTab('priva')}
+            title={backToSessionsTitle}
+            onBack={backToSessions}
+            showHeader={!isSkillsPlugin}
           >
-            <LazyPanel><PluginsView /></LazyPanel>
+            <LazyPanel><PluginsView backTitle={backToSessionsTitle} onBack={backToSessions} /></LazyPanel>
           </ContentOverlay>
         )}
       </div>

@@ -80,6 +80,12 @@ const useAdminStore = create((set, get) => ({
     await get().fetchFleet()
   },
 
+  // Shut an account's agent-runner down (scale to zero now), then refresh the snapshot.
+  shutdownAccountRunner: async (accountId) => {
+    await adminApi.shutdownAccountRunner(accountId)
+    await get().fetchFleet()
+  },
+
   // Resource Quota (agent-runtime live usage vs allocated, polled). Same skeleton-on-
   // first-load + background-refresh shape as the fleet snapshot.
   resourceUsage: null,

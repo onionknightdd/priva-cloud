@@ -574,16 +574,46 @@ async def push_account_credentials(
     logger.info("pushed creds to agent-runner account={} keys={}", account_id, sorted(env.keys()))
 
 
-def terminate(account_id: str) -> None:
-    """Admin: scale the account's runner to zero now (alpha: direct scale)."""
+def _mark_status_zero(account_id: str) -> None:
+    """Flip the CR status not-routable (phase=Zero, podIP cleared, readyReplicas=0) via the
+    status subresource, so the fleet view + EPP stop trusting the doomed pod the instant we
+    scale it away. Mirrors the operator idle-sweep's ordering (``set_cr_status`` BEFORE the
+    scale). 404 (CR gone) is a no-op. control-panel holds ``agenttenants/status`` patch RBAC."""
     s = get_settings()
     ns = s.kubernetes.namespace_tenants
     try:
-        _apps().patch_namespaced_deployment_scale(
-            f"ar-{account_id}", ns, {"spec": {"replicas": 0}})
+        _custom().patch_namespaced_custom_object_status(
+            GROUP, VERSION, ns, PLURAL, account_id,
+            {"status": {"phase": "Zero", "podIP": None, "readyReplicas": 0}})
     except client.ApiException as exc:
         if exc.status != 404:
             raise
+
+
+def shutdown_runner(account_id: str) -> int:
+    """Admin: shut the account's runner down NOW — flip its CR status not-routable, then scale
+    the Deployment to zero. Status-first (like the operator's idle sweep) shrinks the window
+    where the EPP/fleet hand out a doomed endpoint. The operator is the sole scale-*up* path
+    (spec.wake.requestedAt), so scaling to 0 here never fights it — the next user request
+    re-wakes the pod. Returns the replica count that was running (0 if already asleep / no
+    Deployment). Blocking kube calls — invoke via ``asyncio.to_thread``."""
+    s = get_settings()
+    ns = s.kubernetes.namespace_tenants
+    name = f"ar-{account_id}"
+    try:
+        dep = _apps().read_namespaced_deployment(name, ns)
+    except client.ApiException as exc:
+        if exc.status == 404:
+            return 0  # never provisioned / already torn down
+        raise
+    running = int(getattr(dep.spec, "replicas", 0) or 0)
+    _mark_status_zero(account_id)
+    try:
+        _apps().patch_namespaced_deployment_scale(name, ns, {"spec": {"replicas": 0}})
+    except client.ApiException as exc:
+        if exc.status != 404:
+            raise
+    return running
 
 
 def force_restart_pod(account_id: str) -> int:

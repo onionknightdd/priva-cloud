@@ -338,6 +338,11 @@ def get_skill_detail(scope: SkillScope, cwd: str | None, name: str, username: st
     skill_md = skill_path / "SKILL.md"
     fm = _parse_frontmatter(skill_md) if skill_md.exists() else {}
     tree = _build_tree(skill_path)
+    skill_md_content = None
+    if skill_md.exists() and skill_md.is_file():
+        raw = skill_md.read_bytes()
+        if not _detect_binary(raw):
+            skill_md_content = raw.decode("utf-8", errors="replace")
 
     return SkillDetailResponse(
         name=name,
@@ -347,6 +352,7 @@ def get_skill_detail(scope: SkillScope, cwd: str | None, name: str, username: st
         frontmatter=fm if fm else None,
         tree=tree,
         base_path=str(skill_path),
+        skill_md_content=skill_md_content,
     )
 
 

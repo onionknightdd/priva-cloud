@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Server, Activity, ArrowRightLeft, RotateCw } from 'lucide-react'
+import { Server, Activity, ArrowRightLeft, RotateCw, Power } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Dropdown from '@shared/components/shared/Dropdown'
 import useUiStore from '@shared/stores/uiStore'
@@ -233,6 +233,7 @@ export default function FleetView() {
   const fleetError = useAdminStore((s) => s.fleetError)
   const fetchFleet = useAdminStore((s) => s.fetchFleet)
   const restartAccountPod = useAdminStore((s) => s.restartAccountPod)
+  const shutdownAccountRunner = useAdminStore((s) => s.shutdownAccountRunner)
   const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
   const gateway = useAdminStore((s) => s.gateway)
   const gatewayBuffer = useAdminStore((s) => s.gatewayBuffer)
@@ -296,6 +297,22 @@ export default function FleetView() {
     })
   }
 
+  const handleShutdown = (a) => {
+    showConfirmDialog({
+      title: t('admin.shutdownTitle'),
+      message: t('admin.shutdownMessage', { name: a.username || a.account_id }),
+      confirmLabel: t('admin.shutdownConfirm'),
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await shutdownAccountRunner(a.account_id)
+        } catch (e) {
+          console.error(e)
+        }
+      },
+    })
+  }
+
   return (
     <div className="flex flex-col" style={{ height: '100%', overflow: 'hidden' }}>
       {/* Header */}
@@ -351,7 +368,7 @@ export default function FleetView() {
             <span style={{ width: 80, flexShrink: 0 }}>{t('admin.state')}</span>
             <span style={{ width: 88, flexShrink: 0, textAlign: 'right' }}>{t('admin.runs')}</span>
             <span style={{ width: 96, flexShrink: 0, textAlign: 'right' }}>{t('admin.lastActivity')}</span>
-            <span style={{ width: 36, flexShrink: 0 }} />
+            <span style={{ width: 72, flexShrink: 0 }} />
           </div>
 
           {initialLoad ? (
@@ -399,17 +416,36 @@ export default function FleetView() {
                   <span className="text-xs font-light" style={{ width: 96, flexShrink: 0, textAlign: 'right', color: 'var(--text-dim)' }}>
                     {relTime(a.last_activity_ts, t)}
                   </span>
-                  <button
-                    className="flex items-center justify-center flex-shrink-0"
-                    style={{ width: 36, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 4, transition: 'color 150ms ease' }}
-                    onClick={() => handleRestart(a)}
-                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red)' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-                    title={t('admin.restartPodTitle')}
-                    aria-label={t('admin.restartPodTitle')}
-                  >
-                    <RotateCw size={14} strokeWidth={1.5} />
-                  </button>
+                  {/* Actions: restart (left) always; shut down (right) only when there's a
+                      live pod to stop. The 72px slot is fixed so idle rows don't shift. */}
+                  <span className="flex items-center flex-shrink-0" style={{ width: 72 }}>
+                    <button
+                      className="flex items-center justify-center flex-shrink-0"
+                      style={{ width: 36, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 4, transition: 'color 150ms ease' }}
+                      onClick={() => handleRestart(a)}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+                      title={t('admin.restartPodTitle')}
+                      aria-label={t('admin.restartPodTitle')}
+                    >
+                      <RotateCw size={14} strokeWidth={1.5} />
+                    </button>
+                    {(a.awake || a.phase === 'Waking') ? (
+                      <button
+                        className="flex items-center justify-center flex-shrink-0"
+                        style={{ width: 36, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 4, transition: 'color 150ms ease' }}
+                        onClick={() => handleShutdown(a)}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red)' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+                        title={t('admin.shutdownTitle')}
+                        aria-label={t('admin.shutdownTitle')}
+                      >
+                        <Power size={14} strokeWidth={1.5} />
+                      </button>
+                    ) : (
+                      <span style={{ width: 36, flexShrink: 0 }} />
+                    )}
+                  </span>
                 </div>
               )
             })

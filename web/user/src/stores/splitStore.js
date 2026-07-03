@@ -15,9 +15,15 @@ function normalizePanes(panes) {
 
 function layoutForCount(count, previous = 'single') {
   if (count <= 1) return 'single'
-  if (count === 2) return previous === 'two-rows' ? 'two-rows' : 'two-columns'
+  if (count === 2) return previous === 'two-rows' || previous === 'two-rows-top' ? 'two-rows' : 'two-columns'
   if (count === 3) return previous === 'three-right' ? 'three-right' : 'three-left'
   return 'four'
+}
+
+function normalizeRequestedLayout(layout) {
+  if (layout === 'two-columns-left') return 'two-columns'
+  if (layout === 'two-rows-top') return 'two-rows'
+  return layout
 }
 
 const useSplitStore = create((set, get) => ({
@@ -63,16 +69,18 @@ const useSplitStore = create((set, get) => ({
   addSessionWithLayout: (sessionId, layout, currentSessionId = null) => set((s) => {
     if (!sessionId) return {}
     let panes = normalizePanes(s.panes)
+    const insertBefore = layout === 'two-columns-left' || layout === 'two-rows-top'
     if (panes.length === 0 && currentSessionId) {
       panes = [{ id: makePaneId(), sessionId: currentSessionId, local: true }]
     }
     if (panes.length === 0) {
       const mainPane = { id: makePaneId(), sessionId: null, local: true }
       const pane = { id: makePaneId(), sessionId }
+      const nextPanes = insertBefore ? [pane, mainPane] : [mainPane, pane]
       return {
-        panes: [mainPane, pane],
-        layout: layout === 'two-rows' ? 'two-rows' : 'two-columns',
-        activePaneId: mainPane.id,
+        panes: nextPanes,
+        layout: normalizeRequestedLayout(layout) === 'two-rows' ? 'two-rows' : 'two-columns',
+        activePaneId: pane.id,
       }
     }
     if (panes.length >= 4) {
@@ -86,8 +94,8 @@ const useSplitStore = create((set, get) => ({
       }
     }
     const pane = { id: makePaneId(), sessionId }
-    const nextPanes = [...panes, pane]
-    const nextLayout = layout || layoutForCount(nextPanes.length, s.layout)
+    const nextPanes = insertBefore && panes.length === 1 ? [pane, ...panes] : [...panes, pane]
+    const nextLayout = normalizeRequestedLayout(layout) || layoutForCount(nextPanes.length, s.layout)
     return {
       panes: nextPanes,
       layout: nextLayout,

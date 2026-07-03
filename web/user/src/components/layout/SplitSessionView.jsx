@@ -35,7 +35,8 @@ function paneSrc(pane) {
 
 const MIN_SPLIT_RATIO = 20
 const MAX_SPLIT_RATIO = 80
-const SESSION_HEADER_HEIGHT = 40
+const SESSION_HEADER_HEIGHT = 27
+const DEFAULT_DROP_PREVIEW = { placement: 'right', choice: 'two-columns' }
 
 function clampSplitRatio(value) {
   return Math.max(MIN_SPLIT_RATIO, Math.min(MAX_SPLIT_RATIO, value))
@@ -186,10 +187,64 @@ function layoutControlChoices(count) {
   return []
 }
 
-function SplitDropOverlay({ paneCount, onChoose }) {
+function getDropPreviewFromPoint(event, rect, paneCount) {
+  if (!rect?.width || !rect?.height) return DEFAULT_DROP_PREVIEW
+
+  const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+  const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
+  const horizontalPull = Math.abs(x - 0.5)
+  const verticalPull = Math.abs(y - 0.5)
+
+  if (paneCount >= 4) return { placement: 'center', choice: 'replace-active' }
+
+  if (paneCount <= 1) {
+    if (verticalPull > horizontalPull) {
+      return y < 0.5
+        ? { placement: 'top', choice: 'two-rows-top' }
+        : { placement: 'bottom', choice: 'two-rows' }
+    }
+    return x < 0.5
+      ? { placement: 'left', choice: 'two-columns-left' }
+      : { placement: 'right', choice: 'two-columns' }
+  }
+
+  if (paneCount === 2) {
+    return x >= 0.5
+      ? { placement: 'right', choice: 'three-right' }
+      : { placement: 'bottom', choice: 'three-left' }
+  }
+
+  return { placement: 'bottom-right', choice: 'four' }
+}
+
+function getDropTargetStyle(placement) {
+  const base = {
+    position: 'absolute',
+    boxSizing: 'border-box',
+  }
+
+  if (placement === 'left') {
+    return { ...base, left: 0, top: 0, width: '50%', height: '100%' }
+  }
+  if (placement === 'right') {
+    return { ...base, right: 0, top: 0, width: '50%', height: '100%' }
+  }
+  if (placement === 'top') {
+    return { ...base, left: 0, top: 0, width: '100%', height: '50%' }
+  }
+  if (placement === 'bottom') {
+    return { ...base, left: 0, bottom: 0, width: '100%', height: '50%' }
+  }
+  if (placement === 'bottom-right') {
+    return { ...base, right: 0, bottom: 0, width: '50%', height: '50%' }
+  }
+  return { ...base, inset: 0 }
+}
+
+function SplitDropOverlay({ paneCount, preview = DEFAULT_DROP_PREVIEW, onChoose, onPreview }) {
   const choices = layoutChoices(paneCount)
-  const defaultChoice = choices[0]?.id || 'single'
-  const primaryLabel = paneCount <= 0 ? 'Open in split' : 'Add split'
+  const defaultChoice = preview?.choice || choices[0]?.id || 'single'
+  const primaryLabel = paneCount >= 4 ? 'Replace pane' : (paneCount <= 0 ? 'Open in split' : 'Add split')
   const handleDrop = (event, choice = defaultChoice) => {
     event.preventDefault()
     event.stopPropagation()
@@ -199,40 +254,48 @@ function SplitDropOverlay({ paneCount, onChoose }) {
   return (
     <div
       data-testid="split-drop-overlay"
-      className="absolute inset-0 flex items-center justify-center"
+      className="absolute inset-0"
       style={{
         zIndex: 30,
-        background: 'var(--bg-overlay)',
-        backdropFilter: 'blur(3px)',
-        border: '2px solid var(--blue)',
-        borderRadius: 4,
         boxSizing: 'border-box',
       }}
       onDragOver={(event) => {
         event.preventDefault()
         event.dataTransfer.dropEffect = 'copy'
+        onPreview?.(event)
       }}
       onDrop={(event) => handleDrop(event)}
     >
       <div
-        className="flex flex-col items-center gap-4"
+        className="flex items-center justify-center"
         style={{
-          minWidth: 220,
-          maxWidth: 'min(360px, calc(100% - 48px))',
+          ...getDropTargetStyle(preview?.placement || 'right'),
+          background: 'color-mix(in srgb, var(--bg-surface) 58%, transparent)',
+          backdropFilter: 'blur(2.7px) saturate(113%)',
+          WebkitBackdropFilter: 'blur(2.7px) saturate(113%)',
+          border: '2px solid var(--blue)',
+          borderRadius: 4,
           color: 'var(--text-primary)',
+          overflow: 'hidden',
         }}
+        onDragOver={(event) => {
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+          onPreview?.(event)
+        }}
+        onDrop={(event) => handleDrop(event)}
       >
         <button
           type="button"
           title={primaryLabel}
           className="inline-flex items-center justify-center"
           style={{
-            height: 32,
-            padding: '0 12px',
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-strong)',
+            height: 24,
+            padding: '0 10px',
+            background: 'var(--blue)',
+            border: '1px solid var(--blue)',
             borderRadius: 4,
-            color: 'var(--text-primary)',
+            color: 'var(--text-inverse)',
             cursor: 'copy',
             fontSize: 12,
             fontWeight: 600,
@@ -247,44 +310,6 @@ function SplitDropOverlay({ paneCount, onChoose }) {
         >
           {primaryLabel}
         </button>
-        <div className="flex items-center justify-center gap-2">
-          {choices.map((choice) => (
-            <button
-              key={choice.id}
-              type="button"
-              title={choice.title}
-              onDragOver={(event) => {
-                event.preventDefault()
-                event.dataTransfer.dropEffect = 'copy'
-              }}
-              onDrop={(event) => handleDrop(event, choice.id)}
-              onClick={(event) => event.preventDefault()}
-              className="inline-flex items-center justify-center gap-2"
-              style={{
-                minWidth: 60,
-                height: 30,
-                padding: '0 8px',
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border)',
-                borderRadius: 4,
-                color: 'var(--text-secondary)',
-                cursor: 'copy',
-                transition: 'background 150ms ease, color 150ms ease, border-color 150ms ease',
-              }}
-              onMouseEnter={(event) => {
-                event.currentTarget.style.color = 'var(--text-primary)'
-                event.currentTarget.style.borderColor = 'var(--border-strong)'
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.style.color = 'var(--text-secondary)'
-                event.currentTarget.style.borderColor = 'var(--border)'
-              }}
-            >
-              <LayoutGlyph type={choice.id} />
-              <span style={{ fontSize: 11, fontWeight: 600 }}>{choice.label}</span>
-            </button>
-          ))}
-        </div>
       </div>
     </div>
   )
@@ -486,6 +511,7 @@ export default function SplitSessionView({ fallback }) {
   const [splitSize, setSplitSize] = useState({ width: 0, height: 0 })
   const [resizeDrag, setResizeDrag] = useState(null)
   const [hoveredResizeAxis, setHoveredResizeAxis] = useState(null)
+  const [dropPreview, setDropPreview] = useState(DEFAULT_DROP_PREVIEW)
 
   const names = useMemo(() => {
     const map = new Map()
@@ -573,12 +599,19 @@ export default function SplitSessionView({ fallback }) {
       addSessionWithLayout(session.sessionId, choice, currentSessionId)
     }
     setDragOverActive(false)
+    setDropPreview(DEFAULT_DROP_PREVIEW)
     endSessionDrag()
+  }
+
+  const updateDropPreview = (event) => {
+    const rect = splitRootRef.current?.getBoundingClientRect() || event.currentTarget.getBoundingClientRect()
+    setDropPreview(getDropPreviewFromPoint(event, rect, Math.max(1, panes.length)))
   }
 
   const handleDragEnter = (event) => {
     if (!hasSessionDrag(event)) return
     event.preventDefault()
+    updateDropPreview(event)
     setDragOverActive(true)
   }
 
@@ -586,18 +619,21 @@ export default function SplitSessionView({ fallback }) {
     if (!hasSessionDrag(event)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
+    updateDropPreview(event)
   }
 
   const handleDragLeave = (event) => {
     if (!event.currentTarget.contains(event.relatedTarget)) {
       event.preventDefault()
       setDragOverActive(false)
+      setDropPreview(DEFAULT_DROP_PREVIEW)
     }
   }
 
   if (panes.length === 0) {
     return (
       <div
+        ref={splitRootRef}
         className="relative flex flex-1 min-w-0 min-h-0"
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
@@ -605,7 +641,12 @@ export default function SplitSessionView({ fallback }) {
       >
         {fallback || <EmptySessionView />}
         {!!(draggingSession || dragOverActive) && (
-          <SplitDropOverlay paneCount={1} onChoose={handleDropChoice} />
+          <SplitDropOverlay
+            paneCount={1}
+            preview={dropPreview}
+            onPreview={updateDropPreview}
+            onChoose={handleDropChoice}
+          />
         )}
       </div>
     )
@@ -622,7 +663,7 @@ export default function SplitSessionView({ fallback }) {
     >
       <div style={getGridStyle(layout, splitRatios)}>
         {panes.map((pane, index) => {
-          const active = pane.id === activePaneId
+          const active = panes.length > 1 && pane.id === activePaneId
           const paneTitle = pane.sessionId ? (names.get(pane.sessionId) || pane.sessionId) : 'Session view'
           return (
             <div
@@ -675,7 +716,12 @@ export default function SplitSessionView({ fallback }) {
       />
       <SplitLayoutSwitcher count={panes.length} layout={layout} onLayout={setLayout} metrics={controlMetrics} />
       {!!(draggingSession || dragOverActive) && (
-        <SplitDropOverlay paneCount={panes.length} onChoose={handleDropChoice} />
+        <SplitDropOverlay
+          paneCount={panes.length}
+          preview={dropPreview}
+          onPreview={updateDropPreview}
+          onChoose={handleDropChoice}
+        />
       )}
     </div>
   )

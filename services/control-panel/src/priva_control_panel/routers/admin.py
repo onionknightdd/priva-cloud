@@ -632,6 +632,31 @@ async def restart_account_pod(
     return {"status": "ok", "pods_deleted": deleted}
 
 
+@router.post("/accounts/{account_id}/shutdown")
+async def shutdown_account_runner(
+    account_id: str,
+    current_user: UserRecord = Depends(require_admin),
+):
+    """Admin: shut an account's agent-runner down now — flip its CR status not-routable,
+    then scale the Deployment to zero (mirrors the operator idle-sweep). The operator only
+    scales *up* (spec.wake), so this never fights it; the next user request re-wakes the
+    pod. No-op if the runner is already asleep. Any in-flight run is lost."""
+    from ..provisioner import shutdown_runner
+
+    try:
+        replicas = await asyncio.to_thread(shutdown_runner, account_id)
+    except Exception as exc:
+        raise HTTPException(500, f"Shutdown failed: {exc}") from exc
+
+    get_audit_logger().append(AuditEntry(
+        actor=current_user.username,
+        action="runner.shutdown",
+        target=account_id,
+        details={"replicas_scaled_down": replicas},
+    ))
+    return {"status": "ok", "replicas_scaled_down": replicas}
+
+
 @router.get("/gateway-metrics", response_model=GatewayMetricsResponse)
 async def get_gateway_metrics():
     """Live agentgateway HTTP traffic snapshot. See ``_gateway_snapshot``."""

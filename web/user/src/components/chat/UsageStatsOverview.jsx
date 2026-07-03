@@ -216,6 +216,7 @@ function Heatmap({ data }) {
 function ModelsView({ modelUsage, dailyModelTokens, range, themeKey }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
+  const chartMargin = { top: 0, right: 4, bottom: 0, left: -12 }
 
   const filteredDaily = useMemo(() => {
     if (!dailyModelTokens || dailyModelTokens.length === 0) return []
@@ -259,7 +260,7 @@ function ModelsView({ modelUsage, dailyModelTokens, range, themeKey }) {
           <BarChart
             key={`models-${themeKey}-${range}`}
             data={chartData}
-            margin={{ top: 0, right: 4, bottom: 0, left: 0 }}
+            margin={chartMargin}
           >
             <CartesianGrid {...getGridStyle()} />
             <XAxis
@@ -269,6 +270,7 @@ function ModelsView({ modelUsage, dailyModelTokens, range, themeKey }) {
             />
             <YAxis
               {...AXIS_STYLE}
+              width={34}
               tick={{ ...AXIS_STYLE.tick, fill: resolveVar('--text-dim'), fontSize: 9 }}
               allowDecimals={false}
               tickFormatter={(v) => formatNumber(v)}

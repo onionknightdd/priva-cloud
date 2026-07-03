@@ -20,6 +20,7 @@ import { getSplitParams, isSplitPane } from '../../utils/splitMode'
 import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 
 const MessageList = lazyWithChunkReload(() => import('./MessageList'))
+const SESSION_HEADER_HEIGHT = 27
 
 function CanvasShortcut({ icon: Icon, title, hidden, indicator, onClick }) {
   if (hidden) return null
@@ -210,7 +211,7 @@ export default function ChatPanel() {
     <div
       className="flex items-center justify-between px-4 flex-shrink-0"
       style={{
-        height: 40,
+        height: SESSION_HEADER_HEIGHT,
         borderBottom: '1px solid var(--border-subtle)',
         background: 'var(--bg-surface)',
       }}

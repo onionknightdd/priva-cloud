@@ -195,6 +195,8 @@ export default function PromptComposer({
     if (onRegisterWarn) onRegisterWarn(addFileWarning)
   }, [onRegisterWarn, addFileWarning])
 
+  const hasInlineContext = !!skill || attachments.length > 0
+
   const filteredSkills = useMemo(
     () => getFilteredSkills(availableSkills, skillQuery),
     [availableSkills, skillQuery]
@@ -1080,9 +1082,12 @@ export default function PromptComposer({
             fontFamily: "'Noto Sans', sans-serif",
             fontSize: 14,
             lineHeight: 1.5,
-            minHeight: (skill || attachments.length > 0) ? 52 : minHeight,
+            minHeight: hasInlineContext ? 52 : minHeight,
             maxHeight: 200,
-            paddingTop: (skill || attachments.length > 0) ? 8 : 12,
+            overflowY: value ? 'auto' : 'hidden',
+            paddingTop: hasInlineContext ? 8 : 6,
+            paddingBottom: hasInlineContext ? 8 : 2,
+            paddingLeft: hasInlineContext ? 12 : 16,
           }}
           placeholder={skill ? t('skillPicker.instructionPlaceholder') : (placeholder || t('chat.placeholder'))}
           value={value}
@@ -1096,7 +1101,7 @@ export default function PromptComposer({
         />
 
         {/* Toolbar row */}
-        <div className="flex items-center justify-between px-2 pb-2 pt-1">
+        <div className="flex items-center justify-between px-2 pb-2" style={{ paddingTop: hasInlineContext ? 4 : 2 }}>
           {/* Left: + button + optional extra */}
           <div className="flex items-center gap-1">
             <div className="relative">

@@ -11,6 +11,7 @@ export const rejectPendingUser = (requestId) => postJSON(`/admin/pending-registr
 
 export const getFleet = () => getJSON('/admin/fleet')
 export const restartAccountPod = (accountId) => postJSON(`/admin/accounts/${encodeURIComponent(accountId)}/restart-pod`)
+export const shutdownAccountRunner = (accountId) => postJSON(`/admin/accounts/${encodeURIComponent(accountId)}/shutdown`)
 export const getGatewayMetrics = () => getJSON('/admin/gateway-metrics')
 export const getResourceUsage = () => getJSON('/admin/resource-usage')
 export const getSystemHealth = () => getJSON('/admin/system-health')

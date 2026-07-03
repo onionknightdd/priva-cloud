@@ -25,6 +25,8 @@ import QueuedMessagesStack from './QueuedMessagesStack'
 import { buildSelectedXlsxXml } from '../../utils/selectedXlsx'
 import { buildSelectedFileXml } from '../../utils/selectedFile'
 
+const EMPTY_COMPOSER_TEXTAREA_HEIGHT = 50
+
 function findNextVariable(text, fromPos) {
   const regex = /\{[^}]+\}/g
   regex.lastIndex = fromPos
@@ -715,8 +717,8 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
 
   return (
     <div
-      className="flex-shrink-0 pt-3 pb-3"
-      style={{ background: 'var(--bg-base)' }}
+      className="flex-shrink-0"
+      style={{ background: 'var(--bg-base)', paddingTop: 14, paddingBottom: 10 }}
     >
       {directoryPickers}
       <div style={{ maxWidth: 900, width: '80%', margin: '0 auto' }}>
@@ -754,7 +756,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
             skill={selectedSkill}
             onSkillChange={setSelectedSkill}
             placeholder={t('chat.placeholder')}
-            minHeight={62}
+            minHeight={EMPTY_COMPOSER_TEXTAREA_HEIGHT}
             onKeyDown={handleKeyDown}
             textareaRef={textareaRef}
             toolbarLeft={toolbarLeftContent}

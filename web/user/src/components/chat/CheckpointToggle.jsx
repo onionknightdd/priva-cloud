@@ -21,20 +21,24 @@ export default function CheckpointToggle() {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       title={t('checkpoint.tooltip')}
-      className="inline-flex items-center gap-1 px-2 py-1 text-xs uppercase"
+      className="inline-flex items-center gap-1 uppercase"
       style={{
+        height: 20,
+        padding: '0 5px',
         background: enabled ? 'var(--bg-elevated)' : 'transparent',
         border: '1px solid var(--border-subtle)',
         borderLeft: enabled ? '2px solid var(--blue)' : '2px solid transparent',
         borderRadius: 2,
         color,
         cursor: disabled ? 'default' : 'pointer',
+        fontSize: 9,
+        lineHeight: '12px',
         letterSpacing: '0.06em',
         fontWeight: 600,
         transition: 'color 150ms ease, background 150ms ease',
       }}
     >
-      <Zap size={14} strokeWidth={1.5} />
+      <Zap size={10} strokeWidth={1.5} />
       <span>{enabled ? t('checkpoint.labelOn') : t('checkpoint.label')}</span>
     </button>
   )

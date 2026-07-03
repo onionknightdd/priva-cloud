@@ -5,6 +5,17 @@ import * as skillsApi from '../api/skills'
 // Stable identity for a skill across the personal group + every workdir group.
 export const skillKey = (s) => (s ? `${s.scope}:${s.cwd || ''}:${s.name}` : '')
 
+let selectionRequestId = 0
+let fileRequestId = 0
+
+function matchesSelection(state, scope, cwd, name) {
+  const selected = state.selectedSkill
+  return !!selected
+    && selected.scope === scope
+    && selected.cwd === (cwd ?? null)
+    && selected.name === name
+}
+
 const useSkillsStore = create((set, get) => ({
   // Skill list — grouped: personal (~/.claude/skills) + one group per workdir.
   personal: [],            // SkillSummary[]
@@ -20,11 +31,13 @@ const useSkillsStore = create((set, get) => ({
   selectedSkill: null,     // { scope, cwd, name }
   skillDetail: null,
   detailLoading: false,
+  detailError: null,
 
   // Selected file (shown in the viewer)
   selectedFile: null,      // path string
   fileContent: null,
   fileLoading: false,
+  viewerMode: 'skill',     // 'skill' | 'file'
 
   // Left list column width (persisted)
   listWidth: safeStorage.getNumber('skill-list-width', 300, { min: 220, max: 560 }),
@@ -86,41 +99,109 @@ const useSkillsStore = create((set, get) => ({
     }
   },
 
-  // Toggle the inline tree for a skill. Selecting loads detail + auto-opens
-  // SKILL.md; clicking the already-selected skill collapses it.
+  // Toggle the inline tree for a skill. Selecting loads detail + caches
+  // SKILL.md for the detail view; files are selected only by explicit tree click.
   selectSkill: async (scope, cwd, name) => {
     const cur = get().selectedSkill
     if (cur && cur.scope === scope && cur.cwd === (cwd ?? null) && cur.name === name) {
-      set({ selectedSkill: null, skillDetail: null, selectedFile: null, fileContent: null })
+      selectionRequestId += 1
+      fileRequestId += 1
+      set({ selectedSkill: null, skillDetail: null, detailError: null, selectedFile: null, fileContent: null, viewerMode: 'skill' })
       return
     }
+    const requestId = ++selectionRequestId
+    const skillFileRequestId = ++fileRequestId
     set({
       selectedSkill: { scope, cwd: cwd ?? null, name },
       detailLoading: true,
+      detailError: null,
       skillDetail: null,
       selectedFile: null,
       fileContent: null,
+      fileLoading: false,
+      viewerMode: 'skill',
+      viewMode: 'preview',
     })
     try {
       const detail = await skillsApi.getSkillDetail(scope, cwd, name)
-      set({ skillDetail: detail, detailLoading: false })
-      // Auto-open the top-level SKILL.md so the viewer isn't empty.
+      if (requestId !== selectionRequestId || !matchesSelection(get(), scope, cwd, name)) return
+
       const hasSkillMd = (detail?.tree || []).some((n) => n.type === 'file' && n.name === 'SKILL.md')
-      if (hasSkillMd) get().selectFile('SKILL.md')
-    } catch {
-      set({ detailLoading: false })
+      const detailSkillMd = typeof detail?.skill_md_content === 'string'
+        ? { path: 'SKILL.md', content: detail.skill_md_content, language: 'markdown', is_binary: false }
+        : null
+      set({
+        skillDetail: detail,
+        detailLoading: false,
+        detailError: null,
+        selectedFile: null,
+        fileContent: detailSkillMd,
+        fileLoading: hasSkillMd && !detailSkillMd,
+        viewerMode: 'skill',
+      })
+
+      if (!hasSkillMd || detailSkillMd) return
+
+      try {
+        const skillMd = await skillsApi.getSkillFile(scope, cwd, name, 'SKILL.md')
+        if (
+          requestId !== selectionRequestId
+          || skillFileRequestId !== fileRequestId
+          || !matchesSelection(get(), scope, cwd, name)
+        ) return
+        set({
+          fileContent: skillMd,
+          fileLoading: false,
+          viewerMode: 'skill',
+        })
+      } catch {
+        if (
+          requestId === selectionRequestId
+          && skillFileRequestId === fileRequestId
+          && matchesSelection(get(), scope, cwd, name)
+        ) {
+          set({ fileLoading: false })
+        }
+      }
+    } catch (e) {
+      if (requestId === selectionRequestId && matchesSelection(get(), scope, cwd, name)) {
+        console.error('[skills] Failed to load skill detail', { scope, cwd: cwd ?? null, name, error: e })
+        set({ detailLoading: false, fileLoading: false, detailError: e?.message || 'Failed to load skill detail' })
+      }
     }
   },
 
-  selectFile: async (path) => {
+  selectFile: async (path, viewerMode = 'file') => {
     const { selectedSkill } = get()
     if (!selectedSkill) return
-    set({ selectedFile: path, fileLoading: true })
+    const requestId = ++fileRequestId
+    const { scope, cwd, name } = selectedSkill
+    set({ selectedFile: path, fileLoading: true, viewerMode, viewMode: 'preview' })
     try {
-      const data = await skillsApi.getSkillFile(selectedSkill.scope, selectedSkill.cwd, selectedSkill.name, path)
+      const data = await skillsApi.getSkillFile(scope, cwd, name, path)
+      if (requestId !== fileRequestId || !matchesSelection(get(), scope, cwd, name)) return
       set({ fileContent: data, fileLoading: false })
     } catch {
-      set({ fileLoading: false })
+      if (requestId === fileRequestId && matchesSelection(get(), scope, cwd, name)) {
+        set({ fileLoading: false })
+      }
+    }
+  },
+
+  cacheSkillFile: async (path) => {
+    const { selectedSkill } = get()
+    if (!selectedSkill) return
+    const requestId = ++fileRequestId
+    const { scope, cwd, name } = selectedSkill
+    set({ fileLoading: true, viewerMode: 'skill', viewMode: 'preview' })
+    try {
+      const data = await skillsApi.getSkillFile(scope, cwd, name, path)
+      if (requestId !== fileRequestId || !matchesSelection(get(), scope, cwd, name)) return
+      set({ fileContent: data, fileLoading: false, viewerMode: 'skill' })
+    } catch {
+      if (requestId === fileRequestId && matchesSelection(get(), scope, cwd, name)) {
+        set({ fileLoading: false })
+      }
     }
   },
 
@@ -150,7 +231,7 @@ const useSkillsStore = create((set, get) => ({
     await skillsApi.deleteSkill(scope, cwd, name)
     const { selectedSkill } = get()
     if (selectedSkill?.scope === scope && selectedSkill?.cwd === (cwd ?? null) && selectedSkill?.name === name) {
-      set({ selectedSkill: null, skillDetail: null, selectedFile: null, fileContent: null })
+      set({ selectedSkill: null, skillDetail: null, detailError: null, selectedFile: null, fileContent: null, viewerMode: 'skill' })
     }
     get().fetchSkills()
   },
@@ -165,14 +246,17 @@ const useSkillsStore = create((set, get) => ({
   clearSelection: () => set({
     selectedSkill: null,
     skillDetail: null,
+    detailError: null,
     selectedFile: null,
     fileContent: null,
+    viewerMode: 'skill',
   }),
 
   reset: () => set({
     personal: [], groups: [], skillsLoading: true, searchQuery: '',
-    selectedSkill: null, skillDetail: null, detailLoading: false,
+    selectedSkill: null, skillDetail: null, detailLoading: false, detailError: null,
     selectedFile: null, fileContent: null, fileLoading: false,
+    viewerMode: 'skill',
     viewMode: 'preview', uploading: false,
     skillExclude: [], configLoaded: false,
   }),
