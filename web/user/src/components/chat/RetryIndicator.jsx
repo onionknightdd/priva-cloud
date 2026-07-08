@@ -1,6 +1,14 @@
 import { useEffect } from 'react'
 import { RefreshCw, Check } from 'lucide-react'
+import { useAnimatedNumber } from '@shared/motion/useAnimatedNumber'
 import useChatStore from '../../stores/chatStore'
+
+// Countdown ticks roll to the next second instead of snapping. Mounts snap
+// (first paint), so the banner appears already showing the full delay.
+function CountdownSeconds({ seconds }) {
+  const shown = useAnimatedNumber(seconds, { decimals: 0 })
+  return <>{shown}s</>
+}
 
 export default function RetryIndicator() {
   const retryState = useChatStore((s) => s.retryState)
@@ -53,9 +61,10 @@ export default function RetryIndicator() {
                 fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
                 fontStyle: 'normal',
                 color: 'var(--text-primary)',
+                fontVariantNumeric: 'tabular-nums',
               }}
             >
-              {delaySeconds > 0 ? `${delaySeconds}s` : 'now'}
+              {delaySeconds > 0 ? <CountdownSeconds seconds={delaySeconds} /> : 'now'}
             </span>
           )}
           {' · attempt '}

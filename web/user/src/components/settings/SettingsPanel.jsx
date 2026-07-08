@@ -21,6 +21,7 @@ import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { getLucideIcon, ICON_NAMES } from '../../utils/lucideIconMap'
 import WebTerminalTab from './WebTerminalTab'
 import Toggle from '@shared/components/shared/Toggle'
+import DrawIcon from '@shared/components/shared/DrawIcon'
 
 function FilterableModelSelect({ models, value, onChange, label, labelStyle, inputStyle, placeholder, filterPlaceholder, noMatchesText }) {
   const [open, setOpen] = useState(false)
@@ -542,7 +543,7 @@ function ApiKeyTab() {
                   onClick={handleCopy}
                   type="button"
                 >
-                  {copied ? <Check size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
+                  {copied ? <DrawIcon name="check" size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
                 </button>
               </div>
             </div>

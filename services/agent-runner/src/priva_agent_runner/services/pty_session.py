@@ -49,53 +49,6 @@ def _resolve_shell(configured: str) -> str:
     return os.environ.get("SHELL") or "/bin/bash"
 
 
-def _build_preexec(cfg: PtySettings) -> Callable[[], None]:
-    cpu = cfg.rlimit_cpu_seconds
-    asize = cfg.rlimit_as_bytes
-    fsize = cfg.rlimit_fsize_bytes
-    nofile = cfg.rlimit_nofile
-
-    def _preexec() -> None:
-        # By the time preexec runs, subprocess has already:
-        #   - setsid()  (because we pass start_new_session=True)
-        #   - dup2 slave_fd onto fd 0/1/2
-        # so the child is the new session's leader, but the slave PTY isn't
-        # yet its controlling terminal. Make it so. Without this, the shell's
-        # tcsetpgrp() fails, the foreground pg is empty, and Ctrl+C is echoed
-        # but never delivered as SIGINT to the running command.
-        ctty_status = "ok"
-        try:
-            fcntl.ioctl(0, termios.TIOCSCTTY, 0)
-        except OSError as e:
-            ctty_status = f"failed: {e}"
-        # One-shot log so we can verify TIOCSCTTY in case the shell's job
-        # control is misbehaving. Best-effort only; child can't touch the
-        # parent's logger.
-        try:
-            with open("/tmp/priva_pty_preexec.log", "a") as f:
-                f.write(f"pid={os.getpid()} TIOCSCTTY={ctty_status}\n")
-        except Exception:
-            pass
-        try:
-            resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu))
-        except (ValueError, OSError):
-            pass
-        try:
-            resource.setrlimit(resource.RLIMIT_AS, (asize, asize))
-        except (ValueError, OSError):
-            pass
-        try:
-            resource.setrlimit(resource.RLIMIT_FSIZE, (fsize, fsize))
-        except (ValueError, OSError):
-            pass
-        try:
-            resource.setrlimit(resource.RLIMIT_NOFILE, (nofile, nofile))
-        except (ValueError, OSError):
-            pass
-
-    return _preexec
-
-
 def _set_winsize(fd: int, cols: int, rows: int) -> None:
     try:
         winsize = struct.pack("HHHH", rows, cols, 0, 0)
@@ -158,10 +111,13 @@ class PtySession:
                         resource.setrlimit(resource.RLIMIT_CPU, (cfg.rlimit_cpu_seconds, cfg.rlimit_cpu_seconds))
                     except (ValueError, OSError):
                         pass
-                    try:
-                        resource.setrlimit(resource.RLIMIT_AS, (cfg.rlimit_as_bytes, cfg.rlimit_as_bytes))
-                    except (ValueError, OSError):
-                        pass
+                    # RLIMIT_AS = 0 means "don't cap": VM-hungry runtimes (bun/JSC,
+                    # wasm) reserve far more address space than they ever commit.
+                    if cfg.rlimit_as_bytes:
+                        try:
+                            resource.setrlimit(resource.RLIMIT_AS, (cfg.rlimit_as_bytes, cfg.rlimit_as_bytes))
+                        except (ValueError, OSError):
+                            pass
                     try:
                         resource.setrlimit(resource.RLIMIT_FSIZE, (cfg.rlimit_fsize_bytes, cfg.rlimit_fsize_bytes))
                     except (ValueError, OSError):

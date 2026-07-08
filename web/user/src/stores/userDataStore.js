@@ -1,6 +1,53 @@
 import { create } from 'zustand'
 import * as userDataApi from '../api/userData'
 import { listUploadedFiles, deleteUploadedFile } from '../api/files'
+import useMcpStore from './mcpStore'
+import useSettingsStore from './settingsStore'
+import useSidebarStore from './sidebarStore'
+
+function hydrateOverviewBootstrap(bootstrap) {
+  if (!bootstrap || typeof bootstrap !== 'object') return
+
+  const settingsPatch = {}
+  if (Array.isArray(bootstrap.quickactions)) {
+    settingsPatch.quickActions = bootstrap.quickactions
+    settingsPatch.quickActionsLoaded = true
+  }
+  if (Object.prototype.hasOwnProperty.call(bootstrap, 'vision_model')) {
+    settingsPatch.visionModel = bootstrap.vision_model || null
+  }
+  if (typeof bootstrap.default_model === 'string' && bootstrap.default_model) {
+    settingsPatch.defaultModel = bootstrap.default_model
+  }
+  if (bootstrap.models_loaded && Array.isArray(bootstrap.models)) {
+    settingsPatch.models = bootstrap.models
+    settingsPatch.modelsLoading = false
+    settingsPatch.modelsLoaded = true
+    settingsPatch.modelsError = null
+  }
+  if (Object.keys(settingsPatch).length > 0) {
+    useSettingsStore.setState(settingsPatch)
+  }
+
+  if (Array.isArray(bootstrap.mcp_servers)) {
+    useMcpStore.setState({
+      servers: bootstrap.mcp_servers,
+      serversLoading: false,
+      serversLoaded: true,
+    })
+  }
+
+  const sidebarPatch = {}
+  if (typeof bootstrap.active_cwd === 'string' && bootstrap.active_cwd) {
+    sidebarPatch.activeCwd = bootstrap.active_cwd
+  }
+  if (Array.isArray(bootstrap.recent_activities)) {
+    sidebarPatch.recentActivities = bootstrap.recent_activities
+  }
+  if (Object.keys(sidebarPatch).length > 0) {
+    useSidebarStore.setState(sidebarPatch)
+  }
+}
 
 const useUserDataStore = create((set, get) => ({
   activeSection: 'usage',
@@ -15,6 +62,7 @@ const useUserDataStore = create((set, get) => ({
     set({ overviewLoading: true })
     try {
       const overview = await userDataApi.getUserOverview()
+      hydrateOverviewBootstrap(overview?.bootstrap)
       set({ overview, overviewLoading: false })
     } catch {
       set({ overviewLoading: false })

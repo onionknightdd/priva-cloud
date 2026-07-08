@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { X, Key, ShieldOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useResizable } from '@shared/hooks/useResizable'
+import useOverlayTransition from '@shared/motion/useOverlayTransition'
 import useAdminStore from '../../stores/adminStore'
 import * as adminApi from '@shared/api/admin'
 import CopyButton from '@shared/components/shared/CopyButton'
@@ -24,7 +25,13 @@ export default function UserEditDrawer() {
     onResize: setDrawerWidth,
   })
 
-  const user = users.find((u) => u.username === selectedUser)
+  const liveUser = users.find((u) => u.username === selectedUser)
+  // Exit animation: closeUserDrawer() clears selectedUser immediately, so keep
+  // rendering a snapshot of the last user while the drawer slides out.
+  const { mounted, panelRef, backdropRef } = useOverlayTransition({ open: !!liveUser, variant: 'drawer' })
+  const shownUserRef = useRef(null)
+  if (liveUser) shownUserRef.current = liveUser
+  const user = liveUser ?? shownUserRef.current
 
   const [role, setRole] = useState(user?.role || 'user')
   const [password, setPassword] = useState('')
@@ -38,19 +45,21 @@ export default function UserEditDrawer() {
   const mountedRef = useRef(true)
   useEffect(() => () => { mountedRef.current = false }, [])
 
+  // Reset the form on every open (selectedUser flips null → username), which
+  // matches the pre-snapshot behavior where `user` went undefined on close.
   useEffect(() => {
-    if (user) {
-      setRole(user.role)
+    if (liveUser) {
+      setRole(liveUser.role)
       setPassword('')
-      setRunnerType(user.agent_runner_type || 'auto_scale')
-      setCpuCores(String(user.cpu_cores ?? 1))
-      setMemoryMb(String(user.memory_mb ?? 2048))
-      setVolumeGb(String(user.volume_gb ?? 1))
+      setRunnerType(liveUser.agent_runner_type || 'auto_scale')
+      setCpuCores(String(liveUser.cpu_cores ?? 1))
+      setMemoryMb(String(liveUser.memory_mb ?? 2048))
+      setVolumeGb(String(liveUser.volume_gb ?? 1))
       setError(null)
     }
-  }, [user?.username])
+  }, [selectedUser]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!user) return null
+  if (!mounted || !user) return null
 
   const handleSave = async () => {
     setSaving(true)
@@ -109,24 +118,26 @@ export default function UserEditDrawer() {
     <>
       {/* Overlay */}
       <div
+        ref={backdropRef}
         className="fixed inset-0"
         style={{
           background: 'var(--bg-overlay)',
           backdropFilter: 'blur(4px)',
           zIndex: 200,
+          pointerEvents: liveUser ? 'auto' : 'none',
         }}
         onClick={closeUserDrawer}
       />
 
       {/* Drawer */}
       <div
+        ref={panelRef}
         className="fixed top-0 right-0 bottom-0 flex flex-col"
         style={{
           width: drawerWidth,
           background: 'var(--bg-surface)',
           borderLeft: '1px solid var(--border)',
           zIndex: 201,
-          animation: dragging ? 'none' : 'slide-in-right 220ms cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
         {/* Resize handle — left edge */}
@@ -426,13 +437,6 @@ export default function UserEditDrawer() {
             {t('admin.saveChanges')}
           </button>
         </div>
-
-        <style>{`
-          @keyframes slide-in-right {
-            from { transform: translateX(100%); }
-            to { transform: translateX(0); }
-          }
-        `}</style>
       </div>
     </>
   )

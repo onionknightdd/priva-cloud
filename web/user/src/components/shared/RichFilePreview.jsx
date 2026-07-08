@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { createPortal } from 'react-dom'
 import { CornerDownLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -459,6 +460,24 @@ function SpreadsheetGrid({
   )
   const columnOffsetInfo = useMemo(() => buildSizeOffsets(resolvedColumnWidths), [resolvedColumnWidths])
   const rowOffsetInfo = useMemo(() => buildSizeOffsets(resolvedRowHeights), [resolvedRowHeights])
+
+  // Row heights are known exactly, so the virtualizer acts as a pure row-window
+  // calculator — no element measurement; spacer rows keep the <table> layout,
+  // sticky headers and selection hit-testing untouched.
+  const rowVirtualizer = useVirtualizer({
+    count: safeRows.length,
+    getScrollElement: () => viewportRef.current,
+    estimateSize: (index) => resolvedRowHeights[index] ?? SPREADSHEET_DEFAULT_ROW_HEIGHT,
+    overscan: 10,
+    // tbody rows start below the in-flow (sticky) header row
+    scrollMargin: SPREADSHEET_HEADER_HEIGHT,
+  })
+
+  // estimateSize is not a dependency of the virtualizer's measurement cache —
+  // re-sync when row heights change (drag-resize, sheet switch).
+  useEffect(() => {
+    rowVirtualizer.measure()
+  }, [resolvedRowHeights]) // eslint-disable-line react-hooks/exhaustive-deps
   const committedSelection = useMemo(() => normalizeSelectionBounds(selectedRange), [selectedRange])
   const normalizedDraft = useMemo(() => normalizeSelectionBounds(selectionDraft), [selectionDraft])
   const activeSelection = normalizedDraft || committedSelection
@@ -626,6 +645,15 @@ function SpreadsheetGrid({
     )
   }
 
+  // item.start/end include scrollMargin; getTotalSize() excludes it.
+  const virtualRows = rowVirtualizer.getVirtualItems()
+  const spacerTop = virtualRows.length > 0
+    ? virtualRows[0].start - SPREADSHEET_HEADER_HEIGHT
+    : 0
+  const spacerBottom = virtualRows.length > 0
+    ? rowVirtualizer.getTotalSize() - (virtualRows[virtualRows.length - 1].end - SPREADSHEET_HEADER_HEIGHT)
+    : 0
+
   return (
     <div
       ref={viewportRef}
@@ -735,7 +763,15 @@ function SpreadsheetGrid({
           </tr>
         </thead>
         <tbody>
-          {safeRows.map((row, rowIndex) => (
+          {spacerTop > 0 && (
+            <tr aria-hidden="true" style={{ height: spacerTop }}>
+              <td colSpan={columnCount + 1} style={{ padding: 0 }} />
+            </tr>
+          )}
+          {virtualRows.map((vi) => {
+            const rowIndex = vi.index
+            const row = safeRows[rowIndex]
+            return (
             <tr key={rowIndex} style={{ height: resolvedRowHeights[rowIndex] }}>
               <th
                 scope="row"
@@ -884,7 +920,13 @@ function SpreadsheetGrid({
                 )
               })}
             </tr>
-          ))}
+            )
+          })}
+          {spacerBottom > 0 && (
+            <tr aria-hidden="true" style={{ height: spacerBottom }}>
+              <td colSpan={columnCount + 1} style={{ padding: 0 }} />
+            </tr>
+          )}
         </tbody>
       </table>
     </div>

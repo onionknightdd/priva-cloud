@@ -10,6 +10,7 @@ import ToolCallCard from '../chat/ToolCallCard'
 import FileToolCard from '../chat/FileToolCard'
 import ToolRunSection from '../chat/ToolRunSection'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import { tweenScrollIntoView } from '@shared/motion/tweenScroll'
 
 const statusIconMap = {
   running: { icon: Loader, color: 'var(--purple)', spinning: true },
@@ -556,7 +557,7 @@ export default function SubagentInspector() {
     const tryScroll = () => {
       const node = rowRefs.current[pendingScrollTargetId]
       if (node) {
-        node.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        tweenScrollIntoView(node, { block: 'center', flash: true })
         setPendingScrollTargetId(null)
         return
       }

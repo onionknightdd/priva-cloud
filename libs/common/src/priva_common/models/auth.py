@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .mcp import McpServerSummary
+from .resource import ModelInfo, QuickAction
 from .user_env import UserEnvSettings
 
 
@@ -80,6 +83,17 @@ class UserPublic(BaseModel):
     tagline: str | None = None
 
 
+class UserOverviewBootstrap(BaseModel):
+    quickactions: list[QuickAction] = Field(default_factory=list)
+    vision_model: str | None = None
+    mcp_servers: list[McpServerSummary] = Field(default_factory=list)
+    active_cwd: str | None = None
+    recent_activities: list[dict[str, Any]] = Field(default_factory=list)
+    default_model: str | None = None
+    models: list[ModelInfo] = Field(default_factory=list)
+    models_loaded: bool = False
+
+
 class UserOverviewResponse(BaseModel):
     """Per-user usage overview — agent-runtime state served by the agent-runner
     (reads the per-account /workspace PVC). Formerly embedded in /api/auth/me on
@@ -94,6 +108,7 @@ class UserOverviewResponse(BaseModel):
     longest_streak: int = 0
     peak_hour: int | None = None
     tagline: str | None = None
+    bootstrap: UserOverviewBootstrap = Field(default_factory=UserOverviewBootstrap)
 
 
 class UserCreate(BaseModel):

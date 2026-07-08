@@ -6,7 +6,10 @@ ourselves in a single **account-level** index next to the SDK's data:
     ~/.claude/priva_meta.json
     {
       "sessions": { "<session_id>": {"pinned": bool, "archived": bool} },
-      "workdirs":  { "<canonical_cwd>": {"pinned": bool} }
+      "workdirs":  { "<canonical_cwd>": {"pinned": bool} },
+      "recent_activities": [
+        {"session_id": "<session_id>", "cwd": "<canonical_cwd>"}
+      ]
     }
 
 One file (not per-session sidecars like ``session_add_dirs``) because the runner
@@ -37,6 +40,7 @@ from priva_common.logging import get_app_logger
 logger = get_app_logger(__name__)
 
 _META_FILENAME = "priva_meta.json"
+_RECENT_ACTIVITIES_LIMIT = 5
 
 # Guards read-modify-write of the index. The pod is single-writer, but turns and
 # list requests are concurrent coroutines, so serialize mutations.
@@ -48,7 +52,31 @@ def _index_path() -> Path:
 
 
 def _empty() -> dict:
-    return {"sessions": {}, "workdirs": {}}
+    return {"sessions": {}, "workdirs": {}, "recent_activities": []}
+
+
+def _normalize_recent_activities(raw: object) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    activities: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        session_id = item.get("session_id")
+        cwd = item.get("cwd")
+        session_id = session_id if isinstance(session_id, str) and session_id else None
+        cwd = _canonicalize_path(cwd) if isinstance(cwd, str) and cwd else None
+        if not session_id and not cwd:
+            continue
+        key = ("session", session_id) if session_id else ("cwd", cwd or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        activities.append({"session_id": session_id, "cwd": cwd})
+        if len(activities) >= _RECENT_ACTIVITIES_LIMIT:
+            break
+    return activities
 
 
 def _read_raw() -> dict:
@@ -70,6 +98,7 @@ def _read_raw() -> dict:
     return {
         "sessions": sessions if isinstance(sessions, dict) else {},
         "workdirs": workdirs if isinstance(workdirs, dict) else {},
+        "recent_activities": _normalize_recent_activities(data.get("recent_activities")),
     }
 
 
@@ -105,6 +134,11 @@ def get_workdir_pinned(cwd: str, meta: dict | None = None) -> bool:
     data = meta if meta is not None else _read_raw()
     entry = data.get("workdirs", {}).get(_canonicalize_path(cwd))
     return bool(entry.get("pinned", False)) if isinstance(entry, dict) else False
+
+
+def get_recent_activities(meta: dict | None = None) -> list[dict]:
+    data = meta if meta is not None else _read_raw()
+    return _normalize_recent_activities(data.get("recent_activities"))
 
 
 # --- Writes (serialized read-modify-write) ------------------------------------
@@ -147,6 +181,23 @@ async def set_workdir_pinned(cwd: str, pinned: bool) -> None:
         _write_raw(data)
 
 
+async def record_recent_activity(cwd: str | None, session_id: str | None) -> list[dict]:
+    session_id = session_id if isinstance(session_id, str) and session_id else None
+    if not session_id:
+        return get_recent_activities()
+    canonical_cwd = _canonicalize_path(cwd) if cwd else None
+    async with _lock:
+        data = _read_raw()
+        entry = {"session_id": session_id, "cwd": canonical_cwd}
+        activities = [
+            item for item in get_recent_activities(data)
+            if item.get("session_id") != session_id
+        ]
+        data["recent_activities"] = [entry, *activities][:_RECENT_ACTIVITIES_LIMIT]
+        _write_raw(data)
+        return data["recent_activities"]
+
+
 async def archive_workdir(session_ids: list[str]) -> None:
     """Cascade: mark every given session archived in one write."""
     async with _lock:
@@ -164,5 +215,13 @@ async def prune_session(session_id: str) -> None:
     """Drop a deleted session's entry so the index doesn't accumulate dead ids."""
     async with _lock:
         data = _read_raw()
-        if data["sessions"].pop(session_id, None) is not None:
+        changed = data["sessions"].pop(session_id, None) is not None
+        recent_activities = [
+            item for item in get_recent_activities(data)
+            if item.get("session_id") != session_id
+        ]
+        if len(recent_activities) != len(data.get("recent_activities", [])):
+            data["recent_activities"] = recent_activities
+            changed = True
+        if changed:
             _write_raw(data)

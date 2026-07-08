@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { listSkills } from '../api/skills'
 import safeStorage from '@shared/utils/safeStorage'
 import useWorkflowStore from './workflowStore'
 
@@ -35,9 +34,6 @@ const useChatStore = create((set, get) => ({
   // time; persisted server-side per session and recovered on resume.
   addDirs: [],
   pendingPlanApproval: null,
-  availableSkills: [],
-  skillsLoaded: false,
-  skillsLoading: false,
   wsSendPermission: null,
   // Mid-stream queue of user messages awaiting injection at the next
   // tool-result boundary (backend). Each entry:
@@ -131,16 +127,6 @@ const useChatStore = create((set, get) => ({
     })
     return { attachments: kept }
   }),
-  fetchAvailableSkills: async () => {
-    if (get().skillsLoaded || get().skillsLoading) return
-    set({ skillsLoading: true })
-    try {
-      const data = await listSkills()
-      set({ availableSkills: data.skills || [], skillsLoaded: true, skillsLoading: false })
-    } catch {
-      set({ skillsLoaded: true, skillsLoading: false })
-    }
-  },
   setCompacting: (value) => set({ isCompacting: value }),
   setPermissionMode: (mode) => set({ permissionMode: mode }),
   setMcpServers: (value) => set({ mcpServers: value }),
@@ -407,7 +393,7 @@ const useChatStore = create((set, get) => ({
     messages: [], subagentContent: {}, sessionId: null, inputText: '', isStreaming: false, isCompacting: false,
     streamAbort: null, pendingAskUser: null, streamId: null,
     pendingPermission: null, permissionQueue: [], permissionMode: 'bypassPermissions',
-    pendingPlanApproval: null, availableSkills: [], skillsLoaded: false, skillsLoading: false,
+    pendingPlanApproval: null,
     wsSendPermission: null, attachments: [], quickActionVariableMode: false, mcpServers: 'auto',
     pendingOptimize: null, quotedText: null, fileReference: null, fileReferenceTemplate: null,
     selectedXlsxReference: null, selectedFileReference: null,
@@ -447,7 +433,6 @@ const useChatStore = create((set, get) => ({
       cwdDraft: null,
       addDirs: Array.isArray(addDirs) ? addDirs : [],
     }))
-    get().fetchAvailableSkills()
   },
 }))
 

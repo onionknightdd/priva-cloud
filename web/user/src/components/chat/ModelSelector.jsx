@@ -1,21 +1,34 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { ChevronDown, Cpu, Search } from 'lucide-react'
+import usePopoverTransition from '@shared/motion/usePopoverTransition'
+import { AnimatedCollapse } from '@shared/components/shared/Accordion'
 import useSettingsStore from '../../stores/settingsStore'
+
+const MODEL_ROW_HEIGHT = 28
+const MODEL_LIST_MAX_HEIGHT = 196
+const MODEL_LIST_OVERSCAN = 3
 
 export default function ModelSelector() {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
+  const [scrollTop, setScrollTop] = useState(0)
+  const hasEnv = useSettingsStore((s) => s.hasEnv)
   const models = useSettingsStore((s) => s.models)
   const modelsLoading = useSettingsStore((s) => s.modelsLoading)
+  const modelsLoaded = useSettingsStore((s) => s.modelsLoaded)
   const selectedModel = useSettingsStore((s) => s.selectedModel)
   const setSelectedModel = useSettingsStore((s) => s.setSelectedModel)
-  const fetchModels = useSettingsStore((s) => s.fetchModels)
   const env = useSettingsStore((s) => s.env)
+  const defaultModelFromBootstrap = useSettingsStore((s) => s.defaultModel)
   const dropdownRef = useRef(null)
   const filterRef = useRef(null)
+  const listRef = useRef(null)
+  const openFetchRafRef = useRef(null)
+  // Canonical popover envelope (M7): opacity + 4px rise, 200ms both ways.
+  const { mounted: menuMounted, popRef } = usePopoverTransition({ open, placement: 'top' })
 
   // Default model from env
-  const defaultModel = env?.ANTHROPIC_MODEL || null
+  const defaultModel = env?.ANTHROPIC_MODEL || defaultModelFromBootstrap || null
   const displayModel = selectedModel || defaultModel || 'model'
 
   const filteredModels = useMemo(() => {
@@ -23,6 +36,44 @@ export default function ModelSelector() {
     const q = filter.toLowerCase()
     return models.filter((m) => m.id.toLowerCase().includes(q))
   }, [models, filter])
+  const modelListHeight = filteredModels.length > 0
+    ? Math.min(MODEL_LIST_MAX_HEIGHT, filteredModels.length * MODEL_ROW_HEIGHT)
+    : 0
+  const visibleModelRange = useMemo(() => {
+    if (!filteredModels.length) return { start: 0, end: 0 }
+    const start = Math.max(0, Math.floor(scrollTop / MODEL_ROW_HEIGHT) - MODEL_LIST_OVERSCAN)
+    const visibleCount = Math.ceil(MODEL_LIST_MAX_HEIGHT / MODEL_ROW_HEIGHT) + MODEL_LIST_OVERSCAN * 2
+    const end = Math.min(filteredModels.length, start + visibleCount)
+    return { start, end }
+  }, [filteredModels.length, scrollTop])
+  const visibleModels = useMemo(
+    () => filteredModels.slice(visibleModelRange.start, visibleModelRange.end),
+    [filteredModels, visibleModelRange]
+  )
+  const shouldLoadModels = hasEnv !== false && !modelsLoaded && models.length === 0
+  const showModelsLoading = modelsLoading || shouldLoadModels
+  const showSearch = !showModelsLoading && models.length > 0
+
+  const prefetchModels = useCallback(() => {
+    const state = useSettingsStore.getState()
+    if (state.hasEnv === false || state.modelsLoaded || state.modelsLoading || state.models.length > 0) return
+    state.fetchModels()
+  }, [])
+
+  useEffect(() => {
+    if (hasEnv === false || modelsLoaded || modelsLoading || models.length > 0) return undefined
+    const run = () => prefetchModels()
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(run, { timeout: 1200 })
+      return () => window.cancelIdleCallback(id)
+    }
+    const timer = window.setTimeout(run, 700)
+    return () => window.clearTimeout(timer)
+  }, [hasEnv, models.length, modelsLoaded, modelsLoading, prefetchModels])
+
+  useEffect(() => () => {
+    if (openFetchRafRef.current) cancelAnimationFrame(openFetchRafRef.current)
+  }, [])
 
   useEffect(() => {
     const handler = (e) => {
@@ -35,19 +86,30 @@ export default function ModelSelector() {
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  // Auto-focus search input when dropdown opens
+  // Focus after the popover's first paint/enter animation so opening the menu
+  // does not spend its first frame on input focus layout work.
   useEffect(() => {
-    if (open && filterRef.current) {
-      filterRef.current.focus()
-    }
+    if (!open) return undefined
+    const timer = window.setTimeout(() => { filterRef.current?.focus() }, 180)
+    return () => window.clearTimeout(timer)
   }, [open])
 
+  useEffect(() => {
+    setScrollTop(0)
+    if (listRef.current) listRef.current.scrollTop = 0
+  }, [filter, open])
+
   const handleOpen = () => {
-    if (!open && models.length === 0 && !modelsLoading) {
-      fetchModels()
-    }
+    const nextOpen = !open
     if (open) setFilter('')
-    setOpen(!open)
+    setOpen(nextOpen)
+    if (nextOpen && shouldLoadModels) {
+      if (openFetchRafRef.current) cancelAnimationFrame(openFetchRafRef.current)
+      openFetchRafRef.current = requestAnimationFrame(() => {
+        openFetchRafRef.current = null
+        prefetchModels()
+      })
+    }
   }
 
   const handleSelect = (modelId) => {
@@ -67,21 +129,23 @@ export default function ModelSelector() {
       <button
         className="flex items-center gap-1 px-2"
         style={{
-          height: 28,
+          height: 26,
           background: 'var(--bg-surface)',
           border: '1px solid var(--border)',
           borderRadius: 4,
           cursor: 'pointer',
           color: selectedModel ? 'var(--cyan)' : 'var(--text-dim)',
-          fontSize: 12,
+          fontSize: 11,
           fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
           transition: 'color 150ms ease, border-color 150ms ease',
-          maxWidth: 180,
+          maxWidth: 156,
           whiteSpace: 'nowrap',
           overflow: 'hidden',
         }}
         onClick={handleOpen}
+        onFocus={prefetchModels}
         onMouseEnter={(e) => {
+          prefetchModels()
           e.currentTarget.style.borderColor = 'var(--border-strong)'
           e.currentTarget.style.color = 'var(--text-secondary)'
         }}
@@ -91,104 +155,141 @@ export default function ModelSelector() {
         }}
         title={displayModel}
       >
-        <Cpu size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+        <Cpu size={11} strokeWidth={1.5} style={{ flexShrink: 0 }} />
         <span className="truncate">{truncatedName}</span>
-        <ChevronDown size={10} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+        <ChevronDown size={9} strokeWidth={1.5} style={{ flexShrink: 0 }} />
       </button>
 
-      <div
-        className="absolute right-0 flex flex-col"
-        style={{
-          bottom: '100%',
-          marginBottom: 4,
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border)',
-          borderRadius: 4,
-          minWidth: 200,
-          maxWidth: 320,
-          maxHeight: 280,
-          zIndex: 50,
-          opacity: open ? 1 : 0,
-          transform: open ? 'translateY(0)' : 'translateY(4px)',
-          pointerEvents: open ? 'auto' : 'none',
-          transition: 'opacity 200ms cubic-bezier(0.16, 1, 0.3, 1), transform 200ms cubic-bezier(0.16, 1, 0.3, 1)',
-        }}
-      >
+      {menuMounted && (
+        <div
+          ref={popRef}
+          className="absolute right-0 flex flex-col"
+          style={{
+            bottom: '100%',
+            marginBottom: 4,
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border)',
+            borderRadius: 4,
+            minWidth: 180,
+            maxWidth: 276,
+            maxHeight: 228,
+            zIndex: 50,
+            pointerEvents: open ? 'auto' : 'none',
+            contain: 'layout paint style',
+            willChange: 'transform, opacity',
+          }}
+        >
           {/* Search filter */}
-          {!modelsLoading && models.length > 0 && (
+          <AnimatedCollapse
+            open={showSearch}
+            heightDuration={180}
+            opacityDuration={160}
+            animateContentResize
+            resizeDuration={180}
+          >
             <div
-              className="flex items-center gap-2 px-2 flex-shrink-0"
+              className="flex items-center gap-2 px-2 py-2 flex-shrink-0"
               style={{ borderBottom: '1px solid var(--border)' }}
             >
-              <Search size={12} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
+              <Search size={11} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
               <input
                 ref={filterRef}
                 type="text"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="Filter models..."
-                className="flex-1 py-2 text-xs"
+                className="flex-1 text-xs"
                 style={{
                   background: 'transparent',
                   border: 'none',
                   outline: 'none',
                   color: 'var(--text-primary)',
                   fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-                  fontSize: 12,
+                  fontSize: 11,
                   minWidth: 0,
                 }}
               />
             </div>
-          )}
+          </AnimatedCollapse>
 
           {/* Model list */}
-          <div className="overflow-y-auto" style={{ maxHeight: 240 }}>
-            {modelsLoading ? (
-              <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-dim)' }}>
-                Loading models...
-              </div>
-            ) : models.length === 0 ? (
-              <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-dim)' }}>
-                No models available
-              </div>
-            ) : filteredModels.length === 0 ? (
-              <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-dim)' }}>
-                No matches
-              </div>
-            ) : (
-              filteredModels.map((m) => {
-                const isActive = (selectedModel || defaultModel) === m.id
-                return (
-                  <button
-                    key={m.id}
-                    className="flex items-center w-full px-3 py-2 text-xs"
+          <AnimatedCollapse
+            open
+            animateContentResize
+            resizeDuration={220}
+            heightDuration={220}
+            opacityDuration={160}
+          >
+            <div
+              ref={listRef}
+              className="overflow-y-auto"
+              style={{ height: modelListHeight || 'auto', maxHeight: MODEL_LIST_MAX_HEIGHT }}
+              onScroll={(e) => { setScrollTop(e.currentTarget.scrollTop) }}
+            >
+              {showModelsLoading ? (
+                <div className="px-2 py-1 text-xs" style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+                  Loading models...
+                </div>
+              ) : modelsLoaded && models.length === 0 ? (
+                <div className="px-2 py-1 text-xs" style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+                  No models available
+                </div>
+              ) : filteredModels.length === 0 ? (
+                <div className="px-2 py-1 text-xs" style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+                  No matches
+                </div>
+              ) : (
+                <div style={{ height: filteredModels.length * MODEL_ROW_HEIGHT, position: 'relative' }}>
+                  <div
                     style={{
-                      background: isActive ? 'var(--bg-surface)' : 'transparent',
-                      border: 'none',
-                      borderLeft: isActive ? '2px solid var(--cyan)' : '2px solid transparent',
-                      color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      cursor: 'pointer',
-                      fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-                      fontSize: 12,
-                      textAlign: 'left',
-                      transition: 'background 150ms ease',
-                      wordBreak: 'break-all',
-                    }}
-                    onClick={() => handleSelect(m.id)}
-                    onMouseEnter={(e) => {
-                      if (!isActive) e.currentTarget.style.background = 'var(--bg-surface)'
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isActive) e.currentTarget.style.background = 'transparent'
+                      position: 'absolute',
+                      top: visibleModelRange.start * MODEL_ROW_HEIGHT,
+                      left: 0,
+                      right: 0,
                     }}
                   >
-                    {m.id}
-                  </button>
-                )
-              })
-            )}
-          </div>
-      </div>
+                    {visibleModels.map((m) => {
+                      const isActive = (selectedModel || defaultModel) === m.id
+                      return (
+                        <button
+                          key={m.id}
+                          className="flex items-center w-full px-2 text-xs"
+                          title={m.id}
+                          style={{
+                            height: MODEL_ROW_HEIGHT,
+                            boxSizing: 'border-box',
+                            background: isActive ? 'var(--bg-surface)' : 'transparent',
+                            border: 'none',
+                            borderLeft: isActive ? '2px solid var(--cyan)' : '2px solid transparent',
+                            color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                            cursor: 'pointer',
+                            fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+                            fontSize: 11,
+                            textAlign: 'left',
+                            transition: 'background 150ms ease',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                          onClick={() => handleSelect(m.id)}
+                          onMouseEnter={(e) => {
+                            if (!isActive) e.currentTarget.style.background = 'var(--bg-surface)'
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isActive) e.currentTarget.style.background = 'transparent'
+                          }}
+                        >
+                          {m.id}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </AnimatedCollapse>
+        </div>
+      )}
     </div>
   )
 }

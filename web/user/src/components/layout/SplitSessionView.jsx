@@ -1,5 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Columns2, Rows2, Grid2X2, PanelLeft, PanelRight } from 'lucide-react'
+import { animate } from 'animejs'
+import { useReducedMotion } from '@shared/motion/useReducedMotion'
+import { EASE_OUT, EASE_TAB } from '@shared/motion/tokens'
+import { glyphPop } from '@shared/motion/waapiMicro'
 import useSplitStore from '../../stores/splitStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import useChatStore from '../../stores/chatStore'
@@ -217,42 +221,81 @@ function getDropPreviewFromPoint(event, rect, paneCount) {
   return { placement: 'bottom-right', choice: 'four' }
 }
 
-function getDropTargetStyle(placement) {
-  const base = {
-    position: 'absolute',
-    boxSizing: 'border-box',
-  }
-
-  if (placement === 'left') {
-    return { ...base, left: 0, top: 0, width: '50%', height: '100%' }
-  }
-  if (placement === 'right') {
-    return { ...base, right: 0, top: 0, width: '50%', height: '100%' }
-  }
-  if (placement === 'top') {
-    return { ...base, left: 0, top: 0, width: '100%', height: '50%' }
-  }
-  if (placement === 'bottom') {
-    return { ...base, left: 0, bottom: 0, width: '100%', height: '50%' }
-  }
-  if (placement === 'bottom-right') {
-    return { ...base, right: 0, bottom: 0, width: '50%', height: '50%' }
-  }
-  return { ...base, inset: 0 }
+// I6: drop-zone geometry in px, computed from the overlay container's current
+// size, so the single highlight rect can glide between zones (anime retargets
+// left/top/width/height on each zone crossing).
+function getDropZoneRect(placement, width, height) {
+  if (placement === 'left') return { left: 0, top: 0, width: width / 2, height }
+  if (placement === 'right') return { left: width / 2, top: 0, width: width / 2, height }
+  if (placement === 'top') return { left: 0, top: 0, width, height: height / 2 }
+  if (placement === 'bottom') return { left: 0, top: height / 2, width, height: height / 2 }
+  if (placement === 'bottom-right') return { left: width / 2, top: height / 2, width: width / 2, height: height / 2 }
+  // 'center' and any unknown placement fill the whole container.
+  return { left: 0, top: 0, width, height }
 }
 
 function SplitDropOverlay({ paneCount, preview = DEFAULT_DROP_PREVIEW, onChoose, onPreview }) {
   const choices = layoutChoices(paneCount)
   const defaultChoice = preview?.choice || choices[0]?.id || 'single'
   const primaryLabel = paneCount >= 4 ? 'Replace pane' : (paneCount <= 0 ? 'Open in split' : 'Add split')
+  const placement = preview?.placement || 'right'
+  const overlayRef = useRef(null)
+  const zoneRef = useRef(null)
+  const placedRef = useRef(false)
+  const reducedMotion = useReducedMotion()
   const handleDrop = (event, choice = defaultChoice) => {
     event.preventDefault()
     event.stopPropagation()
     onChoose(choice, event)
   }
 
+  // I6 glide: ONE persistent highlight rect whose geometry is written
+  // imperatively (never via JSX style, so React re-renders can't snap an
+  // in-flight glide). On drag start it pre-positions instantly on the first
+  // zone (plus a quick scale/fade entrance); on every zone crossing anime
+  // retargets left/top/width/height — its default 'replace' composition
+  // handles mid-flight redirects. Reduced motion: instant jumps, no entrance.
+  useLayoutEffect(() => {
+    const overlay = overlayRef.current
+    const el = zoneRef.current
+    if (!overlay || !el) return
+    const { width, height } = overlay.getBoundingClientRect()
+    const zone = getDropZoneRect(placement, width, height)
+    const writeInstant = () => {
+      el.style.left = `${zone.left}px`
+      el.style.top = `${zone.top}px`
+      el.style.width = `${zone.width}px`
+      el.style.height = `${zone.height}px`
+    }
+    if (!placedRef.current) {
+      placedRef.current = true
+      writeInstant()
+      if (!reducedMotion) {
+        // Set the entrance start state pre-paint (scale in anime's own
+        // vocabulary so composition works), then play to identity.
+        el.style.opacity = '0'
+        el.style.transform = 'scale(0.96)'
+        animate(el, { scale: 1, opacity: 1, duration: 120, ease: EASE_TAB })
+      }
+      return
+    }
+    if (reducedMotion) {
+      writeInstant()
+      return
+    }
+    animate(el, {
+      left: zone.left,
+      top: zone.top,
+      width: zone.width,
+      height: zone.height,
+      duration: 120,
+      ease: EASE_TAB,
+    })
+  }, [placement, reducedMotion])
+
   return (
     <div
+      ref={overlayRef}
       data-testid="split-drop-overlay"
       className="absolute inset-0"
       style={{
@@ -267,12 +310,11 @@ function SplitDropOverlay({ paneCount, preview = DEFAULT_DROP_PREVIEW, onChoose,
       onDrop={(event) => handleDrop(event)}
     >
       <div
-        className="flex items-center justify-center"
+        ref={zoneRef}
+        className="absolute flex items-center justify-center"
         style={{
-          ...getDropTargetStyle(preview?.placement || 'right'),
+          boxSizing: 'border-box',
           background: 'color-mix(in srgb, var(--bg-surface) 58%, transparent)',
-          backdropFilter: 'blur(2.7px) saturate(113%)',
-          WebkitBackdropFilter: 'blur(2.7px) saturate(113%)',
           border: '2px solid var(--blue)',
           borderRadius: 4,
           color: 'var(--text-primary)',
@@ -317,6 +359,15 @@ function SplitDropOverlay({ paneCount, preview = DEFAULT_DROP_PREVIEW, onChoose,
 
 function SplitLayoutSwitcher({ count, layout, onLayout, metrics }) {
   const choices = layoutControlChoices(count)
+  // M15: one-shot pop on the ACTIVE layout glyph when the selection changes
+  // live. Effects run post-commit, so the ref already points at the NEW active
+  // glyph; the prev-value guard keeps mount (and remounts) silent.
+  const activeGlyphRef = useRef(null)
+  const prevLayoutRef = useRef(layout)
+  useEffect(() => {
+    if (prevLayoutRef.current !== layout) glyphPop(activeGlyphRef.current)
+    prevLayoutRef.current = layout
+  }, [layout])
   if (choices.length <= 1) return null
   return (
     <div
@@ -361,7 +412,11 @@ function SplitLayoutSwitcher({ count, layout, onLayout, metrics }) {
               if (!active) event.currentTarget.style.background = 'transparent'
             }}
           >
-            <LayoutGlyph type={choice.id} size={metrics.iconSize} />
+            {/* inline-flex wrapper: plain inline elements can't transform,
+                and the WAAPI glyph pop scales this span. */}
+            <span ref={active ? activeGlyphRef : undefined} className="inline-flex">
+              <LayoutGlyph type={choice.id} size={metrics.iconSize} />
+            </span>
           </button>
         )
       })}
@@ -555,6 +610,8 @@ export default function SplitSessionView({ fallback }) {
     [layout, panes.length, splitRatios, splitSize],
   )
 
+  const reducedMotion = useReducedMotion()
+
   const handleResizeStart = (event, axis) => {
     event.preventDefault()
     event.stopPropagation()
@@ -564,16 +621,19 @@ export default function SplitSessionView({ fallback }) {
     document.body.style.userSelect = 'none'
     setResizeDrag({ axis })
 
+    let lastRatio = null
     const handlePointerMove = (moveEvent) => {
       const rect = splitRootRef.current?.getBoundingClientRect()
       if (!rect) return
       moveEvent.preventDefault()
       if (axis === 'column') {
         const next = ((moveEvent.clientX - rect.left) / rect.width) * 100
-        setSplitRatios((s) => ({ ...s, column: clampSplitRatio(next) }))
+        lastRatio = clampSplitRatio(next)
+        setSplitRatios((s) => ({ ...s, column: lastRatio }))
       } else {
         const next = ((moveEvent.clientY - rect.top) / rect.height) * 100
-        setSplitRatios((s) => ({ ...s, row: clampSplitRatio(next) }))
+        lastRatio = clampSplitRatio(next)
+        setSplitRatios((s) => ({ ...s, row: lastRatio }))
       }
     }
     const stopResize = () => {
@@ -583,6 +643,21 @@ export default function SplitSessionView({ fallback }) {
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', stopResize)
       window.removeEventListener('pointercancel', stopResize)
+      // I2 detent: a release near the midline settles to exactly 50%.
+      if (lastRatio != null && lastRatio !== 50 && Math.abs(lastRatio - 50) <= 3) {
+        if (reducedMotion) {
+          setSplitRatios((s) => ({ ...s, [axis]: 50 }))
+        } else {
+          const st = { v: lastRatio }
+          animate(st, {
+            v: 50,
+            duration: 200,
+            ease: EASE_OUT,
+            onUpdate: () => setSplitRatios((s) => ({ ...s, [axis]: st.v })),
+            onComplete: () => setSplitRatios((s) => ({ ...s, [axis]: 50 })),
+          })
+        }
+      }
     }
 
     window.addEventListener('pointermove', handlePointerMove, { passive: false })

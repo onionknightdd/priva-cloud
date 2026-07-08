@@ -1,9 +1,15 @@
 import { useResizable } from '@shared/hooks/useResizable'
 import useSidebarStore from '../../stores/sidebarStore'
 
+// I2 detent: dragging the handle well under the 180px minimum (cursor intent
+// below 120px) collapses the sidebar to the 48px icon rail on release — the
+// rail transition itself is the existing 220ms sidebar width spring.
+const COLLAPSE_INTENT_PX = 120
+
 export default function SidebarResizer() {
   const width = useSidebarStore((s) => s.width)
   const setWidth = useSidebarStore((s) => s.setWidth)
+  const setCollapsed = useSidebarStore((s) => s.setCollapsed)
   const toggleCollapsed = useSidebarStore((s) => s.toggleCollapsed)
 
   const { dragging, onMouseDown } = useResizable({
@@ -12,6 +18,9 @@ export default function SidebarResizer() {
     max: 480,
     direction: 'right',
     onResize: setWidth,
+    onRelease: (size, unclamped) => {
+      if (unclamped < COLLAPSE_INTENT_PX) setCollapsed(true)
+    },
   })
 
   return (

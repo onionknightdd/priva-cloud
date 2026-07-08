@@ -1,4 +1,4 @@
-import { Suspense, useEffect } from 'react'
+import { Suspense, useEffect, useRef } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Sidebar from './Sidebar'
@@ -88,7 +88,15 @@ export default function MainLayout() {
   const activeNavTab = useUiStore((s) => s.activeNavTab)
   const activePluginSection = useUiStore((s) => s.activePluginSection)
   const canvasVisible = useUiStore((s) => s.canvasVisible)
+  // Sticky latch: the first open lazy-loads + mounts the panel; afterwards it
+  // stays mounted so its width-collapse exit can play (a `canvasVisible &&`
+  // gate would unmount it the instant the flag flips — it renders null itself
+  // once fully collapsed).
+  const canvasEverVisibleRef = useRef(false)
+  if (canvasVisible) canvasEverVisibleRef.current = true
   const terminalOpen = useUiStore((s) => s.terminalOpen)
+  const terminalEverOpenRef = useRef(false)
+  if (terminalOpen) terminalEverOpenRef.current = true
   const terminalMode = useUiStore((s) => s.terminalMode)
   const setTerminalMode = useUiStore((s) => s.setTerminalMode)
   const setActiveNavTab = useUiStore((s) => s.setActiveNavTab)
@@ -126,7 +134,7 @@ export default function MainLayout() {
       >
         <EmbeddedSessionLoader />
         <ChatPanel />
-        {canvasVisible && (
+        {canvasEverVisibleRef.current && (
           <Suspense fallback={null}>
             <CanvasPanel />
           </Suspense>
@@ -138,7 +146,7 @@ export default function MainLayout() {
   const sessionFallback = (
     <>
       <ChatPanel />
-      {canvasVisible && (
+      {canvasEverVisibleRef.current && (
         <Suspense fallback={null}>
           <CanvasPanel />
         </Suspense>
@@ -189,7 +197,11 @@ export default function MainLayout() {
           </ContentOverlay>
         )}
       </div>
-      {terminalOpen && (!isData && !isPlugins || splitActive) && (
+      {/* Same sticky latch as the canvas: stays mounted after first open so
+          the drawer's exit motion can play (it renders null once exited). The
+          view-mode gate still swaps it out instantly — that's a layout
+          change, not a dismissal. */}
+      {terminalEverOpenRef.current && (!isData && !isPlugins || splitActive) && (
         <Suspense fallback={null}>
           <WebTerminalDrawer />
         </Suspense>

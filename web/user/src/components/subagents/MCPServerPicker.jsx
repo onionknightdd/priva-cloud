@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { X, ChevronDown, Server } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Dropdown from '@shared/components/shared/Dropdown'
+import usePopoverTransition from '@shared/motion/usePopoverTransition'
 
 const SERVER_TYPE_OPTIONS = [
   { value: 'http', label: 'http' },
@@ -188,6 +189,8 @@ export default function MCPServerPicker({ value = [], catalog = [], onChange }) 
   const [open, setOpen] = useState(false)
   const [showInline, setShowInline] = useState(false)
   const ref = useRef(null)
+  // Canonical popover envelope (M7): opacity + 4px drop, 200ms both ways.
+  const { mounted: menuMounted, popRef } = usePopoverTransition({ open })
 
   useEffect(() => {
     if (!open) return
@@ -295,8 +298,9 @@ export default function MCPServerPicker({ value = [], catalog = [], onChange }) 
         />
       </div>
 
-      {open && (
+      {menuMounted && (
         <div
+          ref={popRef}
           className="absolute flex flex-col"
           style={{
             top: 'calc(100% + 4px)',
@@ -308,6 +312,7 @@ export default function MCPServerPicker({ value = [], catalog = [], onChange }) 
             border: '1px solid var(--border)',
             borderRadius: 4,
             zIndex: 50,
+            pointerEvents: open ? 'auto' : 'none',
           }}
         >
           {offered.map((name) => (

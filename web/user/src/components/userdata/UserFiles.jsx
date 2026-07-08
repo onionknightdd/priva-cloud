@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { Search, FileText, Trash2, Download, MoreVertical, CheckSquare, Square, ArrowUp, ArrowDown, Copy, Check } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useUserDataStore from '../../stores/userDataStore'
@@ -8,6 +9,8 @@ import { copyTextToClipboard } from '@shared/utils/clipboard'
 import Dropdown from '@shared/components/shared/Dropdown'
 import FilePreviewDrawer from './FilePreviewDrawer'
 import { formatDateTime } from '../../utils/formatTime'
+import DrawIcon from '@shared/components/shared/DrawIcon'
+import { useStaggerEntrance } from '@shared/motion/useStaggerEntrance'
 
 function formatBytes(bytes) {
   if (bytes === 0) return '0 B'
@@ -139,16 +142,17 @@ function CopyPathButton({ path }) {
         flexShrink: 0,
       }}
       title={path}
-      onClick={(e) => {
+      onClick={async (e) => {
         e.stopPropagation()
-        copyTextToClipboard(path)
+        const didCopy = await copyTextToClipboard(path)
+        if (!didCopy) return
         setCopied(true)
         setTimeout(() => setCopied(false), 800)
       }}
       onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = 'var(--text-secondary)' }}
       onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = 'var(--text-dim)' }}
     >
-      {copied ? <Check size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
+      {copied ? <DrawIcon name="check" size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
     </button>
   )
 }
@@ -306,6 +310,18 @@ export default function UserFiles() {
   }, [files, searchQuery, extFilter, sortField, sortDir])
 
   const totalSize = useMemo(() => files.reduce((s, f) => s + (f.size || 0), 0), [files])
+
+  const filesScrollRef = useRef(null)
+  // New file rows fade + rise in (uploads, first fetch after mount); rows the
+  // list has already seen — recycled, re-sorted, re-filtered — render static.
+  const entranceRef = useStaggerEntrance()
+  const fileVirtualizer = useVirtualizer({
+    count: filteredFiles.length,
+    getScrollElement: () => filesScrollRef.current,
+    estimateSize: () => 38,
+    overscan: 12,
+    getItemKey: (i) => filteredFiles[i].uuid,
+  })
 
   const uniqueDates = useMemo(() => {
     const dates = new Set(files.map((f) => f.upload_date))
@@ -469,7 +485,7 @@ export default function UserFiles() {
         </div>
 
         {/* File rows */}
-        <div className="flex-1 overflow-y-auto">
+        <div ref={filesScrollRef} className="flex-1 overflow-y-auto">
           {filesLoading ? (
             <FileTableSkeleton />
           ) : filteredFiles.length === 0 ? (
@@ -477,13 +493,23 @@ export default function UserFiles() {
               {t('userData.noFiles')}
             </div>
           ) : (
-            filteredFiles.map((file) => {
+            <div style={{ height: fileVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+            {fileVirtualizer.getVirtualItems().map((vi) => {
+              const file = filteredFiles[vi.index]
               const isSelected = selectedFileUuids.has(file.uuid)
               const isPreview = previewFile?.uuid === file.uuid
               const Icon = getFileIcon(file.ext)
               return (
                 <div
-                  key={file.uuid}
+                  key={vi.key}
+                  data-index={vi.index}
+                  ref={fileVirtualizer.measureElement}
+                  style={{ position: 'absolute', top: vi.start, left: 0, width: '100%' }}
+                >
+                <div
+                  // Entrance animates this inner div — the virtualizer's
+                  // absolutely positioned shell must never move.
+                  ref={entranceRef(file.uuid)}
                   className="flex items-center gap-3 px-4 py-2"
                   style={{
                     borderBottom: '1px solid var(--border)',
@@ -541,21 +567,21 @@ export default function UserFiles() {
                     onDelete={() => handleDeleteFile(file)}
                   />
                 </div>
+                </div>
               )
-            })
+            })}
+            </div>
           )}
         </div>
       </div>
 
-      {/* Preview drawer */}
-      {previewFile && (
-        <FilePreviewDrawer
-          file={previewFile}
-          onClose={() => setPreviewFile(null)}
-          onDownload={() => handleDownload(previewFile)}
-          onDelete={() => handleDeleteFile(previewFile)}
-        />
-      )}
+      {/* Preview drawer — always rendered; self-gates + animates its width */}
+      <FilePreviewDrawer
+        file={previewFile}
+        onClose={() => setPreviewFile(null)}
+        onDownload={() => previewFile && handleDownload(previewFile)}
+        onDelete={() => previewFile && handleDeleteFile(previewFile)}
+      />
     </div>
   )
 }

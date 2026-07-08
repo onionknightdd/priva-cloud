@@ -1,16 +1,22 @@
+import { useLayoutEffect, useRef } from 'react'
 import { ChevronDown } from 'lucide-react'
+import { animate } from 'animejs'
 import { AnimatedChevron } from './Accordion'
+import { useReducedMotion } from '../../motion/useReducedMotion'
+import { EASE_OUT } from '../../motion/tokens'
 
 /**
  * Shared sidebar navigation row (style guide: `.nav-item`).
  *
  * Borderless by default; active/hover paint `--bg-elevated` + `--text-primary`,
- * active adds a 2px `--blue` left border. Collapsed → icon-only with a tooltip.
+ * active adds a 2px `--blue` left rail. The rail gives a one-shot scaleY
+ * 0.6→1 tick when a row is activated LIVE (I5 spec) — rows that mount
+ * already-active render it static. Collapsed → icon-only with a tooltip.
  *
  * Props:
  *   icon        lucide component
  *   label       row text
- *   active      active/selected state (bg-elevated + blue left border)
+ *   active      active/selected state (bg-elevated + blue left rail)
  *   disabled    dim + not-allowed, no hover
  *   collapsed   icon-only (label/badge/chevron hidden), title used as tooltip
  *   badge       optional right-aligned count (e.g. session total)
@@ -38,13 +44,27 @@ export default function NavItem({
 }) {
   const baseColor = active ? 'var(--text-primary)' : 'var(--text-secondary)'
   const large = scale === 'lg'
+  const railRef = useRef(null)
+  const wasActiveRef = useRef(active)
+  const reducedMotion = useReducedMotion()
+
+  // One-shot activation tick on the rail — live transitions only.
+  useLayoutEffect(() => {
+    if (active === wasActiveRef.current) return
+    wasActiveRef.current = active
+    const el = railRef.current
+    if (!active || !el || reducedMotion) return
+    el.style.transform = 'scaleY(0.6)'
+    animate(el, { scaleY: 1, duration: 150, ease: EASE_OUT })
+  }, [active, reducedMotion])
+
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={disabled ? undefined : onClick}
       title={title || (collapsed ? label : undefined)}
-      className="flex items-center w-full"
+      className="flex items-center w-full relative"
       style={{
         gap: 8,
         minHeight: large ? 34 : 32,
@@ -54,7 +74,9 @@ export default function NavItem({
         paddingLeft: collapsed ? 0 : 8 + indent,
         justifyContent: collapsed ? 'center' : 'flex-start',
         border: 0,
-        borderLeft: `2px solid ${active ? 'var(--blue)' : 'transparent'}`,
+        // Reserved 2px lane; the paintable rail below overlays it so it can
+        // scaleY-tick (a border can't be transformed).
+        borderLeft: '2px solid transparent',
         // Full-bleed (square) like SessionItem — the 2px left bar is the active indicator.
         borderRadius: 0,
         background: active ? 'var(--bg-elevated)' : 'transparent',
@@ -63,7 +85,7 @@ export default function NavItem({
         opacity: disabled ? 0.45 : 1,
         textAlign: 'left',
         minWidth: 0,
-        transition: 'background 150ms ease, color 150ms ease, border-color 150ms ease',
+        transition: 'background 150ms ease, color 150ms ease',
       }}
       onMouseEnter={(e) => {
         if (disabled || active) return
@@ -76,6 +98,21 @@ export default function NavItem({
         e.currentTarget.style.color = baseColor
       }}
     >
+      {active && (
+        <span
+          ref={railRef}
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            left: -2,
+            top: 0,
+            bottom: 0,
+            width: 2,
+            background: 'var(--blue)',
+            pointerEvents: 'none',
+          }}
+        />
+      )}
       {Icon && (
         <Icon
           size={large ? 18 : 16}

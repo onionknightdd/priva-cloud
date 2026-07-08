@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import { CheckCircle, Loader, Circle, ChevronDown } from 'lucide-react'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import { useStatusSettle } from '@shared/motion/useStatusSettle'
 
 const todoStatusConfig = {
   completed: { icon: CheckCircle, color: 'var(--green)' },
@@ -33,6 +34,10 @@ export default function TodoItem({
   const [expanded, setExpanded] = useState(false)
   const bodyId = useId()
   const status = todo.status || 'pending'
+  // M9: one-shot 0.98→1 settle on the status icon when the status flips LIVE
+  // (pending → in_progress → completed); mounts (history, collapse/expand
+  // remounts) render static.
+  const settleRef = useStatusSettle(status)
   const config = todoStatusConfig[status] || todoStatusConfig.pending
   const Icon = config.icon
   const label = todo.content || todo.text || todo.description || ''
@@ -76,13 +81,15 @@ export default function TodoItem({
         ) : (
           <span style={{ width: 10, flexShrink: 0 }} />
         )}
-        <Icon
-          size={12}
-          strokeWidth={1.5}
-          style={{ color: config.color, flexShrink: 0 }}
-          className={config.spinning ? 'icon-running' : ''}
-          aria-label={status}
-        />
+        <span ref={settleRef} className="flex-shrink-0" style={{ display: 'inline-flex' }}>
+          <Icon
+            size={12}
+            strokeWidth={1.5}
+            style={{ color: config.color }}
+            className={config.spinning ? 'icon-running' : ''}
+            aria-label={status}
+          />
+        </span>
         <span
           className="min-w-0 flex-1"
           style={{

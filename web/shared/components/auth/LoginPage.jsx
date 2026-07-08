@@ -163,9 +163,7 @@ export default function LoginPage() {
         </button>
       </form>
 
-      {registerOpen && (
-        <RegistrationWizardModal onClose={() => setRegisterOpen(false)} />
-      )}
+      <RegistrationWizardModal open={registerOpen} onClose={() => setRegisterOpen(false)} />
     </div>
   )
 }

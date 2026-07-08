@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import MainLayout from './components/layout/MainLayout'
 import ConfirmDialog from './components/shared/ConfirmDialog'
 import ErrorBoundary from './components/shared/ErrorBoundary'
@@ -38,6 +38,11 @@ export default function App() {
   const setTheme = useUiStore((s) => s.setTheme)
   const setTerminalFeatureEnabled = useUiStore((s) => s.setTerminalFeatureEnabled)
   const [showSetupWizard, setShowSetupWizard] = useState(false)
+  // Sticky latch: once the wizard has been shown, keep its (lazy) chunk
+  // mounted so the modal can play its exit animation after close — the
+  // wrapper renders null once fully exited.
+  const setupWizardShownRef = useRef(false)
+  if (showSetupWizard) setupWizardShownRef.current = true
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -168,9 +173,9 @@ export default function App() {
           <IntroPanel />
         </Suspense>
       )}
-      {showSetupWizard && (
+      {(showSetupWizard || setupWizardShownRef.current) && (
         <Suspense fallback={null}>
-          <SetupWizardModal onComplete={handleSetupWizardComplete} />
+          <SetupWizardModal open={showSetupWizard} onComplete={handleSetupWizardComplete} />
         </Suspense>
       )}
     </>

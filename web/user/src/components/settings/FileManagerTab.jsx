@@ -36,6 +36,7 @@ import { listDirectory, previewFile, downloadFile, uploadUserFile } from '../../
 import { useResizable } from '@shared/hooks/useResizable'
 import safeStorage from '@shared/utils/safeStorage'
 import { formatDateTime } from '../../utils/formatTime'
+import DrawIcon from '@shared/components/shared/DrawIcon'
 
 hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('python', python)
@@ -954,7 +955,7 @@ function CopyPathBtn({ path }) {
       }}
       title={path}
     >
-      {copied ? <Check size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
+      {copied ? <DrawIcon name="check" size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
     </button>
   )
 }

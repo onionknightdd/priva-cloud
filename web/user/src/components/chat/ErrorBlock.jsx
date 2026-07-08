@@ -3,6 +3,7 @@ import { AlertTriangle, RefreshCw, Copy, Check } from 'lucide-react'
 import useChatStore from '../../stores/chatStore'
 import { useSSE } from '../../hooks/useSSE'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
+import DrawIcon from '@shared/components/shared/DrawIcon'
 
 export default function ErrorBlock({ message }) {
   const [copied, setCopied] = useState(false)
@@ -153,7 +154,7 @@ export default function ErrorBlock({ message }) {
             e.currentTarget.style.color = copied ? 'var(--green)' : 'var(--text-secondary)'
           }}
         >
-          {copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
+          {copied ? <DrawIcon name="check" size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
           {copied ? 'Copied' : 'Copy details'}
         </button>
       </div>

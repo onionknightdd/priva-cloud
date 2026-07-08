@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { LogOut, Users, ScrollText, LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen, Server, Activity, Network, Gauge, SquareTerminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useAuthStore from '@shared/stores/authStore'
-import useAdminStore from './stores/adminStore'
 import { useResizable } from '@shared/hooks/useResizable'
 import Tabs from '@shared/components/shared/Tabs'
 import LanguageToggleButton from '@shared/components/shared/LanguageToggleButton'
@@ -67,7 +66,6 @@ export default function AdminApp() {
   const user = useAuthStore((s) => s.user)
   const initialize = useAuthStore((s) => s.initialize)
   const logout = useAuthStore((s) => s.logout)
-  const drawerOpen = useAdminStore((s) => s.drawerOpen)
   const [activeTab, setActiveTab] = useState(() => (safeStorage.getItem('admin-tab') === 'config' ? 'config' : 'dashboard'))
   const [section, setSection] = useState(() => {
     const t = safeStorage.getItem('admin-tab') === 'config' ? 'config' : 'dashboard'
@@ -325,7 +323,8 @@ export default function AdminApp() {
         {activeTab === 'config' && section !== 'sandbox' && <ConfigPlaceholder />}
       </main>
 
-      {drawerOpen && <UserEditDrawer />}
+      {/* Self-gates on selectedUser; stays mounted so its exit slide can play. */}
+      <UserEditDrawer />
       <ConfirmDialog />
     </div>
   )

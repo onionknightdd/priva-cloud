@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useId, useRef } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { FileText, FilePen, Check, X, Loader, Copy, ChevronDown, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useFileOpsStore from '../../stores/fileOpsStore'
@@ -8,6 +9,7 @@ import { downloadFile } from '../../api/userFiles'
 import RichFilePreview from '../shared/RichFilePreview'
 import { RollingInteger } from '../shared/Odometer'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import DrawIcon from '@shared/components/shared/DrawIcon'
 import safeStorage from '@shared/utils/safeStorage'
 
 const STORAGE_KEY_SPLIT = 'fileops-split-width'
@@ -37,20 +39,23 @@ function InlineCopyButton({ content }) {
       }}
     >
       {copied
-        ? <Check size={12} strokeWidth={1.5} />
+        ? <DrawIcon name="check" size={12} strokeWidth={1.5} />
         : <Copy size={12} strokeWidth={1.5} />}
     </span>
   )
 }
 
 function StatusIcon({ status }) {
+  // Draw the terminal icon only when the op resolves LIVE — ops that mount
+  // already-terminal (panel reopen, history) render statically.
+  const mountedRunningRef = useRef(status === 'running')
   if (status === 'running') {
     return <Loader size={12} strokeWidth={1.5} className="icon-running" style={{ color: 'var(--purple)' }} />
   }
   if (status === 'error') {
-    return <X size={12} strokeWidth={1.5} style={{ color: 'var(--red)' }} />
+    return <DrawIcon name="x" size={12} strokeWidth={1.5} draw={mountedRunningRef.current} style={{ color: 'var(--red)' }} />
   }
-  return <Check size={12} strokeWidth={1.5} style={{ color: 'var(--green)' }} />
+  return <DrawIcon name="check" size={12} strokeWidth={1.5} draw={mountedRunningRef.current} style={{ color: 'var(--green)' }} />
 }
 
 function getFileOpMeta(op) {
@@ -268,118 +273,165 @@ function DiffLine({ oldNum, newNum, line, lineStyle }) {
   )
 }
 
+// Windowed list for per-line diff/code rows: row arrays are unbounded for large
+// diffs, so only the visible window mounts. Rows are near-uniform height
+// (hunk headers slightly taller) — measureElement trues them up.
+function VirtualizedRows({ rows, renderRow }) {
+  const scrollRef = useRef(null)
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 20,
+    overscan: 30,
+  })
+  return (
+    <div ref={scrollRef} className="overflow-y-auto" style={{ flex: 1, overflowAnchor: 'none' }}>
+      <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+        {virtualizer.getVirtualItems().map((vi) => (
+          <div
+            key={vi.key}
+            data-index={vi.index}
+            ref={virtualizer.measureElement}
+            style={{
+              position: 'absolute',
+              top: vi.start,
+              left: 0,
+              width: '100%',
+            }}
+          >
+            {renderRow(rows[vi.index], vi.index)}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function HunkHeader({ text }) {
+  return (
+    <div
+      className="px-3 py-1 text-xs"
+      style={{
+        color: 'var(--cyan)',
+        fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+        background: 'var(--bg-surface)',
+        borderBottom: '1px solid var(--border-subtle)',
+      }}
+    >
+      {text}
+    </div>
+  )
+}
+
 function DiffView({ op }) {
   const patch = op.structuredPatch
-  if (patch && Array.isArray(patch.hunks)) {
-    return (
-      <div className="overflow-y-auto" style={{ flex: 1 }}>
-        {patch.hunks.map((hunk, hi) => {
-          let oldLine = hunk.oldStart
-          let newLine = hunk.newStart
-          return (
-            <div key={hi}>
-              <div
-                className="px-3 py-1 text-xs"
-                style={{
-                  color: 'var(--cyan)',
-                  fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-                  background: 'var(--bg-surface)',
-                  borderBottom: '1px solid var(--border-subtle)',
-                }}
-              >
-                @@ -{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@
-              </div>
-              {hunk.lines.map((line, li) => {
-                const prefix = line[0]
-                let lineStyle = { color: 'var(--text-secondary)', background: 'transparent' }
-                let oNum = null
-                let nNum = null
-                if (prefix === '+') {
-                  lineStyle = { color: 'var(--green)', background: 'rgba(63,185,80,0.1)' }
-                  nNum = newLine++
-                } else if (prefix === '-') {
-                  lineStyle = { color: 'var(--red)', background: 'rgba(248,81,73,0.1)' }
-                  oNum = oldLine++
-                } else {
-                  oNum = oldLine++
-                  nNum = newLine++
-                }
-                return (
-                  <DiffLine key={li} oldNum={oNum} newNum={nNum} line={line} lineStyle={lineStyle} />
-                )
-              })}
-            </div>
-          )
-        })}
-      </div>
-    )
-  }
-
-  // Fallback: show old_string → new_string from input with actual line numbers
-  if (op.input?.old_string != null && op.input?.new_string != null) {
-    const oldLines = op.input.old_string.split('\n')
-    const newLines = op.input.new_string.split('\n')
-
-    // Find the actual starting line in the original file
-    let oldStartLine = 1
-    const origFile = op.originalFile
-      || op.toolUseResult?.original_file
-      || op.toolUseResult?.originalFile
-      || op.resultContent
-    if (origFile && typeof origFile === 'string') {
-      const idx = origFile.indexOf(op.input.old_string)
-      if (idx >= 0) {
-        oldStartLine = origFile.substring(0, idx).split('\n').length
+  const rows = useMemo(() => {
+    if (patch && Array.isArray(patch.hunks)) {
+      const out = []
+      for (const hunk of patch.hunks) {
+        out.push({
+          kind: 'header',
+          text: `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`,
+        })
+        let oldLine = hunk.oldStart
+        let newLine = hunk.newStart
+        for (const line of hunk.lines) {
+          const prefix = line[0]
+          let lineStyle = { color: 'var(--text-secondary)', background: 'transparent' }
+          let oNum = null
+          let nNum = null
+          if (prefix === '+') {
+            lineStyle = { color: 'var(--green)', background: 'rgba(63,185,80,0.1)' }
+            nNum = newLine++
+          } else if (prefix === '-') {
+            lineStyle = { color: 'var(--red)', background: 'rgba(248,81,73,0.1)' }
+            oNum = oldLine++
+          } else {
+            oNum = oldLine++
+            nNum = newLine++
+          }
+          out.push({ kind: 'line', oldNum: oNum, newNum: nNum, line, lineStyle })
+        }
       }
+      return out
     }
-    // new_string replaces old_string at the same position
-    const newStartLine = oldStartLine
 
+    // Fallback: show old_string → new_string from input with actual line numbers
+    if (op.input?.old_string != null && op.input?.new_string != null) {
+      const oldLines = op.input.old_string.split('\n')
+      const newLines = op.input.new_string.split('\n')
+
+      // Find the actual starting line in the original file
+      let oldStartLine = 1
+      const origFile = op.originalFile
+        || op.toolUseResult?.original_file
+        || op.toolUseResult?.originalFile
+        || op.resultContent
+      if (origFile && typeof origFile === 'string') {
+        const idx = origFile.indexOf(op.input.old_string)
+        if (idx >= 0) {
+          oldStartLine = origFile.substring(0, idx).split('\n').length
+        }
+      }
+      // new_string replaces old_string at the same position
+      const newStartLine = oldStartLine
+
+      return [
+        ...oldLines.map((line, i) => ({
+          kind: 'line',
+          oldNum: oldStartLine + i,
+          newNum: null,
+          line: `-${line}`,
+          lineStyle: { color: 'var(--red)', background: 'rgba(248,81,73,0.1)' },
+        })),
+        ...newLines.map((line, i) => ({
+          kind: 'line',
+          oldNum: null,
+          newNum: newStartLine + i,
+          line: `+${line}`,
+          lineStyle: { color: 'var(--green)', background: 'rgba(63,185,80,0.1)' },
+        })),
+      ]
+    }
+
+    return null
+  }, [patch, op])
+
+  if (!rows) {
     return (
-      <div className="overflow-y-auto" style={{ flex: 1 }}>
-        {oldLines.map((line, i) => (
-          <DiffLine
-            key={`old-${i}`}
-            oldNum={oldStartLine + i}
-            newNum={null}
-            line={`-${line}`}
-            lineStyle={{ color: 'var(--red)', background: 'rgba(248,81,73,0.1)' }}
-          />
-        ))}
-        {newLines.map((line, i) => (
-          <DiffLine
-            key={`new-${i}`}
-            oldNum={null}
-            newNum={newStartLine + i}
-            line={`+${line}`}
-            lineStyle={{ color: 'var(--green)', background: 'rgba(63,185,80,0.1)' }}
-          />
-        ))}
+      <div className="px-3 py-4 text-xs" style={{ color: 'var(--text-dim)' }}>
+        {/* i18n handled at component level */}
+        No diff data available
       </div>
     )
   }
 
   return (
-    <div className="px-3 py-4 text-xs" style={{ color: 'var(--text-dim)' }}>
-      {/* i18n handled at component level */}
-      No diff data available
-    </div>
+    <VirtualizedRows
+      rows={rows}
+      renderRow={(row) => (row.kind === 'header' ? (
+        <HunkHeader text={row.text} />
+      ) : (
+        <DiffLine oldNum={row.oldNum} newNum={row.newNum} line={row.line} lineStyle={row.lineStyle} />
+      ))}
+    />
   )
 }
 
 function CodeView({ content }) {
-  if (!content) {
+  const lines = useMemo(() => (content ? content.split('\n') : null), [content])
+  if (!lines) {
     return (
       <div className="px-3 py-4 text-xs" style={{ color: 'var(--text-dim)' }}>
         No content available
       </div>
     )
   }
-  const lines = content.split('\n')
   return (
-    <div className="overflow-y-auto" style={{ flex: 1 }}>
-      {lines.map((line, i) => (
-        <div key={i} className="flex text-xs" style={{ lineHeight: 1.6 }}>
+    <VirtualizedRows
+      rows={lines}
+      renderRow={(line, i) => (
+        <div className="flex text-xs" style={{ lineHeight: 1.6 }}>
           <span
             className="text-xs flex-shrink-0 px-2"
             style={{
@@ -403,8 +455,8 @@ function CodeView({ content }) {
             {line}
           </span>
         </div>
-      ))}
-    </div>
+      )}
+    />
   )
 }
 

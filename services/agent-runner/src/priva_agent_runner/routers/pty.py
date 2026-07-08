@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import json
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from priva_common.logging import get_app_logger
 from priva_common.audit_log import AuditEntry, get_audit_logger
@@ -40,10 +41,17 @@ class PtyConfigUpdate(BaseModel):
     max_cols: int | None = Field(default=None, ge=20, le=2000)
     max_rows: int | None = Field(default=None, ge=5, le=1000)
     rlimit_cpu_seconds: int | None = Field(default=None, ge=1)
-    rlimit_as_bytes: int | None = Field(default=None, ge=1024 * 1024)
+    rlimit_as_bytes: int | None = Field(default=None, ge=0)
     rlimit_fsize_bytes: int | None = Field(default=None, ge=1024)
     rlimit_nofile: int | None = Field(default=None, ge=16)
     shell: str | None = None
+
+    @field_validator("rlimit_as_bytes")
+    @classmethod
+    def _rlimit_as_zero_or_min_1mib(cls, v: int | None) -> int | None:
+        if v and v < 1024 * 1024:
+            raise ValueError("rlimit_as_bytes must be 0 (unlimited) or >= 1 MiB")
+        return v
 
 
 @router.get("/feature", response_model=PtyFeatureResponse)
@@ -182,8 +190,16 @@ async def pty_ws(websocket: WebSocket):
             except Exception:
                 raise
 
+    # PTY reads chunk the byte stream at arbitrary offsets, so a multi-byte
+    # UTF-8 char can straddle two chunks. Decoding per-chunk would emit U+FFFD
+    # for the split char, inflating the row width and desyncing TUI repaints
+    # (duplicated lines). The incremental decoder buffers the partial char.
+    output_decoder = codecs.getincrementaldecoder("utf-8")("replace")
+
     async def on_output(data: bytes) -> None:
-        await safe_send({"type": "output", "data": data.decode("utf-8", errors="replace")})
+        text = output_decoder.decode(data)
+        if text:
+            await safe_send({"type": "output", "data": text})
 
     async def on_closed(reason: str, exit_code: int | None) -> None:
         payload = {"type": "closed", "reason": reason}

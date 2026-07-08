@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FileText } from 'lucide-react'
+import usePopoverTransition from '@shared/motion/usePopoverTransition'
 import { formatDateTime } from '../../utils/formatTime'
 
 function formatBytes(bytes) {
@@ -24,10 +25,13 @@ function getFileDate(file) {
   return Number.isNaN(date.getTime()) ? value : formatDateTime(date)
 }
 
-export default function FilePicker({ files, query, onSelect, onClose, activeIndex, loading, positionStyle }) {
+export default function FilePicker({ files, query, onSelect, onClose, activeIndex, loading, positionStyle, open = true }) {
   const { t } = useTranslation()
   const listRef = useRef(null)
   const activeRef = useRef(null)
+  // Popover envelope: parent keeps the picker rendered with open=false while
+  // the dismissal fade plays ('top' = the picker sits above its trigger).
+  const { mounted, popRef } = usePopoverTransition({ open, placement: 'top' })
 
   const q = query.toLowerCase()
   const filtered = q
@@ -150,58 +154,34 @@ export default function FilePicker({ files, query, onSelect, onClose, activeInde
     )
   }
 
-  if (loading) {
-    return (
-      <div
-        className="file-picker-popup"
-        style={{
-          ...popupPosition,
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border-strong)',
-          borderRadius: 4,
-          padding: '0 0 8px 0',
-          zIndex: 50,
-        }}
-      >
-        {headerEl}
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="px-3 py-2 flex items-center gap-2">
-            <div className="skeleton" style={{ width: 14, height: 14, borderRadius: 2 }} />
-            <div className="skeleton" style={{ width: 150, height: 14, borderRadius: 2 }} />
-            <div className="flex-1" />
-            <div className="skeleton" style={{ width: 40, height: 10, borderRadius: 2 }} />
-          </div>
-        ))}
-      </div>
-    )
-  }
+  if (!mounted) return null
 
-  if (filtered.length === 0) {
-    return (
-      <div
-        className="file-picker-popup"
-        style={{
-          ...popupPosition,
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border-strong)',
-          borderRadius: 4,
-          padding: 0,
-          zIndex: 50,
-        }}
-      >
-        {headerEl}
-        <div className="px-3 py-2">
-          <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
-            {t('filePicker.noFiles')}
-          </span>
-        </div>
+  let body
+  if (loading) {
+    body = [1, 2, 3].map((i) => (
+      <div key={i} className="px-3 py-2 flex items-center gap-2">
+        <div className="skeleton" style={{ width: 14, height: 14, borderRadius: 2 }} />
+        <div className="skeleton" style={{ width: 150, height: 14, borderRadius: 2 }} />
+        <div className="flex-1" />
+        <div className="skeleton" style={{ width: 40, height: 10, borderRadius: 2 }} />
+      </div>
+    ))
+  } else if (filtered.length === 0) {
+    body = (
+      <div className="px-3 py-2">
+        <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
+          {t('filePicker.noFiles')}
+        </span>
       </div>
     )
   }
 
   return (
     <div
-      ref={listRef}
+      ref={(el) => {
+        listRef.current = el
+        popRef.current = el
+      }}
       className="file-picker-popup"
       style={{
         ...popupPosition,
@@ -212,11 +192,13 @@ export default function FilePicker({ files, query, onSelect, onClose, activeInde
         overflowY: 'auto',
         zIndex: 50,
         padding: '0 0 4px 0',
+        pointerEvents: open ? 'auto' : 'none',
       }}
     >
       {headerEl}
-      {renderSection(t('filePicker.uploadedFiles'), uploadedFiles, 0)}
-      {renderSection(t('filePicker.currentDirectory'), currentFiles, uploadedFiles.length)}
+      {body}
+      {!body && renderSection(t('filePicker.uploadedFiles'), uploadedFiles, 0)}
+      {!body && renderSection(t('filePicker.currentDirectory'), currentFiles, uploadedFiles.length)}
     </div>
   )
 }

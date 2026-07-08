@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Maximize2, X } from 'lucide-react'
+import useOverlayTransition from '@shared/motion/useOverlayTransition'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { StreamLanguage } from '@codemirror/language'
@@ -58,6 +59,8 @@ export default function ScriptEditor({
   modalFooter = null,
 }) {
   const [expanded, setExpanded] = useState(false)
+  // Enter/exit envelope for the expanded modal (kept mounted while exiting).
+  const { mounted: modalMounted, panelRef, backdropRef } = useOverlayTransition({ open: expanded, variant: 'scale' })
 
   const langExtension = useMemo(
     () => (language === 'shell' ? StreamLanguage.define(shell) : python()),
@@ -150,8 +153,9 @@ export default function ScriptEditor({
         )}
       </div>
 
-      {expanded && createPortal(
+      {modalMounted && createPortal(
         <div
+          ref={backdropRef}
           onClick={() => setExpanded(false)}
           style={{
             position: 'fixed',
@@ -164,9 +168,11 @@ export default function ScriptEditor({
             alignItems: 'center',
             justifyContent: 'center',
             padding: 24,
+            pointerEvents: expanded ? 'auto' : 'none',
           }}
         >
           <div
+            ref={panelRef}
             onClick={(e) => e.stopPropagation()}
             className="flex flex-col relative"
             style={{

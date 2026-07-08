@@ -60,6 +60,7 @@ const useSidebarStore = create((set, get) => ({
   // first by the backend). `total` drives the per-group "more in this dir".
   groups: [],
   activeCwd: null,
+  recentActivities: [],
   expandedCwds: {}, // { [cwd]: bool } — active cwd defaults open, others closed
   activeSessionId: null,
   sessionsLoading: false,   // initial grouped load
@@ -228,7 +229,7 @@ const useSidebarStore = create((set, get) => ({
   },
 
   reset: () => set({
-    sessions: [], groups: [], activeCwd: null, expandedCwds: {},
+    sessions: [], groups: [], activeCwd: null, recentActivities: [], expandedCwds: {},
     activeSessionId: null, sessionsLoading: false, groupLoadingCwd: null,
   }),
 }))

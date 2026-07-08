@@ -7,6 +7,7 @@ import Dropdown from '@shared/components/shared/Dropdown'
 import MarkdownRenderer from '../markdown/MarkdownRenderer'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import DrawIcon from '@shared/components/shared/DrawIcon'
 
 function mcpToolFullName(serverName, toolName) {
   return `mcp__${serverName}__${toolName}`
@@ -28,7 +29,7 @@ function ToolHeaderCopy({ fullName }) {
         setTimeout(() => setCopied(false), 800)
       }}
     >
-      {copied ? <Check size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
+      {copied ? <DrawIcon name="check" size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
     </button>
   )
 }

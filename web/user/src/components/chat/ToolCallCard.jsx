@@ -10,6 +10,9 @@ import { copyTextToClipboard } from '@shared/utils/clipboard'
 import useTaskStore from '../../stores/taskStore'
 import { GENERATED_TOOL_LABEL, GENERATED_TOOL_NAME, getToolDisplayName } from '../../utils/generatedTool'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import DrawIcon from '@shared/components/shared/DrawIcon'
+import { useStatusSettle } from '@shared/motion/useStatusSettle'
+import { tweenScrollIntoView } from '@shared/motion/tweenScroll'
 
 const TOOL_ICONS = {
   Bash: Terminal,
@@ -297,7 +300,7 @@ function InlineCopyButton({ content }) {
       }}
     >
       {copied
-        ? <Check size={12} strokeWidth={1.5} />
+        ? <DrawIcon name="check" size={12} strokeWidth={1.5} />
         : <Copy size={12} strokeWidth={1.5} />}
     </span>
   )
@@ -325,11 +328,16 @@ export default function ToolCallCard({ block, reverted = false, compact = false 
   const displayName = getToolDisplayName(block.name)
   useEffect(() => {
     if (isActive && cardRef.current) {
-      cardRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      tweenScrollIntoView(cardRef.current, { block: 'center', flash: true })
     }
   }, [isActive])
 
   const isComplete = status === 'success' || status === 'error'
+  // Draw the success check only when the card resolves LIVE — cards that
+  // mount already-complete (history, scroll-back remounts) render it static.
+  const mountedIncompleteRef = useRef(!isComplete)
+  // M9: one-shot 0.98→1 settle on the status chip when the status flips live.
+  const chipSettleRef = useStatusSettle(status)
   const Icon = TOOL_ICONS[block.name] || TOOL_ICONS[displayName] || Terminal
   const richMeta = getRichMeta(block)
   const commandLine = !richMeta ? getCommandLine(block) : null
@@ -561,7 +569,7 @@ export default function ToolCallCard({ block, reverted = false, compact = false 
           {/* Status chip */}
           {isComplete ? (
             isError ? (
-              <span className="chip" style={{
+              <span ref={chipSettleRef} className="chip" style={{
                 color: 'var(--text-inverse)',
                 background: 'var(--red)',
                 borderColor: 'var(--red)',
@@ -573,14 +581,14 @@ export default function ToolCallCard({ block, reverted = false, compact = false 
                 <AlertTriangle size={statusIconSize} strokeWidth={1.5} style={{ marginRight: 2 }} /> {t('toolCall.error')}
               </span>
             ) : (
-              <span className="chip" style={{
+              <span ref={chipSettleRef} className="chip" style={{
                 color: 'var(--green)',
                 background: 'rgba(63, 185, 80, 0.15)',
                 borderColor: 'rgba(63, 185, 80, 0.4)',
                 opacity: 1,
                 ...chipCompactStyle,
               }}>
-                <Check size={statusIconSize} strokeWidth={1.5} style={{ marginRight: 2 }} /> {statusOverride || t('toolCall.success')}
+                <DrawIcon name="check" size={statusIconSize} strokeWidth={1.5} draw={mountedIncompleteRef.current} style={{ marginRight: 2 }} /> {statusOverride || t('toolCall.success')}
               </span>
             )
           ) : (

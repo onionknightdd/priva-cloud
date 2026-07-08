@@ -1,4 +1,4 @@
-import { memo, useState, useEffect, useId, useRef, useCallback } from 'react'
+import { memo, useState, useEffect, useId, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Clock, Loader, Copy, Check, AlertTriangle, Repeat, ArrowDownToLine, ArrowUpFromLine, PanelRight, ChevronRight, ChevronDown, FileText, FilePen, CornerDownLeft, RotateCcw, GitBranch, ExternalLink, ScrollText, Timer } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -22,6 +22,7 @@ import { RollingInteger } from '../shared/Odometer'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 import useUiStore from '@shared/stores/uiStore'
 import useChatStore from '../../stores/chatStore'
+import useSkillsStore, { flattenSkillsForPicker } from '../../stores/skillsStore'
 import useTaskStore from '../../stores/taskStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import useFileOpsStore from '../../stores/fileOpsStore'
@@ -29,6 +30,7 @@ import useFileBrowserStore from '../../stores/fileBrowserStore'
 import { getToolDisplayName } from '../../utils/generatedTool'
 import { parseSelectedXlsx } from '../../utils/selectedXlsx'
 import { parseSelectedFile } from '../../utils/selectedFile'
+import DrawIcon from '@shared/components/shared/DrawIcon'
 
 /**
  * Parse text containing <think>...</think> tags into segments.
@@ -318,7 +320,7 @@ function PathCopyButton({ path }) {
         flexShrink: 0,
       }}
     >
-      {copied ? <Check size={11} strokeWidth={1.5} /> : <Copy size={11} strokeWidth={1.5} />}
+      {copied ? <DrawIcon name="check" size={11} strokeWidth={1.5} /> : <Copy size={11} strokeWidth={1.5} />}
     </button>
   )
 }
@@ -450,7 +452,7 @@ function InlineCopyButton({ content }) {
       }}
     >
       {copied
-        ? <Check size={12} strokeWidth={1.5} />
+        ? <DrawIcon name="check" size={12} strokeWidth={1.5} />
         : <Copy size={12} strokeWidth={1.5} />}
     </span>
   )
@@ -1084,18 +1086,23 @@ export default memo(function MessageBubble({
   const [collapsedToolSections, setCollapsedToolSections] = useState({})
   const [lightboxImage, setLightboxImage] = useState(null)
 
-  const availableSkills = useChatStore((s) => s.availableSkills)
-  const skillsLoaded = useChatStore((s) => s.skillsLoaded)
-  const fetchAvailableSkills = useChatStore((s) => s.fetchAvailableSkills)
+  const personalSkills = useSkillsStore((s) => s.personal)
+  const skillGroups = useSkillsStore((s) => s.groups)
+  const skillsLoaded = useSkillsStore((s) => s.skillsLoaded)
+  const ensureSkillsLoaded = useSkillsStore((s) => s.ensureSkillsLoaded)
+  const availableSkills = useMemo(
+    () => flattenSkillsForPicker(personalSkills, skillGroups),
+    [personalSkills, skillGroups]
+  )
   const fileOps = useFileOpsStore((s) => s.fileOps)
   const latestTodoWriteId = useTaskStore((s) => s.todoWriteInfo?.tool_use_id || null)
 
   useEffect(() => {
     if (!isUser || skillsLoaded) return
     if (/(^|\n)\s*\/[a-zA-Z0-9_-]+(?:\s|$)/.test(textContent)) {
-      fetchAvailableSkills()
+      ensureSkillsLoaded()
     }
-  }, [fetchAvailableSkills, isUser, skillsLoaded, textContent])
+  }, [ensureSkillsLoaded, isUser, skillsLoaded, textContent])
 
   // Selection tooltip for assistant messages (quote feedback)
   const [tooltip, setTooltip] = useState(null)
@@ -1509,14 +1516,12 @@ export default memo(function MessageBubble({
           <AttachmentChips files={message.attachments.filter((a) => !a.isImage)} />
         )}
 
-        {/* Lightbox overlay */}
-        {lightboxImage && (
-          <ImageLightbox
-            src={lightboxImage.src}
-            alt={lightboxImage.alt}
-            onClose={() => setLightboxImage(null)}
-          />
-        )}
+        {/* Lightbox overlay — always rendered; self-gates + animates out */}
+        <ImageLightbox
+          src={lightboxImage?.src}
+          alt={lightboxImage?.alt}
+          onClose={() => setLightboxImage(null)}
+        />
 
         {/* Error / synthetic messages render as a structured ErrorBlock */}
         {isErrorMessage && <ErrorBlock message={message} />}
@@ -1768,7 +1773,7 @@ function MessageActions({ textContent, message, assistantIndex, onRewind, onFork
         title={t('chat.copyMessage')}
       >
         {copied
-          ? <Check size={14} strokeWidth={1.5} />
+          ? <DrawIcon name="check" size={14} strokeWidth={1.5} />
           : <Copy size={14} strokeWidth={1.5} />}
       </button>
       {messageTimestamp && (

@@ -119,7 +119,10 @@ class PtySettings(BaseModel):
     max_cols: int = 500
     max_rows: int = 200
     rlimit_cpu_seconds: int = 600
-    rlimit_as_bytes: int = 2 * 1024 * 1024 * 1024
+    # 0 = don't cap address space. RLIMIT_AS counts virtual *reservations*, and the
+    # claude CLI's bun/JSC binary reserves >3 GiB of PROT_NONE at startup — any
+    # realistic cap SIGTRAPs it. Real memory is already bounded by the pod cgroup.
+    rlimit_as_bytes: int = 0
     rlimit_fsize_bytes: int = 100 * 1024 * 1024
     rlimit_nofile: int = 1024
     shell: str = ""

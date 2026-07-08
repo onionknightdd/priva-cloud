@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Wifi, WifiOff, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import useOverlayTransition from '@shared/motion/useOverlayTransition'
 import useConnectionStore from '../../stores/connectionStore'
 
 export default function ConnectionBanner() {
@@ -17,14 +18,24 @@ export default function ConnectionBanner() {
     return () => clearInterval(id)
   }, [state, tickDelay])
 
-  if (state === 'connected') return null
+  // Exit animation: the store resets state/attempt data the instant the
+  // socket comes back, so render the closing frames from a snapshot while
+  // the banner slides out.
+  const open = state !== 'connected'
+  const { mounted, panelRef } = useOverlayTransition({ open, variant: 'slide' })
+  const shownRef = useRef(null)
+  if (open) shownRef.current = { state, attempt, maxAttempts, delaySeconds }
+  const shown = shownRef.current
 
-  const isReconnecting = state === 'reconnecting'
+  if (!mounted || !shown) return null
+
+  const isReconnecting = shown.state === 'reconnecting'
   const color = isReconnecting ? 'var(--yellow)' : 'var(--red)'
   const Icon = isReconnecting ? Wifi : WifiOff
 
   return (
     <div
+      ref={panelRef}
       role="status"
       style={{
         position: 'sticky',
@@ -37,6 +48,7 @@ export default function ConnectionBanner() {
         display: 'flex',
         alignItems: 'center',
         gap: 8,
+        pointerEvents: open ? 'auto' : 'none',
       }}
     >
       <Icon size={14} strokeWidth={1.5} style={{ color }} />
@@ -54,8 +66,8 @@ export default function ConnectionBanner() {
             fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
           }}
         >
-          {t('connection.attempt', { attempt, max: maxAttempts || '?' })}
-          {delaySeconds > 0 ? ` · ${t('connection.inSeconds', { seconds: delaySeconds })}` : ''}
+          {t('connection.attempt', { attempt: shown.attempt, max: shown.maxAttempts || '?' })}
+          {shown.delaySeconds > 0 ? ` · ${t('connection.inSeconds', { seconds: shown.delaySeconds })}` : ''}
         </span>
       )}
       {!isReconnecting && (

@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next'
 import useSkillSyncStore from '../../stores/skillSyncStore'
 import useSkillsStore, { skillKey } from '../../stores/skillsStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
+import DrawIcon from '@shared/components/shared/DrawIcon'
 
 function StatusIcon({ state }) {
   if (state === 'pending') return <Circle size={12} strokeWidth={1.5} style={{ color: 'var(--text-dim)' }} />
@@ -699,7 +700,7 @@ function PromptPanel({ title, prompt, promptLoading, healthInfo, localApiKey, co
             e.currentTarget.style.background = 'transparent'
           }}
         >
-          {copied ? <Check size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
+          {copied ? <DrawIcon name="check" size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
           {copied ? t('skillSync.copied') : t('skillSync.copyPrompt')}
         </button>
       </div>

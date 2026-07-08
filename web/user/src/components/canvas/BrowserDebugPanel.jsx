@@ -36,7 +36,6 @@ function persistInspectorHeight(height) {
 }
 
 export default function BrowserDebugPanel() {
-  const modalOpen = useBrowserDebugStore((s) => s.modalOpen)
   const setHtmlSource = useBrowserDebugStore((s) => s.setHtmlSource)
   const [dragOver, setDragOver] = useState(false)
   const [inspectorHeight, setInspectorHeightState] = useState(readStoredInspectorHeight)
@@ -113,7 +112,7 @@ export default function BrowserDebugPanel() {
           Drop HTML file
         </div>
       )}
-      {modalOpen && <BrowserDebugModal />}
+      <BrowserDebugModal />
     </div>
   )
 }

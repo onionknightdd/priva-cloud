@@ -1124,7 +1124,7 @@
       "maxCols": "最大列数",
       "maxRows": "最大行数",
       "rlimitCpu": "CPU 限制",
-      "rlimitAs": "地址空间限制",
+      "rlimitAs": "地址空间限制（0 = 不限制）",
       "rlimitFsize": "文件大小限制",
       "rlimitNofile": "打开文件数限制",
       "unitSeconds": "（秒）",

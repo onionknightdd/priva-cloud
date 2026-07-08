@@ -1,8 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { Server, Activity, ArrowRightLeft, RotateCw, Power } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { animate, svg as animeSvg, utils as animeUtils } from 'animejs'
 import Dropdown from '@shared/components/shared/Dropdown'
 import useUiStore from '@shared/stores/uiStore'
+import { useAnimatedNumber } from '@shared/motion/useAnimatedNumber'
+import { useStaggerEntrance } from '@shared/motion/useStaggerEntrance'
+import { useStatusColorTween } from '@shared/motion/useStatusSettle'
+import { useReducedMotion } from '@shared/motion/useReducedMotion'
 import useAdminStore from '../../stores/adminStore'
 import LiveToggleButton from './LiveToggleButton'
 
@@ -81,7 +87,91 @@ function relTime(ts, t) {
   return t('admin.daysAgo', { count: Math.floor(hrs / 24) })
 }
 
+// Memoized so the 1s relative-time tick only re-renders rows whose derived
+// labels actually changed — all row props are primitives except `account`,
+// whose identity is stable between 5s polls.
+const FleetRow = memo(function FleetRow({ account, stateColor, stateLabel, stateIdle, runs, lastActivity, onRestart, onShutdown, entranceKey, entranceRef }) {
+  const { t } = useTranslation()
+  const a = account
+  // T3: live state changes blend the 2px status border over 150ms.
+  const borderTweenRef = useStatusColorTween(stateColor)
+  return (
+    <div
+      // Entrance animates this inner div — the virtualizer shell must not move.
+      ref={(el) => {
+        borderTweenRef.current = el
+        if (entranceRef) entranceRef(entranceKey)(el)
+      }}
+      className="flex items-center gap-3 px-4 py-2"
+      style={{
+        borderBottom: '1px solid var(--border-subtle)',
+        borderLeft: `2px solid ${stateColor}`,
+      }}
+    >
+      <span className="flex flex-col flex-1 min-w-0">
+        <span className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+          {a.username || a.account_id}
+        </span>
+        {a.username && (
+          <span className="text-xs truncate" style={{ color: 'var(--text-dim)', fontWeight: 300, fontFamily: "'JetBrains Mono', monospace" }}>
+            {a.account_id}
+          </span>
+        )}
+      </span>
+      <span
+        className="uppercase"
+        style={{ width: 80, flexShrink: 0, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', color: stateIdle ? 'var(--text-dim)' : stateColor }}
+      >
+        {stateLabel}
+      </span>
+      <span
+        className="text-sm"
+        style={{ width: 88, flexShrink: 0, textAlign: 'right', color: a.active_runs ? 'var(--text-primary)' : 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace" }}
+      >
+        {runs}
+      </span>
+      <span className="text-xs font-light" style={{ width: 96, flexShrink: 0, textAlign: 'right', color: 'var(--text-dim)' }}>
+        {lastActivity}
+      </span>
+      {/* Actions: restart (left) always; shut down (right) only when there's a
+          live pod to stop. The 72px slot is fixed so idle rows don't shift. */}
+      <span className="flex items-center flex-shrink-0" style={{ width: 72 }}>
+        <button
+          className="flex items-center justify-center flex-shrink-0"
+          style={{ width: 36, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 4, transition: 'color 150ms ease' }}
+          onClick={() => onRestart(a)}
+          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+          title={t('admin.restartPodTitle')}
+          aria-label={t('admin.restartPodTitle')}
+        >
+          <RotateCw size={14} strokeWidth={1.5} />
+        </button>
+        {(a.awake || a.phase === 'Waking') ? (
+          <button
+            className="flex items-center justify-center flex-shrink-0"
+            style={{ width: 36, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 4, transition: 'color 150ms ease' }}
+            onClick={() => onShutdown(a)}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+            title={t('admin.shutdownTitle')}
+            aria-label={t('admin.shutdownTitle')}
+          >
+            <Power size={14} strokeWidth={1.5} />
+          </button>
+        ) : (
+          <span style={{ width: 36, flexShrink: 0 }} />
+        )}
+      </span>
+    </div>
+  )
+})
+
 function Tile({ icon: Icon, label, value, suffix }) {
+  // Poll updates tween to the new value; first paint and non-numeric snap.
+  const isNumeric = typeof value === 'number' && Number.isFinite(value)
+  const animatedValue = useAnimatedNumber(isNumeric ? value : 0)
+  const shownValue = isNumeric ? animatedValue : value
   return (
     <div
       className="flex flex-col gap-2"
@@ -99,7 +189,7 @@ function Tile({ icon: Icon, label, value, suffix }) {
         <span className="truncate">{label}</span>
       </div>
       <div className="flex items-baseline gap-1">
-        <span className="font-bold" style={{ color: 'var(--text-primary)', fontSize: 28, lineHeight: 1 }}>{value}</span>
+        <span className="font-bold" style={{ color: 'var(--text-primary)', fontSize: 28, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{shownValue}</span>
         {suffix != null && (
           <span style={{ color: 'var(--text-dim)', fontSize: 16, fontWeight: 300 }}>/ {suffix}</span>
         )}
@@ -110,22 +200,63 @@ function Tile({ icon: Icon, label, value, suffix }) {
 
 // Inline SVG sparkline of recent req/s samples — no chart lib (design-spec minimal).
 // Reserves its footprint until two samples exist so the tile doesn't reflow on fill-in.
+// T7: the first data traces the line in once; later polls morph the points to
+// their new shape with a single 200ms settle (matched point-counts only —
+// while the window is still filling, shapes just snap). Never loops.
 function Sparkline({ data, width = 76, height = 24 }) {
-  if (!data || data.length < 2) return <div style={{ width, height, flexShrink: 0 }} />
-  const max = Math.max(...data)
-  const min = Math.min(...data)
-  const range = max - min || 1
-  const n = data.length
-  const pts = data
-    .map((v, i) => {
-      const x = (i / (n - 1)) * (width - 2) + 1
-      const y = height - 2 - ((v - min) / range) * (height - 4)
-      return `${x.toFixed(1)},${y.toFixed(1)}`
-    })
-    .join(' ')
+  const polyRef = useRef(null)
+  const tracedRef = useRef(false)
+  const reducedMotion = useReducedMotion()
+  const has = !!data && data.length >= 2
+  let pts = ''
+  if (has) {
+    const max = Math.max(...data)
+    const min = Math.min(...data)
+    const range = max - min || 1
+    const n = data.length
+    pts = data
+      .map((v, i) => {
+        const x = (i / (n - 1)) * (width - 2) + 1
+        const y = height - 2 - ((v - min) / range) * (height - 4)
+        return `${x.toFixed(1)},${y.toFixed(1)}`
+      })
+      .join(' ')
+  }
+
+  useLayoutEffect(() => {
+    const el = polyRef.current
+    if (!el || !pts) return
+    const prev = el.getAttribute('points') || ''
+    if (reducedMotion) {
+      el.setAttribute('points', pts)
+      tracedRef.current = true
+      return
+    }
+    if (!tracedRef.current) {
+      // First data: set the shape, then draw it in once.
+      tracedRef.current = true
+      el.setAttribute('points', pts)
+      const [drawable] = animeSvg.createDrawable(el)
+      animeUtils.set(drawable, { draw: '0 0' })
+      animate(drawable, { draw: '0 1', duration: 300, ease: 'out(2)' })
+      return
+    }
+    const prevCount = (prev.match(/-?[\d.]+/g) || []).length
+    const nextCount = (pts.match(/-?[\d.]+/g) || []).length
+    if (prev === pts) return
+    if (prevCount !== nextCount) {
+      el.setAttribute('points', pts) // window still filling — snap
+      return
+    }
+    animate(el, { points: pts, duration: 200, ease: 'out(2)' })
+  }, [pts, reducedMotion])
+
+  if (!has) return <div style={{ width, height, flexShrink: 0 }} />
   return (
     <svg width={width} height={height} style={{ display: 'block', flexShrink: 0 }} aria-hidden="true">
-      <polyline points={pts} fill="none" stroke="var(--cyan)" strokeWidth={1.5}
+      {/* points is written imperatively (initial set + morphs) so React's
+          re-renders never snap the shape mid-tween */}
+      <polyline ref={polyRef} fill="none" stroke="var(--cyan)" strokeWidth={1.5}
         strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   )
@@ -139,6 +270,7 @@ function GatewayTile({ available, count, rate, spark, full, windowSec, onWindowC
   const { t } = useTranslation()
   const windowOptions = WINDOW_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))
   const scopeOptions = SCOPE_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))
+  const animatedCount = useAnimatedNumber(count ?? 0)
 
   return (
     <div
@@ -183,8 +315,8 @@ function GatewayTile({ available, count, rate, spark, full, windowSec, onWindowC
       ) : (
         <>
           <div className="flex items-center justify-between gap-3">
-            <span className="font-bold" style={{ color: 'var(--text-primary)', fontSize: 28, lineHeight: 1 }}>
-              {count == null ? '—' : `${full ? '' : '~'}${count.toLocaleString()}`}
+            <span className="font-bold" style={{ color: 'var(--text-primary)', fontSize: 28, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+              {count == null ? '—' : `${full ? '' : '~'}${animatedCount.toLocaleString()}`}
             </span>
             <Sparkline data={spark} />
           </div>
@@ -227,6 +359,7 @@ function TableSkeleton() {
 
 export default function FleetView() {
   const { t } = useTranslation()
+  const rowEntranceRef = useStaggerEntrance()
   const fleet = useAdminStore((s) => s.fleet)
   const fleetLoading = useAdminStore((s) => s.fleetLoading)
   const fleetRefreshing = useAdminStore((s) => s.fleetRefreshing)
@@ -281,7 +414,7 @@ export default function FleetView() {
     })
   }
 
-  const handleRestart = (a) => {
+  const handleRestart = useCallback((a) => {
     showConfirmDialog({
       title: t('admin.restartPodTitle'),
       message: t('admin.restartPodMessage', { name: a.username || a.account_id }),
@@ -295,9 +428,9 @@ export default function FleetView() {
         }
       },
     })
-  }
+  }, [showConfirmDialog, t])
 
-  const handleShutdown = (a) => {
+  const handleShutdown = useCallback((a) => {
     showConfirmDialog({
       title: t('admin.shutdownTitle'),
       message: t('admin.shutdownMessage', { name: a.username || a.account_id }),
@@ -311,7 +444,31 @@ export default function FleetView() {
         }
       },
     })
-  }
+  }, [showConfirmDialog, t])
+
+  const fleetScrollRef = useRef(null)
+  const fleetRowsRef = useRef(null)
+  const [fleetRowsMargin, setFleetRowsMargin] = useState(0)
+
+  // Account rows sit below the tiles inside the same scroll pane — measure
+  // that offset into scrollMargin.
+  useLayoutEffect(() => {
+    const scrollEl = fleetScrollRef.current
+    const rowsEl = fleetRowsRef.current
+    if (!scrollEl || !rowsEl) return
+    setFleetRowsMargin(
+      rowsEl.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop
+    )
+  }, [initialLoad, accounts.length])
+
+  const fleetVirtualizer = useVirtualizer({
+    count: accounts.length,
+    getScrollElement: () => fleetScrollRef.current,
+    estimateSize: () => 46,
+    overscan: 12,
+    scrollMargin: fleetRowsMargin,
+    getItemKey: (i) => accounts[i].account_id,
+  })
 
   return (
     <div className="flex flex-col" style={{ height: '100%', overflow: 'hidden' }}>
@@ -333,7 +490,7 @@ export default function FleetView() {
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto" style={{ padding: '16px var(--admin-section-x) 24px var(--admin-section-x)' }}>
+      <div ref={fleetScrollRef} className="flex-1 overflow-y-auto" style={{ padding: '16px var(--admin-section-x) 24px var(--admin-section-x)' }}>
         {/* Tiles */}
         {initialLoad ? (
           <TilesSkeleton />
@@ -378,77 +535,36 @@ export default function FleetView() {
               {t('admin.noAgentRunnerAccounts')}
             </div>
           ) : (
-            accounts.map((a) => {
-              const st = stateOf(a)
-              const runs = a.active_runs == null ? '—' : a.active_runs
-              const stateLabel = t(st.labelKey)
-              return (
-                <div
-                  key={a.account_id}
-                  className="flex items-center gap-3 px-4 py-2"
-                  style={{
-                    borderBottom: '1px solid var(--border-subtle)',
-                    borderLeft: `2px solid ${st.color}`,
-                  }}
-                >
-                  <span className="flex flex-col flex-1 min-w-0">
-                    <span className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
-                      {a.username || a.account_id}
-                    </span>
-                    {a.username && (
-                      <span className="text-xs truncate" style={{ color: 'var(--text-dim)', fontWeight: 300, fontFamily: "'JetBrains Mono', monospace" }}>
-                        {a.account_id}
-                      </span>
-                    )}
-                  </span>
-                  <span
-                    className="uppercase"
-                    style={{ width: 80, flexShrink: 0, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', color: st.labelKey === 'admin.stateIdle' ? 'var(--text-dim)' : st.color }}
+            <div
+              ref={fleetRowsRef}
+              style={{ height: fleetVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}
+            >
+              {fleetVirtualizer.getVirtualItems().map((vi) => {
+                const a = accounts[vi.index]
+                const st = stateOf(a)
+                return (
+                  <div
+                    key={vi.key}
+                    data-index={vi.index}
+                    ref={fleetVirtualizer.measureElement}
+                    style={{ position: 'absolute', top: vi.start - fleetRowsMargin, left: 0, width: '100%' }}
                   >
-                    {stateLabel}
-                  </span>
-                  <span
-                    className="text-sm"
-                    style={{ width: 88, flexShrink: 0, textAlign: 'right', color: a.active_runs ? 'var(--text-primary)' : 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace" }}
-                  >
-                    {runs}
-                  </span>
-                  <span className="text-xs font-light" style={{ width: 96, flexShrink: 0, textAlign: 'right', color: 'var(--text-dim)' }}>
-                    {relTime(a.last_activity_ts, t)}
-                  </span>
-                  {/* Actions: restart (left) always; shut down (right) only when there's a
-                      live pod to stop. The 72px slot is fixed so idle rows don't shift. */}
-                  <span className="flex items-center flex-shrink-0" style={{ width: 72 }}>
-                    <button
-                      className="flex items-center justify-center flex-shrink-0"
-                      style={{ width: 36, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 4, transition: 'color 150ms ease' }}
-                      onClick={() => handleRestart(a)}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red)' }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-                      title={t('admin.restartPodTitle')}
-                      aria-label={t('admin.restartPodTitle')}
-                    >
-                      <RotateCw size={14} strokeWidth={1.5} />
-                    </button>
-                    {(a.awake || a.phase === 'Waking') ? (
-                      <button
-                        className="flex items-center justify-center flex-shrink-0"
-                        style={{ width: 36, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 4, transition: 'color 150ms ease' }}
-                        onClick={() => handleShutdown(a)}
-                        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red)' }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-                        title={t('admin.shutdownTitle')}
-                        aria-label={t('admin.shutdownTitle')}
-                      >
-                        <Power size={14} strokeWidth={1.5} />
-                      </button>
-                    ) : (
-                      <span style={{ width: 36, flexShrink: 0 }} />
-                    )}
-                  </span>
-                </div>
-              )
-            })
+                    <FleetRow
+                      account={a}
+                      stateColor={st.color}
+                      stateLabel={t(st.labelKey)}
+                      stateIdle={st.labelKey === 'admin.stateIdle'}
+                      runs={a.active_runs == null ? '—' : a.active_runs}
+                      lastActivity={relTime(a.last_activity_ts, t)}
+                      onRestart={handleRestart}
+                      onShutdown={handleShutdown}
+                      entranceKey={vi.key}
+                      entranceRef={rowEntranceRef}
+                    />
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
       </div>

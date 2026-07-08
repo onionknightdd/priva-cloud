@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { motion } from 'framer-motion'
 import { animate, svg } from 'animejs'
 import { useTranslation } from 'react-i18next'
+import { DUR_MIGRATION, EASE_IN_OUT_CSS } from '@shared/motion/tokens'
+import { traceSvgStrokes } from '@shared/motion/traceSvg'
 
 // SystemTopologyDiagram — a modernized §3 topology (docs/priva-cloud-architecture-report.html)
 // rendered as pure SVG on the GitHub-dark palette. Four color-coded planes
@@ -204,9 +205,11 @@ function NodeView({ node, reducedMotion, t }) {
         fill="var(--bg-surface)" stroke="var(--border)" strokeWidth={1}
         strokeDasharray={disabled ? '4 4' : undefined} />
       {/* Status left-border (2px), color-animated over 150ms */}
-      <motion.rect x={box.x} y={box.y} width={2.5} height={box.h}
-        initial={false} animate={{ fill: color }}
-        transition={{ duration: reducedMotion ? 0 : 0.15 }} style={{ fill: color }} />
+      <rect x={box.x} y={box.y} width={2.5} height={box.h}
+        style={{
+          fill: color,
+          transition: reducedMotion ? 'none' : `fill ${DUR_MIGRATION.topologyFill}ms ${EASE_IN_OUT_CSS}`,
+        }} />
 
       {/* Title */}
       <text x={box.x + 16} y={titleY} fontSize={14} fontWeight={600} fill="var(--text-primary)">
@@ -329,6 +332,17 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
     }
     return () => { for (const a of anims) { try { a.revert ? a.revert() : a.pause?.() } catch { /* noop */ } } }
   }, [flowSig]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // One-shot edge draw-in on the first data-ready mount (approved T4 spec).
+  // Ref-guarded: never re-runs on the 5s poll or StrictMode's double pass.
+  const hasTracedRef = useRef(false)
+  useEffect(() => {
+    if (hasTracedRef.current || reducedMotion || !flowEdges.length) return
+    const els = flowEdges.map((e) => pathRefs.current[e.key]).filter(Boolean)
+    if (!els.length) return
+    hasTracedRef.current = true
+    traceSvgStrokes(els)
+  }, [flowEdges, reducedMotion])
 
   return (
     <div className="grid w-full gap-3" style={{ minWidth: 0, height: `${DIAGRAM_SCALE * 100}%`, overflow: 'hidden', gridTemplateColumns: 'minmax(0, 1fr) 210px' }}>

@@ -1,9 +1,12 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
+import { memo, useEffect, useState, useMemo, useRef, useCallback, useLayoutEffect } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { Pencil, Trash2, Plus, Search, Eye, Check, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useAdminStore from '../../stores/adminStore'
 import useAuthStore from '@shared/stores/authStore'
 import useUiStore from '@shared/stores/uiStore'
+import usePopoverTransition from '@shared/motion/usePopoverTransition'
+import { useListLifecycle, LifecycleItem } from '@shared/motion/ListLifecycle'
 import * as adminApi from '@shared/api/admin'
 import Tabs from '@shared/components/shared/Tabs'
 import Chip from '@shared/components/shared/Chip'
@@ -14,6 +17,96 @@ import Dropdown from '@shared/components/shared/Dropdown'
 function runnerColor(type) {
   return type === 'persistent' ? 'var(--orange)' : 'var(--cyan)'
 }
+
+function formatDate(dateStr) {
+  if (!dateStr) return '—'
+  return new Date(dateStr).toLocaleDateString()
+}
+
+const UserRow = memo(function UserRow({ user, canDelete, onEdit, onDelete }) {
+  const { t } = useTranslation()
+  return (
+    <div
+      className="flex items-center gap-3 px-4 py-2"
+      style={{
+        borderBottom: '1px solid var(--border-subtle)',
+        borderLeft: '2px solid transparent',
+        transition: 'background 150ms ease',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+    >
+      <span
+        className="text-sm font-semibold flex-1 min-w-0 truncate"
+        style={{ color: 'var(--text-primary)' }}
+      >
+        {user.username}
+      </span>
+      <span style={{ width: 60, flexShrink: 0 }}>
+        <Chip color={user.role === 'admin' ? 'var(--green)' : 'var(--text-secondary)'}>
+          {user.role.toUpperCase()}
+        </Chip>
+      </span>
+      <span style={{ width: 88, flexShrink: 0 }}>
+        {user.agent_runner_type ? (
+          <Chip color={runnerColor(user.agent_runner_type)}>
+            {user.agent_runner_type.toUpperCase()}
+          </Chip>
+        ) : (
+          <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>—</span>
+        )}
+      </span>
+      <span style={{ width: 32, flexShrink: 0, textAlign: 'center' }}>
+        <ApiKeyPopover apiKey={user.api_key} />
+      </span>
+      <span
+        className="text-xs font-light"
+        style={{ color: 'var(--text-dim)', width: 72, flexShrink: 0 }}
+      >
+        {formatDate(user.created_at)}
+      </span>
+      <span
+        className="flex items-center gap-1 justify-end"
+        style={{ width: 52, flexShrink: 0 }}
+      >
+        <button
+          style={{
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 4,
+            color: 'var(--text-dim)',
+            transition: 'color 150ms ease',
+          }}
+          onClick={(e) => { e.stopPropagation(); onEdit(user.username) }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+          title={t('admin.edit')}
+        >
+          <Pencil size={14} strokeWidth={1.5} />
+        </button>
+        {canDelete && (
+          <button
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              padding: 4,
+              color: 'var(--text-dim)',
+              transition: 'color 150ms ease',
+            }}
+            onClick={(e) => { e.stopPropagation(); onDelete(user.username) }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+            title={t('admin.delete')}
+          >
+            <Trash2 size={14} strokeWidth={1.5} />
+          </button>
+        )}
+      </span>
+    </div>
+  )
+})
 
 function TableSkeleton() {
   return (
@@ -35,6 +128,8 @@ function ApiKeyPopover({ apiKey }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
+  // Canonical popover envelope (M7): opacity + 4px drop, 200ms both ways.
+  const { mounted: menuMounted, popRef } = usePopoverTransition({ open })
 
   useEffect(() => {
     if (!open) return
@@ -69,7 +164,9 @@ function ApiKeyPopover({ apiKey }) {
       >
         <Eye size={14} strokeWidth={1.5} />
       </button>
-      {open && (
+      {menuMounted && (
+        // Positioning wrapper: keeps the translateX centering off the animated
+        // node — the hook owns opacity/transform on popRef.
         <div
           style={{
             position: 'absolute',
@@ -77,26 +174,33 @@ function ApiKeyPopover({ apiKey }) {
             left: '50%',
             transform: 'translateX(-50%)',
             marginTop: 4,
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border-strong)',
-            borderRadius: 4,
-            padding: '8px 12px',
             zIndex: 50,
-            minWidth: 240,
-            maxWidth: 360,
+            pointerEvents: open ? 'auto' : 'none',
           }}
           onClick={(e) => e.stopPropagation()}
         >
           <div
-            className="flex items-center gap-2 text-xs"
+            ref={popRef}
             style={{
-              fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-              color: 'var(--text-secondary)',
-              wordBreak: 'break-all',
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-strong)',
+              borderRadius: 4,
+              padding: '8px 12px',
+              minWidth: 240,
+              maxWidth: 360,
             }}
           >
-            <span style={{ flex: 1 }}>{apiKey}</span>
-            <CopyButton content={apiKey} inline />
+            <div
+              className="flex items-center gap-2 text-xs"
+              style={{
+                fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+                color: 'var(--text-secondary)',
+                wordBreak: 'break-all',
+              }}
+            >
+              <span style={{ flex: 1 }}>{apiKey}</span>
+              <CopyButton content={apiKey} inline />
+            </div>
           </div>
         </div>
       )}
@@ -255,6 +359,11 @@ function PendingApprovalPane() {
 
   useEffect(() => { fetchPendingUsers() }, [])
 
+  // Rows get a real enter/exit: approving or rejecting collapses the row and
+  // slides survivors up; a fresh registration rises in. Exiting rows are
+  // retained by the lifecycle map until their animation finishes.
+  const [lifecyclePending, removePendingExited] = useListLifecycle(pendingUsers, (r) => r.username)
+
   const formatDateTime = (dateStr) => {
     if (!dateStr) return '—'
     const d = new Date(dateStr)
@@ -310,9 +419,11 @@ function PendingApprovalPane() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      {pendingUsersLoading ? (
+      {/* Skeleton only before the first data lands — approve/reject refetches
+          keep the stale rows mounted so the removed row can animate out. */}
+      {pendingUsersLoading && pendingUsers.length === 0 && lifecyclePending.length === 0 ? (
         <TableSkeleton />
-      ) : pendingUsers.length === 0 ? (
+      ) : lifecyclePending.length === 0 ? (
         <div className="flex flex-1 items-center justify-center py-12" style={{ color: 'var(--text-dim)' }}>
           <span className="text-sm">{t('admin.noPendingRequests')}</span>
         </div>
@@ -334,9 +445,9 @@ function PendingApprovalPane() {
             <span style={{ width: 132, flexShrink: 0, textAlign: 'right' }}>{t('admin.actions')}</span>
           </div>
           {/* Rows */}
-          {pendingUsers.map((req) => (
+          {lifecyclePending.map(({ key, item: req, present }) => (
+            <LifecycleItem key={key} present={present} onExited={() => removePendingExited(key)}>
             <div
-              key={req.request_id}
               className="flex items-center gap-3 px-4 py-2"
               style={{
                 borderBottom: '1px solid var(--border-subtle)',
@@ -398,6 +509,7 @@ function PendingApprovalPane() {
                 </button>
               </span>
             </div>
+            </LifecycleItem>
           ))}
         </div>
       )}
@@ -440,7 +552,7 @@ export default function UserManagement() {
     return result
   }, [users, searchQuery, roleFilter])
 
-  const handleDelete = (username) => {
+  const handleDelete = useCallback((username) => {
     showConfirmDialog({
       title: t('admin.deleteUserTitle'),
       message: t('admin.deleteUserMessage', { name: username }),
@@ -456,13 +568,31 @@ export default function UserManagement() {
         }
       },
     })
-  }
+  }, [showConfirmDialog, fetchUsers, t])
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '—'
-    const d = new Date(dateStr)
-    return d.toLocaleDateString()
-  }
+  const tableScrollRef = useRef(null)
+  const tableRowsRef = useRef(null)
+  const [tableRowsMargin, setTableRowsMargin] = useState(0)
+
+  // The header row scrolls with the table, so the virtual rows start below it —
+  // measure that offset into scrollMargin.
+  useLayoutEffect(() => {
+    const scrollEl = tableScrollRef.current
+    const rowsEl = tableRowsRef.current
+    if (!scrollEl || !rowsEl) return
+    setTableRowsMargin(
+      rowsEl.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop
+    )
+  }, [usersLoading, selectedTab])
+
+  const rowVirtualizer = useVirtualizer({
+    count: filteredUsers.length,
+    getScrollElement: () => tableScrollRef.current,
+    estimateSize: () => 38,
+    overscan: 12,
+    scrollMargin: tableRowsMargin,
+    getItemKey: (i) => filteredUsers[i].username,
+  })
 
   return (
     <div className="flex flex-col" style={{ height: '100%', overflow: 'hidden' }}>
@@ -584,7 +714,7 @@ export default function UserManagement() {
           </div>
 
           {/* Table */}
-          <div className="flex-1 overflow-y-auto">
+          <div ref={tableScrollRef} className="flex-1 overflow-y-auto">
             {usersLoading ? (
               <TableSkeleton />
             ) : (
@@ -606,91 +736,30 @@ export default function UserManagement() {
                   <span style={{ width: 72, flexShrink: 0 }}>{t('admin.created')}</span>
                   <span style={{ width: 52, flexShrink: 0, textAlign: 'right' }}>{t('admin.actions')}</span>
                 </div>
-                {/* Data rows */}
-                {filteredUsers.map((user) => {
-                  return (
-                    <div
-                      key={user.username}
-                      className="flex items-center gap-3 px-4 py-2"
-                      style={{
-                        borderBottom: '1px solid var(--border-subtle)',
-                        borderLeft: '2px solid transparent',
-                        transition: 'background 150ms ease',
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                    >
-                      <span
-                        className="text-sm font-semibold flex-1 min-w-0 truncate"
-                        style={{ color: 'var(--text-primary)' }}
+                {/* Data rows (virtualized) */}
+                <div
+                  ref={tableRowsRef}
+                  style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}
+                >
+                  {rowVirtualizer.getVirtualItems().map((vi) => {
+                    const user = filteredUsers[vi.index]
+                    return (
+                      <div
+                        key={vi.key}
+                        data-index={vi.index}
+                        ref={rowVirtualizer.measureElement}
+                        style={{ position: 'absolute', top: vi.start - tableRowsMargin, left: 0, width: '100%' }}
                       >
-                        {user.username}
-                      </span>
-                      <span style={{ width: 60, flexShrink: 0 }}>
-                        <Chip color={user.role === 'admin' ? 'var(--green)' : 'var(--text-secondary)'}>
-                          {user.role.toUpperCase()}
-                        </Chip>
-                      </span>
-                      <span style={{ width: 88, flexShrink: 0 }}>
-                        {user.agent_runner_type ? (
-                          <Chip color={runnerColor(user.agent_runner_type)}>
-                            {user.agent_runner_type.toUpperCase()}
-                          </Chip>
-                        ) : (
-                          <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>—</span>
-                        )}
-                      </span>
-                      <span style={{ width: 32, flexShrink: 0, textAlign: 'center' }}>
-                        <ApiKeyPopover apiKey={user.api_key} />
-                      </span>
-                      <span
-                        className="text-xs font-light"
-                        style={{ color: 'var(--text-dim)', width: 72, flexShrink: 0 }}
-                      >
-                        {formatDate(user.created_at)}
-                      </span>
-                      <span
-                        className="flex items-center gap-1 justify-end"
-                        style={{ width: 52, flexShrink: 0 }}
-                      >
-                        <button
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            cursor: 'pointer',
-                            padding: 4,
-                            color: 'var(--text-dim)',
-                            transition: 'color 150ms ease',
-                          }}
-                          onClick={(e) => { e.stopPropagation(); openUserDrawer(user.username) }}
-                          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-                          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-                          title={t('admin.edit')}
-                        >
-                          <Pencil size={14} strokeWidth={1.5} />
-                        </button>
-                        {user.username !== authUser?.username && (
-                          <button
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              cursor: 'pointer',
-                              padding: 4,
-                              color: 'var(--text-dim)',
-                              transition: 'color 150ms ease',
-                            }}
-                            onClick={(e) => { e.stopPropagation(); handleDelete(user.username) }}
-                            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red)' }}
-                            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-                            title={t('admin.delete')}
-                          >
-                            <Trash2 size={14} strokeWidth={1.5} />
-                          </button>
-                        )}
-                      </span>
-                    </div>
-                  )
-                })}
+                        <UserRow
+                          user={user}
+                          canDelete={user.username !== authUser?.username}
+                          onEdit={openUserDrawer}
+                          onDelete={handleDelete}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             )}
           </div>

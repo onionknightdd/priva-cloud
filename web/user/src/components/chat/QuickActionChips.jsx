@@ -1,17 +1,22 @@
 import { useEffect } from 'react'
+import { useStaggerEntrance } from '@shared/motion/useStaggerEntrance'
 import useSettingsStore from '../../stores/settingsStore'
 import useChatStore from '../../stores/chatStore'
 import { getLucideIcon } from '../../utils/lucideIconMap'
 
 export default function QuickActionChips() {
   const quickActions = useSettingsStore((s) => s.quickActions)
+  const quickActionsLoaded = useSettingsStore((s) => s.quickActionsLoaded)
   const fetchQuickActions = useSettingsStore((s) => s.fetchQuickActions)
   const setInputText = useChatStore((s) => s.setInputText)
   const setQuickActionVariableMode = useChatStore((s) => s.setQuickActionVariableMode)
+  // Chips arriving after the fetch fade + rise in, staggered; chips already
+  // seen (re-renders, store cache) render static.
+  const entranceRef = useStaggerEntrance()
 
   useEffect(() => {
-    fetchQuickActions()
-  }, [fetchQuickActions])
+    if (!quickActionsLoaded) fetchQuickActions()
+  }, [fetchQuickActions, quickActionsLoaded])
 
   if (quickActions.length === 0) return null
 
@@ -39,6 +44,7 @@ export default function QuickActionChips() {
         return (
           <button
             key={`${action.name}-${i}`}
+            ref={entranceRef(`${action.name}-${i}`)}
             className="flex items-center gap-2 px-3 py-2 text-xs min-w-0"
             style={{
               background: 'var(--bg-elevated)',

@@ -132,6 +132,8 @@ const useUiStore = create((set, get) => ({
   terminalFeatureEnabled: false,
   terminalSessionActive: false,
   terminalActiveCount: 0,
+  terminalMotionAnchorRect: null,
+  terminalMotionActive: false,
 
   reset: () => set({
     activeNavTab: 'priva', activePluginSection: 'skills', canvasVisible: false, canvasMinimized: false,
@@ -142,6 +144,8 @@ const useUiStore = create((set, get) => ({
     terminalOpen: false, terminalMinimized: false,
     terminalConfirmAcked: false, terminalFeatureEnabled: false,
     terminalSessionActive: false, terminalActiveCount: 0,
+    terminalMotionAnchorRect: null,
+    terminalMotionActive: false,
   }),
 
   openIntro: () => set({ introOpen: true }),
@@ -198,11 +202,12 @@ const useUiStore = create((set, get) => ({
   setTerminalOpen: (open) => set({
     terminalOpen: !!open,
     terminalMinimized: open ? false : false,
+    terminalMotionActive: false,
   }),
-  setTerminalMinimized: (v) => set({ terminalMinimized: !!v }),
+  setTerminalMinimized: (v) => set({ terminalMinimized: !!v, terminalMotionActive: true }),
   toggleTerminal: () => set((s) => {
-    if (!s.terminalOpen) return { terminalOpen: true, terminalMinimized: false }
-    return { terminalMinimized: !s.terminalMinimized }
+    if (!s.terminalOpen) return { terminalOpen: true, terminalMinimized: false, terminalMotionActive: false }
+    return { terminalMinimized: !s.terminalMinimized, terminalMotionActive: true }
   }),
   setTerminalHeight: (h) => {
     const clamped = Math.max(160, Math.min(window.innerHeight * 0.6, h))
@@ -212,11 +217,7 @@ const useUiStore = create((set, get) => ({
   setTerminalMode: (mode) => {
     const next = mode === 'float' || mode === 'expanded' || mode === 'dock' ? mode : 'dock'
     safeStorage.setItem(STORAGE_KEY_TERMINAL_MODE, next)
-    set((s) => ({
-      terminalMode: next,
-      // Minimize is dock-only; force off when switching away from dock.
-      terminalMinimized: next === 'dock' ? s.terminalMinimized : false,
-    }))
+    set({ terminalMode: next })
   },
   setTerminalBounds: (partial) => {
     set((s) => {
@@ -229,6 +230,8 @@ const useUiStore = create((set, get) => ({
   setTerminalFeatureEnabled: (v) => set({ terminalFeatureEnabled: !!v }),
   setTerminalSessionActive: (v) => set({ terminalSessionActive: !!v }),
   setTerminalActiveCount: (n) => set({ terminalActiveCount: Math.max(0, Number(n) || 0) }),
+  setTerminalMotionAnchorRect: (rect) => set({ terminalMotionAnchorRect: rect || null }),
+  setTerminalMotionActive: (v) => set({ terminalMotionActive: !!v }),
 }))
 
 export default useUiStore

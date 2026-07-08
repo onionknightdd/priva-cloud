@@ -5,6 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import useAuthStore from '@shared/stores/authStore'
+import { useAnimatedNumber } from '@shared/motion/useAnimatedNumber'
 import useUserDataStore from '../../stores/userDataStore'
 import Tabs from '@shared/components/shared/Tabs'
 import {
@@ -25,7 +26,14 @@ function rangeKey(range) {
   return 'all'
 }
 
-function StatTile({ label, value }) {
+function StatTile({ label, value, format }) {
+  // Numeric tiles tween to new readings (range switch, refetch); first paint
+  // snaps. Non-numeric tiles (peak hour label, model name) render as-is.
+  const isNumeric = typeof value === 'number' && Number.isFinite(value)
+  const animatedValue = useAnimatedNumber(isNumeric ? value : 0)
+  const shown = isNumeric
+    ? (format ? format(animatedValue) : animatedValue)
+    : (format ? format(value) : value)
   return (
     <div
       className="flex flex-col min-w-0"
@@ -56,10 +64,11 @@ function StatTile({ label, value }) {
           fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
           letterSpacing: '-0.01em',
           lineHeight: 1.2,
+          fontVariantNumeric: 'tabular-nums',
         }}
-        title={typeof value === 'string' || typeof value === 'number' ? String(value) : undefined}
+        title={typeof shown === 'string' || typeof shown === 'number' ? String(shown) : undefined}
       >
-        {value}
+        {shown}
       </span>
     </div>
   )
@@ -341,7 +350,31 @@ function ModelsView({ modelUsage, dailyModelTokens, range, themeKey }) {
   )
 }
 
-export default function UsageStatsOverview() {
+export function UsageStatsOverviewTitle() {
+  const { t } = useTranslation()
+  const user = useAuthStore((s) => s.user)
+
+  if (!user) return null
+
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <Sparkles size={16} strokeWidth={1.5} style={{ color: 'var(--orange)', flexShrink: 0 }} />
+      <span
+        className="truncate"
+        style={{
+          color: 'var(--text-primary)',
+          fontSize: 16,
+          fontWeight: 700,
+          letterSpacing: '-0.01em',
+        }}
+      >
+        {t('chat.usage.title', { name: user.username })}
+      </span>
+    </div>
+  )
+}
+
+export default function UsageStatsOverview({ showTitle = true }) {
   const { t } = useTranslation()
   const themeKey = useThemeKey()
   const user = useAuthStore((s) => s.user)
@@ -385,34 +418,23 @@ export default function UsageStatsOverview() {
     { value: 'models', label: t('chat.usage.tab.models') },
   ]
 
+  // Numeric tiles pass the raw number + formatter so StatTile can tween the
+  // value and format each frame; label-only tiles stay plain strings.
   const tiles = [
-    { label: t('chat.usage.card.sessions'), value: formatNumber(counts.sessions) },
-    { label: t('chat.usage.card.messages'), value: formatNumber(counts.messages) },
-    { label: t('chat.usage.card.tokens'), value: formatNumber(counts.total_tokens) },
-    { label: t('chat.usage.card.activeDays'), value: formatNumber(counts.active_days) },
-    { label: t('chat.usage.card.currentStreak'), value: streakLabel(currentStreak) },
-    { label: t('chat.usage.card.longestStreak'), value: streakLabel(longestStreak) },
+    { label: t('chat.usage.card.sessions'), value: counts.sessions, format: formatNumber },
+    { label: t('chat.usage.card.messages'), value: counts.messages, format: formatNumber },
+    { label: t('chat.usage.card.tokens'), value: counts.total_tokens, format: formatNumber },
+    { label: t('chat.usage.card.activeDays'), value: counts.active_days, format: formatNumber },
+    { label: t('chat.usage.card.currentStreak'), value: currentStreak, format: streakLabel },
+    { label: t('chat.usage.card.longestStreak'), value: longestStreak, format: streakLabel },
     { label: t('chat.usage.card.peakHour'), value: peakLabel },
     { label: t('chat.usage.card.favoriteModel'), value: favoriteLabel },
   ]
 
   return (
-    <div className="flex flex-col min-w-0" style={{ gap: 12 }}>
+    <div className="flex flex-col min-w-0" style={{ gap: showTitle ? 12 : 0 }}>
       {/* Title OUTSIDE card */}
-      <div className="flex items-center gap-2 min-w-0">
-        <Sparkles size={16} strokeWidth={1.5} style={{ color: 'var(--orange)', flexShrink: 0 }} />
-        <span
-          className="truncate"
-          style={{
-            color: 'var(--text-primary)',
-            fontSize: 16,
-            fontWeight: 700,
-            letterSpacing: '-0.01em',
-          }}
-        >
-          {t('chat.usage.title', { name: user.username })}
-        </span>
-      </div>
+      {showTitle && <UsageStatsOverviewTitle />}
 
       {/* Single card */}
       <div
@@ -472,7 +494,7 @@ export default function UsageStatsOverview() {
               }}
             >
               {tiles.map((tile, i) => (
-                <StatTile key={i} label={tile.label} value={tile.value} />
+                <StatTile key={i} label={tile.label} value={tile.value} format={tile.format} />
               ))}
             </div>
 

@@ -1,11 +1,11 @@
-import { useEffect, useState, useRef, useCallback, useId, useMemo } from 'react'
-import { Search, ChevronDown, RefreshCw } from 'lucide-react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import { Search, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useUserDataStore from '../../stores/userDataStore'
 import AuditCharts from '@shared/components/admin/charts/AuditCharts'
 import DateRangePicker from '@shared/components/shared/DateRangePicker'
 import Dropdown from '@shared/components/shared/Dropdown'
-import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import AuditEntryList from '@shared/components/shared/AuditEntryList'
 
 const FILTER_CATEGORIES = [
   { value: '', labelKey: 'admin.filterAll', filterField: 'target' },
@@ -15,54 +15,6 @@ const FILTER_CATEGORIES = [
   { value: 'skill', labelKey: 'admin.filterSkill', filterField: 'target' },
   { value: 'tool', labelKey: 'admin.filterTool', filterField: 'target' },
 ]
-
-function getActionBorderColor(action) {
-  if (action === 'login.success' || action === 'user.created') return 'var(--green)'
-  if (action === 'login.failed' || action === 'user.deleted' || action === 'user.apikey_revoked') return 'var(--red)'
-  if (action === 'user.role_changed' || action === 'user.password_reset') return 'var(--yellow)'
-  if (action?.startsWith('tool.')) return 'var(--cyan)'
-  if (action?.startsWith('skill.')) return 'var(--purple)'
-  return 'var(--blue)'
-}
-
-function formatDescription(entry, t) {
-  const { action, actor, target, details } = entry
-  switch (action) {
-    case 'login.success':
-      return t('admin.auditLoginSuccess', { actor })
-    case 'login.failed':
-      return t('admin.auditLoginFailed', { target })
-    case 'user.created':
-      return t('admin.auditUserCreated', { actor, target, role: details?.role || 'user' })
-    case 'user.deleted':
-      return t('admin.auditUserDeleted', { actor, target })
-    case 'user.role_changed':
-      return t('admin.auditRoleChanged', { actor, target, oldRole: details?.old_role, newRole: details?.new_role })
-    case 'user.password_reset':
-      return t('admin.auditPasswordReset', { actor, target })
-    case 'user.apikey_generated':
-      return t('admin.auditApikeyGenerated', { actor, target })
-    case 'user.apikey_revoked':
-      return t('admin.auditApikeyRevoked', { actor, target })
-    case 'session.deleted':
-      return t('admin.auditSessionDeleted', { actor, target })
-    default:
-      return `${actor}: ${action}${target ? ` → ${target}` : ''}`
-  }
-}
-
-function relativeTime(dateStr, t) {
-  if (!dateStr) return ''
-  const now = Date.now()
-  const diff = now - new Date(dateStr).getTime()
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return t('admin.justNow')
-  if (minutes < 60) return t('admin.minutesAgo', { count: minutes })
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return t('admin.hoursAgo', { count: hours })
-  const days = Math.floor(hours / 24)
-  return t('admin.daysAgo', { count: days })
-}
 
 function useDebouncedCallback(callback, delay) {
   const timerRef = useRef(null)
@@ -91,56 +43,6 @@ function EntrySkeleton() {
           <div className="skeleton" style={{ width: '70%', height: 13 }} />
         </div>
       ))}
-    </div>
-  )
-}
-
-function DetailsBlock({ details }) {
-  const [expanded, setExpanded] = useState(false)
-  const bodyId = useId()
-  if (!details || Object.keys(details).length === 0) return null
-
-  return (
-    <div>
-      <button
-        className="flex items-center gap-1 text-xs"
-        style={{
-          background: 'transparent',
-          border: 'none',
-          color: 'var(--text-dim)',
-          cursor: 'pointer',
-          padding: '2px 0',
-          transition: 'color 150ms ease',
-        }}
-        onClick={() => setExpanded(!expanded)}
-        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-        aria-expanded={expanded}
-        aria-controls={bodyId}
-      >
-        <AnimatedChevron open={expanded}>
-          <ChevronDown size={12} strokeWidth={1.5} />
-        </AnimatedChevron>
-        details
-      </button>
-      <AnimatedCollapse open={expanded} id={bodyId}>
-        <pre
-          style={{
-            background: 'var(--bg-elevated)',
-            borderRadius: '2px',
-            padding: '8px 12px',
-            margin: '4px 0 0 0',
-            fontSize: '11px',
-            fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-            color: 'var(--text-secondary)',
-            overflowX: 'auto',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
-          {JSON.stringify(details, null, 2)}
-        </pre>
-      </AnimatedCollapse>
     </div>
   )
 }
@@ -308,67 +210,26 @@ export default function UserAuditLog() {
           </div>
 
           {/* Scrollable entries list */}
-          <div className="flex-1 overflow-y-auto" style={{ minHeight: 0, paddingBottom: 32 }}>
-            {auditLoading && mergedEntries.length === 0 ? (
+          {auditLoading && mergedEntries.length === 0 ? (
+            <div className="flex-1 overflow-y-auto" style={{ minHeight: 0, paddingBottom: 32 }}>
               <EntrySkeleton />
-            ) : mergedEntries.length === 0 ? (
+            </div>
+          ) : mergedEntries.length === 0 ? (
+            <div className="flex-1 overflow-y-auto" style={{ minHeight: 0, paddingBottom: 32 }}>
               <div className="text-sm" style={{ color: 'var(--text-dim)', padding: '20px 0' }}>
                 {t('admin.noAuditEntries')}
               </div>
-            ) : (
-              <div className="flex flex-col">
-                {mergedEntries.map((entry, i) => (
-                  <div
-                    key={entry.id || i}
-                    className="flex flex-col gap-1 px-4 py-3"
-                    style={{
-                      borderLeft: `2px solid ${getActionBorderColor(entry.action)}`,
-                      borderBottom: '1px solid var(--border)',
-                      transition: 'background 150ms ease',
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span
-                        className="text-xs uppercase"
-                        style={{ color: getActionBorderColor(entry.action), letterSpacing: '0.06em' }}
-                      >
-                        {entry.action}
-                      </span>
-                      <span className="text-xs font-light" style={{ color: 'var(--text-dim)' }}>
-                        {relativeTime(entry.timestamp, t)}
-                      </span>
-                    </div>
-                    <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                      {formatDescription(entry, t)}
-                    </span>
-                    <DetailsBlock details={entry.details} />
-                  </div>
-                ))}
-
-                {/* Load more */}
-                {hasMore && (
-                  <button
-                    className="px-4 py-2 text-xs"
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'var(--blue)',
-                      cursor: auditLoading ? 'not-allowed' : 'pointer',
-                      opacity: auditLoading ? 0.5 : 1,
-                      textAlign: 'center',
-                      transition: 'opacity 150ms ease',
-                    }}
-                    disabled={auditLoading}
-                    onClick={() => fetchAuditLog(true)}
-                  >
-                    {auditLoading ? t('sidebar.loading') : t('sidebar.loadMore')}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <AuditEntryList
+              className="flex-1 overflow-y-auto"
+              style={{ minHeight: 0, paddingBottom: 32 }}
+              entries={mergedEntries}
+              hasMore={hasMore}
+              loading={auditLoading}
+              onLoadMore={() => fetchAuditLog(true)}
+            />
+          )}
         </div>
 
         {/* Right column: chart */}

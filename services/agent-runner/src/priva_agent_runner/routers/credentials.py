@@ -91,6 +91,11 @@ async def list_models(user: UserRecord = Depends(require_user)):
 
     Runs pod-side so the per-account base_url (often a LAN endpoint the pod can
     reach but the control-panel can't) is the one being tested."""
+    return ModelListResponse(models=await load_model_list())
+
+
+async def load_model_list(timeout: float = 15.0) -> list[ModelInfo]:
+    """Fetch upstream model ids using the account's saved credentials."""
     env = read_settings_env()
     if not env:
         raise HTTPException(400, "API credentials not configured")
@@ -101,7 +106,7 @@ async def list_models(user: UserRecord = Depends(require_user)):
         raise HTTPException(400, "API credentials not configured. Please set base URL and auth token.")
 
     try:
-        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             resp = await client.get(
                 f"{base_url}/v1/models",
                 headers={"Authorization": f"Bearer {auth_token}"},
@@ -135,4 +140,4 @@ async def list_models(user: UserRecord = Depends(require_user)):
         elif isinstance(m, str):
             models.append(ModelInfo(id=m))
 
-    return ModelListResponse(models=models)
+    return models

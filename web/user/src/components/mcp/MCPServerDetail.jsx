@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import useMcpStore from '../../stores/mcpStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import Tabs from '@shared/components/shared/Tabs'
+import DrawIcon from '@shared/components/shared/DrawIcon'
 
 function mcpToolFullName(serverName, toolName) {
   return `mcp__${serverName}__${toolName}`
@@ -121,7 +122,7 @@ function ToolNameCopy({ fullName }) {
         setTimeout(() => setCopied(false), 800)
       }}
     >
-      {copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
+      {copied ? <DrawIcon name="check" size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
     </button>
   )
 }

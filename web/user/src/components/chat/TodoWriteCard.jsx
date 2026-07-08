@@ -4,6 +4,7 @@ import TodoItem from '../shared/TodoItem'
 import useTaskStore from '../../stores/taskStore'
 import useUiStore from '@shared/stores/uiStore'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import { tweenScrollIntoView } from '@shared/motion/tweenScroll'
 
 /**
  * Inline TodoWrite card shown in the message timeline in place of the
@@ -27,7 +28,7 @@ export default function TodoWriteCard({ block, mode = 'full' }) {
 
   useEffect(() => {
     if (isActive && cardRef.current) {
-      cardRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      tweenScrollIntoView(cardRef.current, { block: 'center', flash: true })
     }
   }, [isActive])
 

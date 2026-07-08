@@ -1,5 +1,7 @@
+import { useRef } from 'react'
 import { RotateCcw, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import useOverlayTransition from '@shared/motion/useOverlayTransition'
 import useChatStore from '../../stores/chatStore'
 
 function fmtTime(ts) {
@@ -15,13 +17,26 @@ export default function RewindBanner() {
   const rewindMarker = useChatStore((s) => s.rewindMarker)
   const clearRewindMarker = useChatStore((s) => s.clearRewindMarker)
 
-  if (!rewindMarker) return null
+  // Exit animation: the store nulls rewindMarker on dismiss, so render from a
+  // snapshot while the banner slides out. exitCollapse closes the 40px strip's
+  // space with the fade instead of snapping it shut at unmount.
+  const { mounted, panelRef } = useOverlayTransition({
+    open: !!rewindMarker,
+    variant: 'slide',
+    exitCollapse: true,
+  })
+  const shownRef = useRef(null)
+  if (rewindMarker) shownRef.current = rewindMarker
+  const shown = rewindMarker ?? shownRef.current
 
-  const count = rewindMarker.revertedToolUseIds?.length || 0
-  const time = fmtTime(rewindMarker.rewindTs)
+  if (!mounted || !shown) return null
+
+  const count = shown.revertedToolUseIds?.length || 0
+  const time = fmtTime(shown.rewindTs)
 
   return (
     <div
+      ref={panelRef}
       className="flex items-center gap-2 px-4 flex-shrink-0"
       style={{
         position: 'sticky',
@@ -33,6 +48,7 @@ export default function RewindBanner() {
         borderBottom: '1px solid var(--border-subtle)',
         color: 'var(--text-secondary)',
         fontSize: 12,
+        pointerEvents: rewindMarker ? 'auto' : 'none',
       }}
     >
       <RotateCcw size={14} strokeWidth={1.5} style={{ color: 'var(--purple)', flexShrink: 0 }} />

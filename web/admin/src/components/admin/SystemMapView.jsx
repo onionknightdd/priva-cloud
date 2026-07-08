@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Network } from 'lucide-react'
-import { useReducedMotion } from 'framer-motion'
+import { useReducedMotion } from '@shared/motion/useReducedMotion'
 import { useTranslation } from 'react-i18next'
 import useAdminStore from '../../stores/adminStore'
 import LiveToggleButton from './LiveToggleButton'

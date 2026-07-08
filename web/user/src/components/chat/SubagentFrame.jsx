@@ -1,5 +1,7 @@
-import { memo } from 'react'
-import { Bot, Loader, Check, AlertTriangle, Clock } from 'lucide-react'
+import { memo, useRef } from 'react'
+import { Bot, Loader, AlertTriangle, Clock } from 'lucide-react'
+import DrawIcon from '@shared/components/shared/DrawIcon'
+import { useStatusSettle } from '@shared/motion/useStatusSettle'
 import useChatStore from '../../stores/chatStore'
 import useTaskStore from '../../stores/taskStore'
 import useUiStore from '@shared/stores/uiStore'
@@ -37,6 +39,12 @@ const EMPTY_CONTENT = []
 function SubagentFrame({ block, reverted = false }) {
   const status = block.status || 'running'
   const isError = status === 'error' || block.result?.is_error
+  const isComplete = status === 'success' || status === 'error'
+  // Draw the Done check only when the frame resolves LIVE — frames that mount
+  // already-complete (history, scroll-back remounts) render it static.
+  const mountedIncompleteRef = useRef(!isComplete)
+  // M9: one-shot 0.98→1 settle on the status chip when the status flips live.
+  const chipSettleRef = useStatusSettle(status)
 
   const subagentContent = useChatStore((s) => s.subagentContent[block.id]) || EMPTY_CONTENT
   const activeSubagentId = useTaskStore((s) => s.activeSubagentId)
@@ -93,7 +101,7 @@ function SubagentFrame({ block, reverted = false }) {
     )
   } else if (isError) {
     statusNode = (
-      <span className="chip" style={{
+      <span ref={chipSettleRef} className="chip" style={{
         color: 'var(--text-inverse)',
         background: 'var(--red)',
         borderColor: 'var(--red)',
@@ -106,14 +114,14 @@ function SubagentFrame({ block, reverted = false }) {
     )
   } else {
     statusNode = (
-      <span className="chip" style={{
+      <span ref={chipSettleRef} className="chip" style={{
         color: 'var(--green)',
         background: 'rgba(63, 185, 80, 0.15)',
         borderColor: 'rgba(63, 185, 80, 0.4)',
         opacity: 1,
         gap: 3,
       }}>
-        <Check size={10} strokeWidth={1.5} style={{ marginRight: 2 }} />
+        <DrawIcon name="check" size={10} strokeWidth={1.5} draw={mountedIncompleteRef.current} style={{ marginRight: 2 }} />
         <span>Done</span>
         {toolUseCount > 0 && (
           <>

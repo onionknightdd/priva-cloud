@@ -1,11 +1,15 @@
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronRight } from 'lucide-react'
+import usePopoverTransition from '@shared/motion/usePopoverTransition'
 
-export default function SkillPicker({ skills, query, onSelect, onClose, activeIndex, loading, positionStyle }) {
+export default function SkillPicker({ skills, query, onSelect, onClose, activeIndex, loading, positionStyle, open = true }) {
   const { t } = useTranslation()
   const listRef = useRef(null)
   const activeRef = useRef(null)
+  // Popover envelope: parent keeps the picker rendered with open=false while
+  // the dismissal fade plays ('top' = the picker sits above its trigger).
+  const { mounted, popRef } = usePopoverTransition({ open, placement: 'top' })
 
   // Filter skills by query
   const q = query.toLowerCase()
@@ -49,53 +53,7 @@ export default function SkillPicker({ skills, query, onSelect, onClose, activeIn
     </div>
   )
 
-  if (loading) {
-    return (
-      <div
-        className="skill-picker-popup"
-        style={{
-          ...popupPosition,
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border-strong)',
-          borderRadius: 4,
-          padding: '0 0 8px 0',
-          zIndex: 50,
-        }}
-      >
-        {headerEl}
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="px-3 py-2 flex items-center gap-2">
-            <div className="skeleton" style={{ width: 120, height: 14, borderRadius: 2 }} />
-            <div className="flex-1" />
-            <div className="skeleton" style={{ width: 50, height: 10, borderRadius: 2 }} />
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  if (flatList.length === 0) {
-    return (
-      <div
-        className="skill-picker-popup"
-        style={{
-          ...popupPosition,
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border-strong)',
-          borderRadius: 4,
-          padding: 0,
-          zIndex: 50,
-        }}
-      >
-        {headerEl}
-        <div className="px-3 py-2">
-          <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
-            {t('skillPicker.noMatch')}
-          </span>
-        </div>
-      </div>
-    )
-  }
+  if (!mounted) return null
 
   let runningIndex = 0
 
@@ -165,9 +123,31 @@ export default function SkillPicker({ skills, query, onSelect, onClose, activeIn
     )
   }
 
+  let body
+  if (loading) {
+    body = [1, 2, 3].map((i) => (
+      <div key={i} className="px-3 py-2 flex items-center gap-2">
+        <div className="skeleton" style={{ width: 120, height: 14, borderRadius: 2 }} />
+        <div className="flex-1" />
+        <div className="skeleton" style={{ width: 50, height: 10, borderRadius: 2 }} />
+      </div>
+    ))
+  } else if (flatList.length === 0) {
+    body = (
+      <div className="px-3 py-2">
+        <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
+          {t('skillPicker.noMatch')}
+        </span>
+      </div>
+    )
+  }
+
   return (
     <div
-      ref={listRef}
+      ref={(el) => {
+        listRef.current = el
+        popRef.current = el
+      }}
       className="skill-picker-popup"
       style={{
         ...popupPosition,
@@ -178,10 +158,12 @@ export default function SkillPicker({ skills, query, onSelect, onClose, activeIn
         overflowY: 'auto',
         zIndex: 50,
         padding: '0 0 4px 0',
+        pointerEvents: open ? 'auto' : 'none',
       }}
     >
       {headerEl}
-      {projectSkills.length > 0 && (
+      {body}
+      {!body && projectSkills.length > 0 && (
         <>
           <div
             className="px-3 pt-2 pb-1 uppercase"
@@ -202,7 +184,7 @@ export default function SkillPicker({ skills, query, onSelect, onClose, activeIn
           ))}
         </>
       )}
-      {globalSkills.length > 0 && (
+      {!body && globalSkills.length > 0 && (
         <>
           <div
             className="px-3 pt-2 pb-1 uppercase"

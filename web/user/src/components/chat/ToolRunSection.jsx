@@ -1,15 +1,12 @@
-import { useId, useState } from 'react'
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
+import { animate } from 'animejs'
 import { ChevronDown } from 'lucide-react'
 import { summarizeRun } from '../../utils/toolRunSummary'
 import { RollingText } from '../shared/Odometer'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
-
-const QUIET_REVEAL_TRANSITION = {
-  type: 'tween',
-  duration: 0.16,
-  ease: [0.4, 0, 0.2, 1],
-}
+import { usePresence } from '@shared/motion/usePresence'
+import { useReducedMotion } from '@shared/motion/useReducedMotion'
+import { DUR_MIGRATION, EASE_TAB } from '@shared/motion/tokens'
 
 function SummaryTokens({ summary, fallback, height = 12, fontWeight = 500 }) {
   if (!summary?.tokens?.length) {
@@ -110,6 +107,53 @@ export default function ToolRunSection({
 }) {
   const bodyId = useId()
   const shouldReduce = useReducedMotion()
+
+  // Compact reveal: quiet opacity + 3px drop, latched through its exit.
+  const compactOpen = compact && !collapsed
+  const { mounted: compactMounted, onExited: compactExited } = usePresence(compactOpen)
+  const compactRef = useRef(null)
+  const compactEnteredRef = useRef(compactOpen)
+
+  useLayoutEffect(() => {
+    if (!compact) return
+    if (!compactMounted) {
+      compactEnteredRef.current = false
+      return
+    }
+    const el = compactRef.current
+    if (!el) {
+      if (!compactOpen) compactExited()
+      return
+    }
+    if (shouldReduce) {
+      if (compactOpen) {
+        compactEnteredRef.current = true
+        el.style.opacity = '1'
+        el.style.transform = 'translateY(0px)'
+      } else {
+        compactExited()
+      }
+      return
+    }
+    if (compactOpen) {
+      if (!compactEnteredRef.current) {
+        // Fresh reveal: pre-paint the from-state.
+        el.style.opacity = '0'
+        el.style.transform = 'translateY(-3px)'
+      }
+      compactEnteredRef.current = true
+      animate(el, { opacity: 1, translateY: '0px', duration: DUR_MIGRATION.toolReveal, ease: EASE_TAB })
+    } else {
+      animate(el, {
+        opacity: 0,
+        translateY: '-3px',
+        duration: DUR_MIGRATION.toolReveal,
+        ease: EASE_TAB,
+        onComplete: compactExited,
+      })
+    }
+  }, [compact, compactOpen, compactMounted, shouldReduce, compactExited])
+
   const renderToolTree = () => (
     <div className="tool-tree">
       {run.map((toolBlock, runIndex) => (
@@ -136,20 +180,11 @@ export default function ToolRunSection({
       />
 
       {compact ? (
-        <AnimatePresence initial={false}>
-          {!collapsed && (
-            <motion.div
-              id={bodyId}
-              initial={shouldReduce ? false : { opacity: 0, y: -3 }}
-              animate={shouldReduce ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
-              exit={shouldReduce ? { opacity: 0, y: 0 } : { opacity: 0, y: -3 }}
-              transition={shouldReduce ? { duration: 0 } : QUIET_REVEAL_TRANSITION}
-              style={{ overflow: 'hidden' }}
-            >
-              {renderToolTree()}
-            </motion.div>
-          )}
-        </AnimatePresence>
+        compactMounted ? (
+          <div id={bodyId} ref={compactRef} style={{ overflow: 'hidden' }}>
+            {renderToolTree()}
+          </div>
+        ) : null
       ) : (
         <AnimatedCollapse
           open={!collapsed}

@@ -1139,7 +1139,7 @@
       "maxCols": "Max cols",
       "maxRows": "Max rows",
       "rlimitCpu": "CPU rlimit",
-      "rlimitAs": "Address space rlimit",
+      "rlimitAs": "Address space rlimit (0 = unlimited)",
       "rlimitFsize": "File size rlimit",
       "rlimitNofile": "Open files rlimit",
       "unitSeconds": "(seconds)",

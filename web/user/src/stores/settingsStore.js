@@ -19,9 +19,12 @@ const useSettingsStore = create((set, get) => ({
   hasEnv: null,
   models: [],
   modelsLoading: false,
+  modelsLoaded: false,
   modelsError: null,
   quickActions: [],
+  quickActionsLoaded: false,
   selectedModel: null,
+  defaultModel: null,
   apiKey: null,
   apiKeyLoading: false,
   presetPrompt: null,
@@ -65,10 +68,10 @@ const useSettingsStore = create((set, get) => ({
     set({ modelsLoading: true, modelsError: null })
     try {
       const data = await fetchModelsAPI()
-      set({ models: data.models || [], modelsLoading: false })
+      set({ models: data.models || [], modelsLoading: false, modelsLoaded: true })
       return data.models || []
     } catch (err) {
-      set({ modelsLoading: false, modelsError: err.message })
+      set({ modelsLoading: false, modelsLoaded: true, modelsError: err.message })
       return []
     }
   },
@@ -76,17 +79,17 @@ const useSettingsStore = create((set, get) => ({
   fetchQuickActions: async () => {
     try {
       const data = await getQuickActions()
-      set({ quickActions: data.quickactions || [] })
+      set({ quickActions: data.quickactions || [], quickActionsLoaded: true })
       return data.quickactions || []
     } catch {
-      set({ quickActions: [] })
+      set({ quickActions: [], quickActionsLoaded: true })
       return []
     }
   },
 
   saveQuickActions: async (actions) => {
     const data = await updateQuickActionsAPI(actions)
-    set({ quickActions: data.quickactions || [] })
+    set({ quickActions: data.quickactions || [], quickActionsLoaded: true })
     return data
   },
 
@@ -181,9 +184,12 @@ const useSettingsStore = create((set, get) => ({
     hasEnv: null,
     models: [],
     modelsLoading: false,
+    modelsLoaded: false,
     modelsError: null,
     quickActions: [],
+    quickActionsLoaded: false,
     selectedModel: null,
+    defaultModel: null,
     apiKey: null,
     apiKeyLoading: false,
     presetPrompt: null,

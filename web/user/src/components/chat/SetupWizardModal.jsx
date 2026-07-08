@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Bot, Check, AlertCircle, Eye, EyeOff, ChevronRight, ChevronLeft, ChevronDown, Search } from 'lucide-react'
+import useOverlayTransition from '@shared/motion/useOverlayTransition'
+import usePopoverTransition from '@shared/motion/usePopoverTransition'
+import StepSlide from '@shared/motion/StepSlide'
 import useSettingsStore from '../../stores/settingsStore'
 import safeStorage from '@shared/utils/safeStorage'
 
@@ -8,6 +11,8 @@ function FilterableModelSelect({ models, value, onChange, label, labelStyle, inp
   const [filter, setFilter] = useState('')
   const containerRef = useRef(null)
   const filterRef = useRef(null)
+  // Canonical popover envelope (M7): opacity + 4px drop, 200ms both ways.
+  const { mounted: menuMounted, popRef } = usePopoverTransition({ open })
 
   const filtered = useMemo(() => {
     if (!filter.trim()) return models
@@ -72,8 +77,9 @@ function FilterableModelSelect({ models, value, onChange, label, labelStyle, inp
           </button>
         </div>
 
-        {open && (
+        {menuMounted && (
           <div
+            ref={popRef}
             className="absolute left-0 right-0 flex flex-col"
             style={{
               top: '100%',
@@ -83,6 +89,7 @@ function FilterableModelSelect({ models, value, onChange, label, labelStyle, inp
               borderRadius: 4,
               maxHeight: 200,
               zIndex: 60,
+              pointerEvents: open ? 'auto' : 'none',
             }}
           >
             <div
@@ -158,7 +165,7 @@ function FilterableModelSelect({ models, value, onChange, label, labelStyle, inp
   )
 }
 
-export default function SetupWizardModal({ onComplete }) {
+function SetupWizardBody({ onComplete, onDismissed, active, panelRef, backdropRef }) {
   const [step, setStep] = useState(1)
   const [baseUrl, setBaseUrl] = useState('')
   const [authToken, setAuthToken] = useState('')
@@ -171,7 +178,6 @@ export default function SetupWizardModal({ onComplete }) {
   const [haikuModel, setHaikuModel] = useState('')
   const [visionModel, setVisionModel] = useState('')
   const [saving, setSaving] = useState(false)
-  const [dismissed, setDismissed] = useState(false)
 
   const models = useSettingsStore((s) => s.models)
   const saveEnv = useSettingsStore((s) => s.saveEnv)
@@ -244,11 +250,9 @@ export default function SetupWizardModal({ onComplete }) {
 
   const handleDismiss = () => {
     safeStorage.setItem('env-setup-dismissed', String(Date.now()))
-    setDismissed(true)
+    onDismissed()
     if (onComplete) onComplete()
   }
-
-  if (dismissed) return null
 
   const inputStyle = {
     width: '100%',
@@ -275,14 +279,17 @@ export default function SetupWizardModal({ onComplete }) {
 
   return (
     <div
+      ref={backdropRef}
       className="fixed inset-0 flex items-center justify-center"
       style={{
         background: 'var(--bg-overlay)',
         backdropFilter: 'blur(4px)',
         zIndex: 200,
+        pointerEvents: active ? 'auto' : 'none',
       }}
     >
       <div
+        ref={panelRef}
         style={{
           width: 480,
           maxHeight: '80vh',
@@ -290,7 +297,6 @@ export default function SetupWizardModal({ onComplete }) {
           background: 'var(--bg-surface)',
           border: '1px solid var(--border)',
           borderRadius: 4,
-          animation: 'modal-scale-in 200ms cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
         {/* Header */}
@@ -318,6 +324,7 @@ export default function SetupWizardModal({ onComplete }) {
         </div>
 
         <div className="px-6 pb-6">
+          <StepSlide stepKey={step}>
           {/* Step 1: Connection */}
           {step === 1 && (
             <div className="flex flex-col gap-4">
@@ -565,15 +572,35 @@ export default function SetupWizardModal({ onComplete }) {
               </div>
             </div>
           )}
+          </StepSlide>
         </div>
       </div>
-
-      <style>{`
-        @keyframes modal-scale-in {
-          from { transform: scale(0.95); opacity: 0; }
-          to { transform: scale(1); opacity: 1; }
-        }
-      `}</style>
     </div>
+  )
+}
+
+// Shell: owns the dismissed latch and the enter/exit animation envelope.
+// The body (and all its form state) mounts fresh per open and stays mounted
+// only while the exit animation plays.
+export default function SetupWizardModal({ open = true, onComplete }) {
+  const [dismissed, setDismissed] = useState(false)
+  const visible = open && !dismissed
+
+  // Re-arm the latch when the wizard is reopened later.
+  useEffect(() => {
+    if (open) setDismissed(false)
+  }, [open])
+
+  const { mounted, panelRef, backdropRef } = useOverlayTransition({ open: visible, variant: 'scale' })
+  if (!mounted) return null
+
+  return (
+    <SetupWizardBody
+      active={visible}
+      panelRef={panelRef}
+      backdropRef={backdropRef}
+      onComplete={onComplete}
+      onDismissed={() => setDismissed(true)}
+    />
   )
 }

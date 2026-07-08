@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
-import { Send, Square, Shield, Cable, ChevronRight, X, AlertTriangle, Cpu, CornerDownLeft, FolderPlus } from 'lucide-react'
+import { Square, Shield, Cable, ChevronRight, X, AlertTriangle, Cpu, CornerDownLeft, FolderPlus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
 import useUiStore from '@shared/stores/uiStore'
@@ -24,6 +24,9 @@ import { setSessionAddDirs } from '../../api/sessions'
 import QueuedMessagesStack from './QueuedMessagesStack'
 import { buildSelectedXlsxXml } from '../../utils/selectedXlsx'
 import { buildSelectedFileXml } from '../../utils/selectedFile'
+import { popIn, pressTick } from '@shared/motion/waapiMicro'
+import usePopoverTransition from '@shared/motion/usePopoverTransition'
+import { useListLifecycle, LifecycleItem } from '@shared/motion/ListLifecycle'
 
 const EMPTY_COMPOSER_TEXTAREA_HEIGHT = 50
 
@@ -61,6 +64,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
   const setMcpServers = useChatStore((s) => s.setMcpServers)
   const mcpServerList = useMcpStore((s) => s.servers)
   const mcpServersLoading = useMcpStore((s) => s.serversLoading)
+  const mcpServersLoaded = useMcpStore((s) => s.serversLoaded)
   const fetchMcpServers = useMcpStore((s) => s.fetchServers)
   const attachments = useChatStore((s) => s.attachments)
   const queuedUserMessages = useChatStore((s) => s.queuedUserMessages)
@@ -87,6 +91,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
   const [selectedSkill, setSelectedSkill] = useState(null)
   const [showPermissionMenu, setShowPermissionMenu] = useState(false)
   const permMenuRef = useRef(null)
+  const { mounted: permissionMenuMounted, popRef: permissionMenuPopRef } = usePopoverTransition({ open: showPermissionMenu, placement: 'top' })
   // Composer-warning callback registered by PromptComposer.
   const composerWarnRef = useRef(null)
 
@@ -101,7 +106,9 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
   }, [])
 
   // Fetch MCP servers on mount
-  useEffect(() => { fetchMcpServers() }, [fetchMcpServers])
+  useEffect(() => {
+    if (!mcpServersLoaded) fetchMcpServers()
+  }, [fetchMcpServers, mcpServersLoaded])
 
   // Stopping a run is destructive — both the stop button and Escape route
   // through the same red confirm dialog; nothing insta-aborts.
@@ -376,6 +383,23 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
   const canQueue = hasContentToSend && isStreaming && !isBlocked && !hasUploading
   const canSend = canSendIdle || canQueue
 
+  // M15 micro-feedback (WAAPI, fire-and-forget): pop the send button when it
+  // appears or swaps send↔queue, pop the stop button when it appears. Prev-value
+  // guards keep the initial mount silent — only live transitions animate.
+  const sendBtnRef = useRef(null)
+  const stopBtnRef = useRef(null)
+  const sendBtnMode = canSend ? (canQueue ? 'queue' : 'send') : null
+  const prevSendBtnModeRef = useRef(sendBtnMode)
+  useEffect(() => {
+    if (sendBtnMode && prevSendBtnModeRef.current !== sendBtnMode) popIn(sendBtnRef.current)
+    prevSendBtnModeRef.current = sendBtnMode
+  }, [sendBtnMode])
+  const prevStreamingRef = useRef(isStreaming)
+  useEffect(() => {
+    if (isStreaming && !prevStreamingRef.current) popIn(stopBtnRef.current)
+    prevStreamingRef.current = isStreaming
+  }, [isStreaming])
+
   const handlePlanApproval = (option, feedbackText) => {
     const { requestId, planContent, planFilePath } = pendingPlanApproval
     respondPermission(requestId, 'allow')
@@ -420,97 +444,136 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
     { value: 'plan', label: t('permission.plan'), desc: t('permission.planDesc'), color: 'var(--cyan)' },
   ]
 
-  // File reference card rendered before the textarea inside PromptComposer
-  const fileRefCard = fileReference ? (
-    <div className="px-3 pt-3 pb-0">
-      <FileReferenceCard
-        filePath={fileReference.filePath}
-        startLine={fileReference.startLine}
-        endLine={fileReference.endLine}
-        selectedText={fileReference.selectedText}
-        language={fileReference.language}
-        onDismiss={clearFileReference}
-      />
-    </div>
-  ) : null
+  const contextItems = []
+  if (selectedFileReference) contextItems.push({ id: 'selected-file', type: 'selected-file', data: selectedFileReference })
+  if (selectedXlsxReference) contextItems.push({ id: 'selected-xlsx', type: 'selected-xlsx', data: selectedXlsxReference })
+  if (fileReference) contextItems.push({ id: 'file-reference', type: 'file-reference', data: fileReference })
+  if (quotedText) contextItems.push({ id: 'quote', type: 'quote', text: quotedText })
+  const [lifecycleContextItems, removeExitedContextItem] = useListLifecycle(contextItems, (item) => item.id)
 
-  const selectedXlsxCard = selectedXlsxReference ? (
-    <div className="px-3 pt-3 pb-0">
-      <SelectedXlsxCard
-        filePath={selectedXlsxReference.filePath}
-        sheetName={selectedXlsxReference.sheetName}
-        range={selectedXlsxReference.range}
-        contentTsv={selectedXlsxReference.contentTsv}
-        onDismiss={clearSelectedXlsxReference}
-      />
-    </div>
-  ) : null
-
-  const selectedFileCard = selectedFileReference ? (
-    <div className="px-3 pt-3 pb-0">
-      <SelectedFileCard
-        kind={selectedFileReference.kind}
-        filePath={selectedFileReference.filePath}
-        fileName={selectedFileReference.fileName}
-        locator={selectedFileReference.locator}
-        content={selectedFileReference.content}
-        onDismiss={clearSelectedFileReference}
-      />
-    </div>
-  ) : null
-
-  // Quote badge rendered before the textarea inside PromptComposer
-  const quoteBadge = quotedText ? (
-    <div className="flex items-center gap-2 px-3 pt-3 pb-0">
-      <div className="flex items-center gap-2 px-2 py-1" style={{
-        background: 'var(--bg-surface)',
-        borderLeft: '2px solid var(--blue)',
-        borderRadius: 2,
-        maxWidth: '100%',
-        minWidth: 0,
-      }}>
-        <CornerDownLeft size={12} strokeWidth={1.5} style={{ color: 'var(--blue)', flexShrink: 0 }} />
-        <span className="uppercase" style={{
-          color: 'var(--text-dim)', fontSize: 11, letterSpacing: '0.06em', fontWeight: 600, flexShrink: 0,
+  const renderContextItem = (item) => {
+    if (item.type === 'selected-file') {
+      return (
+        <div className="px-3 pt-3 pb-0">
+          <SelectedFileCard
+            kind={item.data.kind}
+            filePath={item.data.filePath}
+            fileName={item.data.fileName}
+            locator={item.data.locator}
+            content={item.data.content}
+            onDismiss={clearSelectedFileReference}
+          />
+        </div>
+      )
+    }
+    if (item.type === 'selected-xlsx') {
+      return (
+        <div className="px-3 pt-3 pb-0">
+          <SelectedXlsxCard
+            filePath={item.data.filePath}
+            sheetName={item.data.sheetName}
+            range={item.data.range}
+            contentTsv={item.data.contentTsv}
+            onDismiss={clearSelectedXlsxReference}
+          />
+        </div>
+      )
+    }
+    if (item.type === 'file-reference') {
+      return (
+        <div className="px-3 pt-3 pb-0">
+          <FileReferenceCard
+            filePath={item.data.filePath}
+            startLine={item.data.startLine}
+            endLine={item.data.endLine}
+            selectedText={item.data.selectedText}
+            language={item.data.language}
+            onDismiss={clearFileReference}
+          />
+        </div>
+      )
+    }
+    return (
+      <div className="flex items-center gap-2 px-3 pt-3 pb-0">
+        <div className="flex items-center gap-2 px-2 py-1" style={{
+          background: 'var(--bg-surface)',
+          borderLeft: '2px solid var(--blue)',
+          borderRadius: 2,
+          maxWidth: '100%',
+          minWidth: 0,
         }}>
-          {t('quote.quoted')}
-        </span>
-        <span className="truncate" style={{
-          color: 'var(--text-secondary)', fontSize: 12, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-        }}>
-          &ldquo;{quotedText.length > 60 ? quotedText.slice(0, 60) + '...' : quotedText}&rdquo;
-        </span>
-        <button
-          className="flex items-center justify-center flex-shrink-0"
-          style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 0, marginLeft: 2, transition: 'color 150ms ease' }}
-          onClick={clearQuotedText}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-        >
-          <X size={14} strokeWidth={1.5} />
-        </button>
+          <CornerDownLeft size={12} strokeWidth={1.5} style={{ color: 'var(--blue)', flexShrink: 0 }} />
+          <span className="uppercase" style={{
+            color: 'var(--text-dim)', fontSize: 11, letterSpacing: '0.06em', fontWeight: 600, flexShrink: 0,
+          }}>
+            {t('quote.quoted')}
+          </span>
+          <span className="truncate" style={{
+            color: 'var(--text-secondary)', fontSize: 12, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+          }}>
+            &ldquo;{item.text.length > 60 ? item.text.slice(0, 60) + '...' : item.text}&rdquo;
+          </span>
+          <button
+            className="flex items-center justify-center flex-shrink-0"
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 0, marginLeft: 2, transition: 'color 150ms ease' }}
+            onClick={clearQuotedText}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+          >
+            <X size={14} strokeWidth={1.5} />
+          </button>
+        </div>
       </div>
-    </div>
+    )
+  }
+
+  const beforeTextareaContent = lifecycleContextItems.length > 0 ? (
+    <>
+      {lifecycleContextItems.map(({ key, item, present, exitIndex }) => (
+        <LifecycleItem
+          key={key}
+          present={present}
+          onExited={() => removeExitedContextItem(key)}
+          duration={220}
+          exitDuration={200}
+          enterCollapse
+          exitDelay={Math.min(exitIndex * 20, 80)}
+          style={{ pointerEvents: present ? 'auto' : 'none' }}
+        >
+          {renderContextItem(item)}
+        </LifecycleItem>
+      ))}
+    </>
   ) : null
 
   // Vision model hint banners rendered after image thumbnails
   const hasImages = attachments.some((a) => a.isImage)
-  const visionHints = hasImages ? (
+  const visionHintItems = hasImages ? [{ id: 'vision-hint', model: visionModel || null }] : []
+  const [lifecycleVisionHints, removeExitedVisionHint] = useListLifecycle(visionHintItems, (item) => item.id)
+  const visionHints = lifecycleVisionHints.length > 0 ? (
     <>
-      {!visionModel && (
-        <div className="flex items-center gap-2 px-3 py-1 mx-3 mt-1"
-          style={{ background: 'var(--bg-elevated)', borderLeft: '2px solid var(--yellow)', borderRadius: 2, fontSize: 11, color: 'var(--text-dim)', userSelect: 'none' }}>
-          <AlertTriangle size={12} strokeWidth={1.5} style={{ color: 'var(--yellow)', flexShrink: 0 }} />
-          {t('chat.noVisionModel')}
-        </div>
-      )}
-      {visionModel && (
-        <div className="flex items-center gap-2 px-3 py-1 mx-3 mt-1"
-          style={{ background: 'var(--bg-elevated)', borderLeft: '2px solid var(--cyan)', borderRadius: 2, fontSize: 11, color: 'var(--text-dim)', userSelect: 'none' }}>
-          <Cpu size={12} strokeWidth={1.5} style={{ color: 'var(--cyan)', flexShrink: 0 }} />
-          {t('chat.usingVisionModel', { model: visionModel })}
-        </div>
-      )}
+      {lifecycleVisionHints.map(({ key, item, present }) => {
+        const hasVisionModel = !!item.model
+        return (
+          <LifecycleItem
+            key={key}
+            present={present}
+            onExited={() => removeExitedVisionHint(key)}
+            duration={220}
+            exitDuration={180}
+            enterCollapse
+            style={{ pointerEvents: present ? 'auto' : 'none' }}
+          >
+            <div className="flex items-center gap-2 px-3 py-1 mx-3 mt-1"
+              style={{ background: 'var(--bg-elevated)', borderLeft: `2px solid ${hasVisionModel ? 'var(--cyan)' : 'var(--yellow)'}`, borderRadius: 2, fontSize: 11, color: 'var(--text-dim)', userSelect: 'none' }}>
+              {hasVisionModel
+                ? <Cpu size={12} strokeWidth={1.5} style={{ color: 'var(--cyan)', flexShrink: 0 }} />
+                : <AlertTriangle size={12} strokeWidth={1.5} style={{ color: 'var(--yellow)', flexShrink: 0 }} />}
+              {hasVisionModel ? t('chat.usingVisionModel', { model: item.model }) : t('chat.noVisionModel')}
+            </div>
+          </LifecycleItem>
+        )
+      })}
     </>
   ) : null
 
@@ -541,6 +604,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
         }}
         onMouseEnter={(e) => { if (!isStreaming) e.currentTarget.style.background = 'var(--bg-elevated)' }}
         onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+        onPointerDown={(e) => { if (!isStreaming) pressTick(e.currentTarget, { to: 0.96 }) }}
         onClick={(e) => {
           e.stopPropagation()
           if (!isStreaming) setShowPermissionMenu(!showPermissionMenu)
@@ -550,13 +614,15 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
         <span>{PERMISSION_MODES.find((m) => m.value === permissionMode)?.label}</span>
       </button>
 
-      {showPermissionMenu && (
+      {permissionMenuMounted && (
         <div
+          ref={permissionMenuPopRef}
           className="absolute"
           style={{
             bottom: '100%', left: 0, marginBottom: 4,
             background: 'var(--bg-elevated)', border: '1px solid var(--border)',
             borderRadius: 4, minWidth: 200, zIndex: 20, padding: '4px 0',
+            pointerEvents: showPermissionMenu ? 'auto' : 'none',
           }}
         >
           {PERMISSION_MODES.map((mode) => {
@@ -593,37 +659,45 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
   )
 
   // Model selector + send/stop buttons (toolbar right)
-  const sendBtnBg = canQueue ? 'var(--yellow)' : 'var(--blue)'
   const toolbarRightContent = (
     <>
       <ModelSelector />
       {isStreaming && (
         <button
+          ref={stopBtnRef}
           className="flex items-center justify-center"
           style={{
             width: 28, height: 28,
-            background: 'var(--red)', border: 'none', borderRadius: '4px',
-            cursor: 'pointer', color: 'var(--text-inverse)', transition: 'opacity 150ms ease',
+            background: 'transparent', border: 'none', borderRadius: '4px',
+            cursor: 'pointer', color: 'var(--text-primary)',
+            transition: 'background 150ms ease, color 150ms ease',
           }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+          onPointerDown={(e) => { pressTick(e.currentTarget) }}
           onClick={confirmStop}
           title={t('chat.stopEscape')}
         >
-          <Square size={14} strokeWidth={1.5} />
+          <Square size={13} strokeWidth={2.25} fill="currentColor" />
         </button>
       )}
       {canSend && (
         <button
+          ref={sendBtnRef}
           className="flex items-center justify-center"
           style={{
             width: 28, height: 28,
-            background: sendBtnBg, border: 'none', borderRadius: '4px',
-            cursor: 'pointer', color: 'var(--text-inverse)',
+            background: 'transparent', border: 'none', borderRadius: '4px',
+            cursor: 'pointer', color: 'var(--text-primary)',
             transition: 'background 150ms ease, color 150ms ease',
           }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+          onPointerDown={(e) => { pressTick(e.currentTarget) }}
           onClick={handleSend}
           title={canQueue ? t('chat.queueForBoundary') : t('chat.send')}
         >
-          <Send size={14} strokeWidth={1.5} />
+          <CornerDownLeft size={17} strokeWidth={2.25} />
         </button>
       )}
       {/* Running tasks block fresh sends — keep the button visible but inert
@@ -639,7 +713,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
           }}
           title={t('chat.waitForTasks')}
         >
-          <Send size={14} strokeWidth={1.5} />
+          <CornerDownLeft size={17} strokeWidth={2.25} />
         </button>
       )}
     </>
@@ -715,6 +789,37 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
     </>
   )
 
+  const pendingComposerItems = pendingPlanApproval
+    ? [{ id: `plan-${pendingPlanApproval.requestId || 'current'}`, type: 'plan', data: pendingPlanApproval }]
+    : pendingPermission
+      ? [{ id: `permission-${pendingPermission.requestId || pendingPermission.request_id || 'current'}`, type: 'permission', data: pendingPermission }]
+      : pendingAskUser
+        ? [{ id: `ask-${pendingAskUser.toolUseId || pendingAskUser.tool_use_id || 'current'}`, type: 'ask', data: pendingAskUser }]
+        : []
+  const [lifecyclePendingComposerItems, removeExitedPendingComposerItem] = useListLifecycle(pendingComposerItems, (item) => item.id)
+
+  const renderPendingComposerItem = (item) => {
+    if (item.type === 'plan') {
+      return (
+        <ErrorBoundary compact resetKey={item.data.requestId}>
+          <PlanApprovalCard approval={item.data} onApprove={handlePlanApproval} />
+        </ErrorBoundary>
+      )
+    }
+    if (item.type === 'permission') {
+      return (
+        <ErrorBoundary compact resetKey={item.data.requestId || item.data.request_id}>
+          <PermissionRequestCard block={item.data} onRespond={respondPermission} />
+        </ErrorBoundary>
+      )
+    }
+    return (
+      <ErrorBoundary compact resetKey={item.data.toolUseId || item.data.tool_use_id}>
+        <AskUserQuestionCard block={item.data} onAnswer={sendAnswer} onSkip={handleDecline} />
+      </ErrorBoundary>
+    )
+  }
+
   return (
     <div
       className="flex-shrink-0"
@@ -728,25 +833,27 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
           </div>
         )}
 
-        {queuedUserMessages.length > 0 && (
-          <QueuedMessagesStack
-            entries={queuedUserMessages}
-            style={{ marginBottom: 8 }}
-          />
-        )}
+        {/* No length gate here: the stack retains exiting rows and unmounts
+            itself once the last exit animation finishes. */}
+        <QueuedMessagesStack
+          entries={queuedUserMessages}
+          style={{ marginBottom: 8 }}
+        />
 
-        {pendingPlanApproval ? (
-          <ErrorBoundary compact resetKey={pendingPlanApproval.requestId}>
-            <PlanApprovalCard approval={pendingPlanApproval} onApprove={handlePlanApproval} />
-          </ErrorBoundary>
-        ) : pendingPermission ? (
-          <ErrorBoundary compact resetKey={pendingPermission.requestId}>
-            <PermissionRequestCard block={pendingPermission} onRespond={respondPermission} />
-          </ErrorBoundary>
-        ) : pendingAskUser ? (
-          <ErrorBoundary compact resetKey={pendingAskUser.toolUseId}>
-            <AskUserQuestionCard block={pendingAskUser} onAnswer={sendAnswer} onSkip={handleDecline} />
-          </ErrorBoundary>
+        {lifecyclePendingComposerItems.length > 0 ? (
+          lifecyclePendingComposerItems.map(({ key, item, present }) => (
+            <LifecycleItem
+              key={key}
+              present={present}
+              onExited={() => removeExitedPendingComposerItem(key)}
+              duration={220}
+              exitDuration={220}
+              rise={0}
+              style={{ pointerEvents: present ? 'auto' : 'none' }}
+            >
+              {renderPendingComposerItem(item)}
+            </LifecycleItem>
+          ))
         ) : (
           <PromptComposer
             value={inputText}
@@ -762,9 +869,9 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
             toolbarLeft={toolbarLeftContent}
             toolbarRight={toolbarRightContent}
             plusMenuExtra={mcpMenuContent}
-            beforeTextarea={<>{selectedFileCard}{selectedXlsxCard}{fileRefCard}{quoteBadge}</>}
+            beforeTextarea={beforeTextareaContent}
             afterImages={visionHints}
-            currentDirectory={cwd}
+            currentDirectory={displayCwd}
             onRegisterWarn={(fn) => { composerWarnRef.current = fn }}
           />
         )}
@@ -785,6 +892,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
 function McpSubMenu({ mcpServers, setMcpServers, serverList, loading, t }) {
   const [showSub, setShowSub] = useState(false)
   const hoverTimeout = useRef(null)
+  const { mounted: subMounted, popRef: subPopRef } = usePopoverTransition({ open: showSub, placement: 'right' })
 
   const isAuto = mcpServers === 'auto'
   const isDisabled = mcpServers === 'disable'
@@ -842,18 +950,20 @@ function McpSubMenu({ mcpServers, setMcpServers, serverList, loading, t }) {
         <ChevronRight size={12} strokeWidth={1.5} style={{ color: 'var(--text-dim)' }} />
       </button>
 
-      {showSub && (
+      {subMounted && (
         <div
+          ref={subPopRef}
           style={{
             position: 'absolute', left: '100%', bottom: 0,
             marginLeft: 0,
             background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-            borderRadius: 4, minWidth: 220, zIndex: 30,
+            borderRadius: 4, minWidth: 184, zIndex: 30,
+            pointerEvents: showSub ? 'auto' : 'none',
           }}
           onMouseEnter={enter}
           onMouseLeave={leave}
         >
-          <div className="flex items-center gap-1 px-3 py-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+          <div className="flex items-center gap-1 px-2 py-1" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
             {[
               { value: 'auto', label: t('mcp.policyAuto'), color: 'var(--green)' },
               { value: 'disable', label: t('mcp.policyDisable'), color: 'var(--red)' },
@@ -863,13 +973,13 @@ function McpSubMenu({ mcpServers, setMcpServers, serverList, loading, t }) {
                 <button
                   type="button"
                   key={mode.value}
-                  className="px-2 py-0 text-xs"
+	                  className="px-2 py-0"
                   style={{
                     background: active ? 'var(--bg-surface)' : 'transparent',
                     border: active ? `1px solid ${mode.color}` : '1px solid transparent',
                     borderRadius: 4, color: active ? mode.color : 'var(--text-dim)',
                     cursor: 'pointer', fontWeight: active ? 700 : 500,
-                    fontSize: 11, lineHeight: '20px', transition: 'all 150ms ease',
+	                    fontSize: 10, lineHeight: '18px', transition: 'all 150ms ease',
                   }}
                   onClick={(e) => { e.stopPropagation(); setMcpServers(mode.value) }}
                   onMouseEnter={(e) => { if (!active) e.currentTarget.style.color = mode.color }}
@@ -880,19 +990,19 @@ function McpSubMenu({ mcpServers, setMcpServers, serverList, loading, t }) {
               )
             })}
             {isCustom && (
-              <span style={{ color: 'var(--cyan)', fontSize: 10, fontWeight: 600, marginLeft: 'auto' }}>
+	              <span style={{ color: 'var(--cyan)', fontSize: 9, fontWeight: 600, marginLeft: 'auto' }}>
                 {selectedNames.length}/{serverCount}
               </span>
             )}
           </div>
 
-          <div style={{ maxHeight: 220, overflowY: 'auto', padding: '2px 0' }}>
+	          <div style={{ maxHeight: 184, overflowY: 'auto', padding: '2px 0' }}>
             {loading ? (
-              <div className="px-3 py-2" style={{ color: 'var(--text-dim)', fontSize: 12 }}>
+	              <div className="px-2 py-1" style={{ color: 'var(--text-dim)', fontSize: 11 }}>
                 {t('sidebar.loading')}
               </div>
             ) : serverList.length === 0 ? (
-              <div className="px-3 py-2" style={{ color: 'var(--text-dim)', fontSize: 12 }}>
+	              <div className="px-2 py-1" style={{ color: 'var(--text-dim)', fontSize: 11 }}>
                 {t('mcp.noServers')}
               </div>
             ) : serverList.map((srv) => {
@@ -901,12 +1011,12 @@ function McpSubMenu({ mcpServers, setMcpServers, serverList, loading, t }) {
                 <button
                   type="button"
                   key={srv.name}
-                  className="flex items-center gap-2 w-full px-3 py-1"
+	                  className="flex items-center gap-1 w-full px-2 py-1"
                   style={{
                     background: 'transparent', border: 'none',
                     cursor: 'pointer',
                     color: checked ? 'var(--text-primary)' : 'var(--text-secondary)',
-                    fontSize: 12, textAlign: 'left', transition: 'background 150ms ease',
+	                    fontSize: 11, textAlign: 'left', transition: 'background 150ms ease',
                     opacity: isDisabled ? 0.4 : 1,
                   }}
                   onClick={(e) => { e.stopPropagation(); toggleServer(srv.name) }}
@@ -914,17 +1024,17 @@ function McpSubMenu({ mcpServers, setMcpServers, serverList, loading, t }) {
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                 >
                   <span style={{
-                    width: 14, height: 14, borderRadius: 2, flexShrink: 0,
+	                    width: 12, height: 12, borderRadius: 2, flexShrink: 0,
                     border: checked ? '1px solid var(--cyan)' : '1px solid var(--border)',
                     background: checked ? 'var(--cyan)' : 'transparent',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     transition: 'all 150ms ease',
                   }}>
-                    {checked && <span style={{ color: 'var(--text-inverse)', fontSize: 10, fontWeight: 700 }}>&#10003;</span>}
+	                    {checked && <span style={{ color: 'var(--text-inverse)', fontSize: 9, fontWeight: 700 }}>&#10003;</span>}
                   </span>
                   <span className="truncate flex-1">{srv.name}</span>
                   <span className="uppercase flex-shrink-0" style={{
-                    fontSize: 9, color: srv.type === 'http' ? 'var(--cyan)' : 'var(--purple)',
+	                    fontSize: 8, color: srv.type === 'http' ? 'var(--cyan)' : 'var(--purple)',
                     letterSpacing: '0.06em',
                   }}>
                     {srv.type}

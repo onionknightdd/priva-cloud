@@ -6,6 +6,7 @@ import { RollingInteger } from '../shared/Odometer'
 import useUiStore from '@shared/stores/uiStore'
 import useWorkflowStore, { phaseRollup, workflowAgentTotals } from '../../stores/workflowStore'
 import { fetchWorkflowAgentTranscript } from '../../api/sessions'
+import { tweenScrollIntoView } from '@shared/motion/tweenScroll'
 import {
   formatDuration,
   agentStatusMeta,
@@ -54,7 +55,7 @@ function DetailAgentRow({ workflow, agentIndex }) {
     handledRevisionRef.current = inspectorFocusRevision
     setExpanded(true)
     const raf = window.requestAnimationFrame(() => {
-      rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      tweenScrollIntoView(rowRef.current, { block: 'center', flash: true })
     })
     return () => window.cancelAnimationFrame(raf)
   }, [inspectorFocusRevision, inspectorFocusTarget, workflow.toolUseId, agentIndex])

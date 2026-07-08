@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { X, ChevronDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import usePopoverTransition from '@shared/motion/usePopoverTransition'
 
 const KNOWN_TOOLS = new Set(['Read', 'Write', 'Edit', 'Grep', 'Glob', 'Bash', 'TodoWrite'])
 const monoFont = "'JetBrains Mono', 'Source Han Mono SC', monospace"
@@ -42,6 +43,9 @@ export default function ToolPicker({ value = [], catalog = [], onChange, label }
   }
   const remove = (tool) => onChange(value.filter((v) => v !== tool))
   const canOpen = offered.length > 0
+  const menuOpen = open && canOpen
+  // Canonical popover envelope (M7): opacity + 4px drop, 200ms both ways.
+  const { mounted: menuMounted, popRef } = usePopoverTransition({ open: menuOpen })
 
   return (
     <div className="flex flex-col gap-2">
@@ -129,8 +133,9 @@ export default function ToolPicker({ value = [], catalog = [], onChange, label }
           />
         </div>
 
-        {open && canOpen && (
+        {menuMounted && (
           <div
+            ref={popRef}
             className="absolute flex flex-col"
             style={{
               top: 'calc(100% + 4px)',
@@ -142,6 +147,7 @@ export default function ToolPicker({ value = [], catalog = [], onChange, label }
               border: '1px solid var(--border)',
               borderRadius: 4,
               zIndex: 50,
+              pointerEvents: menuOpen ? 'auto' : 'none',
             }}
           >
             {offered.map((tool) => (

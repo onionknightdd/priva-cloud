@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { CheckCircle, XCircle, Clock, Loader, X, ChevronDown, Workflow as WorkflowIcon } from 'lucide-react'
 import { AnimatedChevron } from '@shared/components/shared/Accordion'
 import CopyButton from '@shared/components/shared/CopyButton'
+import { useStatusSettle } from '@shared/motion/useStatusSettle'
 import { RollingInteger } from '../shared/Odometer'
 import MarkdownRenderer from '../markdown/MarkdownRenderer'
 import hljsCore from 'highlight.js/lib/core'
@@ -324,6 +325,8 @@ function InlineAgentRow({ workflow, agentIndex }) {
   const showCanvas = useUiStore((s) => s.showCanvas)
   const setActiveCanvasTab = useUiStore((s) => s.setActiveCanvasTab)
 
+  // M9: one-shot 0.98→1 settle on the status icon when the agent resolves live.
+  const settleRef = useStatusSettle(agent?.state)
   if (!agent) return null
   const { Icon, color, spin } = agentStatusMeta(agent.state)
   const active = activeWorkflowId === workflow.toolUseId && activeAgentIndex === agentIndex
@@ -357,7 +360,9 @@ function InlineAgentRow({ workflow, agentIndex }) {
       onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--bg-elevated)' }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent' }}
     >
-      <Icon size={12} strokeWidth={1.5} style={{ color, flexShrink: 0 }} className={spin ? 'icon-running' : ''} />
+      <span ref={settleRef} className="inline-flex flex-shrink-0">
+        <Icon size={12} strokeWidth={1.5} style={{ color }} className={spin ? 'icon-running' : ''} />
+      </span>
       <span className="truncate min-w-0 flex-1" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
         {agent.label || `agent ${agentIndex}`}
       </span>

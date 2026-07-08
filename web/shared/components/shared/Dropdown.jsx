@@ -1,5 +1,10 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { ChevronDown, Search } from 'lucide-react'
+
+// Above this option count the open menu virtualizes its list — e.g. the admin
+// console's account picker on a large tenant. Below it, plain rendering.
+const VIRTUALIZE_AT = 50
 
 /**
  * Dropdown — the canonical select control for the whole app.
@@ -65,6 +70,16 @@ export default function Dropdown({
   useEffect(() => {
     if (open && searchable && filterRef.current) filterRef.current.focus()
   }, [open, searchable])
+
+  const menuListRef = useRef(null)
+  const menuVirtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => menuListRef.current,
+    estimateSize: () => 29, // px-3 py-2 single-line option
+    overscan: 10,
+    getItemKey: (i) => String(filtered[i].value),
+    enabled: open && filtered.length > VIRTUALIZE_AT,
+  })
 
   const fontFamily = mono ? "'JetBrains Mono', 'Source Han Mono SC', monospace" : undefined
   const dims = size === 'sm'
@@ -132,7 +147,12 @@ export default function Dropdown({
           opacity: open ? 1 : 0,
           transform: open ? 'translateY(0)' : closedTransform,
           pointerEvents: open ? 'auto' : 'none',
-          transition: 'opacity 200ms cubic-bezier(0.16, 1, 0.3, 1), transform 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+          // Spring in; the exit runs a balanced curve slightly longer — the
+          // spring front-loads ~80% into the first 40ms, which makes a
+          // dismissal on it read as a hard cut.
+          transition: open
+            ? 'opacity 200ms cubic-bezier(0.16, 1, 0.3, 1), transform 200ms cubic-bezier(0.16, 1, 0.3, 1)'
+            : 'opacity 250ms cubic-bezier(0.4, 0, 0.2, 1), transform 250ms cubic-bezier(0.4, 0, 0.2, 1)',
           fontFamily,
         }}
       >
@@ -151,11 +171,9 @@ export default function Dropdown({
           </div>
         )}
 
-        <div className="overflow-y-auto" style={{ maxHeight: 240 }}>
-          {filtered.length === 0 ? (
-            <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-dim)' }}>No matches</div>
-          ) : (
-            filtered.map((o) => {
+        <div ref={menuListRef} className="overflow-y-auto" style={{ maxHeight: 240 }}>
+          {(() => {
+            const renderOption = (o) => {
               const isActive = o.value === value
               const OptIcon = o.icon
               return (
@@ -186,8 +204,29 @@ export default function Dropdown({
                   <span className="truncate">{o.label}</span>
                 </button>
               )
-            })
-          )}
+            }
+
+            if (filtered.length === 0) {
+              return <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-dim)' }}>No matches</div>
+            }
+            if (filtered.length > VIRTUALIZE_AT) {
+              return (
+                <div style={{ height: menuVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+                  {menuVirtualizer.getVirtualItems().map((vi) => (
+                    <div
+                      key={vi.key}
+                      data-index={vi.index}
+                      ref={menuVirtualizer.measureElement}
+                      style={{ position: 'absolute', top: vi.start, left: 0, width: '100%' }}
+                    >
+                      {renderOption(filtered[vi.index])}
+                    </div>
+                  ))}
+                </div>
+              )
+            }
+            return filtered.map(renderOption)
+          })()}
         </div>
       </div>
     </div>

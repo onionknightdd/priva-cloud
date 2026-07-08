@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { Cpu, MemoryStick, HardDrive, Gauge } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Chip from '@shared/components/shared/Chip'
+import { useAnimatedNumber } from '@shared/motion/useAnimatedNumber'
 import useAdminStore from '../../stores/adminStore'
 import LiveToggleButton from './LiveToggleButton'
 
@@ -41,7 +43,10 @@ function pctOf(used, allocated) {
 // One fleet-wide usage bar: label · track with a filled portion · used/allocated + pct.
 // available=false renders a single '—' instead of a misleading empty bar.
 function UsageBar({ icon: Icon, label, used, allocated, fmt, available }) {
-  const pct = pctOf(used, allocated)
+  // Poll updates tween the used value (and thus the % + fill) to the new
+  // reading; first paint snaps.
+  const animatedUsed = useAnimatedNumber(used, { decimals: 2 })
+  const pct = pctOf(animatedUsed, allocated)
   return (
     <div className="flex items-center gap-3" style={{ minWidth: 0 }}>
       <div
@@ -70,8 +75,8 @@ function UsageBar({ icon: Icon, label, used, allocated, fmt, available }) {
             className="flex items-baseline gap-2 flex-shrink-0"
             style={{ width: 188, justifyContent: 'flex-end', fontFamily: "'JetBrains Mono', monospace" }}
           >
-            <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
-              {fmt(used)} <span style={{ color: 'var(--text-dim)' }}>/ {fmt(allocated)}</span>
+            <span className="text-sm" style={{ color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>
+              {fmt(animatedUsed)} <span style={{ color: 'var(--text-dim)' }}>/ {fmt(allocated)}</span>
             </span>
             <span className="text-xs font-light" style={{ width: 44, textAlign: 'right', color: 'var(--text-secondary)' }}>
               {pct.toFixed(pct < 10 ? 1 : 0)}%
@@ -140,6 +145,30 @@ export default function ResourceQuotaView() {
   // available when any account reports a backend usage figure.
   const volAvailable = accounts.some((a) => a.volume_used_gb != null)
   const initialLoad = loading && !usage
+
+  const rqScrollRef = useRef(null)
+  const rqRowsRef = useRef(null)
+  const [rqRowsMargin, setRqRowsMargin] = useState(0)
+
+  // Account rows sit below the summary card inside the same scroll pane —
+  // measure that offset into scrollMargin.
+  useLayoutEffect(() => {
+    const scrollEl = rqScrollRef.current
+    const rowsEl = rqRowsRef.current
+    if (!scrollEl || !rowsEl) return
+    setRqRowsMargin(
+      rowsEl.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop
+    )
+  }, [initialLoad, accounts.length])
+
+  const rqVirtualizer = useVirtualizer({
+    count: accounts.length,
+    getScrollElement: () => rqScrollRef.current,
+    estimateSize: () => 46,
+    overscan: 12,
+    scrollMargin: rqRowsMargin,
+    getItemKey: (i) => accounts[i].account_id,
+  })
   const handleLiveToggle = () => {
     if (error) {
       setLiveEnabled(true)
@@ -173,7 +202,7 @@ export default function ResourceQuotaView() {
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto" style={{ padding: '16px var(--admin-section-x) 24px var(--admin-section-x)' }}>
+      <div ref={rqScrollRef} className="flex-1 overflow-y-auto" style={{ padding: '16px var(--admin-section-x) 24px var(--admin-section-x)' }}>
         {/* Fleet-wide summary card */}
         {initialLoad ? (
           <SummarySkeleton />
@@ -228,9 +257,20 @@ export default function ResourceQuotaView() {
               {t('admin.noAgentRunnerAccounts')}
             </div>
           ) : (
-            accounts.map((a) => (
+            <div
+              ref={rqRowsRef}
+              style={{ height: rqVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}
+            >
+            {rqVirtualizer.getVirtualItems().map((vi) => {
+              const a = accounts[vi.index]
+              return (
               <div
-                key={a.account_id}
+                key={vi.key}
+                data-index={vi.index}
+                ref={rqVirtualizer.measureElement}
+                style={{ position: 'absolute', top: vi.start - rqRowsMargin, left: 0, width: '100%' }}
+              >
+              <div
                 className="flex items-center gap-3 px-4 py-2"
                 style={{ borderBottom: '1px solid var(--border-subtle)', borderLeft: `2px solid ${a.awake ? 'var(--green)' : 'var(--status-idle)'}` }}
               >
@@ -266,7 +306,10 @@ export default function ResourceQuotaView() {
                   <span style={{ color: 'var(--text-dim)' }}>/{a.volume_gb}Gi</span>
                 </span>
               </div>
-            ))
+              </div>
+              )
+            })}
+            </div>
           )}
         </div>
       </div>

@@ -1,6 +1,10 @@
 import { useState, useRef, useEffect, useMemo, useCallback, useLayoutEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'framer-motion'
+import { animate } from 'animejs'
+import { usePresence } from '@shared/motion/usePresence'
+import { useReducedMotion } from '@shared/motion/useReducedMotion'
+import { useFlipPosition } from '@shared/motion/useFlipPosition'
+import { DUR_MIGRATION, EASE_SPRING } from '@shared/motion/tokens'
 import {
   Search, RefreshCw, Plus, ArrowDownUp, Package,
   Download, Trash2, ChevronDown, Folder, FolderOpen, FileText,
@@ -52,11 +56,87 @@ const menuItemStyle = {
 }
 const menuItemIn = (e) => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.color = 'var(--text-primary)' }
 const menuItemOut = (e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }
-const TREE_LAYOUT_TRANSITION = { type: 'tween', duration: 0.32, ease: [0.16, 1, 0.3, 1] }
-const TREE_EXPAND_TRANSITION = { type: 'tween', duration: 0.32, ease: [0.16, 1, 0.3, 1] }
-const TREE_COLLAPSE_TRANSITION = { type: 'tween', duration: 0.42, ease: [0.16, 1, 0.3, 1] }
 const TREE_ROW_HEIGHT = 26
 const TREE_INLINE_PADDING_BOTTOM = 4
+
+// Rows slide to their new layout position when content above them changes
+// (framer `layout="position"` equivalent).
+function FlipPosition({ disabled, className, style, children }) {
+  const ref = useRef(null)
+  useFlipPosition(ref, { duration: DUR_MIGRATION.treeExpand, ease: EASE_SPRING, disabled })
+  return <div ref={ref} className={className} style={style}>{children}</div>
+}
+
+// Measured-height reveal with a presence-latched collapse. `height` comes from
+// useMeasuredHeight, so content growth retargets the tween live. The selected
+// skill's tree collapses INSTANTLY (instantCollapse) — the row FLIP above is
+// what makes the rows below slide smoothly.
+function TreeReveal({ open, height, reduceMotion, instantCollapse = false, collapseMs = DUR_MIGRATION.treeCollapse, className, style, children }) {
+  const { mounted, onExited } = usePresence(open)
+  const ref = useRef(null)
+  const enteredRef = useRef(open)
+  const animRef = useRef(null)
+  // This element also FLIPs (framer had layout="position" on it too).
+  useFlipPosition(ref, { duration: DUR_MIGRATION.treeExpand, ease: EASE_SPRING, disabled: reduceMotion })
+
+  useLayoutEffect(() => {
+    if (!mounted) {
+      enteredRef.current = false
+      return
+    }
+    const el = ref.current
+    if (!el) {
+      if (!open) onExited()
+      return
+    }
+    animRef.current?.cancel()
+    if (reduceMotion) {
+      if (open) {
+        enteredRef.current = true
+        el.style.height = `${height}px`
+      } else {
+        onExited()
+      }
+      return
+    }
+    if (open) {
+      if (!enteredRef.current) el.style.height = '0px' // pre-paint fresh enter
+      enteredRef.current = true
+      animRef.current = animate(el, {
+        height: `${height}px`,
+        duration: DUR_MIGRATION.treeExpand,
+        ease: EASE_SPRING,
+      })
+    } else if (instantCollapse) {
+      el.style.height = '0px'
+      onExited()
+    } else {
+      animRef.current = animate(el, {
+        height: '0px',
+        duration: collapseMs,
+        ease: EASE_SPRING,
+        onComplete: onExited,
+      })
+    }
+  }, [open, mounted, height, reduceMotion, instantCollapse, collapseMs, onExited])
+
+  if (!mounted) return null
+  return (
+    <div
+      ref={ref}
+      className={className}
+      style={{
+        overflow: 'hidden',
+        transformOrigin: 'top left',
+        willChange: 'height',
+        pointerEvents: open && height > 0 ? 'auto' : 'none',
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  )
+}
 
 function useMeasuredHeight(deps) {
   const ref = useRef(null)
@@ -390,16 +470,12 @@ export default function SkillList({ headerStart = null }) {
             {t('skills.noSkills')}
           </div>
         ) : (
-          <LayoutGroup id="skills-inline-tree">
+          <>
             {sections.map((sec) => {
               const open = !collapsedGroups[sec.key]
               const Icon = sec.icon
               return (
-                <motion.div
-                  key={sec.key}
-                  layout="position"
-                  transition={{ layout: shouldReduceMotion ? { duration: 0 } : TREE_LAYOUT_TRANSITION }}
-                >
+                <FlipPosition key={sec.key} disabled={shouldReduceMotion}>
                   <button
                     className="flex items-center gap-1 w-full px-2 py-1"
                     style={{ background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}
@@ -437,10 +513,10 @@ export default function SkillList({ headerStart = null }) {
                       ))}
                     </div>
                   </AnimatedCollapse>
-                </motion.div>
+                </FlipPosition>
               )
             })}
-          </LayoutGroup>
+          </>
         )}
       </div>
 
@@ -498,9 +574,8 @@ function SkillRow({ skill, selected, detail, detailLoading, detailError, suppres
   }, [onSelectFile])
 
   return (
-    <motion.div
-      layout="position"
-      transition={{ layout: reduceMotion ? { duration: 0 } : TREE_LAYOUT_TRANSITION }}
+    <FlipPosition
+      disabled={reduceMotion}
       style={{
         '--skill-inline-active-bg': hasActiveFile ? 'var(--bg-elevated)' : 'transparent',
         '--skill-inline-active-border': hasActiveFile ? 'var(--cyan)' : 'transparent',
@@ -551,19 +626,15 @@ function SkillRow({ skill, selected, detail, detailLoading, detailError, suppres
         )}
       </div>
 
-      {/* Inline file tree for the selected skill */}
-      <AnimatePresence initial={false}>
-        {selected && (
-          <motion.div
-            key="inline-tree"
-            layout="position"
-            className="skill-inline-content"
-            initial={reduceMotion ? false : { height: 0, pointerEvents: 'none' }}
-            animate={{ height: inlineTreeHeight, pointerEvents: inlineTreeHeight > 0 ? 'auto' : 'none' }}
-            exit={{ height: 0, pointerEvents: 'none', transition: { duration: 0 } }}
-            transition={reduceMotion ? { duration: 0 } : TREE_EXPAND_TRANSITION}
-            style={{ overflow: 'hidden', transformOrigin: 'top left', willChange: 'height' }}
-          >
+      {/* Inline file tree for the selected skill — collapses instantly on
+          deselect; the row FLIP makes the rows below slide. */}
+      <TreeReveal
+        open={selected}
+        height={inlineTreeHeight}
+        reduceMotion={reduceMotion}
+        instantCollapse
+        className="skill-inline-content"
+      >
             <div ref={inlineTreeMeasureRef} style={{ paddingBottom: TREE_INLINE_PADDING_BOTTOM }}>
               {detailLoading ? null : detailError ? (
                 <div
@@ -594,10 +665,8 @@ function SkillRow({ skill, selected, detail, detailLoading, detailError, suppres
                 </div>
               )}
             </div>
-          </motion.div>
-          )}
-      </AnimatePresence>
-    </motion.div>
+      </TreeReveal>
+    </FlipPosition>
   )
 }
 
@@ -642,7 +711,7 @@ function InlineTreeDirectory({ node, depth, parentPath, selectedFile, onSelectFi
   ])
 
   return (
-    <motion.div layout="position" transition={{ layout: reduceMotion ? { duration: 0 } : TREE_LAYOUT_TRANSITION }}>
+    <FlipPosition disabled={reduceMotion}>
       <button
         className="flex items-center gap-1 w-full pr-2 py-1"
         style={{ paddingLeft: pad, height: TREE_ROW_HEIGHT, minHeight: TREE_ROW_HEIGHT, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 12, textAlign: 'left', transition: 'background 150ms ease' }}
@@ -658,18 +727,13 @@ function InlineTreeDirectory({ node, depth, parentPath, selectedFile, onSelectFi
           : <Folder size={12} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />}
         <span className="truncate">{node.name}</span>
       </button>
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            key="children"
-            layout="position"
-            className="skill-inline-content"
-            initial={reduceMotion ? false : { height: 0, pointerEvents: 'none' }}
-            animate={{ height: childrenHeight, pointerEvents: childrenHeight > 0 ? 'auto' : 'none' }}
-            exit={reduceMotion ? { height: 0, pointerEvents: 'none' } : { height: 0, pointerEvents: 'none', transition: TREE_COLLAPSE_TRANSITION }}
-            transition={reduceMotion ? { duration: 0 } : TREE_EXPAND_TRANSITION}
-            style={{ overflow: 'hidden', transformOrigin: 'top left', willChange: 'height' }}
-          >
+      <TreeReveal
+        open={expanded}
+        height={childrenHeight}
+        reduceMotion={reduceMotion}
+        collapseMs={DUR_MIGRATION.treeCollapse}
+        className="skill-inline-content"
+      >
             <div ref={childrenMeasureRef}>
               {(node.children || []).map((c) => (
                 <InlineTreeNode
@@ -686,10 +750,8 @@ function InlineTreeDirectory({ node, depth, parentPath, selectedFile, onSelectFi
                 />
               ))}
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+      </TreeReveal>
+    </FlipPosition>
   )
 }
 
@@ -698,7 +760,7 @@ function InlineTreeFile({ node, depth, parentPath, selectedFile, onSelectFile, s
   const pad = 22 + depth * 14
   const active = !suppressFileActive && selectedFile === path
   return (
-    <motion.div layout="position" transition={{ layout: reduceMotion ? { duration: 0 } : TREE_LAYOUT_TRANSITION }}>
+    <FlipPosition disabled={reduceMotion}>
       <button
         className="flex items-center gap-1 w-full pr-2 py-1"
         style={{
@@ -718,6 +780,6 @@ function InlineTreeFile({ node, depth, parentPath, selectedFile, onSelectFile, s
         <FileText size={12} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />
         <span className="truncate">{node.name}</span>
       </button>
-    </motion.div>
+    </FlipPosition>
   )
 }

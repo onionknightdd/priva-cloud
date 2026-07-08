@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 
-export function useResizable({ initial, min, max, direction = 'right', onResize }) {
+export function useResizable({ initial, min, max, direction = 'right', onResize, onRelease }) {
   const [dragging, setDragging] = useState(false)
   const cleanupRef = useRef(null)
   const frameRef = useRef(null)
@@ -46,11 +46,16 @@ export function useResizable({ initial, min, max, direction = 'right', onResize 
       frameRef.current = window.requestAnimationFrame(flushResize)
     }
 
+    // Unclamped size tracks the cursor's true intent past min/max — release
+    // detents (e.g. "dragged well under min → collapse") key off it.
+    let unclampedSize = startSize
+
     const onMouseMove = (e) => {
       const currentPos = isVertical ? e.clientY : e.clientX
       let delta = currentPos - startPos
       if (direction === 'left' || direction === 'up') delta = -delta
-      const newSize = Math.min(max, Math.max(min, startSize + delta))
+      unclampedSize = startSize + delta
+      const newSize = Math.min(max, Math.max(min, unclampedSize))
       scheduleResize(newSize)
     }
 
@@ -64,6 +69,7 @@ export function useResizable({ initial, min, max, direction = 'right', onResize 
       if (pendingSize !== lastSize) {
         onResize(pendingSize)
       }
+      onRelease?.(pendingSize, unclampedSize)
       if (updateDragging) setDragging(false)
       document.removeEventListener('mousemove', onMouseMove)
       document.removeEventListener('mouseup', onMouseUp)

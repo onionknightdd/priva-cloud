@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAnimatedNumber } from '@shared/motion/useAnimatedNumber'
 import useUserDataStore from '../../stores/userDataStore'
 
 function formatBytes(bytes) {
@@ -34,7 +35,14 @@ function CardSkeleton() {
   )
 }
 
-function StatCard({ label, value }) {
+function StatCard({ label, value, format }) {
+  // Refetches tween numeric values to the new reading (formatter applied per
+  // frame); first paint snaps. Non-numeric values (relative time) render as-is.
+  const isNumeric = typeof value === 'number' && Number.isFinite(value)
+  const animatedValue = useAnimatedNumber(isNumeric ? value : 0)
+  const shown = isNumeric
+    ? (format ? format(animatedValue) : animatedValue)
+    : value
   return (
     <div
       className="flex flex-col gap-1 px-5 py-4"
@@ -43,8 +51,8 @@ function StatCard({ label, value }) {
       <span className="text-xs uppercase font-semibold" style={{ color: 'var(--text-dim)', letterSpacing: '0.06em' }}>
         {label}
       </span>
-      <span className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-        {value}
+      <span className="text-lg font-bold" style={{ color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>
+        {shown}
       </span>
     </div>
   )
@@ -76,9 +84,9 @@ export default function UserUsage() {
         ) : stats ? (
           <>
             <StatCard label={t('userData.sessions')} value={stats.session_count} />
-            <StatCard label={t('userData.storage')} value={formatBytes(stats.storage_bytes)} />
+            <StatCard label={t('userData.storage')} value={stats.storage_bytes} format={formatBytes} />
             <StatCard label={t('userData.files')} value={stats.file_count} />
-            <StatCard label={t('userData.totalFileSize')} value={formatBytes(stats.total_file_size)} />
+            <StatCard label={t('userData.totalFileSize')} value={stats.total_file_size} format={formatBytes} />
             <StatCard label={t('userData.lastActive')} value={relativeTime(stats.last_active, t)} />
           </>
         ) : null}

@@ -3,6 +3,7 @@ import { SquareTerminal, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Dropdown from '@shared/components/shared/Dropdown'
 import TerminalSession from '@shared/components/terminal/TerminalSession'
+import { useStatusColorTween } from '@shared/motion/useStatusSettle'
 import useAdminStore from '../../stores/adminStore'
 
 // Admin console: open a live shell into either
@@ -19,18 +20,20 @@ const AR_PATH = '/api/sandbox/pty/ws'
 
 function StatusLabel({ meta, ready, closed }) {
   const { t } = useTranslation()
-  if (!meta) return null
   const [text, color] = closed
     ? [t('admin.consoleDisconnected'), 'var(--red)']
     : ready
       ? [t('admin.live'), 'var(--green)']
       : [t('admin.consoleConnecting'), 'var(--yellow)']
+  // T3: CONNECTING→LIVE (and →DISCONNECTED) blends the label color over 150ms.
+  const labelTweenRef = useStatusColorTween(color, { property: 'color' })
+  if (!meta) return null
   return (
     <div className="flex items-center gap-2 flex-shrink-0">
       <span className="uppercase text-xs" style={{ color: 'var(--text-dim)', letterSpacing: '0.06em' }}>
         {meta.kind === 'cp' ? t('admin.scopeControlPlane') : t('admin.agentRunner')}
       </span>
-      <span className="uppercase text-xs" style={{ color, fontWeight: 600, letterSpacing: '0.06em' }}>
+      <span ref={labelTweenRef} className="uppercase text-xs" style={{ color, fontWeight: 600, letterSpacing: '0.06em' }}>
         {text}
       </span>
     </div>

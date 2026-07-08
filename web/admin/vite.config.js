@@ -54,7 +54,7 @@ export default defineConfig({
           ) {
             return 'vendor-charts'
           }
-          if (pkg === 'framer-motion' || pkg === 'motion-utils' || pkg === 'motion-dom') return 'vendor-motion'
+          if (pkg === 'animejs') return 'vendor-motion'
           return 'vendor-misc'
         },
       },

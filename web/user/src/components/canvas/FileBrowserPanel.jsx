@@ -28,11 +28,13 @@ import RichFilePreview from '../shared/RichFilePreview'
 import Tabs, { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 import MarkdownRenderer from '../markdown/MarkdownRenderer'
+import VirtualizedCodeLines from '../shared/VirtualizedCodeLines'
 import MermaidDiagram from '../markdown/MermaidDiagram'
 import ExcalidrawDiagram from '../markdown/ExcalidrawDiagram'
 import SelectedFilePopup from '../shared/SelectedFilePopup'
 import getLineFromNode from '../../utils/getLineFromNode'
 import { getFileIcon } from '../../utils/fileIcons'
+import DrawIcon from '@shared/components/shared/DrawIcon'
 
 hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('python', python)
@@ -271,7 +273,7 @@ function CopyPathButton({ path }) {
         flexShrink: 0,
       }}
     >
-      {copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
+      {copied ? <DrawIcon name="check" size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
     </button>
   )
 }
@@ -346,77 +348,7 @@ function HighlightedCode({ content, language }) {
     return highlighted.replace(/\n$/, '').split('\n').map((html) => ({ text: null, html }))
   }, [content, highlighted])
 
-  const gutterWidth = String(lines.length).length * 8 + 16
-
-  return (
-    <div className="overflow-auto" style={{ height: '100%', background: 'var(--bg-elevated)' }}>
-      <table style={{
-        borderCollapse: 'collapse',
-        fontSize: 12,
-        lineHeight: 1.6,
-        fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-        width: '100%',
-        tableLayout: 'fixed',
-      }}>
-        <tbody>
-          {lines.map((line, i) => (
-            <tr key={i}>
-              <td style={{
-                width: gutterWidth,
-                minWidth: gutterWidth,
-                padding: i === 0
-                  ? '12px 8px 0 12px'
-                  : i === lines.length - 1
-                    ? '0 8px 12px 12px'
-                    : '0 8px 0 12px',
-                textAlign: 'right',
-                color: 'var(--text-dim)',
-                userSelect: 'none',
-                verticalAlign: 'top',
-                borderRight: '1px solid var(--border)',
-                position: 'sticky',
-                left: 0,
-                background: 'var(--bg-elevated)',
-                zIndex: 1,
-              }}>
-                {i + 1}
-              </td>
-              {line.html != null ? (
-                <td
-                  style={{
-                    padding: i === 0
-                      ? '12px 16px 0 12px'
-                      : i === lines.length - 1
-                        ? '0 16px 12px 12px'
-                        : '0 16px 0 12px',
-                    whiteSpace: 'pre-wrap',
-                    overflowWrap: 'anywhere',
-                    wordBreak: 'break-word',
-                    color: 'var(--text-primary)',
-                  }}
-                  dangerouslySetInnerHTML={{ __html: line.html || '&nbsp;' }}
-                />
-              ) : (
-                <td style={{
-                  padding: i === 0
-                    ? '12px 16px 0 12px'
-                    : i === lines.length - 1
-                      ? '0 16px 12px 12px'
-                      : '0 16px 0 12px',
-                  whiteSpace: 'pre-wrap',
-                  overflowWrap: 'anywhere',
-                  wordBreak: 'break-word',
-                  color: 'var(--text-primary)',
-                }}>
-                  {line.text || ' '}
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
+  return <VirtualizedCodeLines lines={lines} />
 }
 
 function NonPlainRawNotice({ onPreview }) {

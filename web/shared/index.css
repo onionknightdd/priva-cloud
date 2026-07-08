@@ -386,20 +386,9 @@ html, body {
   transform-origin: bottom center;
 }
 
-@keyframes prompt-expand-backdrop-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes prompt-expand-modal-in {
-  from { opacity: 0; transform: scale(0.96); }
-  to { opacity: 1; transform: scale(1); }
-}
-.prompt-expand-backdrop {
-  animation: prompt-expand-backdrop-in 200ms var(--ease-spring) both;
-}
-.prompt-expand-modal {
-  animation: prompt-expand-modal-in 200ms var(--ease-spring) both;
-}
+/* .prompt-expand-backdrop / .prompt-expand-modal keyframes removed — expand
+   modals now animate (enter AND exit) via @shared/motion/useOverlayTransition.
+   The class names remain in JSX purely as selector hooks (caret anchoring). */
 
 @keyframes skeleton-shimmer {
   0% { background-position: -400px 0; }
@@ -930,12 +919,6 @@ html, body {
 .canvas-inspector-message .markdown-body pre,
 .canvas-inspector-message .copyable-block > div {
   margin-bottom: 2px !important;
-}
-
-/* ── Content visibility optimization ── */
-.content-auto {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 200px;
 }
 
 /* ── MarqueeText ── */

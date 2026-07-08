@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import useUiStore from '@shared/stores/uiStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import { useResizable } from '@shared/hooks/useResizable'
+import useCollapseWidth from '@shared/motion/useCollapseWidth'
 import ErrorBoundary from '../shared/ErrorBoundary'
 import CanvasHeader from '../canvas/CanvasHeader'
 import SubagentInspector from '../canvas/SubagentInspector'
@@ -36,7 +37,6 @@ export default function CanvasPanel() {
   const activeCanvasTab = useUiStore((s) => s.activeCanvasTab)
   const sidebarWidth = useSidebarStore((s) => s.width)
   const sidebarCollapsed = useSidebarStore((s) => s.collapsed)
-  const panelRef = useRef(null)
 
   const canvasBaseMin = embeddedPane ? EMBEDDED_CANVAS_MIN_WIDTH : CANVAS_MIN_WIDTH
   const [canvasMax, setCanvasMax] = useState(() => (
@@ -48,13 +48,13 @@ export default function CanvasPanel() {
   // viewport, and in single-pane mode it is the non-sidebar content area.
   useEffect(() => {
     const update = () => {
-      const parentWidth = panelRef.current?.parentElement?.getBoundingClientRect().width
+      const parentWidth = rootRef.current?.parentElement?.getBoundingClientRect().width
       const sb = useSidebarStore.getState()
       const paneWidth = parentWidth || getFallbackPaneWidth(sb.width, sb.collapsed, embeddedPane)
       setCanvasMax(getCanvasMax(paneWidth))
     }
     update()
-    const parent = panelRef.current?.parentElement
+    const parent = rootRef.current?.parentElement
     const observer = parent && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null
     if (parent && observer) observer.observe(parent)
     window.addEventListener('resize', update)
@@ -79,14 +79,18 @@ export default function CanvasPanel() {
     onResize: setCanvasWidth,
   })
 
-  if (!canvasVisible) return null
+  // Show/hide: width animates 0 ↔ effective width (layout push both ways),
+  // replacing the old hard mount/unmount + CSS width transition (which would
+  // double-smooth the animator's per-frame writes).
+  const open = canvasVisible && !canvasMinimized
+  const { mounted, rootRef } = useCollapseWidth({ open, width: effectiveCanvasWidth })
 
-  if (canvasMinimized) return null
+  if (!mounted) return null
 
   return (
     <div
-      ref={panelRef}
-      className="flex flex-col flex-shrink-0 relative"
+      ref={rootRef}
+      className="flex-shrink-0 relative"
       style={{
         width: effectiveCanvasWidth,
         maxWidth: `${CANVAS_MAX_PANE_RATIO * 100}%`,
@@ -94,10 +98,13 @@ export default function CanvasPanel() {
         minHeight: 0,
         background: 'var(--bg-surface)',
         borderLeft: '1px solid var(--border)',
-        transition: dragging ? 'none' : 'width 220ms cubic-bezier(0.16, 1, 0.3, 1)',
         overflow: 'hidden',
+        pointerEvents: open ? 'auto' : 'none',
       }}
     >
+      {/* Fixed-width inner shell so content never reflows while the pane
+          width animates — it is revealed, not squished. */}
+      <div className="flex flex-col" style={{ width: effectiveCanvasWidth, height: '100%', minHeight: 0 }}>
       <div
         onMouseDown={onMouseDown}
         style={{
@@ -135,6 +142,7 @@ export default function CanvasPanel() {
           </div>
         )}
       </ErrorBoundary>
+      </div>
     </div>
   )
 }

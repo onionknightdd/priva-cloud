@@ -18,6 +18,7 @@ import useFileBrowserStore from '../../stores/fileBrowserStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { RollingInteger } from '../shared/Odometer'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import DrawIcon from '@shared/components/shared/DrawIcon'
 
 function formatDuration(ms) {
   if (!ms) return null
@@ -201,7 +202,7 @@ function PathCopyButton({ path, compact = false }) {
         flexShrink: 0,
       }}
     >
-      {copied ? <Check size={iconSize} strokeWidth={1.5} /> : <Copy size={iconSize} strokeWidth={1.5} />}
+      {copied ? <DrawIcon name="check" size={iconSize} strokeWidth={1.5} /> : <Copy size={iconSize} strokeWidth={1.5} />}
     </button>
   )
 }

@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
@@ -13,6 +14,10 @@ import JumpToLatest from './JumpToLatest'
 import { useSSE } from '../../hooks/useSSE'
 import { rewindFiles, forkSession, fetchSessionMessages } from '../../api/sessions'
 import { hasCanvasInspectorItems, transformSessionMessages } from '../../utils/sessionTransform'
+
+// The centered reading column, replicated per virtual row so layout matches the
+// pre-virtualization single-column wrapper exactly.
+const ROW_COLUMN_STYLE = { maxWidth: 900, width: '80%', margin: '0 auto' }
 
 export default function MessageList() {
   const { t } = useTranslation()
@@ -35,6 +40,9 @@ export default function MessageList() {
   const lastSessionRef = useRef(sessionId)
   const isNearBottomRef = useRef(true)
   const scrollFrameRef = useRef(null)
+  const initialPinFrameRef = useRef(null)
+  const initialPinSessionRef = useRef(null)
+  const initialPinningRef = useRef(false)
 
   // Reset mounted count when conversation changes
   if (sessionId !== lastSessionRef.current) {
@@ -47,54 +55,6 @@ export default function MessageList() {
     typeof window !== 'undefined' &&
     window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   ), [])
-
-  const scrollToBottom = useCallback((behavior = 'smooth') => {
-    const el = containerRef.current
-    const requestedBehavior = behavior === 'auto' || behavior === 'smooth' ? behavior : 'smooth'
-    const resolvedBehavior = prefersReducedMotion() ? 'auto' : requestedBehavior
-    if (el) {
-      el.scrollTo({ top: el.scrollHeight, behavior: resolvedBehavior })
-      return
-    }
-    bottomRef.current?.scrollIntoView({ behavior: resolvedBehavior })
-  }, [prefersReducedMotion])
-
-  const scheduleScrollToBottom = useCallback((behavior = 'smooth') => {
-    if (scrollFrameRef.current != null) {
-      window.cancelAnimationFrame(scrollFrameRef.current)
-    }
-    scrollFrameRef.current = window.requestAnimationFrame(() => {
-      scrollFrameRef.current = null
-      scrollToBottom(behavior)
-    })
-  }, [scrollToBottom])
-
-  // Auto-scroll only while the viewer is already near the live edge. During
-  // streaming we pin instantly to avoid repeated smooth-scroll animations.
-  useEffect(() => {
-    if (!isNearBottomRef.current) return
-    scheduleScrollToBottom(isStreaming ? 'auto' : 'smooth')
-  }, [messages, isStreaming, scheduleScrollToBottom])
-
-  useEffect(() => () => {
-    if (scrollFrameRef.current != null) {
-      window.cancelAnimationFrame(scrollFrameRef.current)
-    }
-  }, [])
-
-  // Track scroll position
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const onScroll = () => {
-      const threshold = 80
-      const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
-      isNearBottomRef.current = isNearBottom
-      setShowJump(!isNearBottom)
-    }
-    el.addEventListener('scroll', onScroll, { passive: true })
-    return () => el.removeEventListener('scroll', onScroll)
-  }, [])
 
   const handleRewind = useCallback(async (idx) => {
     const uuid = findCheckpointForAssistant(idx)
@@ -207,94 +167,283 @@ export default function MessageList() {
     [rewindMarker]
   )
 
+  // Separate system compact messages from chat messages to keep stable indices for MessageBubble
+  const renderItems = useMemo(() => {
+    const chatMessages = []
+    const compactInserts = [] // { beforeIndex, msg }
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i].role === 'system' && messages[i].type === 'compact') {
+        compactInserts.push({ beforeIndex: chatMessages.length, msg: messages[i] })
+      } else {
+        chatMessages.push({ msg: messages[i], originalIndex: i })
+      }
+    }
+
+    const lastAssistantIndex = [...chatMessages].reverse().findIndex((e) => e.msg.role === 'assistant')
+    const latestAssistantChatIndex = lastAssistantIndex === -1
+      ? -1
+      : chatMessages.length - 1 - lastAssistantIndex
+
+    // Build render list: interleave compact boundaries at correct positions
+    const items = []
+    let compactPtr = 0
+    for (let ci = 0; ci <= chatMessages.length; ci++) {
+      while (compactPtr < compactInserts.length && compactInserts[compactPtr].beforeIndex === ci) {
+        const compactMsg = compactInserts[compactPtr].msg
+        items.push({ type: 'compact', msg: compactMsg, key: `compact-${compactMsg.timestamp}` })
+        compactPtr++
+      }
+      if (ci < chatMessages.length) {
+        const entry = chatMessages[ci]
+        if (rewindMarker && entry.msg.uuid && entry.msg.uuid === rewindMarker.checkpointUuid) {
+          items.push({ type: 'rewind_divider', rewindTs: rewindMarker.rewindTs, key: `rewind-${rewindMarker.rewindTs}` })
+        }
+        items.push({
+          type: 'chat',
+          key: entry.msg._cid || `idx-${ci}`,
+          msg: entry.msg,
+          chatIndex: ci,
+          originalIndex: entry.originalIndex,
+          isLastAssistant: isStreaming && entry.msg.role === 'assistant' && ci === chatMessages.length - 1,
+          isLatestAssistantMessage: entry.msg.role === 'assistant' && ci === latestAssistantChatIndex,
+        })
+      }
+    }
+    return items
+  }, [messages, isStreaming, rewindMarker])
+
+  // Above-viewport re-measures (async images/diagrams) are compensated by the
+  // virtualizer's default scroll adjustment, so the reading position holds.
+  const virtualizer = useVirtualizer({
+    count: renderItems.length,
+    getScrollElement: () => containerRef.current,
+    estimateSize: () => 120,
+    overscan: 6,
+    paddingStart: 24,
+    getItemKey: (index) => renderItems[index].key,
+    // Chat semantics: stay glued to the live edge. anchorTo 'end' compensates
+    // item resizes while at the bottom (the streaming tail) and follows rows
+    // appended while there; the threshold matches the 80px near-bottom gate.
+    anchorTo: 'end',
+    followOnAppend: true,
+    scrollEndThreshold: 80,
+  })
+
+  const totalSize = virtualizer.getTotalSize()
+
+  // Scroll to the live edge THROUGH the virtualizer, never raw el.scrollTo():
+  // scrollToEnd keeps the internal scroll offset in sync (so first-measurement
+  // adjustments can't tug the jump back from a stale base) and its reconcile
+  // loop retries until estimated row sizes settle at the true bottom.
+  const scrollToBottom = useCallback((behavior = 'smooth') => {
+    const el = containerRef.current
+    if (!el) {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto' })
+      return
+    }
+    const requestedBehavior = behavior === 'auto' || behavior === 'smooth' ? behavior : 'smooth'
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+    // Smooth only for short hops — animating across thousands of estimated
+    // pixels fights measurement and looks janky anyway.
+    const useSmooth = !prefersReducedMotion()
+      && requestedBehavior === 'smooth'
+      && distance < el.clientHeight * 2
+    virtualizer.scrollToEnd({ behavior: useSmooth ? 'smooth' : 'auto' })
+  }, [virtualizer, prefersReducedMotion])
+
+  const cancelInitialBottomPin = useCallback(() => {
+    initialPinningRef.current = false
+    if (initialPinFrameRef.current != null) {
+      window.cancelAnimationFrame(initialPinFrameRef.current)
+      initialPinFrameRef.current = null
+    }
+  }, [])
+
+  const runInitialBottomPin = useCallback(() => {
+    cancelInitialBottomPin()
+    initialPinningRef.current = true
+    isNearBottomRef.current = true
+    setShowJump(false)
+
+    const deadline = performance.now() + 1600
+    let lastTotal = -1
+    let stableFrames = 0
+
+    const tick = () => {
+      if (!initialPinningRef.current) return
+      const el = containerRef.current
+      if (el) {
+        virtualizer.scrollToEnd({ behavior: 'auto' })
+
+        const distance = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight)
+        const nextTotal = virtualizer.getTotalSize()
+        const totalStable = Math.abs(nextTotal - lastTotal) < 1
+        stableFrames = distance <= 2 && totalStable ? stableFrames + 1 : 0
+        lastTotal = nextTotal
+
+        isNearBottomRef.current = true
+        setShowJump(false)
+
+        if (stableFrames >= 4 || performance.now() >= deadline) {
+          initialPinningRef.current = false
+          initialPinFrameRef.current = null
+          return
+        }
+      }
+
+      initialPinFrameRef.current = window.requestAnimationFrame(tick)
+    }
+
+    initialPinFrameRef.current = window.requestAnimationFrame(tick)
+  }, [cancelInitialBottomPin, virtualizer])
+
+  const scheduleScrollToBottom = useCallback((behavior = 'smooth') => {
+    if (scrollFrameRef.current != null) {
+      window.cancelAnimationFrame(scrollFrameRef.current)
+    }
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      scrollToBottom(behavior)
+    })
+  }, [scrollToBottom])
+
+  // Auto-scroll only while the viewer is already near the live edge. During
+  // streaming we pin instantly to avoid repeated smooth-scroll animations.
+  useEffect(() => {
+    if (!isNearBottomRef.current) return
+    scheduleScrollToBottom(isStreaming ? 'auto' : 'smooth')
+  }, [messages, isStreaming, scheduleScrollToBottom])
+
+  // Opening or switching a session always lands at the live edge — the
+  // previous session's scroll position and near-bottom state must not leak in.
+  useEffect(() => {
+    isNearBottomRef.current = true
+    scheduleScrollToBottom('auto')
+  }, [sessionId, scheduleScrollToBottom])
+
+  // A long recovered transcript starts with estimated row heights. Keep the
+  // viewport pinned until the virtualizer has measured the real tail rows.
+  useEffect(() => {
+    if (!sessionId || renderItems.length === 0) return
+    if (initialPinSessionRef.current === sessionId) return
+    initialPinSessionRef.current = sessionId
+    runInitialBottomPin()
+  }, [sessionId, renderItems.length, runInitialBottomPin])
+
+  // Measurement can land behind content growth (images finishing near the
+  // bottom) — re-pin whenever the measured height changes while near the edge.
+  useEffect(() => {
+    if (!isNearBottomRef.current) return
+    scheduleScrollToBottom('auto')
+  }, [totalSize, scheduleScrollToBottom])
+
+  // Track scroll position
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const onScroll = () => {
+      if (initialPinningRef.current) {
+        isNearBottomRef.current = true
+        setShowJump(false)
+        return
+      }
+      const threshold = 80
+      const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+      isNearBottomRef.current = isNearBottom
+      setShowJump(!isNearBottom)
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return undefined
+    const cancelOnUserIntent = () => {
+      if (initialPinningRef.current) cancelInitialBottomPin()
+    }
+    el.addEventListener('wheel', cancelOnUserIntent, { passive: true })
+    el.addEventListener('touchstart', cancelOnUserIntent, { passive: true })
+    el.addEventListener('pointerdown', cancelOnUserIntent)
+    return () => {
+      el.removeEventListener('wheel', cancelOnUserIntent)
+      el.removeEventListener('touchstart', cancelOnUserIntent)
+      el.removeEventListener('pointerdown', cancelOnUserIntent)
+    }
+  }, [cancelInitialBottomPin])
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current != null) {
+      window.cancelAnimationFrame(scrollFrameRef.current)
+    }
+    cancelInitialBottomPin()
+  }, [cancelInitialBottomPin])
+
   // Empty state handled by ChatPanel
   if (messages.length === 0) return null
-
-  // Separate system compact messages from chat messages to keep stable indices for MessageBubble
-  const chatMessages = []
-  const compactInserts = [] // { beforeIndex, msg }
-  for (let i = 0; i < messages.length; i++) {
-    if (messages[i].role === 'system' && messages[i].type === 'compact') {
-      compactInserts.push({ beforeIndex: chatMessages.length, msg: messages[i] })
-    } else {
-      chatMessages.push({ msg: messages[i], originalIndex: i })
-    }
-  }
-
-  const lastAssistantIndex = [...chatMessages].reverse().findIndex((e) => e.msg.role === 'assistant')
-  const latestAssistantChatIndex = lastAssistantIndex === -1
-    ? -1
-    : chatMessages.length - 1 - lastAssistantIndex
-
-  // Build render list: interleave compact boundaries at correct positions
-  const renderItems = []
-  let compactPtr = 0
-  for (let ci = 0; ci <= chatMessages.length; ci++) {
-    while (compactPtr < compactInserts.length && compactInserts[compactPtr].beforeIndex === ci) {
-      renderItems.push({ type: 'compact', msg: compactInserts[compactPtr].msg })
-      compactPtr++
-    }
-    if (ci < chatMessages.length) {
-      const entry = chatMessages[ci]
-      if (rewindMarker && entry.msg.uuid && entry.msg.uuid === rewindMarker.checkpointUuid) {
-        renderItems.push({ type: 'rewind_divider', rewindTs: rewindMarker.rewindTs })
-      }
-      renderItems.push({
-        type: 'chat',
-        msg: entry.msg,
-        chatIndex: ci,
-        originalIndex: entry.originalIndex,
-        isLastAssistant: isStreaming && entry.msg.role === 'assistant' && ci === chatMessages.length - 1,
-        isLatestAssistantMessage: entry.msg.role === 'assistant' && ci === latestAssistantChatIndex,
-      })
-    }
-  }
 
   return (
     <div className="flex-1 relative overflow-hidden" style={{ background: 'var(--bg-base)' }}>
       <div
         ref={containerRef}
         className="absolute inset-0 overflow-y-auto overflow-x-hidden"
+        // Native scroll anchoring double-compensates against the virtualizer's
+        // own scroll adjustments and can strand the viewport mid-transcript.
+        style={{ overflowAnchor: 'none' }}
       >
-        <div
-          className="overflow-hidden"
-          style={{
-            maxWidth: 900,
-            width: '80%',
-            margin: '0 auto',
-            paddingTop: 24,
-          }}
-        >
-          {renderItems.map((item, i) => {
+        <div style={{ height: totalSize, position: 'relative', width: '100%' }}>
+          {virtualizer.getVirtualItems().map((vi) => {
+            const item = renderItems[vi.index]
+            let row
             if (item.type === 'compact') {
-              return (
-                <div key={`compact-${item.msg.timestamp}`} className="overflow-hidden chat-message-in">
+              row = (
+                <div className="overflow-hidden chat-message-in" style={ROW_COLUMN_STYLE}>
                   <CompactBoundary message={item.msg} />
                 </div>
               )
-            }
-
-            if (item.type === 'rewind_divider') {
-              return (
-                <RewindDivider key={`rewind-${item.rewindTs}`} rewindTs={item.rewindTs} />
+            } else if (item.type === 'rewind_divider') {
+              row = (
+                <div className="overflow-hidden" style={ROW_COLUMN_STYLE}>
+                  <RewindDivider rewindTs={item.rewindTs} />
+                </div>
+              )
+            } else {
+              // The entry animation lives on this inner div: the outer wrapper's
+              // transform is the virtualizer's positioner and must stay untouched.
+              const animClass = item.originalIndex >= mountedCountRef.current ? ' chat-message-in' : ''
+              row = (
+                <div className={`overflow-hidden${animClass}`} style={ROW_COLUMN_STYLE}>
+                  <MessageBubble
+                    message={item.msg}
+                    isStreaming={item.isLastAssistant}
+                    isLatestAssistantMessage={item.isLatestAssistantMessage}
+                    latestAssistantRefreshKey={messages.length}
+                    onSendAnswer={sendAnswer}
+                    assistantIndex={item.originalIndex}
+                    onRewind={handleRewind}
+                    onFork={handleFork}
+                    showCheckpointActions={enableFileCheckpointing && !!sessionId}
+                    revertedToolUseIds={revertedIdSet}
+                  />
+                </div>
               )
             }
-
-            const animClass = item.originalIndex >= mountedCountRef.current ? ' chat-message-in' : ' content-auto'
             return (
-              <div key={item.msg._cid || `idx-${item.chatIndex}`} className={`overflow-hidden${animClass}`}>
-                <MessageBubble
-                  message={item.msg}
-                  isStreaming={item.isLastAssistant}
-                  isLatestAssistantMessage={item.isLatestAssistantMessage}
-                  latestAssistantRefreshKey={messages.length}
-                  onSendAnswer={sendAnswer}
-                  assistantIndex={item.originalIndex}
-                  onRewind={handleRewind}
-                  onFork={handleFork}
-                  showCheckpointActions={enableFileCheckpointing && !!sessionId}
-                  revertedToolUseIds={revertedIdSet}
-                />
+              <div
+                key={vi.key}
+                data-index={vi.index}
+                ref={virtualizer.measureElement}
+                // `top` positioning (not transform) so rows create no stacking
+                // context — popovers/toolbars inside bubbles keep painting above
+                // later rows, exactly as in the unvirtualized flow.
+                style={{
+                  position: 'absolute',
+                  top: vi.start,
+                  left: 0,
+                  width: '100%',
+                }}
+              >
+                {row}
               </div>
             )
           })}
@@ -305,7 +454,12 @@ export default function MessageList() {
       {/* Jump to latest */}
       {showJump && (
         <JumpToLatest
-          onClick={() => scrollToBottom('smooth')}
+          onClick={() => {
+            // An explicit jump means "follow the live edge again" — flag it so the
+            // re-pin effect finishes the landing once row measurements settle.
+            isNearBottomRef.current = true
+            scrollToBottom('smooth')
+          }}
           style={{
             position: 'absolute',
             bottom: 12,

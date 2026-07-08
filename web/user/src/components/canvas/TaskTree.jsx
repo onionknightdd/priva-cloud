@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { useStaggerEntrance } from '@shared/motion/useStaggerEntrance'
 import useTaskStore from '../../stores/taskStore'
 import TaskNode from './TaskNode'
 
@@ -6,6 +7,8 @@ export default function TaskTree() {
   const { t } = useTranslation()
   const tasks = useTaskStore((s) => s.tasks)
   const taskOrder = useTaskStore((s) => s.taskOrder)
+  // New task nodes fade + rise in; nodes present on first commit render static.
+  const entranceRef = useStaggerEntrance()
 
   const taskList = taskOrder.map((id) => tasks[id]).filter(Boolean)
 
@@ -25,7 +28,9 @@ export default function TaskTree() {
         {t('canvas.tasksHeader')}
       </div>
       {taskList.map((task) => (
-        <TaskNode key={task.tool_use_id} task={task} />
+        <div key={task.tool_use_id} ref={entranceRef(task.tool_use_id)}>
+          <TaskNode task={task} />
+        </div>
       ))}
     </div>
   )

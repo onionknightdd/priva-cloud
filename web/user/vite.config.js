@@ -156,7 +156,7 @@ export default defineConfig({
             return 'vendor-markdown'
           }
           if (pkg?.startsWith('@xterm/')) return 'vendor-terminal'
-          if (pkg === 'framer-motion' || pkg === 'motion-utils' || pkg === 'motion-dom') return 'vendor-motion'
+          if (pkg === 'animejs') return 'vendor-motion'
           if (pkg === 'echarts' || pkg === 'zrender' || pkg === 'tslib') return 'vendor-echarts'
           if (pkg === 'pptx-preview' || pkg === 'pptxjs' || pkg === 'jquery' || pkg === 'uuid') return 'vendor-pptx'
           if (

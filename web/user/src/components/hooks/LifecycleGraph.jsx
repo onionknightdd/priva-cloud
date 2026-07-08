@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Minus, Maximize2, X, Info } from 'lucide-react'
+import { animate, svg as animeSvg, utils as animeUtils, stagger } from 'animejs'
+import { useReducedMotion } from '@shared/motion/useReducedMotion'
 import useHooksStore from '../../stores/hooksStore'
 import {
   HOOK_DEFINITIONS,
@@ -89,6 +91,31 @@ export default function LifecycleGraph() {
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
+
+  // One-shot edge draw-in on first mount (approved T4 spec). Solid pipeline
+  // edges trace tip-to-tail with their arrowheads fading in alongside; dashed
+  // decorator edges are excluded (createDrawable would clobber their dash
+  // pattern). Ref-guarded against StrictMode; skipped under reduced motion.
+  const reducedMotion = useReducedMotion()
+  const hasTracedRef = useRef(false)
+  useEffect(() => {
+    if (hasTracedRef.current || reducedMotion) return
+    const root = svgRef.current
+    if (!root) return
+    const els = Array.from(root.querySelectorAll('path.lifecycle-edge'))
+    if (!els.length) return
+    hasTracedRef.current = true
+    const drawables = animeSvg.createDrawable(els)
+    animeUtils.set(drawables, { draw: '0 0' })
+    els.forEach((el) => { el.style.opacity = '0' })
+    animate(drawables, {
+      draw: '0 1',
+      opacity: 0.6,
+      duration: 300,
+      delay: stagger(Math.min(40, Math.max(1, Math.floor(200 / els.length)))),
+      ease: 'out(2)',
+    })
+  }, [reducedMotion])
 
   // Derived viewBox
   const vw = BASE_W / zoom
@@ -315,6 +342,7 @@ export default function LifecycleGraph() {
           return (
             <path
               key={i}
+              className={edge.dashed ? undefined : 'lifecycle-edge'}
               d={path}
               fill="none"
               style={{

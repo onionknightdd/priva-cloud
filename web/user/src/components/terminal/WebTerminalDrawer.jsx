@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  ChevronDown, ChevronUp, X, Plus,
+  ChevronDown, X, Plus,
   SquareTerminal as TerminalIcon,
   ExternalLink, Maximize2, Minimize2, PanelBottom,
 } from 'lucide-react'
@@ -9,8 +9,7 @@ import { useTranslation } from 'react-i18next'
 import useUiStore from '@shared/stores/uiStore'
 import useAuthStore from '@shared/stores/authStore'
 import { useResizable } from '@shared/hooks/useResizable'
-import { useDraggable } from '../../hooks/useDraggable'
-import { useEdgeResizable } from '../../hooks/useEdgeResizable'
+import useFloatPaneFrame from '../../hooks/useFloatPaneFrame'
 import TerminalSession from '@shared/components/terminal/TerminalSession'
 
 const HEADER_HEIGHT = 36
@@ -39,15 +38,15 @@ export default function WebTerminalDrawer() {
   const height = useUiStore((s) => s.terminalHeight)
   const setHeight = useUiStore((s) => s.setTerminalHeight)
   const setOpen = useUiStore((s) => s.setTerminalOpen)
-  const acked = useUiStore((s) => s.terminalConfirmAcked)
-  const setAcked = useUiStore((s) => s.setTerminalConfirmAcked)
-  const showConfirm = useUiStore((s) => s.showConfirmDialog)
   const setSessionActive = useUiStore((s) => s.setTerminalSessionActive)
   const setActiveCount = useUiStore((s) => s.setTerminalActiveCount)
   const mode = useUiStore((s) => s.terminalMode)
   const setMode = useUiStore((s) => s.setTerminalMode)
   const bounds = useUiStore((s) => s.terminalBounds)
   const setBounds = useUiStore((s) => s.setTerminalBounds)
+  const motionAnchorRect = useUiStore((s) => s.terminalMotionAnchorRect)
+  const setMotionAnchorRect = useUiStore((s) => s.setTerminalMotionAnchorRect)
+  const setMotionActive = useUiStore((s) => s.setTerminalMotionActive)
   const user = useAuthStore((s) => s.user)
 
   // Each tab: { id, ready, cwd, customLabel? }
@@ -55,6 +54,9 @@ export default function WebTerminalDrawer() {
   const [activeId, setActiveId] = useState(null)
   const [renamingId, setRenamingId] = useState(null)
   const [renameDraft, setRenameDraft] = useState('')
+
+  const dockTarget = mode === 'dock' ? height : 0
+  const clearMotionAnchorRect = useCallback(() => setMotionAnchorRect(null), [setMotionAnchorRect])
 
   // Dock-mode top-edge resize (only used when mode === 'dock')
   const dockResize = useResizable({
@@ -65,112 +67,69 @@ export default function WebTerminalDrawer() {
     onResize: setHeight,
   })
 
-  // Float-mode drag / resize bounds — floating window can overlap sidebar
-  // and navbar, so we only clamp against the viewport itself.
-  const dragBounds = useCallback(() => ({
-    minX: 0,
-    minY: 0,
-    maxX: (typeof window !== 'undefined' ? window.innerWidth : 9999) - 80,
-    maxY: (typeof window !== 'undefined' ? window.innerHeight : 9999) - 40,
-  }), [])
-
-  const resizeBounds = useCallback(() => ({
-    minX: 0,
-    minY: 0,
-    maxX: typeof window !== 'undefined' ? window.innerWidth : 9999,
-    maxY: typeof window !== 'undefined' ? window.innerHeight : 9999,
-  }), [])
-
-  const resizeMin = useMemo(() => ({ width: MIN_FLOAT_WIDTH, height: MIN_FLOAT_HEIGHT }), [])
-
-  const handleDrag = useCallback(({ x, y }) => setBounds({ x, y }), [setBounds])
-  const handleResize = useCallback((rect) => setBounds(rect), [setBounds])
-
-  const dragHandle = useDraggable({
-    initial: { x: bounds.x, y: bounds.y },
-    onDrag: handleDrag,
-    bounds: dragBounds,
+  const {
+    mounted,
+    frameRef,
+    isDock,
+    isFloat,
+    isExpanded,
+    isMinimized,
+    frameVisible,
+    contentVisible: sessionsVisible,
+    dragHandle,
+    edgeHandles,
+    changeMode,
+    toggleExpanded,
+    restoreExpanded,
+    minimize,
+    restore,
+  } = useFloatPaneFrame({
+    open,
+    mode,
+    setMode,
+    minimized,
+    setMinimized,
+    bounds,
+    setBounds,
+    dockTarget,
+    dockHeight: height,
+    dockResizeDragging: dockResize.dragging,
+    minFloatWidth: MIN_FLOAT_WIDTH,
+    minFloatHeight: MIN_FLOAT_HEIGHT,
+    expandMargin: EXPAND_MARGIN,
+    minimizeAnchorSelector: '[data-terminal-minimize-anchor="true"]',
+    restoreAnchorRect: motionAnchorRect,
+    onRestoreAnchorConsumed: clearMotionAnchorRect,
+    onMotionActiveChange: setMotionActive,
   })
-
-  const edgeN  = useEdgeResizable({ initial: bounds, edge: 'n',  min: resizeMin, onResize: handleResize, bounds: resizeBounds })
-  const edgeS  = useEdgeResizable({ initial: bounds, edge: 's',  min: resizeMin, onResize: handleResize, bounds: resizeBounds })
-  const edgeE  = useEdgeResizable({ initial: bounds, edge: 'e',  min: resizeMin, onResize: handleResize, bounds: resizeBounds })
-  const edgeW  = useEdgeResizable({ initial: bounds, edge: 'w',  min: resizeMin, onResize: handleResize, bounds: resizeBounds })
-  const edgeNE = useEdgeResizable({ initial: bounds, edge: 'ne', min: resizeMin, onResize: handleResize, bounds: resizeBounds })
-  const edgeNW = useEdgeResizable({ initial: bounds, edge: 'nw', min: resizeMin, onResize: handleResize, bounds: resizeBounds })
-  const edgeSE = useEdgeResizable({ initial: bounds, edge: 'se', min: resizeMin, onResize: handleResize, bounds: resizeBounds })
-  const edgeSW = useEdgeResizable({ initial: bounds, edge: 'sw', min: resizeMin, onResize: handleResize, bounds: resizeBounds })
 
   // Reflect "any active session" state + count to the navbar indicator.
   useEffect(() => {
-    const ready = tabs.filter((tab) => tab.ready).length
-    setSessionActive(ready > 0)
-    setActiveCount(ready)
+    const openTabs = tabs.length
+    setSessionActive(openTabs > 0)
+    setActiveCount(openTabs)
   }, [tabs, setSessionActive, setActiveCount])
 
-  // First-open confirm dialog (once per page session).
-  const requestOpenIfNeeded = useCallback(() => {
-    if (acked) return
-    showConfirm({
-      title: t('terminal.confirmTitle'),
-      message: t('terminal.confirmBody'),
-      confirmLabel: t('terminal.confirmContinue'),
-      danger: true,
-      onConfirm: () => setAcked(true),
-    })
-  }, [acked, setAcked, showConfirm, t])
-
+  // When the drawer opens, ensure at least one tab exists.
   useEffect(() => {
-    if (open && !acked) requestOpenIfNeeded()
-  }, [open, acked, requestOpenIfNeeded])
-
-  // When the drawer opens (and is acked), ensure at least one tab exists.
-  useEffect(() => {
-    if (!open || !acked) return
+    if (!open) return
     setTabs((prev) => {
       if (prev.length > 0) return prev
       const id = newTabId()
       setActiveId(id)
       return [{ id, ready: false, cwd: '' }]
     })
-  }, [open, acked])
-
-  // When the drawer fully closes, drop all tabs (force-disconnects sessions via unmount).
-  useEffect(() => {
-    if (!open) {
-      setTabs([])
-      setActiveId(null)
-    }
   }, [open])
 
-  // Remember the last non-expanded mode so double-click can toggle back.
-  const lastNonExpandedRef = useRef(mode === 'expanded' ? 'float' : mode)
+  // When the drawer has fully exited (not merely started closing), drop all
+  // tabs — sessions stay visible through the close animation, then unmount
+  // (force-disconnecting their websockets).
   useEffect(() => {
-    if (mode !== 'expanded') lastNonExpandedRef.current = mode
-  }, [mode])
-
-  const toggleExpanded = useCallback(() => {
-    if (mode === 'expanded') setMode(lastNonExpandedRef.current || 'float')
-    else setMode('expanded')
-  }, [mode, setMode])
-
-  // Esc closes expanded → previous mode
-  useEffect(() => {
-    if (mode !== 'expanded') return
-    const onKey = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); setMode(lastNonExpandedRef.current || 'float') }
+    if (!mounted) {
+      setTabs((prev) => (prev.length ? [] : prev))
+      setActiveId((prev) => (prev == null ? prev : null))
     }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [mode, setMode])
-
-  // Keep float window inside the viewport when it shrinks.
-  useEffect(() => {
-    if (mode !== 'float') return
-    const onResize = () => setBounds({})
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [mode, setBounds])
+  }, [mounted])
 
   const updateTabMeta = useCallback((id, meta) => {
     setTabs((prev) => prev.map((tab) => (tab.id === id ? { ...tab, ...meta } : tab)))
@@ -202,8 +161,8 @@ export default function WebTerminalDrawer() {
     const id = newTabId()
     setTabs((prev) => [...prev, { id, ready: false, cwd: '' }])
     setActiveId(id)
-    setMinimized(false)
-  }, [setMinimized])
+    if (minimized) restore()
+  }, [minimized, restore])
 
   const closeTab = useCallback((id) => {
     setTabs((prev) => {
@@ -224,20 +183,15 @@ export default function WebTerminalDrawer() {
   }, [setOpen])
 
   const handleClose = useCallback(() => setOpen(false), [setOpen])
-  const handleMinimize = useCallback(() => setMinimized(true), [setMinimized])
-  const handleRestore = useCallback(() => setMinimized(false), [setMinimized])
+  const handleMinimize = minimize
+  const handleRestore = restore
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeId) || null,
     [tabs, activeId],
   )
 
-  if (!open) return null
-
-  const isDock = mode === 'dock'
-  const isFloat = mode === 'float'
-  const isExpanded = mode === 'expanded'
-  const showAsMinimized = isDock && minimized
+  if (!mounted) return null
 
   // ---- Shared tab strip (parameterized for drag in float mode) ----
   const renderTabStrip = (allowDrag) => (
@@ -246,14 +200,12 @@ export default function WebTerminalDrawer() {
       style={{
         height: HEADER_HEIGHT,
         background: 'var(--bg-surface)',
-        borderBottom: showAsMinimized ? 'none' : '1px solid var(--border-subtle)',
+        borderBottom: '1px solid var(--border-subtle)',
         minWidth: 0,
         paddingLeft: 4,
         paddingRight: 4,
         gap: 2,
-        cursor: showAsMinimized
-          ? 'pointer'
-          : (allowDrag ? (dragHandle.dragging ? 'grabbing' : 'grab') : 'default'),
+        cursor: allowDrag ? (dragHandle.dragging ? 'grabbing' : 'grab') : 'default',
       }}
       onMouseDown={(e) => {
         if (!allowDrag) return
@@ -263,11 +215,6 @@ export default function WebTerminalDrawer() {
       onDoubleClick={(e) => {
         if (e.target.closest('[data-tab-control]')) return
         toggleExpanded()
-      }}
-      onClick={(e) => {
-        if (!showAsMinimized) return
-        if (e.target.closest('[data-tab-control]')) return
-        handleRestore()
       }}
     >
       <TerminalIcon
@@ -291,7 +238,7 @@ export default function WebTerminalDrawer() {
                 if (renamingId === tab.id) return
                 e.stopPropagation()
                 setActiveId(tab.id)
-                if (minimized) setMinimized(false)
+                if (minimized) handleRestore()
               }}
               onDoubleClick={(e) => {
                 e.stopPropagation()
@@ -431,7 +378,7 @@ export default function WebTerminalDrawer() {
       {isDock && (
         <button
           data-tab-control
-          onClick={(e) => { e.stopPropagation(); setMode('float') }}
+          onClick={(e) => { e.stopPropagation(); changeMode('float') }}
           title={t('terminal.popOut')}
           style={modeBtnStyle}
           onMouseEnter={modeBtnHoverIn}
@@ -444,7 +391,17 @@ export default function WebTerminalDrawer() {
         <>
           <button
             data-tab-control
-            onClick={(e) => { e.stopPropagation(); setMode('dock') }}
+            onClick={(e) => { e.stopPropagation(); handleMinimize() }}
+            title={t('terminal.minimize')}
+            style={modeBtnStyle}
+            onMouseEnter={modeBtnHoverIn}
+            onMouseLeave={modeBtnHoverOut}
+          >
+            <ChevronDown size={14} strokeWidth={1.5} />
+          </button>
+          <button
+            data-tab-control
+            onClick={(e) => { e.stopPropagation(); changeMode('dock') }}
             title={t('terminal.dockBack')}
             style={modeBtnStyle}
             onMouseEnter={modeBtnHoverIn}
@@ -454,7 +411,7 @@ export default function WebTerminalDrawer() {
           </button>
           <button
             data-tab-control
-            onClick={(e) => { e.stopPropagation(); setMode('expanded') }}
+            onClick={(e) => { e.stopPropagation(); changeMode('expanded') }}
             title={t('terminal.expand')}
             style={modeBtnStyle}
             onMouseEnter={modeBtnHoverIn}
@@ -465,35 +422,44 @@ export default function WebTerminalDrawer() {
         </>
       )}
       {isExpanded && (
-        <button
-          data-tab-control
-          onClick={(e) => { e.stopPropagation(); setMode('float') }}
-          title={t('terminal.restoreFloat')}
-          style={modeBtnStyle}
-          onMouseEnter={modeBtnHoverIn}
-          onMouseLeave={modeBtnHoverOut}
-        >
-          <Minimize2 size={14} strokeWidth={1.5} />
-        </button>
+        <>
+          <button
+            data-tab-control
+            onClick={(e) => { e.stopPropagation(); handleMinimize() }}
+            title={t('terminal.minimize')}
+            style={modeBtnStyle}
+            onMouseEnter={modeBtnHoverIn}
+            onMouseLeave={modeBtnHoverOut}
+          >
+            <ChevronDown size={14} strokeWidth={1.5} />
+          </button>
+          <button
+            data-tab-control
+            onClick={(e) => { e.stopPropagation(); changeMode('float') }}
+            title={t('terminal.restoreFloat')}
+            style={modeBtnStyle}
+            onMouseEnter={modeBtnHoverIn}
+            onMouseLeave={modeBtnHoverOut}
+          >
+            <Minimize2 size={14} strokeWidth={1.5} />
+          </button>
+        </>
       )}
 
-      {/* Minimize only meaningful in dock */}
+      {/* Dock-mode minimize */}
       {isDock && (
         <button
           data-tab-control
           onClick={(e) => {
             e.stopPropagation()
-            if (minimized) handleRestore()
-            else handleMinimize()
+            handleMinimize()
           }}
-          title={minimized ? t('terminal.restore') : t('terminal.minimize')}
+          title={t('terminal.minimize')}
           style={modeBtnStyle}
           onMouseEnter={modeBtnHoverIn}
           onMouseLeave={modeBtnHoverOut}
         >
-          {minimized
-            ? <ChevronUp size={14} strokeWidth={1.5} />
-            : <ChevronDown size={14} strokeWidth={1.5} />}
+          <ChevronDown size={14} strokeWidth={1.5} />
         </button>
       )}
 
@@ -520,7 +486,7 @@ export default function WebTerminalDrawer() {
         background: 'var(--bg-base)',
         minWidth: 0,
         overflow: 'hidden',
-        display: showAsMinimized ? 'none' : 'block',
+        display: sessionsVisible ? 'block' : 'none',
       }}
     >
       {tabs.map((tab) => (
@@ -528,7 +494,7 @@ export default function WebTerminalDrawer() {
           key={tab.id}
           visible={tab.id === activeId}
           panelHeight={sessionsPanelHeight}
-          panelMinimized={showAsMinimized}
+          panelMinimized={isMinimized}
           onMetaChange={(meta) => updateTabMeta(tab.id, meta)}
           onClosed={() => { /* tab dot updates via onMetaChange(ready:false) */ }}
         />
@@ -541,17 +507,17 @@ export default function WebTerminalDrawer() {
   // is not unmounted when switching modes. Only the wrapper's CSS varies.
   const frameStyle = (() => {
     if (isDock) {
-      const drawerHeight = minimized ? HEADER_HEIGHT : height
+      // Height is owned by the motion effect (open/close/minimize tweens and
+      // 1:1 drag writes) — declaring it here would have React snap it on
+      // every minimize toggle before the tween can play.
       return {
         position: 'relative',
-        height: drawerHeight,
         flexShrink: 0,
         background: 'var(--bg-base)',
-        borderTop: '2px solid var(--red)',
+        borderTop: '2px solid var(--purple)',
         boxSizing: 'border-box',
         minWidth: 0,
         overflow: 'hidden',
-        transition: 'height 200ms cubic-bezier(0.16, 1, 0.3, 1)',
       }
     }
     if (isFloat) {
@@ -564,12 +530,11 @@ export default function WebTerminalDrawer() {
         zIndex: 150,
         background: 'var(--bg-base)',
         border: '1px solid var(--border-strong)',
-        borderLeft: '2px solid var(--red)',
+        borderLeft: '2px solid var(--purple)',
         borderRight: '1px solid var(--border-strong)',
         boxSizing: 'border-box',
         minWidth: 0,
         overflow: 'hidden',
-        animation: 'terminal-window-in 200ms cubic-bezier(0.16, 1, 0.3, 1)',
       }
     }
     // expanded — covers everything except a 24px margin (overlaps sidebar/navbar)
@@ -582,19 +547,18 @@ export default function WebTerminalDrawer() {
       zIndex: 201,
       background: 'var(--bg-base)',
       border: '1px solid var(--border-strong)',
-      borderLeft: '2px solid var(--red)',
+      borderLeft: '2px solid var(--purple)',
       borderRight: '1px solid var(--border-strong)',
       boxSizing: 'border-box',
       overflow: 'hidden',
-      animation: 'terminal-window-in 200ms cubic-bezier(0.16, 1, 0.3, 1)',
     }
   })()
 
-  const showDockHandle = isDock && !minimized
+  const showDockHandle = isDock && !isMinimized
 
   return (
     <>
-      {isExpanded && (
+      {isExpanded && !isMinimized && (
         <div
           key="terminal-backdrop"
           className="fixed inset-0"
@@ -602,11 +566,23 @@ export default function WebTerminalDrawer() {
             zIndex: 200,
             background: 'var(--bg-overlay)',
             backdropFilter: 'blur(4px)',
+            opacity: open ? 1 : 0,
+            transition: 'opacity 250ms cubic-bezier(0.4, 0, 0.2, 1)',
+            pointerEvents: open ? 'auto' : 'none',
           }}
-          onClick={() => setMode(lastNonExpandedRef.current || 'float')}
+          onClick={restoreExpanded}
         />
       )}
-      <div key="terminal-frame" className="user-main-scope flex flex-col" style={frameStyle}>
+      <div
+        key="terminal-frame"
+        ref={frameRef}
+        className="user-main-scope flex flex-col"
+        style={{
+          ...frameStyle,
+          display: frameVisible ? undefined : 'none',
+          pointerEvents: open && !isMinimized ? 'auto' : 'none',
+        }}
+      >
         {/* Dock-mode top edge resize handle */}
         <div
           key="dock-handle"
@@ -633,17 +609,11 @@ export default function WebTerminalDrawer() {
         {/* Float-mode edge / corner handles. Always rendered for stable order;
             display:none when not floating so their hit area is gone. */}
         {renderEdgeHandles({
-          edges: { edgeN, edgeS, edgeE, edgeW, edgeNE, edgeNW, edgeSE, edgeSW },
+          edges: edgeHandles,
           active: isFloat,
         })}
         {renderTabStrip(isFloat)}
         {renderSessions()}
-        <style>{`
-          @keyframes terminal-window-in {
-            from { opacity: 0; transform: scale(0.98); }
-            to   { opacity: 1; transform: scale(1); }
-          }
-        `}</style>
       </div>
     </>
   )

@@ -5,6 +5,22 @@ import * as skillsApi from '../api/skills'
 // Stable identity for a skill across the personal group + every workdir group.
 export const skillKey = (s) => (s ? `${s.scope}:${s.cwd || ''}:${s.name}` : '')
 
+export function flattenSkillsForPicker(personal = [], groups = []) {
+  const personalSkills = Array.isArray(personal)
+    ? personal.map((skill) => ({ ...skill, level: 'global' }))
+    : []
+  const projectSkills = Array.isArray(groups)
+    ? groups.flatMap((group) => (
+      (group.skills || []).map((skill) => ({
+        ...skill,
+        cwd: skill.cwd ?? group.cwd ?? null,
+        level: 'project',
+      }))
+    ))
+    : []
+  return [...projectSkills, ...personalSkills]
+}
+
 let selectionRequestId = 0
 let fileRequestId = 0
 
@@ -20,7 +36,8 @@ const useSkillsStore = create((set, get) => ({
   // Skill list — grouped: personal (~/.claude/skills) + one group per workdir.
   personal: [],            // SkillSummary[]
   groups: [],              // [{ cwd, skills: SkillSummary[] }]
-  skillsLoading: true,
+  skillsLoading: false,
+  skillsLoaded: false,
   searchQuery: '',
 
   // Skill denylist: names excluded from agent runs (flat, by name).
@@ -56,10 +73,16 @@ const useSkillsStore = create((set, get) => ({
         personal: Array.isArray(data?.personal) ? data.personal : [],
         groups: Array.isArray(data?.groups) ? data.groups : [],
         skillsLoading: false,
+        skillsLoaded: true,
       })
     } catch {
-      set({ skillsLoading: false })
+      set({ skillsLoading: false, skillsLoaded: false })
     }
+  },
+
+  ensureSkillsLoaded: async () => {
+    if (get().skillsLoaded || get().skillsLoading) return
+    return get().fetchSkills()
   },
 
   fetchSkillsConfig: async () => {
@@ -253,7 +276,7 @@ const useSkillsStore = create((set, get) => ({
   }),
 
   reset: () => set({
-    personal: [], groups: [], skillsLoading: true, searchQuery: '',
+    personal: [], groups: [], skillsLoading: false, skillsLoaded: false, searchQuery: '',
     selectedSkill: null, skillDetail: null, detailLoading: false, detailError: null,
     selectedFile: null, fileContent: null, fileLoading: false,
     viewerMode: 'skill',

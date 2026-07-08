@@ -1,6 +1,7 @@
 import { useRef, useEffect, useMemo } from 'react'
 import { Search, X, ArrowLeft, Download, Check, Upload, Trash2, Package } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import useOverlayTransition from '@shared/motion/useOverlayTransition'
 import useSkillHubStore from '../../stores/skillHubStore'
 import useAuthStore from '@shared/stores/authStore'
 import useUiStore from '@shared/stores/uiStore'
@@ -23,21 +24,32 @@ export default function SkillHubModal() {
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [open, closeHub])
 
-  if (!open) return null
+  // Exit animation: stay mounted while animating out; closeHub() nulls
+  // selectedSkill, so snapshot the view choice to avoid a Detail→Grid flip
+  // during the exit frame.
+  const { mounted, panelRef, backdropRef } = useOverlayTransition({ open, variant: 'scale' })
+  const shownSkillRef = useRef(null)
+  if (open) shownSkillRef.current = selectedSkill
+  const shownSkill = open ? selectedSkill : shownSkillRef.current
+
+  if (!mounted) return null
 
   return (
     <div
+      ref={backdropRef}
       className="fixed inset-0 flex items-center justify-center"
       style={{
         zIndex: 1000,
         background: 'var(--bg-overlay)',
         backdropFilter: 'blur(4px)',
+        pointerEvents: open ? 'auto' : 'none',
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) closeHub()
       }}
     >
       <div
+        ref={panelRef}
         className="flex flex-col overflow-hidden"
         style={{
           width: 'min(1100px, 92vw)',
@@ -45,18 +57,10 @@ export default function SkillHubModal() {
           background: 'var(--bg-surface)',
           border: '1px solid var(--border)',
           borderRadius: 4,
-          animation: 'modal-scale-in 200ms cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
-        {selectedSkill ? <DetailView /> : <GridView />}
+        {shownSkill ? <DetailView skill={shownSkill} /> : <GridView />}
       </div>
-
-      <style>{`
-        @keyframes modal-scale-in {
-          from { transform: scale(0.95); opacity: 0; }
-          to { transform: scale(1); opacity: 1; }
-        }
-      `}</style>
     </div>
   )
 }
@@ -313,9 +317,12 @@ function SkillCard({ skill, onSelect }) {
   )
 }
 
-function DetailView() {
+function DetailView({ skill }) {
   const { t } = useTranslation()
-  const selectedSkill = useSkillHubStore((s) => s.selectedSkill)
+  const liveSelectedSkill = useSkillHubStore((s) => s.selectedSkill)
+  // During the exit animation the store's selectedSkill is already null —
+  // fall back to the snapshot passed down from the modal shell.
+  const selectedSkill = liveSelectedSkill ?? skill
   const skillDetail = useSkillHubStore((s) => s.skillDetail)
   const backToGrid = useSkillHubStore((s) => s.backToGrid)
   const deliverSkill = useSkillHubStore((s) => s.deliverSkill)

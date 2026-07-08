@@ -1,8 +1,19 @@
-import { useEffect, useMemo, useState } from 'react'
-import { motion, useSpring, useTransform } from 'framer-motion'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { animate, spring } from 'animejs'
+import { useReducedMotion } from '@shared/motion/useReducedMotion'
 
 const DEFAULT_PLACES = [10000, 1000, 100, 10, 1]
 const DEFAULT_FONT_FAMILY = "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+
+// framer parity: useSpring({ mass: 0.8, stiffness: 75, damping: 15 }).
+// anime clamps spring mass to ≥ 1, so every param is scaled ×1.25 — the spring
+// ODE is scale-invariant, damping ratio ζ ≈ 0.968 is preserved exactly.
+const SPRING_MASS = 1
+const SPRING_STIFFNESS = 93.75
+const SPRING_DAMPING = 18.75
+// Normalized initial velocity (progress/sec) is |vel/delta|-derived; clamp
+// against degenerate tiny-delta retargets.
+const MAX_NORM_VELOCITY = 50
 
 function normalizeValue(value) {
   const numeric = Number(value)
@@ -16,38 +27,83 @@ function buildPlaces(value, minDigits = 1) {
   return Array.from({ length: digits }, (_, index) => 10 ** (digits - index - 1))
 }
 
-function NumberGlyph({ mv, number, height }) {
-  const y = useTransform(mv, (latest) => {
-    const placeValue = latest % 10
-    const offset = (10 + number - placeValue) % 10
-    let memo = offset * height
-    if (offset > 5) memo -= 10 * height
-    return memo
-  })
-
-  return (
-    <motion.span
-      style={{
-        position: 'absolute',
-        inset: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        y,
-      }}
-    >
-      {number}
-    </motion.span>
-  )
-}
-
 function Digit({ value, place, height, width }) {
   const target = Math.floor(normalizeValue(value) / place)
-  const mv = useSpring(target, { mass: 0.8, stiffness: 75, damping: 15 })
+  const reducedMotion = useReducedMotion()
+  const spansRef = useRef([])
+  // Persistent per-digit spring state. `v` is the animated quotient (NOT mod
+  // 10 — the glyph mapping does the modulo, exactly like the framer version).
+  const stRef = useRef(null)
+  if (stRef.current === null) {
+    stRef.current = { v: target, vel: 0, lastV: target, lastT: 0, height, anim: null }
+  }
 
-  useEffect(() => {
-    mv.set(target)
-  }, [mv, target])
+  useLayoutEffect(() => {
+    const st = stRef.current
+    st.height = height
+
+    // Modular shortest-path glyph positioning (unchanged formula). Written
+    // imperatively — transforms are never declared in JSX style, so React
+    // re-renders can't clobber the animator's writes.
+    const applyGlyphs = () => {
+      const placeValue = ((st.v % 10) + 10) % 10
+      for (let number = 0; number < 10; number++) {
+        const el = spansRef.current[number]
+        if (!el) continue
+        const offset = (10 + number - placeValue) % 10
+        let y = offset * st.height
+        if (offset > 5) y -= 10 * st.height
+        el.style.transform = `translateY(${y}px)`
+      }
+    }
+
+    applyGlyphs() // idempotent: positions glyphs on mount / height change
+
+    if (st.v === target) return // fresh mount, or already settled there
+
+    st.anim?.cancel()
+
+    if (reducedMotion) {
+      st.v = target
+      st.vel = 0
+      applyGlyphs()
+      return
+    }
+
+    // Velocity continuity across retargets: anime springs are precomputed
+    // curves that reset velocity, so we track units/sec ourselves per frame
+    // and hand the next spring its normalized (progress/sec) equivalent —
+    // this is what framer's useSpring.set() did natively.
+    const delta = target - st.v
+    let vNorm = st.vel / delta
+    if (!Number.isFinite(vNorm)) vNorm = 0
+    vNorm = Math.max(-MAX_NORM_VELOCITY, Math.min(MAX_NORM_VELOCITY, vNorm))
+
+    st.lastV = st.v
+    st.lastT = performance.now()
+    st.anim = animate(st, {
+      v: target,
+      ease: spring({
+        mass: SPRING_MASS,
+        stiffness: SPRING_STIFFNESS,
+        damping: SPRING_DAMPING,
+        velocity: vNorm,
+      }),
+      onUpdate: () => {
+        const now = performance.now()
+        const dt = (now - st.lastT) / 1000
+        if (dt > 0) {
+          st.vel = (st.v - st.lastV) / dt
+          st.lastV = st.v
+          st.lastT = now
+        }
+        applyGlyphs()
+      },
+    })
+  }, [target, height, reducedMotion])
+
+  // Cancel the in-flight spring on unmount only.
+  useEffect(() => () => { stRef.current.anim?.cancel() }, [])
 
   return (
     <span
@@ -61,7 +117,19 @@ function Digit({ value, place, height, width }) {
       }}
     >
       {Array.from({ length: 10 }, (_, number) => (
-        <NumberGlyph key={number} mv={mv} number={number} height={height} />
+        <span
+          key={number}
+          ref={(el) => { spansRef.current[number] = el }}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {number}
+        </span>
       ))}
     </span>
   )

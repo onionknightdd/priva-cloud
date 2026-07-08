@@ -1,23 +1,37 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useRef } from 'react'
 import { X } from 'lucide-react'
+import useOverlayTransition from '@shared/motion/useOverlayTransition'
 
+// Render unconditionally with a possibly-null src — the lightbox self-gates
+// and keeps showing a snapshot of the last image while it animates out.
 export default function ImageLightbox({ src, alt, onClose }) {
+  const open = !!src
+  const { mounted, panelRef, backdropRef } = useOverlayTransition({ open, variant: 'scale' })
+  const shownRef = useRef(null)
+  if (src) shownRef.current = { src, alt }
+  const shown = src ? { src, alt } : shownRef.current
+
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Escape') { e.preventDefault(); onClose() }
   }, [onClose])
 
   useEffect(() => {
+    if (!open) return
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [handleKeyDown])
+  }, [open, handleKeyDown])
+
+  if (!mounted || !shown) return null
 
   return (
     <div
+      ref={backdropRef}
       className="fixed inset-0 flex items-center justify-center"
       style={{
         background: 'var(--bg-overlay)',
         backdropFilter: 'blur(4px)',
         zIndex: 300,
+        pointerEvents: open ? 'auto' : 'none',
       }}
       onClick={onClose}
     >
@@ -50,8 +64,9 @@ export default function ImageLightbox({ src, alt, onClose }) {
         <X size={18} strokeWidth={1.5} />
       </button>
       <img
-        src={src}
-        alt={alt || 'Full size image'}
+        ref={panelRef}
+        src={shown.src}
+        alt={shown.alt || 'Full size image'}
         onClick={(e) => e.stopPropagation()}
         style={{
           maxWidth: '90vw',

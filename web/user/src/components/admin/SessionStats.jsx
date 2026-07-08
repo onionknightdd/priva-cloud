@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useAnimatedNumber } from '@shared/motion/useAnimatedNumber'
 import useAdminStore from '../../stores/adminStore'
 import Chip from '@shared/components/shared/Chip'
 import SessionCharts from './charts/SessionCharts'
@@ -23,6 +24,40 @@ function relativeTime(dateStr, t) {
   if (hours < 24) return t('admin.hoursAgo', { count: hours })
   const days = Math.floor(hours / 24)
   return t('admin.daysAgo', { count: days })
+}
+
+// One summary stat card. Refetches tween the numeric value to its new
+// reading (formatter applied per frame); first paint snaps.
+function SummaryCard({ label, value, format }) {
+  const isNumeric = typeof value === 'number' && Number.isFinite(value)
+  const animatedValue = useAnimatedNumber(isNumeric ? value : 0)
+  const shown = isNumeric
+    ? (format ? format(animatedValue) : animatedValue)
+    : value
+  return (
+    <div
+      className="flex flex-col gap-1 flex-1"
+      style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border)',
+        borderRadius: '4px',
+        padding: '16px 20px',
+      }}
+    >
+      <span
+        className="text-xs uppercase"
+        style={{ color: 'var(--text-dim)', letterSpacing: '0.06em' }}
+      >
+        {label}
+      </span>
+      <span
+        className="font-bold text-xl"
+        style={{ color: 'var(--text-primary)', fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace", fontVariantNumeric: 'tabular-nums' }}
+      >
+        {shown}
+      </span>
+    </div>
+  )
 }
 
 function CardSkeleton() {
@@ -89,31 +124,9 @@ export default function SessionStats() {
           {[
             { label: t('admin.totalUsers'), value: stats.total_users },
             { label: t('admin.totalSessions'), value: stats.total_sessions },
-            { label: t('admin.totalStorage'), value: formatBytes(stats.total_storage_bytes) },
+            { label: t('admin.totalStorage'), value: stats.total_storage_bytes, format: formatBytes },
           ].map((card) => (
-            <div
-              key={card.label}
-              className="flex flex-col gap-1 flex-1"
-              style={{
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border)',
-                borderRadius: '4px',
-                padding: '16px 20px',
-              }}
-            >
-              <span
-                className="text-xs uppercase"
-                style={{ color: 'var(--text-dim)', letterSpacing: '0.06em' }}
-              >
-                {card.label}
-              </span>
-              <span
-                className="font-bold text-xl"
-                style={{ color: 'var(--text-primary)', fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace" }}
-              >
-                {card.value}
-              </span>
-            </div>
+            <SummaryCard key={card.label} label={card.label} value={card.value} format={card.format} />
           ))}
         </div>
       ) : null}

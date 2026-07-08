@@ -44,6 +44,7 @@ import MarkdownRenderer from '../markdown/MarkdownRenderer'
 import CopyButton from '@shared/components/shared/CopyButton'
 import Toggle from '@shared/components/shared/Toggle'
 import OptimizePopup from '../shared/OptimizePopup'
+import VirtualizedCodeLines from '../shared/VirtualizedCodeLines'
 import getLineFromNode from '../../utils/getLineFromNode'
 
 function splitLeadingFrontmatter(content) {
@@ -294,23 +295,23 @@ export default function SkillFileViewer({ animKey }) {
       let endLine = getLineFromNode(range.endContainer, Math.max(0, range.endOffset - 1))
 
       // Fallback: when selecting 3+ rows, browsers may lift range containers
-      // above the table (to a wrapper div), causing getLineFromNode to fail.
-      // Use range.intersectsNode to find the actual selected rows.
+      // above the row list (to a wrapper div), causing getLineFromNode to fail.
+      // Use range.intersectsNode against the mounted [data-line-number] rows.
       if ((!startLine || !endLine) && contentRef.current) {
-        const tbody = contentRef.current.querySelector('table')?.tBodies?.[0]
-        if (tbody && tbody.rows.length > 0) {
+        const rowNodes = contentRef.current.querySelectorAll('[data-line-number]')
+        if (rowNodes.length > 0) {
           if (!startLine) {
-            for (let i = 0; i < tbody.rows.length; i++) {
-              if (range.intersectsNode(tbody.rows[i])) {
-                startLine = Number(tbody.rows[i].dataset.lineNumber) || i + 1
+            for (let i = 0; i < rowNodes.length; i++) {
+              if (range.intersectsNode(rowNodes[i])) {
+                startLine = Number(rowNodes[i].dataset.lineNumber) || i + 1
                 break
               }
             }
           }
           if (!endLine) {
-            for (let i = tbody.rows.length - 1; i >= 0; i--) {
-              if (range.intersectsNode(tbody.rows[i])) {
-                endLine = Number(tbody.rows[i].dataset.lineNumber) || i + 1
+            for (let i = rowNodes.length - 1; i >= 0; i--) {
+              if (range.intersectsNode(rowNodes[i])) {
+                endLine = Number(rowNodes[i].dataset.lineNumber) || i + 1
                 break
               }
             }
@@ -516,6 +517,7 @@ export default function SkillFileViewer({ animKey }) {
           minHeight: 0,
           width: '100%',
           position: 'relative',
+          overflowAnchor: 'none',
         }}
       >
         {isSkillView ? (
@@ -604,6 +606,7 @@ export default function SkillFileViewer({ animKey }) {
                   content={skillDetailContent}
                   language={effectiveFileContent?.language}
                   lineNumberStart={skillDetailLineNumberStart}
+                  scrollRef={contentRef}
                 />
               )}
             </div>
@@ -634,6 +637,7 @@ export default function SkillFileViewer({ animKey }) {
             <HighlightedCode
               content={sourceContent}
               language={effectiveFileContent?.language}
+              scrollRef={contentRef}
             />
         )}
       </div>
@@ -731,7 +735,7 @@ export default function SkillFileViewer({ animKey }) {
   )
 }
 
-function HighlightedCode({ content, language, lineNumberStart = 1 }) {
+function HighlightedCode({ content, language, lineNumberStart = 1, scrollRef }) {
   const highlighted = useMemo(() => {
     if (!content) return null
     try {
@@ -754,79 +758,11 @@ function HighlightedCode({ content, language, lineNumberStart = 1 }) {
     return highlighted.replace(/\n$/, '').split('\n').map((html) => ({ text: null, html }))
   }, [content, highlighted])
 
-  const lastLineNumber = lineNumberStart + Math.max(lines.length - 1, 0)
-  const gutterWidth = String(lastLineNumber).length * 8 + 16
-
   return (
-    <div style={{ background: 'var(--bg-elevated)', width: '100%', maxWidth: '100%' }}>
-      <table style={{
-        borderCollapse: 'collapse',
-        fontSize: 12,
-        lineHeight: 1.6,
-        fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-        width: '100%',
-        tableLayout: 'fixed',
-      }}>
-        <tbody>
-          {lines.map((line, i) => {
-            const lineNumber = lineNumberStart + i
-            return (
-            <tr key={i} data-line-number={lineNumber}>
-              <td style={{
-                width: gutterWidth,
-                minWidth: gutterWidth,
-                padding: i === 0
-                  ? '12px 8px 0 12px'
-                  : i === lines.length - 1
-                    ? '0 8px 12px 12px'
-                    : '0 8px 0 12px',
-                textAlign: 'right',
-                color: 'var(--text-dim)',
-                userSelect: 'none',
-                verticalAlign: 'top',
-                borderRight: '1px solid var(--border)',
-                position: 'sticky',
-                left: 0,
-                background: 'var(--bg-elevated)',
-                zIndex: 1,
-              }}>
-                {lineNumber}
-              </td>
-              {line.html != null ? (
-                <td
-                  style={{
-                    padding: i === 0
-                      ? '12px 16px 0 12px'
-                      : i === lines.length - 1
-                        ? '0 16px 12px 12px'
-                        : '0 16px 0 12px',
-                    whiteSpace: 'pre-wrap',
-                    overflowWrap: 'anywhere',
-                    wordBreak: 'break-word',
-                    color: 'var(--text-primary)',
-                  }}
-                  dangerouslySetInnerHTML={{ __html: line.html || '&nbsp;' }}
-                />
-              ) : (
-                <td style={{
-                  padding: i === 0
-                    ? '12px 16px 0 12px'
-                    : i === lines.length - 1
-                      ? '0 16px 12px 12px'
-                      : '0 16px 0 12px',
-                  whiteSpace: 'pre-wrap',
-                  overflowWrap: 'anywhere',
-                  wordBreak: 'break-word',
-                  color: 'var(--text-primary)',
-                }}>
-                  {line.text || ' '}
-                </td>
-              )}
-            </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
+    <VirtualizedCodeLines
+      lines={lines}
+      lineNumberStart={lineNumberStart}
+      scrollRef={scrollRef}
+    />
   )
 }

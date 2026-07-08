@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { Bot, Check, X, ChevronRight, ChevronLeft, Info } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { submitRegistration } from '../../api/auth'
+import useOverlayTransition from '../../motion/useOverlayTransition'
+import StepSlide from '../../motion/StepSlide'
 
 const RUNNER_TYPES = ['auto_scale', 'persistent']
 
-export default function RegistrationWizardModal({ onClose }) {
+function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
   const { t } = useTranslation()
   const [step, setStep] = useState(1)
 
@@ -219,15 +221,18 @@ export default function RegistrationWizardModal({ onClose }) {
 
   return (
     <div
+      ref={backdropRef}
       className="fixed inset-0 flex items-center justify-center"
       style={{
         background: 'var(--bg-overlay)',
         backdropFilter: 'blur(4px)',
         zIndex: 200,
+        pointerEvents: active ? 'auto' : 'none',
       }}
       onClick={onClose}
     >
       <div
+        ref={panelRef}
         style={{
           width: 480,
           maxWidth: '90%',
@@ -236,7 +241,6 @@ export default function RegistrationWizardModal({ onClose }) {
           background: 'var(--bg-surface)',
           border: '1px solid var(--border)',
           borderRadius: 4,
-          animation: 'reg-modal-scale-in 200ms cubic-bezier(0.16, 1, 0.3, 1)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -334,7 +338,7 @@ export default function RegistrationWizardModal({ onClose }) {
               </button>
             </div>
           ) : (
-            <>
+            <StepSlide stepKey={step}>
               {/* Step 1 — Account */}
               {step === 1 && (
                 <div className="flex flex-col gap-4">
@@ -482,17 +486,25 @@ export default function RegistrationWizardModal({ onClose }) {
                   </div>
                 </div>
               )}
-            </>
+            </StepSlide>
           )}
         </div>
       </div>
-
-      <style>{`
-        @keyframes reg-modal-scale-in {
-          from { transform: scale(0.95); opacity: 0; }
-          to { transform: scale(1); opacity: 1; }
-        }
-      `}</style>
     </div>
+  )
+}
+
+// Shell: owns the enter/exit envelope. The body (and all its wizard state)
+// mounts fresh per open and unmounts only after the exit animation completes.
+export default function RegistrationWizardModal({ open = true, onClose }) {
+  const { mounted, panelRef, backdropRef } = useOverlayTransition({ open, variant: 'scale' })
+  if (!mounted) return null
+  return (
+    <RegistrationWizardBody
+      active={open}
+      panelRef={panelRef}
+      backdropRef={backdropRef}
+      onClose={onClose}
+    />
   )
 }

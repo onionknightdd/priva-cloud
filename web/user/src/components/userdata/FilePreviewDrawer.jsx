@@ -1,7 +1,8 @@
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { X, Download, Trash2, ChevronDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useResizable } from '@shared/hooks/useResizable'
+import useCollapseWidth from '@shared/motion/useCollapseWidth'
 import FilePreview from './FilePreview'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 import safeStorage from '@shared/utils/safeStorage'
@@ -25,11 +26,19 @@ function formatBytes(bytes) {
   return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
 }
 
-export default function FilePreviewDrawer({ file, onClose, onDownload, onDelete }) {
+export default function FilePreviewDrawer({ file: liveFile, onClose, onDownload, onDelete }) {
   const { t } = useTranslation()
   const [width, setWidthState] = useState(getStoredWidth)
   const [infoExpanded, setInfoExpanded] = useState(false)
   const infoBodyId = useId()
+
+  // In-layout pane: width animates 0 ↔ width on open/close (layout push both
+  // ways). The parent nulls `file` on close, so render from a snapshot while
+  // the pane collapses.
+  const { mounted, rootRef } = useCollapseWidth({ open: !!liveFile, width })
+  const shownFileRef = useRef(null)
+  if (liveFile) shownFileRef.current = liveFile
+  const file = liveFile ?? shownFileRef.current
 
   const maxWidth = Math.floor(window.innerWidth * MAX_WIDTH_VW)
 
@@ -46,18 +55,24 @@ export default function FilePreviewDrawer({ file, onClose, onDownload, onDelete 
     onResize: setWidth,
   })
 
+  if (!mounted || !file) return null
+
   return (
     <div
-      className="flex flex-col flex-shrink-0 relative"
+      ref={rootRef}
+      className="flex-shrink-0 relative"
       style={{
         width,
         borderLeft: '1px solid var(--border)',
         background: 'var(--bg-surface)',
         height: '100%',
         overflow: 'hidden',
-        animation: 'slideInRight 220ms cubic-bezier(0.16, 1, 0.3, 1)',
+        pointerEvents: liveFile ? 'auto' : 'none',
       }}
     >
+      {/* Fixed-width inner shell so content never reflows while the pane
+          width animates — it is revealed, not squished. */}
+      <div className="flex flex-col" style={{ width, height: '100%' }}>
       {/* Resize handle — left edge */}
       <div
         onMouseDown={onMouseDown}
@@ -209,13 +224,7 @@ export default function FilePreviewDrawer({ file, onClose, onDownload, onDelete 
       <div className="flex-1 overflow-y-auto">
         <FilePreview file={file} />
       </div>
-
-      <style>{`
-        @keyframes slideInRight {
-          from { transform: translateX(100%); opacity: 0; }
-          to { transform: translateX(0); opacity: 1; }
-        }
-      `}</style>
+      </div>
     </div>
   )
 }

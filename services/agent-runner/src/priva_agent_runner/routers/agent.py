@@ -635,8 +635,13 @@ async def list_agent_sessions(
     cwds — backs the Settings → Archived panel. ``source`` is legacy/ignored.
     """
     del source  # legacy parameter, kept for client compat
-    active_cwd = get_user_workspace(user)
     meta = session_meta.read_meta()
+    recent_activities = session_meta.get_recent_activities(meta)
+    active_cwd = (
+        recent_activities[0].get("cwd")
+        if recent_activities and isinstance(recent_activities[0], dict)
+        else None
+    ) or get_user_workspace(user)
 
     # Archived view (Settings → Archived): every archived session, flat.
     if archived:
@@ -707,6 +712,7 @@ async def get_agent_session_messages(
     messages = get_session_messages(
         session_id=session_id, directory=cwd, limit=limit, offset=offset
     )
+    await session_meta.record_recent_activity(cwd, session_id)
     replay_metadata = _build_message_replay_metadata(cwd, session_id)
     sidechain_messages: list[SessionMessageResponse] = []
     if limit is None and offset == 0:

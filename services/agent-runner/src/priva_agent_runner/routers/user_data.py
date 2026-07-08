@@ -20,20 +20,102 @@ from pathlib import Path
 from claude_agent_sdk import list_sessions
 from fastapi import APIRouter, Depends, Query
 
+from priva_common import skill_exclude as _user_yaml
 from priva_common.audit_log import get_audit_logger
+from priva_common.logging import get_app_logger
 from priva_common.models.admin import AuditEntryResponse, AuditLogResponse
-from priva_common.models.auth import UserOverviewResponse, UserRecord
+from priva_common.models.auth import (
+    UserOverviewBootstrap,
+    UserOverviewResponse,
+    UserRecord,
+)
+from priva_common.models.mcp import McpServerSummary
+from priva_common.models.resource import QuickAction
+from priva_common.user_env import has_settings_env, read_settings_env
 from priva_common.workspace import get_user_workspace
 from ..deps import require_user
+from ..services.claude_sdk import session_meta
 from ..services.compute_user_stats import compute_user_stats
+from ..services.mcp.config_manager import McpConfigManager
+from .credentials import load_model_list
 
 router = APIRouter(prefix="/api/sandbox/user", tags=["user-data"])
+logger = get_app_logger(__name__)
+
+
+def _load_quickactions(username: str) -> list[QuickAction]:
+    raw = _user_yaml.get_user_yaml_key(username, "quickactions", [])
+    if not isinstance(raw, list):
+        return []
+    return [
+        QuickAction(name=item["name"], prompt=item["prompt"], icon=item.get("icon"))
+        for item in raw
+        if isinstance(item, dict) and "name" in item and "prompt" in item
+    ]
+
+
+def _load_vision_model(username: str) -> str | None:
+    vm = _user_yaml.get_user_yaml_key(username, "vision_model")
+    return vm if isinstance(vm, str) and vm else None
+
+
+def _load_mcp_servers(username: str) -> list[McpServerSummary]:
+    mgr = McpConfigManager(username)
+    servers: list[McpServerSummary] = []
+    for name, config, level in mgr.read_all_servers():
+        try:
+            servers.append(McpServerSummary(
+                name=name,
+                type=config.get("type", "http"),
+                url=config.get("url", ""),
+                level=level,
+                header_count=len(config.get("headers", {})),
+                timeout=config.get("timeout", 60),
+            ))
+        except Exception:
+            logger.warning("Skipping invalid MCP server config in overview bootstrap: %s", name)
+    return servers
+
+
+async def _load_overview_bootstrap(user: UserRecord) -> UserOverviewBootstrap:
+    env = read_settings_env() or {}
+    default_model = env.get("ANTHROPIC_MODEL")
+    if not isinstance(default_model, str) or not default_model:
+        default_model = None
+
+    models = []
+    models_loaded = False
+    if has_settings_env():
+        try:
+            models = await load_model_list(timeout=5.0)
+            models_loaded = True
+        except Exception as exc:
+            logger.info("Overview bootstrap model prefetch skipped: %s", exc)
+
+    recent_activities = session_meta.get_recent_activities()
+    active_cwd = (
+        recent_activities[0].get("cwd")
+        if recent_activities and isinstance(recent_activities[0], dict)
+        else None
+    )
+    return UserOverviewBootstrap(
+        quickactions=_load_quickactions(user.username),
+        vision_model=_load_vision_model(user.username),
+        mcp_servers=_load_mcp_servers(user.username),
+        active_cwd=active_cwd or get_user_workspace(user),
+        recent_activities=recent_activities,
+        default_model=default_model,
+        models=models,
+        models_loaded=models_loaded,
+    )
 
 
 @router.get("/overview", response_model=UserOverviewResponse)
 async def get_user_overview(user: UserRecord = Depends(require_user)):
     """The usage overview the dashboard renders."""
-    block = await asyncio.to_thread(compute_user_stats, user.username)
+    stats_task = asyncio.to_thread(compute_user_stats, user.username)
+    bootstrap_task = asyncio.create_task(_load_overview_bootstrap(user))
+    block, bootstrap = await asyncio.gather(stats_task, bootstrap_task)
     return UserOverviewResponse(
         stats=block.stats,
         heatmap=block.heatmap,
@@ -44,6 +126,7 @@ async def get_user_overview(user: UserRecord = Depends(require_user)):
         longest_streak=block.longest_streak,
         peak_hour=block.peak_hour,
         tagline=block.tagline,
+        bootstrap=bootstrap,
     )
 
 

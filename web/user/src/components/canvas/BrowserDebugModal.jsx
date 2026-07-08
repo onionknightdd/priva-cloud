@@ -1,32 +1,41 @@
 import { useEffect } from 'react'
 import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import useOverlayTransition from '@shared/motion/useOverlayTransition'
 import useBrowserDebugStore from '../../stores/browserDebugStore'
 import BrowserViewport from './BrowserViewport'
 import InspectorDetail from './InspectorDetail'
 
 export default function BrowserDebugModal() {
   const { t } = useTranslation()
+  const modalOpen = useBrowserDebugStore((s) => s.modalOpen)
   const closeModal = useBrowserDebugStore((s) => s.closeModal)
   const htmlSource = useBrowserDebugStore((s) => s.htmlSource)
+  // Enter/exit envelope; self-gates on the store flag.
+  const { mounted, panelRef, backdropRef } = useOverlayTransition({ open: modalOpen, variant: 'scale' })
 
   useEffect(() => {
+    if (!modalOpen) return
     const onKey = (e) => { if (e.key === 'Escape') closeModal() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [closeModal])
+  }, [modalOpen, closeModal])
+
+  if (!mounted) return null
 
   return (
     <div
+      ref={backdropRef}
       className="fixed inset-0 flex items-center justify-center"
       style={{
         zIndex: 1050,
         background: 'var(--bg-overlay)',
         backdropFilter: 'blur(4px)',
-        animation: 'prompt-expand-backdrop-in 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+        pointerEvents: modalOpen ? 'auto' : 'none',
       }}
     >
       <div
+        ref={panelRef}
         className="flex flex-col"
         style={{
           width: '92vw',
@@ -35,7 +44,6 @@ export default function BrowserDebugModal() {
           border: '1px solid var(--border)',
           borderRadius: 4,
           overflow: 'hidden',
-          animation: 'prompt-expand-modal-in 200ms cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
         <div

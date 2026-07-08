@@ -6,6 +6,7 @@ const useMcpStore = create((set, get) => ({
   // Server list
   servers: [],
   serversLoading: true,
+  serversLoaded: false,
   searchQuery: '',
   levelFilter: 'all', // 'all' | 'project' | 'global'
 
@@ -42,9 +43,9 @@ const useMcpStore = create((set, get) => ({
     set({ serversLoading: true })
     try {
       const data = await mcpApi.listMcpServers()
-      set({ servers: data.servers, serversLoading: false })
+      set({ servers: data.servers, serversLoading: false, serversLoaded: true })
     } catch {
-      set({ serversLoading: false })
+      set({ serversLoading: false, serversLoaded: true })
     }
   },
 
@@ -184,7 +185,7 @@ const useMcpStore = create((set, get) => ({
   }),
 
   reset: () => set({
-    servers: [], serversLoading: true, searchQuery: '', levelFilter: 'all',
+    servers: [], serversLoading: true, serversLoaded: false, searchQuery: '', levelFilter: 'all',
     selectedServer: null, serverDetail: null, detailLoading: false,
     capabilities: null, capabilitiesLoading: false, capabilitiesError: null,
     activeDetailTab: 'tools', selectedTool: null,

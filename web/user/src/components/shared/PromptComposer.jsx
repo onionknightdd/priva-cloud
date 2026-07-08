@@ -1,13 +1,20 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import { animate } from 'animejs'
 import { Plus, X, FileText, Upload, Loader, AlertTriangle, Maximize2, Ban, ScrollText } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import useChatStore from '../../stores/chatStore'
+import useSkillsStore, { flattenSkillsForPicker } from '../../stores/skillsStore'
 import { uploadFile, deleteUploadedFile, listUploadedFiles } from '../../api/files'
 import { listDirectory } from '../../api/userFiles'
 import { processImage } from '../../utils/imageCompression'
 import SkillPicker, { getFilteredSkills } from '../chat/SkillPicker'
 import FilePicker, { getFilteredFiles } from '../chat/FilePicker'
+import useOverlayTransition from '@shared/motion/useOverlayTransition'
+import usePopoverTransition from '@shared/motion/usePopoverTransition'
+import { useListLifecycle, LifecycleItem } from '@shared/motion/ListLifecycle'
+import { pressTick } from '@shared/motion/waapiMicro'
+import { AnimatedCollapse } from '@shared/components/shared/Accordion'
+import { EASE_ACCORDION } from '@shared/motion/tokens'
 
 const MAX_FILE_SIZE = 3 * 1024 * 1024 // 3MB
 const MAX_FILES = 5
@@ -122,6 +129,48 @@ function getCaretCoordinates(el, position) {
  *   currentDirectory — directory whose files are available through @ references
  *   disabled       — disable the textarea
  */
+// Shared upload dropdown for the compact toolbar and the modal footer.
+// Module-level (not nested in PromptComposer) so its identity is stable across
+// renders and the popover exit latch survives; anchors to the nearest
+// `relative` ancestor at its call site.
+function PlusDropdown({ open, onClose, onUpload, extra }) {
+  const { t } = useTranslation()
+  const { mounted, popRef } = usePopoverTransition({ open, placement: 'top' })
+  if (!mounted) return null
+  return (
+    <div
+      ref={popRef}
+      className="absolute"
+      style={{
+        bottom: '100%', left: 0, marginBottom: 4,
+        background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+        borderRadius: 4, minWidth: 200, zIndex: 20,
+        pointerEvents: open ? 'auto' : 'none',
+      }}
+    >
+      <button
+        className="flex items-center gap-2 px-3 py-2 w-full text-sm"
+        style={{
+          background: 'transparent', border: 'none',
+          color: 'var(--text-secondary)', cursor: 'pointer', textAlign: 'left',
+          fontFamily: "'Noto Sans', sans-serif", fontSize: 13, transition: 'background 150ms ease',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+        onClick={(e) => {
+          e.stopPropagation()
+          onClose()
+          onUpload()
+        }}
+      >
+        <Upload size={14} strokeWidth={1.5} />
+        {t('chat.uploadFile')}
+      </button>
+      {extra}
+    </div>
+  )
+}
+
 export default function PromptComposer({
   value,
   onChange,
@@ -148,9 +197,13 @@ export default function PromptComposer({
   const fileInputRef = useRef(null)
   const containerRef = useRef(null)
   const modalTextareaRef = useRef(null)
+  const clearAllExitKeysRef = useRef(new Set())
+  const textareaHeightAnimRef = useRef(null)
 
   // Expanded modal for long-form text entry
   const [expanded, setExpanded] = useState(false)
+  // Enter/exit envelope for the expanded modal (kept mounted while exiting).
+  const { mounted: expandMounted, panelRef: expandPanelRef, backdropRef: expandBackdropRef } = useOverlayTransition({ open: expanded, variant: 'scale' })
   // Caret-anchored picker position inside the expanded modal
   const [expandedPickerRect, setExpandedPickerRect] = useState({ top: 0, left: 0 })
 
@@ -158,9 +211,15 @@ export default function PromptComposer({
   const [showSkillPicker, setShowSkillPicker] = useState(false)
   const [skillQuery, setSkillQuery] = useState('')
   const [activeSkillIndex, setActiveSkillIndex] = useState(0)
-  const availableSkills = useChatStore((s) => s.availableSkills)
-  const skillsLoaded = useChatStore((s) => s.skillsLoaded)
-  const fetchAvailableSkills = useChatStore((s) => s.fetchAvailableSkills)
+  const personalSkills = useSkillsStore((s) => s.personal)
+  const skillGroups = useSkillsStore((s) => s.groups)
+  const skillsLoaded = useSkillsStore((s) => s.skillsLoaded)
+  const skillsLoading = useSkillsStore((s) => s.skillsLoading)
+  const ensureSkillsLoaded = useSkillsStore((s) => s.ensureSkillsLoaded)
+  const availableSkills = useMemo(
+    () => flattenSkillsForPicker(personalSkills, skillGroups),
+    [personalSkills, skillGroups]
+  )
 
   // File picker state
   const [showFilePicker, setShowFilePicker] = useState(false)
@@ -175,17 +234,20 @@ export default function PromptComposer({
   const [showCompactPlusMenu, setShowCompactPlusMenu] = useState(false)
   const [showModalPlusMenu, setShowModalPlusMenu] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const { mounted: dragOverlayMounted, panelRef: dragOverlayRef } = useOverlayTransition({
+    open: isDragging,
+    variant: 'scale',
+    duration: 180,
+    exitDuration: 180,
+  })
 
   // File upload warning notifications
   const [fileWarnings, setFileWarnings] = useState([])
   const addFileWarning = useCallback((message) => {
     const id = `warn-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-    setFileWarnings((prev) => [...prev.slice(-2), { id, message, fading: false }])
+    setFileWarnings((prev) => [...prev.slice(-2), { id, message }])
     setTimeout(() => {
-      setFileWarnings((prev) => prev.map((w) => w.id === id ? { ...w, fading: true } : w))
-      setTimeout(() => {
-        setFileWarnings((prev) => prev.filter((w) => w.id !== id))
-      }, 150)
+      setFileWarnings((prev) => prev.filter((w) => w.id !== id))
     }, 3000)
   }, [])
 
@@ -195,11 +257,28 @@ export default function PromptComposer({
     if (onRegisterWarn) onRegisterWarn(addFileWarning)
   }, [onRegisterWarn, addFileWarning])
 
-  const hasInlineContext = !!skill || attachments.length > 0
+  useEffect(() => () => {
+    textareaHeightAnimRef.current?.cancel()
+  }, [])
+
+  const currentSkillCwd = useMemo(() => normalizePath(currentDirectory), [currentDirectory])
+  const scopedAvailableSkills = useMemo(
+    () => availableSkills.filter((availableSkill) => {
+      if (availableSkill.level !== 'project') return true
+      if (!availableSkill.cwd) return true
+      return normalizePath(availableSkill.cwd) === currentSkillCwd
+    }),
+    [availableSkills, currentSkillCwd]
+  )
+
+  useEffect(() => {
+    if (!skill || skill.level !== 'project' || !skill.cwd) return
+    if (normalizePath(skill.cwd) !== currentSkillCwd) onSkillChange(null)
+  }, [currentSkillCwd, onSkillChange, skill])
 
   const filteredSkills = useMemo(
-    () => getFilteredSkills(availableSkills, skillQuery),
-    [availableSkills, skillQuery]
+    () => getFilteredSkills(scopedAvailableSkills, skillQuery),
+    [scopedAvailableSkills, skillQuery]
   )
 
   const filteredFiles = useMemo(
@@ -257,10 +336,25 @@ export default function PromptComposer({
   useEffect(() => {
     const el = textareaRef.current
     if (el) {
+      textareaHeightAnimRef.current?.cancel()
+      const currentHeight = el.getBoundingClientRect().height || parseFloat(el.style.height) || minHeight
       el.style.height = 'auto'
-      el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+      const nextHeight = Math.min(el.scrollHeight, 200)
+      if (Math.abs(nextHeight - currentHeight) < 1) {
+        el.style.height = `${nextHeight}px`
+        return
+      }
+      el.style.height = `${currentHeight}px`
+      textareaHeightAnimRef.current = animate(el, {
+        height: `${nextHeight}px`,
+        duration: 160,
+        ease: EASE_ACCORDION,
+        onComplete: () => {
+          textareaHeightAnimRef.current = null
+        },
+      })
     }
-  }, [value, textareaRef])
+  }, [value, minHeight, textareaRef])
 
   // Focus management for the expanded modal.
   // When opening, focus the modal textarea and place cursor at end of the text.
@@ -480,6 +574,7 @@ export default function PromptComposer({
   // handle yet — the 24h TTL collects them.
   const handleClearAll = useCallback(async () => {
     const snapshot = attachments
+    clearAllExitKeysRef.current = new Set(snapshot.map((att) => att.id))
     onAttachmentsChange(() => [])
     await Promise.all(snapshot.map(async (att) => {
       if (att.isImage || att.status !== 'done') return
@@ -594,7 +689,7 @@ export default function PromptComposer({
         setSkillQuery(query)
         if (!showSkillPicker) {
           setShowSkillPicker(true)
-          if (!skillsLoaded) fetchAvailableSkills()
+          if (!skillsLoaded) ensureSkillsLoaded()
         }
       } else {
         setShowSkillPicker(false)
@@ -630,8 +725,8 @@ export default function PromptComposer({
   }
 
   const handleSkillSelect = (skillName) => {
-    const s = availableSkills.find((sk) => sk.name === skillName)
-    onSkillChange(s ? { name: s.name, level: s.level } : { name: skillName, level: 'project' })
+    const s = scopedAvailableSkills.find((sk) => sk.name === skillName)
+    onSkillChange(s ? { name: s.name, level: s.level, cwd: s.cwd ?? null } : { name: skillName, level: 'project', cwd: currentSkillCwd || null })
     onChange('')
     setShowSkillPicker(false)
     setSkillQuery('')
@@ -739,15 +834,44 @@ export default function PromptComposer({
 
   const imageAtts = attachments.filter((a) => a.isImage)
   const fileAtts = attachments.filter((a) => !a.isImage)
+  const skillChips = skill ? [skill] : []
+  const [lifecycleSkillChips, removeExitedSkillChip] = useListLifecycle(skillChips, () => 'skill')
+  const skillChipRowOpen = skillChips.length > 0
+  // M10: chips animate in AND out (width collapse); clearAll staggers ≤100ms.
+  const [lifecycleImageAtts, removeExitedImageAtt] = useListLifecycle(imageAtts, (a) => a.id)
+  const [lifecycleFileAtts, removeExitedAtt] = useListLifecycle(fileAtts, (a) => a.id)
+  const showImageClear = imageAtts.length > 0 && attachments.length >= 2
+  const showFileClear = imageAtts.length === 0 && attachments.length >= 2
+  const [lifecycleImageClear, removeExitedImageClear] = useListLifecycle(
+    showImageClear ? [{ id: 'image-clear-all', count: attachments.length }] : [],
+    (item) => item.id
+  )
+  const [lifecycleFileClear, removeExitedFileClear] = useListLifecycle(
+    showFileClear ? [{ id: 'file-clear-all', count: attachments.length }] : [],
+    (item) => item.id
+  )
+  const imageChipRowOpen = lifecycleImageAtts.length > 0 || lifecycleImageClear.length > 0
+  const fileChipRowOpen = lifecycleFileAtts.length > 0 || lifecycleFileClear.length > 0
+  const [lifecycleWarnings, removeExitedWarning] = useListLifecycle(fileWarnings, (w) => w.id)
+  const getAttachmentExitDelay = (key, exitIndex) => (
+    clearAllExitKeysRef.current.has(key) ? 0 : Math.min(exitIndex * 25, 100)
+  )
+  const markAttachmentExited = (key) => {
+    if (!clearAllExitKeysRef.current.has(key)) return
+    clearAllExitKeysRef.current.delete(key)
+    if (clearAllExitKeysRef.current.size === 0) clearAllExitKeysRef.current = new Set()
+  }
 
   // Inline "clear N" pill shown when the user has at least 2 attachments — one-by-one
   // dismiss is fine for a single chip but tedious near the 5-file cap.
-  const clearAllPill = attachments.length >= 2 ? (
+  const renderClearAllPill = (count, disabled = false) => (
     <button
       type="button"
       className="inline-flex items-center gap-1 uppercase"
+      disabled={disabled}
       style={{
         background: 'var(--bg-surface)',
+        border: 'none',
         borderLeft: '2px solid var(--text-dim)',
         borderRadius: 2,
         padding: '4px 8px',
@@ -755,74 +879,51 @@ export default function PromptComposer({
         letterSpacing: '0.06em',
         color: 'var(--text-dim)',
         fontWeight: 600,
-        cursor: 'pointer',
-        border: 'none',
+        cursor: disabled ? 'default' : 'pointer',
+        pointerEvents: disabled ? 'none' : 'auto',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
         transition: 'color 150ms ease',
       }}
       onClick={handleClearAll}
-      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-      onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.color = 'var(--text-secondary)' }}
+      onMouseLeave={(e) => { if (!disabled) e.currentTarget.style.color = 'var(--text-dim)' }}
     >
       <Ban size={12} strokeWidth={1.5} />
-      {t('chat.clearAll', { count: attachments.length })}
+      {t('chat.clearAll', { count })}
     </button>
-  ) : null
-
-  // Render function so both the compact toolbar and the modal footer can show
-  // the same dropdown. `close` lets each call site close only its own popover.
-  const renderPlusDropdown = (close) => (
-    <div
-      className="absolute"
-      style={{
-        bottom: '100%', left: 0, marginBottom: 4,
-        background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-        borderRadius: 4, minWidth: 200, zIndex: 20,
-      }}
-    >
-      <button
-        className="flex items-center gap-2 px-3 py-2 w-full text-sm"
-        style={{
-          background: 'transparent', border: 'none',
-          color: 'var(--text-secondary)', cursor: 'pointer', textAlign: 'left',
-          fontFamily: "'Noto Sans', sans-serif", fontSize: 13, transition: 'background 150ms ease',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-        onClick={(e) => {
-          e.stopPropagation()
-          close()
-          fileInputRef.current?.click()
-        }}
-      >
-        <Upload size={14} strokeWidth={1.5} />
-        {t('chat.uploadFile')}
-      </button>
-      {plusMenuExtra}
-    </div>
   )
 
   return (
     <>
       {/* File upload warnings */}
-      {fileWarnings.length > 0 && (
+      {lifecycleWarnings.length > 0 && (
         <div className="flex flex-col gap-1 mb-2">
-          {fileWarnings.map((w) => (
-            <div
-              key={w.id}
-              className="flex items-center gap-2 px-3 py-2"
-              style={{
-                background: 'var(--bg-elevated)',
-                borderLeft: '2px solid var(--yellow)',
-                borderRadius: 2,
-                fontSize: 13,
-                color: 'var(--text-secondary)',
-                opacity: w.fading ? 0 : 1,
-                transition: 'opacity 150ms ease',
-              }}
+          {lifecycleWarnings.map(({ key, item: w, present, exitIndex }) => (
+            <LifecycleItem
+              key={key}
+              present={present}
+              onExited={() => removeExitedWarning(key)}
+              duration={220}
+              exitDuration={180}
+              enterCollapse
+              exitDelay={Math.min(exitIndex * 20, 60)}
+              style={{ pointerEvents: present ? 'auto' : 'none' }}
             >
-              <AlertTriangle size={14} strokeWidth={1.5} style={{ color: 'var(--yellow)', flexShrink: 0 }} />
-              {w.message}
-            </div>
+              <div
+                className="flex items-center gap-2 px-3 py-2"
+                style={{
+                  background: 'var(--bg-elevated)',
+                  borderLeft: '2px solid var(--yellow)',
+                  borderRadius: 2,
+                  fontSize: 13,
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <AlertTriangle size={14} strokeWidth={1.5} style={{ color: 'var(--yellow)', flexShrink: 0 }} />
+                {w.message}
+              </div>
+            </LifecycleItem>
           ))}
         </div>
       )}
@@ -872,8 +973,9 @@ export default function PromptComposer({
         </button>
 
         {/* Drag overlay */}
-        {isDragging && (
+        {dragOverlayMounted && (
           <div
+            ref={dragOverlayRef}
             className="absolute inset-0 flex items-center justify-center"
             style={{
               background: 'var(--bg-overlay)',
@@ -904,15 +1006,16 @@ export default function PromptComposer({
         />
 
         {/* Skill/file picker dropdowns — only render in the compact container when
-            the modal is closed. When expanded, the pickers render inside the modal. */}
+            the modal is closed. When expanded, the pickers render inside the modal.
+            Kept mounted with open=false while their dismissal fade plays. */}
         {!expanded && showSkillPicker && (
           <SkillPicker
-            skills={availableSkills}
+            skills={scopedAvailableSkills}
             query={skillQuery}
             onSelect={handleSkillSelect}
             onClose={() => setShowSkillPicker(false)}
             activeIndex={activeSkillIndex}
-            loading={!skillsLoaded}
+            loading={skillsLoading || !skillsLoaded}
           />
         )}
         {!expanded && showFilePicker && (
@@ -927,41 +1030,62 @@ export default function PromptComposer({
         )}
 
         {/* Selected skill chip */}
-        {skill && (
+        <AnimatedCollapse
+          open={skillChipRowOpen}
+          heightDuration={300}
+          opacityDuration={220}
+          heightEase={EASE_ACCORDION}
+        >
           <div
             className="flex items-center gap-2 px-3 pt-3 pb-0"
-            style={{ paddingRight: EXPAND_BUTTON_GUTTER }}
+            style={{ paddingRight: EXPAND_BUTTON_GUTTER, minWidth: 0, overflow: 'hidden' }}
           >
-            <div
-              className="flex items-center gap-2 px-2 py-1"
-              style={{
-                background: 'var(--bg-surface)',
-                borderLeft: '2px solid var(--purple)',
-                borderRadius: 2,
-              }}
-            >
-              <ScrollText size={12} strokeWidth={1.5} style={{ color: 'var(--purple)', flexShrink: 0 }} />
-              <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: 13, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace" }}>
-                skill:
-              </span>
-              <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: 13, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace" }}>
-                {skill.name}
-              </span>
-              <span className="uppercase flex-shrink-0" style={{ color: 'var(--text-dim)', fontSize: 11, letterSpacing: '0.06em', fontWeight: 600 }}>
-                {skill.level === 'project' ? t('skillPicker.project') : t('skillPicker.global')}
-              </span>
-              <button
-                className="flex items-center justify-center"
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 0, marginLeft: 2, transition: 'color 150ms ease' }}
-                onClick={handleDismissSkill}
-                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+            {lifecycleSkillChips.map(({ key, item: skillChip, present }) => (
+              <LifecycleItem
+                key={key}
+                present={present}
+                onExited={() => removeExitedSkillChip(key)}
+                duration={220}
+                exitDuration={220}
+                collapse="width"
+                enterCollapse
+                rise={0}
+                style={{ maxWidth: '100%', whiteSpace: 'nowrap' }}
               >
-                <X size={14} strokeWidth={1.5} />
-              </button>
-            </div>
+                <div
+                  className="flex items-center gap-2 px-2 py-1 min-w-0"
+                  style={{
+                    background: 'var(--bg-surface)',
+                    borderLeft: '2px solid var(--purple)',
+                    borderRadius: 2,
+                    maxWidth: '100%',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  <ScrollText size={12} strokeWidth={1.5} style={{ color: 'var(--purple)', flexShrink: 0 }} />
+                  <span className="flex-shrink-0" style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: 13, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace" }}>
+                    skill:
+                  </span>
+                  <span className="truncate" style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: 13, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace", minWidth: 0, maxWidth: 220 }}>
+                    {skillChip.name}
+                  </span>
+                  <span className="uppercase flex-shrink-0" style={{ color: 'var(--text-dim)', fontSize: 11, letterSpacing: '0.06em', fontWeight: 600 }}>
+                    {skillChip.level === 'project' ? t('skillPicker.project') : t('skillPicker.global')}
+                  </span>
+                  <button
+                    className="flex items-center justify-center"
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 0, marginLeft: 2, transition: 'color 150ms ease' }}
+                    onClick={handleDismissSkill}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+                  >
+                    <X size={14} strokeWidth={1.5} />
+                  </button>
+                </div>
+              </LifecycleItem>
+            ))}
           </div>
-        )}
+        </AnimatedCollapse>
 
         {/* Slot: beforeTextarea (e.g. quote badge) */}
         {beforeTextarea && (
@@ -971,68 +1095,136 @@ export default function PromptComposer({
         )}
 
         {/* Image thumbnail strip */}
-        {imageAtts.length > 0 && (
+        <AnimatedCollapse
+          open={imageChipRowOpen}
+          heightDuration={300}
+          opacityDuration={220}
+          heightEase={EASE_ACCORDION}
+          animateContentResize
+          resizeDuration={260}
+          resizeEase={EASE_ACCORDION}
+        >
           <div
-            className="flex items-center gap-2 px-3 pt-2 pb-0"
-            style={{ overflowX: 'auto', paddingRight: EXPAND_BUTTON_GUTTER }}
+            className="flex items-end gap-2 px-3 pt-2 pb-0"
+            style={{ overflowX: 'auto', overflowY: 'hidden', paddingRight: EXPAND_BUTTON_GUTTER, minWidth: 0 }}
           >
-            {imageAtts.map((att) => (
-              <div key={att.id} className="relative flex-shrink-0" style={{ width: 64, height: 64 }}>
-                {att.previewUrl ? (
-                  <img
-                    src={att.previewUrl}
-                    alt={att.name}
-                    style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--border)' }}
-                  />
-                ) : (
-                  <div style={{ width: 64, height: 64, borderRadius: 4, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }} />
-                )}
-                <button
-                  onClick={() => handleRemoveAttachment(att)}
-                  className="absolute flex items-center justify-center"
-                  style={{
-                    top: -6, right: -6, width: 18, height: 18, borderRadius: '50%',
-                    background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-                    cursor: 'pointer', color: 'var(--text-dim)', padding: 0,
-                  }}
-                >
-                  <X size={10} strokeWidth={1.5} />
-                </button>
-                {att.status === 'processing' && (
-                  <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'var(--bg-overlay)', borderRadius: 4 }}>
-                    <div className="skeleton" style={{ width: '80%', height: 4, borderRadius: 2 }} />
-                  </div>
-                )}
-              </div>
+            {lifecycleImageAtts.map(({ key, item: att, present, exitIndex }) => (
+              <LifecycleItem
+                key={key}
+                present={present}
+                onExited={() => {
+                  removeExitedImageAtt(key)
+                  markAttachmentExited(key)
+                  if (att.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(att.previewUrl)
+                }}
+                duration={220}
+                exitDuration={220}
+                collapse="width"
+                enterCollapse
+                rise={0}
+                exitDelay={getAttachmentExitDelay(key, exitIndex)}
+                style={{ width: 64, height: 64 }}
+              >
+                <div className="relative" style={{ width: 64, height: 64 }}>
+                  {att.previewUrl ? (
+                    <img
+                      src={att.previewUrl}
+                      alt={att.name}
+                      style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--border)' }}
+                    />
+                  ) : (
+                    <div style={{ width: 64, height: 64, borderRadius: 4, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }} />
+                  )}
+                  <button
+                    onClick={() => handleRemoveAttachment(att)}
+                    className="absolute flex items-center justify-center"
+                    style={{
+                      top: 3,
+                      right: 3,
+                      width: 18,
+                      height: 18,
+                      borderRadius: 2,
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)',
+                      opacity: 0.62,
+                      padding: 0,
+                      transition: 'opacity 150ms ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.opacity = '1'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.opacity = '0.62'
+                    }}
+                  >
+                    <X size={10} strokeWidth={1.5} />
+                  </button>
+                  {att.status === 'processing' && (
+                    <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'var(--bg-overlay)', borderRadius: 4 }}>
+                      <div className="skeleton" style={{ width: '80%', height: 4, borderRadius: 2 }} />
+                    </div>
+                  )}
+                </div>
+              </LifecycleItem>
+            ))}
+            {lifecycleImageClear.map(({ key, item, present }) => (
+              <LifecycleItem
+                key={key}
+                present={present}
+                onExited={() => removeExitedImageClear(key)}
+                duration={220}
+                exitDuration={180}
+                collapse="width"
+                enterCollapse
+                rise={0}
+                style={{ alignSelf: 'flex-end', marginLeft: 'auto', whiteSpace: 'nowrap' }}
+              >
+                {renderClearAllPill(item.count, !present)}
+              </LifecycleItem>
             ))}
           </div>
-        )}
-
-        {/* Image-only standalone Clear row — when no file chips host the pill,
-            but we still want bulk clear for ≥2 attachments. */}
-        {attachments.length >= 2 && fileAtts.length === 0 && (
-          <div
-            className="flex items-center justify-end px-3 pt-2 pb-0"
-            style={{ paddingRight: EXPAND_BUTTON_GUTTER }}
-          >
-            {clearAllPill}
-          </div>
-        )}
+        </AnimatedCollapse>
 
         {/* Slot: afterImages (e.g. vision model hints) */}
         {afterImages}
 
-        {/* File attachment chips */}
-        {fileAtts.length > 0 && (
+        {/* File attachment chips — the ROW's height collapses via
+            AnimatedCollapse when the last chip leaves (clear-all / final
+            remove), so the composer never snaps; individual chips still
+            width-collapse inside it. */}
+        <AnimatedCollapse
+          open={fileChipRowOpen}
+          heightDuration={300}
+          opacityDuration={220}
+          heightEase={EASE_ACCORDION}
+          animateContentResize
+          resizeDuration={260}
+          resizeEase={EASE_ACCORDION}
+        >
           <div
             className="flex flex-wrap items-center gap-1 px-3 pt-2 pb-0"
             style={{ paddingRight: EXPAND_BUTTON_GUTTER }}
           >
-            {fileAtts.map((att) => {
+            {lifecycleFileAtts.map(({ key, item: att, present, exitIndex }) => {
               const borderColor = att.status === 'done' ? 'var(--cyan)' : att.status === 'uploading' ? 'var(--yellow)' : 'var(--red)'
               return (
+                <LifecycleItem
+                  key={key}
+                  present={present}
+                  onExited={() => {
+                    removeExitedAtt(key)
+                    markAttachmentExited(key)
+                  }}
+                  duration={220}
+                  exitDuration={220}
+                  collapse="width"
+                  enterCollapse
+                  rise={0}
+                  exitDelay={getAttachmentExitDelay(key, exitIndex)}
+                >
                 <div
-                  key={att.id}
                   className="flex items-center gap-1 px-2 py-1"
                   style={{ background: 'var(--bg-surface)', borderLeft: `2px solid ${borderColor}`, borderRadius: 2, maxWidth: 200 }}
                 >
@@ -1063,11 +1255,26 @@ export default function PromptComposer({
                     <X size={12} strokeWidth={1.5} />
                   </button>
                 </div>
+                </LifecycleItem>
               )
             })}
-            {clearAllPill}
+            {lifecycleFileClear.map(({ key, item, present }) => (
+              <LifecycleItem
+                key={key}
+                present={present}
+                onExited={() => removeExitedFileClear(key)}
+                duration={220}
+                exitDuration={180}
+                collapse="width"
+                enterCollapse
+                rise={0}
+                style={{ whiteSpace: 'nowrap' }}
+              >
+                {renderClearAllPill(item.count, !present)}
+              </LifecycleItem>
+            ))}
           </div>
-        )}
+        </AnimatedCollapse>
 
         {/* Textarea */}
         <textarea
@@ -1082,12 +1289,12 @@ export default function PromptComposer({
             fontFamily: "'Noto Sans', sans-serif",
             fontSize: 14,
             lineHeight: 1.5,
-            minHeight: hasInlineContext ? 52 : minHeight,
+            minHeight,
             maxHeight: 200,
             overflowY: value ? 'auto' : 'hidden',
-            paddingTop: hasInlineContext ? 8 : 6,
-            paddingBottom: hasInlineContext ? 8 : 2,
-            paddingLeft: hasInlineContext ? 12 : 16,
+            paddingTop: 6,
+            paddingBottom: 2,
+            paddingLeft: 16,
           }}
           placeholder={skill ? t('skillPicker.instructionPlaceholder') : (placeholder || t('chat.placeholder'))}
           value={value}
@@ -1101,7 +1308,7 @@ export default function PromptComposer({
         />
 
         {/* Toolbar row */}
-        <div className="flex items-center justify-between px-2 pb-2" style={{ paddingTop: hasInlineContext ? 4 : 2 }}>
+        <div className="flex items-center justify-between px-2 pb-2" style={{ paddingTop: 2 }}>
           {/* Left: + button + optional extra */}
           <div className="flex items-center gap-1">
             <div className="relative">
@@ -1114,6 +1321,7 @@ export default function PromptComposer({
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
                 onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+                onPointerDown={(e) => { pressTick(e.currentTarget) }}
                 onClick={(e) => {
                   e.stopPropagation()
                   setShowCompactPlusMenu(!showCompactPlusMenu)
@@ -1124,7 +1332,12 @@ export default function PromptComposer({
               </button>
 
               {/* Dropdown menu */}
-              {showCompactPlusMenu && renderPlusDropdown(() => setShowCompactPlusMenu(false))}
+              <PlusDropdown
+                open={showCompactPlusMenu}
+                onClose={() => setShowCompactPlusMenu(false)}
+                onUpload={() => fileInputRef.current?.click()}
+                extra={plusMenuExtra}
+              />
             </div>
             {toolbarLeft}
           </div>
@@ -1137,8 +1350,9 @@ export default function PromptComposer({
       </div>
 
       {/* Expanded modal — large textarea overlay for long-form text entry */}
-      {expanded && createPortal(
+      {expandMounted && createPortal(
         <div
+          ref={expandBackdropRef}
           className="prompt-expand-backdrop"
           onClick={() => setExpanded(false)}
           style={{
@@ -1152,9 +1366,11 @@ export default function PromptComposer({
             alignItems: 'center',
             justifyContent: 'center',
             padding: 24,
+            pointerEvents: expanded ? 'auto' : 'none',
           }}
         >
           <div
+            ref={expandPanelRef}
             className="prompt-expand-modal flex flex-col relative"
             onClick={(e) => e.stopPropagation()}
             style={{
@@ -1223,8 +1439,11 @@ export default function PromptComposer({
             />
 
             {/* Skill/file picker — caret-anchored inside the modal body so the
-                popup appears directly under the text cursor, not pinned to the footer. */}
-            {expanded && (showSkillPicker || showFilePicker) && (
+                popup appears directly under the text cursor, not pinned to the
+                footer. The wrapper stays mounted (pointer-transparent) so the
+                pickers' dismissal fade can play; each picker re-enables its
+                own pointer events while open. */}
+            {expanded && (
               <div
                 style={{
                   position: 'absolute',
@@ -1232,16 +1451,17 @@ export default function PromptComposer({
                   left: expandedPickerRect.left,
                   width: 560,
                   zIndex: 5,
+                  pointerEvents: 'none',
                 }}
               >
                 {showSkillPicker && (
                   <SkillPicker
-                    skills={availableSkills}
+                    skills={scopedAvailableSkills}
                     query={skillQuery}
                     onSelect={handleSkillSelect}
                     onClose={() => setShowSkillPicker(false)}
                     activeIndex={activeSkillIndex}
-                    loading={!skillsLoaded}
+                    loading={skillsLoading || !skillsLoaded}
                     positionStyle={{ position: 'static' }}
                   />
                 )}
@@ -1281,6 +1501,7 @@ export default function PromptComposer({
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
                   onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+                  onPointerDown={(e) => { pressTick(e.currentTarget) }}
                   onClick={(e) => {
                     e.stopPropagation()
                     setShowModalPlusMenu((v) => !v)
@@ -1289,7 +1510,12 @@ export default function PromptComposer({
                 >
                   <Plus size={16} strokeWidth={1.5} />
                 </button>
-                {showModalPlusMenu && renderPlusDropdown(() => setShowModalPlusMenu(false))}
+                <PlusDropdown
+                  open={showModalPlusMenu}
+                  onClose={() => setShowModalPlusMenu(false)}
+                  onUpload={() => fileInputRef.current?.click()}
+                  extra={plusMenuExtra}
+                />
               </div>
               <span>{t('chat.modalFooterHint')}</span>
             </div>

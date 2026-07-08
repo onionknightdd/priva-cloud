@@ -12,7 +12,7 @@ from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 from priva_common.models.agent import PermissionMode
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from ...services.skills import _get_skills_dir
-from . import retry
+from . import retry, session_meta
 from .options import build_agent_options
 from priva_common.logging import get_app_logger
 from .permission_coordinator import PermissionCoordinator, registry
@@ -496,6 +496,7 @@ async def agent_run(
                     sid = (message.data or {}).get("session_id")
                     if isinstance(sid, str) and sid:
                         current_resume_id = sid
+                        await session_meta.record_recent_activity(options.cwd, sid)
                     continue
                 if isinstance(message, AssistantMessage):
                     if retry.should_retry(message):
@@ -573,6 +574,7 @@ async def agent_run(
     # Track vision session for stickiness
     new_sid = result_data.get("session_id")
     _track_vision_session(new_sid, vision_model)
+    await session_meta.record_recent_activity(options.cwd, new_sid or current_resume_id or session_id)
 
     if last_error and not result_data:
         # All retries failed — return an error result so callers can
@@ -838,6 +840,7 @@ async def agent_run_events(
                                 if coordinator and new_sid != stream_id:
                                     coordinator.session_id = new_sid
                                     stream_id = new_sid
+                                await session_meta.record_recent_activity(options.cwd, new_sid)
 
                     await emit(item["event"], item["data"])
 
@@ -869,6 +872,10 @@ async def agent_run_events(
                             new_sid or stream_id,
                             item["data"].get("usage"),
                             model_tracker[0],
+                        )
+                        await session_meta.record_recent_activity(
+                            options.cwd,
+                            new_sid or current_resume_id or session_id,
                         )
 
                     elif (

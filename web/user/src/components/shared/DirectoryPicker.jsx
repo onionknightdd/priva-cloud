@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import {
-  X, Folder, FolderOpen, ChevronRight, ChevronDown, Check, CornerDownLeft,
+  X, Folder, FolderOpen, ChevronRight, Check, CornerDownLeft,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { listDirectory } from '../../api/userFiles'
+import useOverlayTransition from '@shared/motion/useOverlayTransition'
+import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 
 // Center-modal directory picker. Lazy-loads directories (dirs only) from the
 // agent-runner FS via listDirectory. Two modes:
@@ -103,7 +106,8 @@ export default function DirectoryPicker({
     else if (single) onConfirm(single)
   }
 
-  if (!open) return null
+  const { mounted, panelRef, backdropRef } = useOverlayTransition({ open, variant: 'scale' })
+  if (!mounted) return null
 
   const canConfirm = multiple ? true : !!single
 
@@ -129,7 +133,9 @@ export default function DirectoryPicker({
             onClick={() => toggleExpand(path)}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 0, display: 'flex', flexShrink: 0 }}
           >
-            {isOpen ? <ChevronDown size={12} strokeWidth={1.5} /> : <ChevronRight size={12} strokeWidth={1.5} />}
+            <AnimatedChevron open={isOpen}>
+              <ChevronRight size={12} strokeWidth={1.5} />
+            </AnimatedChevron>
           </button>
           {multiple && (
             <button
@@ -160,7 +166,13 @@ export default function DirectoryPicker({
             </span>
           </button>
         </div>
-        {isOpen && (
+        <AnimatedCollapse
+          open={isOpen}
+          heightDuration={220}
+          opacityDuration={180}
+          animateContentResize
+          resizeDuration={220}
+        >
           <div>
             {node?.loading && (
               <div style={{ padding: `3px 8px 3px ${8 + (depth + 1) * 14}px`, color: 'var(--text-dim)', fontSize: 11 }}>…</div>
@@ -170,18 +182,20 @@ export default function DirectoryPicker({
             )}
             {node?.dirs?.map((d) => renderNode(d.path, d.name, depth + 1))}
           </div>
-        )}
+        </AnimatedCollapse>
       </div>
     )
   }
 
-  return (
+  const modal = (
     <div
+      ref={backdropRef}
       className="fixed inset-0 flex items-center justify-center"
-      style={{ background: 'var(--bg-overlay)', backdropFilter: 'blur(4px)', zIndex: 1000 }}
+      style={{ background: 'var(--bg-overlay)', backdropFilter: 'blur(4px)', zIndex: 1000, pointerEvents: open ? 'auto' : 'none' }}
       onClick={onCancel}
     >
       <div
+        ref={panelRef}
         className="flex flex-col"
         onClick={(e) => e.stopPropagation()}
         style={{
@@ -190,7 +204,6 @@ export default function DirectoryPicker({
           borderRadius: 4,
           width: 'min(560px, 92vw)',
           maxHeight: '80vh',
-          animation: 'scale-in 200ms cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
         {/* Header */}
@@ -277,7 +290,8 @@ export default function DirectoryPicker({
           </button>
         </div>
       </div>
-      <style>{`@keyframes scale-in { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
     </div>
   )
+
+  return typeof document === 'undefined' ? modal : createPortal(modal, document.body)
 }

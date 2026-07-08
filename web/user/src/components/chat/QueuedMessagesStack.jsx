@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useListLifecycle, LifecycleItem } from '@shared/motion/ListLifecycle'
 import useChatStore from '../../stores/chatStore'
 
 function QueuedMessageRow({ entry }) {
@@ -16,12 +17,11 @@ function QueuedMessageRow({ entry }) {
 
   return (
     <div
-      className="flex items-center gap-2 px-3 py-1 overflow-hidden chat-message-in"
+      className="flex items-center gap-2 px-3 py-1 overflow-hidden"
       style={{
         borderLeft: '2px solid var(--status-pending)',
         background: 'var(--bg-surface)',
         color: 'var(--text-secondary)',
-        marginTop: 4,
         borderRadius: 2,
         minWidth: 0,
       }}
@@ -71,24 +71,41 @@ function QueuedMessageRow({ entry }) {
 }
 
 export default function QueuedMessagesStack({ entries, style }) {
-  if (!entries?.length) return null
+  // Real exits: sent/cancelled entries fade + collapse, survivors slide up.
+  // Exiting entries are retained by the lifecycle map, so keep rendering
+  // until the last exit finishes (not until `entries` empties).
+  const [lifecycleEntries, removeExited] = useListLifecycle(entries || [], (e) => e.id)
+  if (!lifecycleEntries.length) return null
+
+  const hasLive = Boolean(entries?.length)
 
   return (
     <div className="overflow-hidden" style={style}>
-      {entries.map((entry) => (
-        <QueuedMessageRow key={entry.id} entry={entry} />
+      {lifecycleEntries.map(({ key, item, present }) => (
+        <LifecycleItem
+          key={key}
+          present={present}
+          onExited={() => removeExited(key)}
+          // Spacing lives inside the collapsing shell (a row margin would
+          // leave a 4px hole while the exit height animates to 0).
+          style={{ paddingTop: 4 }}
+        >
+          <QueuedMessageRow entry={item} />
+        </LifecycleItem>
       ))}
-      <div
-        className="px-3 py-1"
-        style={{
-          color: 'var(--text-dim)',
-          fontSize: 11,
-          fontWeight: 300,
-          marginTop: 2,
-        }}
-      >
-        {'\u2192 will send after next tool returns'}
-      </div>
+      {/* Hint collapses in step with the last row instead of popping away. */}
+      <LifecycleItem present={hasLive} onExited={() => {}} style={{ paddingTop: 2 }}>
+        <div
+          className="px-3 py-1"
+          style={{
+            color: 'var(--text-dim)',
+            fontSize: 11,
+            fontWeight: 300,
+          }}
+        >
+          {'\u2192 will send after next tool returns'}
+        </div>
+      </LifecycleItem>
     </div>
   )
 }

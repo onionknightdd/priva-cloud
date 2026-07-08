@@ -4,6 +4,7 @@ import { RotateCw } from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
 
 import useUiStore from '@shared/stores/uiStore'
+import useSkeletonHandoff from '@shared/motion/useSkeletonHandoff'
 import { connectTerminal } from '../../api/terminal'
 
 function readVar(name, fallback) {
@@ -81,6 +82,12 @@ function TerminalSessionInner({
   const [connecting, setConnecting] = useState(false)
   const [closedInfo, setClosedInfo] = useState(null)
 
+  // Connecting skeleton → live xterm handoff. The host div must stay mounted
+  // while connecting (xterm attaches to it mid-connect), so the content ref
+  // sits on an always-mounted wrapper; the hook only animates it when
+  // `connecting` flips back off (rise is skipped while it never went on).
+  const handoff = useSkeletonHandoff(connecting)
+
   const teardown = useCallback(() => {
     // Invalidate any in-flight connect() so it bails before mounting xterm.
     connectVersionRef.current += 1
@@ -117,6 +124,15 @@ function TerminalSessionInner({
       import('@xterm/xterm'),
       import('@xterm/addon-fit'),
       import('@xterm/addon-web-links'),
+    ])
+
+    // Block until the terminal webfonts are active: xterm measures cell size and
+    // builds its glyph atlas at open(), and a fallback-font first render means
+    // wrong cols (reflow artifacts on refit) and substituted glyphs (e.g. ❯).
+    await Promise.allSettled([
+      document.fonts.load("13px 'JetBrainsMono Nerd Font Mono'"),
+      document.fonts.load("bold 13px 'JetBrainsMono Nerd Font Mono'"),
+      document.fonts.load("13px 'Source Han Mono SC'"),
     ])
 
     // If teardown ran while we were awaiting imports (e.g. StrictMode
@@ -184,6 +200,18 @@ function TerminalSessionInner({
 
     term.onData((data) => client.sendInput(data))
     term.onResize(({ cols, rows }) => client.sendResize(cols, rows))
+
+    // xterm.js doesn't speak the kitty keyboard protocol, so Shift+Enter would
+    // reach the pty as a bare \r — indistinguishable from Enter (submit). Send
+    // ESC+\r instead: TUIs (claude, ink apps) treat it as "insert newline",
+    // the same sequence iTerm/VS Code bind for Shift+Enter via /terminal-setup.
+    term.attachCustomKeyEventHandler((ev) => {
+      if (ev.key === 'Enter' && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+        if (ev.type === 'keydown') client.sendInput('\x1b\r')
+        return false
+      }
+      return true
+    })
 
     pingTimerRef.current = setInterval(() => {
       try { client.sendPing() } catch { /* noop */ }
@@ -305,24 +333,26 @@ function TerminalSessionInner({
         overflow: 'hidden',
       }}
     >
-      {connecting && (
-        <div className="flex flex-col gap-2" style={{ padding: 12 }}>
+      {handoff.skeletonMounted && (
+        <div ref={handoff.skeletonRef} className="flex flex-col gap-2" style={{ padding: 12 }}>
           <div className="skeleton" style={{ height: 12, width: '40%' }} />
           <div className="skeleton" style={{ height: 12, width: '85%' }} />
           <div className="skeleton" style={{ height: 12, width: '70%' }} />
           <div className="skeleton" style={{ height: 12, width: '90%' }} />
         </div>
       )}
-      <div
-        ref={hostRef}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          padding: '8px 12px',
-          visibility: ready ? 'visible' : 'hidden',
-          boxSizing: 'border-box',
-        }}
-      />
+      <div ref={handoff.contentRef} style={{ position: 'absolute', inset: 0 }}>
+        <div
+          ref={hostRef}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            padding: '8px 12px',
+            visibility: ready ? 'visible' : 'hidden',
+            boxSizing: 'border-box',
+          }}
+        />
+      </div>
       {closedInfo && (
         <div
           className="flex items-center gap-2 px-3 py-2"

@@ -1,5 +1,6 @@
 import { AlertTriangle, Wifi, Info, Check, X } from 'lucide-react'
 import useToastStore from '@shared/stores/toastStore'
+import { useListLifecycle, LifecycleItem } from '@shared/motion/ListLifecycle'
 
 const LEVEL_CONFIG = {
   error:   { color: 'var(--red)',    Icon: AlertTriangle },
@@ -23,7 +24,6 @@ function Toast({ toast }) {
         padding: '8px 10px',
         minWidth: 280,
         maxWidth: 420,
-        animation: 'toast-slide-in 200ms cubic-bezier(0.16, 1, 0.3, 1)',
       }}
     >
       <div className="flex items-start gap-2">
@@ -95,22 +95,30 @@ function Toast({ toast }) {
 
 export default function ToastStack() {
   const toasts = useToastStore((s) => s.toasts)
-  if (!toasts.length) return null
+  // Real exits: dismissed toasts fade + collapse, survivors slide up.
+  const [lifecycleToasts, removeExited] = useListLifecycle(toasts, (t) => t.id)
+  if (!lifecycleToasts.length) return null
   return (
     <div
       style={{
         position: 'fixed', top: 16, right: 16, zIndex: 10000,
-        display: 'flex', flexDirection: 'column', gap: 8,
+        display: 'flex', flexDirection: 'column',
         pointerEvents: 'auto',
       }}
     >
-      {toasts.map((t) => <Toast key={t.id} toast={t} />)}
-      <style>{`
-        @keyframes toast-slide-in {
-          from { opacity: 0; transform: translateX(8px); }
-          to   { opacity: 1; transform: translateX(0); }
-        }
-      `}</style>
+      {lifecycleToasts.map(({ key, item, present }) => (
+        <LifecycleItem
+          key={key}
+          present={present}
+          onExited={() => removeExited(key)}
+          axis="x"
+          // Spacing lives inside the collapsing shell (a container gap would
+          // leave an 8px hole while the exit height animates to 0).
+          style={{ paddingBottom: 8 }}
+        >
+          <Toast toast={item} />
+        </LifecycleItem>
+      ))}
     </div>
   )
 }

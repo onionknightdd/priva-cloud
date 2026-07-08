@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import useUiStore from '../../stores/uiStore'
+import useOverlayTransition from '../../motion/useOverlayTransition'
 
 // Shared confirm dialog, driven by uiStore.confirmDialog (showConfirmDialog/hideConfirmDialog).
 // Mirrors the user app's ConfirmDialog so the admin SPA gets identical confirm UX.
@@ -9,9 +10,15 @@ export default function ConfirmDialog() {
   const dialog = useUiStore((s) => s.confirmDialog)
   const hideConfirmDialog = useUiStore((s) => s.hideConfirmDialog)
   const [confirmText, setConfirmText] = useState('')
-  const panelRef = useRef(null)
   const inputRef = useRef(null)
   const confirmRef = useRef(null)
+
+  // Exit animation: the dialog stays mounted while it animates out. The store
+  // nulls confirmDialog on close, so render from a snapshot of the last value.
+  const { mounted, panelRef, backdropRef } = useOverlayTransition({ open: !!dialog, variant: 'scale' })
+  const shownRef = useRef(null)
+  if (dialog) shownRef.current = dialog
+  const shown = dialog ?? shownRef.current
 
   const requireText = dialog?.requireText
   const canConfirm = requireText ? confirmText === requireText : true
@@ -71,17 +78,19 @@ export default function ConfirmDialog() {
     return () => window.removeEventListener('keydown', handler, true)
   }, [dialog, hideConfirmDialog, canConfirm])
 
-  if (!dialog) return null
+  if (!mounted || !shown) return null
 
-  const { title, message, confirmLabel = t('confirm.confirm'), onConfirm, danger } = dialog
+  const { title, message, confirmLabel = t('confirm.confirm'), onConfirm, danger } = shown
 
   return (
     <div
+      ref={backdropRef}
       className="fixed inset-0 flex items-center justify-center"
       style={{
         background: 'var(--bg-overlay)',
         backdropFilter: 'blur(4px)',
         zIndex: 1000,
+        pointerEvents: dialog ? 'auto' : 'none',
       }}
       onClick={hideConfirmDialog}
     >
@@ -94,7 +103,6 @@ export default function ConfirmDialog() {
           borderRadius: '4px',
           maxWidth: 420,
           width: '90%',
-          animation: 'scale-in 200ms cubic-bezier(0.16, 1, 0.3, 1)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -104,10 +112,10 @@ export default function ConfirmDialog() {
         <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
           {message}
         </div>
-        {requireText && (
+        {shown.requireText && (
           <div className="flex flex-col gap-1">
             <span className="text-xs" style={{ color: 'var(--text-dim)' }}>
-              {t('confirm.typeToConfirm', { text: requireText })}
+              {t('confirm.typeToConfirm', { text: shown.requireText })}
             </span>
             <input
               ref={inputRef}
@@ -165,12 +173,6 @@ export default function ConfirmDialog() {
           </button>
         </div>
       </div>
-      <style>{`
-        @keyframes scale-in {
-          from { transform: scale(0.95); opacity: 0; }
-          to { transform: scale(1); opacity: 1; }
-        }
-      `}</style>
     </div>
   )
 }

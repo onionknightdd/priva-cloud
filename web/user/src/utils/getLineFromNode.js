@@ -21,8 +21,17 @@ export default function getLineFromNode(node, offset) {
     const row = tbody.rows[Math.min(offset, tbody.rows.length - 1)]
     return rowLineNumber(row)
   }
-  // Normal case: walk up from a node inside a <td> to find the <tr>
-  while (el && el.tagName !== 'TR') el = el.parentElement
+  // Virtualized renderer: the container may be the row list itself, with the
+  // offset pointing at child row divs that carry data-line-number.
+  if (el.dataset?.lineNumber == null
+    && el.children?.length
+    && el.children[0]?.dataset?.lineNumber != null) {
+    const child = el.children[Math.min(offset, el.children.length - 1)]
+    return rowLineNumber(child)
+  }
+  // Normal case: walk up from a node inside a cell to its row — either a <tr>
+  // or a virtualized row div carrying data-line-number.
+  while (el && el.tagName !== 'TR' && el.dataset?.lineNumber == null) el = el.parentElement
   if (!el) return null
   return rowLineNumber(el)
 }

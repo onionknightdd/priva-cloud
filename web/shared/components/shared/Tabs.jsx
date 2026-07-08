@@ -1,10 +1,17 @@
-import { useId, useMemo, useState } from 'react'
-import { LayoutGroup, motion } from 'framer-motion'
+import { createContext, useContext, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { animate } from 'animejs'
+import { DUR_MIGRATION, EASE_TAB } from '../../motion/tokens'
+import { useReducedMotion } from '../../motion/useReducedMotion'
 
-// Shared sliding-tab primitive (mirrors web/user's Tabs) so the admin app gets the
-// exact same animated tab switch. The active indicator is a framer-motion shared-layout
-// element (`layoutId`) that slides between tabs on change.
+// Shared sliding-tab primitive (mirrors web/user's Tabs) so the admin app gets
+// the exact same animated tab switch. The active indicator renders inside the
+// active button and FLIP-slides between tabs on change: the outgoing indicator
+// stores its live viewport rect on unmount (React 18 runs layout cleanup
+// before detach), the incoming one inverts from that rect and animates to
+// identity — translate + px width/height, never scale, so 1px borders and 2px
+// bars stay crisp.
 
+// Kept for API compatibility (legacy framer-motion transition descriptor).
 export const SLIDING_TAB_TRANSITION = {
   type: 'tween',
   duration: 0.25,
@@ -24,9 +31,20 @@ function normalizeTab(tab, index) {
   }
 }
 
-export function SlidingTabGroup({ children, id }) {
-  const generatedId = useId()
-  return <LayoutGroup id={id || generatedId}>{children}</LayoutGroup>
+// Per-group last-known indicator rects, keyed by layoutId. Indicators used
+// outside a SlidingTabGroup share the module-level map (same semantics as a
+// framer layoutId without a LayoutGroup: global scope).
+const TabGroupContext = createContext(null)
+const globalIndicatorRects = new Map()
+
+export function SlidingTabGroup({ children, id }) { // eslint-disable-line no-unused-vars
+  const rectsRef = useRef(null)
+  if (rectsRef.current === null) rectsRef.current = new Map()
+  return (
+    <TabGroupContext.Provider value={rectsRef.current}>
+      {children}
+    </TabGroupContext.Provider>
+  )
 }
 
 export function SlidingTabIndicator({
@@ -34,6 +52,58 @@ export function SlidingTabIndicator({
   layoutId = 'tab-indicator',
   style,
 }) {
+  const rects = useContext(TabGroupContext) || globalIndicatorRects
+  const reducedMotion = useReducedMotion()
+  const ref = useRef(null)
+  const reducedRef = useRef(reducedMotion)
+  reducedRef.current = reducedMotion
+
+  // Mount-only FLIP. StrictMode's double pass is a no-op: the doubled cleanup
+  // stores the just-inverted visual rect, so the second run's delta is ~0.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return undefined
+    const cur = el.getBoundingClientRect()
+    const prev = rects.get(layoutId)
+    rects.set(layoutId, cur)
+
+    if (prev && !reducedRef.current) {
+      const dx = prev.left - cur.left
+      const dy = prev.top - cur.top
+      const dw = prev.width - cur.width
+      const dh = prev.height - cur.height
+      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5 || Math.abs(dw) > 0.5 || Math.abs(dh) > 0.5) {
+        // Invert (pre-paint): jump to the previous tab's rect…
+        el.style.transform = `translateX(${dx}px) translateY(${dy}px)`
+        el.style.width = `${prev.width}px`
+        el.style.height = `${prev.height}px`
+        // …then play to identity + natural size.
+        animate(el, {
+          translateX: 0,
+          translateY: 0,
+          width: `${cur.width}px`,
+          height: `${cur.height}px`,
+          duration: DUR_MIGRATION.tabSlide,
+          ease: EASE_TAB,
+          onComplete: () => {
+            // Restore anchored (left/right/inset) sizing so the indicator
+            // keeps tracking its button through resizes.
+            el.style.transform = ''
+            el.style.width = ''
+            el.style.height = ''
+          },
+        })
+      }
+    }
+
+    return () => {
+      // Seamless handoff: store the live (possibly mid-flight) rect for the
+      // next indicator to invert from.
+      const live = el.getBoundingClientRect()
+      if (live.width || live.height) rects.set(layoutId, live)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const baseStyle = variant === 'frame'
     ? {
       position: 'absolute',
@@ -66,13 +136,7 @@ export function SlidingTabIndicator({
         zIndex: 0,
       }
 
-  return (
-    <motion.div
-      layoutId={layoutId}
-      transition={SLIDING_TAB_TRANSITION}
-      style={{ ...baseStyle, ...style }}
-    />
-  )
+  return <div ref={ref} style={{ ...baseStyle, ...style }} />
 }
 
 export default function Tabs({
