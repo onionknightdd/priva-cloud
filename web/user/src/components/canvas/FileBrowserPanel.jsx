@@ -886,7 +886,7 @@ function FileTreeSidebar({
             background: 'transparent',
             color: 'var(--text-secondary)',
             cursor: 'pointer',
-            padding: `5px 8px 5px ${8 + depth * 12}px`,
+            padding: `4px 8px 4px ${8 + depth * 12}px`,
             textAlign: 'left',
           }}
           onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--bg-elevated)' }}
@@ -907,12 +907,12 @@ function FileTreeSidebar({
           {() => (
           <div>
             {loading && (
-              <div className="text-xs" style={{ color: 'var(--text-dim)', padding: `4px 8px 4px ${32 + depth * 12}px` }}>
+              <div className="text-xs" style={{ color: 'var(--text-dim)', padding: `3px 8px 3px ${32 + depth * 12}px` }}>
                 ...
               </div>
             )}
             {!loading && error && (
-              <div className="text-xs" title={error} style={{ color: 'var(--red)', padding: `4px 8px 4px ${32 + depth * 12}px` }}>
+              <div className="text-xs" title={error} style={{ color: 'var(--red)', padding: `3px 8px 3px ${32 + depth * 12}px` }}>
                 {error}
               </div>
             )}
@@ -941,7 +941,7 @@ function FileTreeSidebar({
                     background: active ? 'var(--bg-elevated)' : 'transparent',
                     color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
                     cursor: 'pointer',
-                    padding: `5px 8px 5px ${22 + (depth + 1) * 12}px`,
+                    padding: `4px 8px 4px ${22 + (depth + 1) * 12}px`,
                     textAlign: 'left',
                   }}
                   onMouseEnter={(event) => { if (!active) event.currentTarget.style.background = 'var(--bg-elevated)' }}
@@ -1251,7 +1251,7 @@ export default function FileBrowserPanel() {
               className="flex items-center gap-2 min-w-0"
               style={{
                 position: 'relative',
-                height: 34,
+                height: 40,
                 maxWidth: 180,
                 flexShrink: 0,
                 border: 'none',
@@ -1264,7 +1264,12 @@ export default function FileBrowserPanel() {
               }}
               title={tab.filePath}
             >
-              {active && <SlidingTabIndicator layoutId="file-browser-tab-indicator" />}
+              {active && (
+                <SlidingTabIndicator
+                  layoutId="file-browser-tab-indicator"
+                  style={{ bottom: -1, height: 2, background: 'var(--blue)' }}
+                />
+              )}
               <FileText size={12} strokeWidth={1.5} style={{ color: active ? 'var(--blue)' : 'var(--text-dim)', flexShrink: 0, position: 'relative', zIndex: 1 }} />
               <span className="truncate text-xs" style={{ fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace", minWidth: 0, position: 'relative', zIndex: 1 }}>
                 {tab.name}
@@ -1289,7 +1294,7 @@ export default function FileBrowserPanel() {
             title={t('fileBrowser.closeAll', 'Close all')}
             className="flex items-center gap-1 text-xs font-semibold uppercase flex-shrink-0"
             style={{
-              height: 34,
+              height: 40,
               borderTop: 'none',
               borderRight: 'none',
               borderBottom: 'none',
@@ -1312,8 +1317,8 @@ export default function FileBrowserPanel() {
       </SlidingTabGroup>
 
       <div
-        className="flex items-center gap-2 px-3 py-2 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-base)' }}
+        className="flex items-center gap-2 px-3 flex-shrink-0"
+        style={{ height: 40, borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-base)' }}
       >
         <span
           className="truncate text-xs"

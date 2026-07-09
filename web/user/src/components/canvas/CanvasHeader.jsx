@@ -53,8 +53,14 @@ export default function CanvasHeader() {
           tabs={tabItems}
           activeKey={activeTabKey}
           onChange={(_, tab) => setActiveCanvasTab(tab.id)}
+          layoutId="canvas-header-tab-indicator"
           className={`flex items-center ${compact ? 'gap-2' : 'gap-4'}`}
           style={{ height: '100%' }}
+          indicatorStyle={{
+            bottom: -1,
+            height: 2,
+            background: 'var(--blue)',
+          }}
           buttonStyle={{
             height: 40,
             display: 'inline-flex',
