@@ -26,7 +26,7 @@ import useSidebarStore from '../../stores/sidebarStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { downloadFile, listDirectory, previewFile } from '../../api/userFiles'
 import RichFilePreview from '../shared/RichFilePreview'
-import Tabs, { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
+import { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
 import { usePresence } from '@shared/motion/usePresence'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
 import { DUR_MIGRATION, EASE_ACCORDION } from '@shared/motion/tokens'
@@ -1342,20 +1342,22 @@ export default function FileBrowserPanel() {
         >
           <RefreshCw size={12} strokeWidth={1.5} />
         </button>
-        <Tabs
-          tabs={[{ id: 'raw', label: 'Raw' }, { id: 'preview', label: 'Preview' }]}
-          activeKey={mode}
-          onChange={(_, tab) => setMode(activeTab.id, tab.id)}
-          variant="frame"
-          className="flex items-center"
-          style={{ border: '1px solid var(--border)', borderRadius: '4px' }}
-          indicatorStyle={{ border: 'none', borderRadius: '4px' }}
-          buttonClassName="px-2 py-1 text-xs"
-          buttonStyle={{ borderRadius: '4px' }}
-          getButtonStyle={({ active }) => ({
-            color: active ? 'var(--text-primary)' : 'var(--text-dim)',
-          })}
-        />
+        <div className="flex items-center" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
+          <ModeButton
+            active={mode === 'preview'}
+            position="left"
+            onClick={() => setMode(activeTab.id, 'preview')}
+          >
+            {t('skills.preview', 'Preview')}
+          </ModeButton>
+          <ModeButton
+            active={mode === 'raw'}
+            position="right"
+            onClick={() => setMode(activeTab.id, 'raw')}
+          >
+            {t('skills.source', 'Source')}
+          </ModeButton>
+        </div>
       </div>
 
       <div className="flex flex-1 min-h-0 overflow-hidden" style={{ background: 'var(--bg-base)' }}>
