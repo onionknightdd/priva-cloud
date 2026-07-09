@@ -17,6 +17,7 @@ spec:
     metadata:
       labels: {app: operator}
     spec:
+      {{- include "priva-cloud.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: priva-operator
       containers:
         - name: operator

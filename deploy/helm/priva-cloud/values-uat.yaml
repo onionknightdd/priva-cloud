@@ -1,0 +1,64 @@
+# UAT overlay — amd64 cluster, images from a real registry, Ceph-backed storage.
+# Usage:
+#   deploy/uat/build-push.sh <registry> <tag>          # buildx linux/amd64 + push
+#   helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace \
+#     -f deploy/helm/priva-cloud/values-uat.yaml
+#
+# EDIT every "<-- EDIT" line before installing. Full runbook: deploy/uat/README.md
+
+# Real registry + an immutable tag (what deploy/uat/build-push.sh pushed).
+image:
+  registry: "registry.example.com"    # <-- EDIT (repository already carries the "priva/" prefix)
+  tag: "v0.2.0"                        # <-- EDIT to the pushed tag
+  pullPolicy: IfNotPresent
+  # dockerconfigjson Secret(s) in the install namespace; create before install:
+  #   kubectl -n priva-cloud create secret docker-registry priva-regcred \
+  #     --docker-server=... --docker-username=... --docker-password=...
+  # The first entry is also used by the operator for per-account runner pods.
+  pullSecrets: []                      # <-- EDIT e.g. [priva-regcred]; [] if registry is public
+
+config:
+  kubernetes:
+    # UAT storage: per-account RWX PVCs on the cluster's CephFS CSI StorageClass —
+    # 1 PVC = 1 subvolume, size IS the quota, PVC expand = quota grow.
+    storageBackend: cephfs
+    cephfsStorageClass: ""             # <-- EDIT to the CephFS RWX SC name (must have
+                                       #     allowVolumeExpansion: true); "" = default SC
+    # Less aggressive scale-to-zero than the dev defaults.
+    idleGraceSeconds: 600
+    minAliveAfterWakeSeconds: 120
+    wakeTimeoutSeconds: 120
+
+# No in-cluster privileged NFS pod — storage comes from Ceph via CSI.
+devStorage:
+  enabled: false
+
+# data-spine's SQLite PVC on a durable RWO StorageClass (e.g. ceph-rbd).
+dataSpine:
+  storage: 5Gi
+  storageClassName: ""                 # <-- EDIT to an RWO SC (ceph-rbd etc.); "" = default
+  resources:
+    requests: {cpu: "100m", memory: "256Mi"}
+    limits:   {cpu: "500m", memory: "1Gi"}
+
+# Edge on (Gateway API + GIE CRDs + agentgateway controller are install prerequisites —
+# see deploy/uat/README.md; the Gateway listens on :80, so terminate TLS in front of it
+# or reach it via port-forward / LB for UAT).
+gateway:
+  enabled: true
+
+# Auto-generated on first install and preserved across upgrades; set both values to pin
+# from an external secret manager instead.
+sharedSecret:
+  create: true
+  jwtSecret: ""
+  apiKeyHmacSecret: ""
+
+controlPanel:
+  resources:
+    requests: {cpu: "250m", memory: "512Mi"}
+    limits:   {cpu: "1",    memory: "1Gi"}
+operator:
+  resources:
+    requests: {cpu: "100m", memory: "256Mi"}
+    limits:   {cpu: "500m", memory: "512Mi"}

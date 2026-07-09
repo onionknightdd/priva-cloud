@@ -33,6 +33,7 @@ spec:
     metadata:
       labels: {app: data-spine}
     spec:
+      {{- include "priva-cloud.imagePullSecrets" . | nindent 6 }}
       containers:
         - name: data-spine
           image: {{ include "priva-cloud.image" (dict "svc" .Values.services.dataSpine "root" .) }}

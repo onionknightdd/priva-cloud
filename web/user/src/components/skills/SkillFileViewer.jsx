@@ -417,7 +417,8 @@ export default function SkillFileViewer({ animKey }) {
     )
   }
 
-  const isMarkdown = !!selectedFile && selectedFile.endsWith('.md')
+  const effectivePath = selectedFile || effectiveFileContent?.path || ''
+  const isMarkdown = effectivePath.endsWith('.md')
   const previewContent = isSkillMarkdownContent ? skillMarkdownBody : (effectiveFileContent?.content || '')
   const sourceContent = effectiveFileContent?.content || ''
   const showToggle = isMarkdown

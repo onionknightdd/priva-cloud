@@ -13,6 +13,10 @@ image:
   registry: ""          # e.g. "ghcr.io/acme" for a real registry; "" = bare repo names
   tag: "dev"            # global default tag
   pullPolicy: IfNotPresent
+  # Names of existing kubernetes.io/dockerconfigjson Secrets in the install namespace.
+  # Rendered as imagePullSecrets on every chart pod; the FIRST entry is also published
+  # to the operator (ConfigMap) for the per-account runner pods it creates.
+  pullSecrets: []
 
 services:
   dataSpine:
@@ -77,6 +81,9 @@ config:
     exportClaimName: priva-export
     # {ns} filled at render time. Points at the dev quota-manager Service.
     quotaManagerUrl: "http://priva-quota.{ns}.svc.cluster.local:8099"
+    # cephfs backend only: RWX-capable CephFS CSI StorageClass for the per-account
+    # export PVCs (must set allowVolumeExpansion for online quota grow). "" = default SC.
+    cephfsStorageClass: ""
     runnerUid: 10001
     runnerGid: 10001
 

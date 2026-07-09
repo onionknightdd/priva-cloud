@@ -3,8 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { animate } from 'animejs'
 import { usePresence } from '@shared/motion/usePresence'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
-import { useFlipPosition } from '@shared/motion/useFlipPosition'
-import { DUR_MIGRATION, EASE_SPRING } from '@shared/motion/tokens'
+import { DUR_MIGRATION, EASE_ACCORDION, EASE_SPRING } from '@shared/motion/tokens'
 import {
   Search, RefreshCw, Plus, ArrowDownUp, Package,
   Download, Trash2, ChevronDown, Folder, FolderOpen, FileText,
@@ -59,29 +58,89 @@ const menuItemOut = (e) => { e.currentTarget.style.background = 'transparent'; e
 const TREE_ROW_HEIGHT = 26
 const TREE_INLINE_PADDING_BOTTOM = 4
 
-// Rows slide to their new layout position when content above them changes
-// (framer `layout="position"` equivalent).
-function FlipPosition({ disabled, className, style, children }) {
-  const ref = useRef(null)
-  useFlipPosition(ref, { duration: DUR_MIGRATION.treeExpand, ease: EASE_SPRING, disabled })
-  return <div ref={ref} className={className} style={style}>{children}</div>
+function countVisibleTreeRows(nodes, expandedPaths, parentPath = '') {
+  if (!Array.isArray(nodes) || nodes.length === 0) return 0
+  let count = 0
+  for (const node of nodes) {
+    count += 1
+    if (node.type !== 'directory') continue
+    const path = parentPath ? `${parentPath}/${node.name}` : node.name
+    if (expandedPaths.has(path)) {
+      count += countVisibleTreeRows(node.children || [], expandedPaths, path)
+    }
+  }
+  return count
 }
 
-// Measured-height reveal with a presence-latched collapse. `height` comes from
-// useMeasuredHeight, so content growth retargets the tween live. The selected
-// skill's tree collapses INSTANTLY (instantCollapse) — the row FLIP above is
-// what makes the rows below slide smoothly.
-function TreeReveal({ open, height, reduceMotion, instantCollapse = false, collapseMs = DUR_MIGRATION.treeCollapse, className, style, children }) {
+// Passive wrapper kept at the former FLIP boundaries. The height reveal already
+// moves following rows naturally; applying stale position FLIP on the next React
+// commit makes the list jump back and replay the expansion.
+function FlipPosition({ className, style, children }) {
+  return <div className={className} style={style}>{children}</div>
+}
+
+function AnimeTreeChevron({ open, reduceMotion, className, style, children }) {
+  const ref = useRef(null)
+  const mountedRef = useRef(false)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const rotate = `${open ? 180 : 0}deg`
+    if (!mountedRef.current || reduceMotion) {
+      mountedRef.current = true
+      el.style.transform = `rotate(${rotate})`
+      return
+    }
+    animate(el, {
+      rotate,
+      duration: DUR_MIGRATION.chevron,
+      ease: EASE_ACCORDION,
+    })
+  }, [open, reduceMotion])
+
+  return (
+    <span
+      ref={ref}
+      className={className}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        ...style,
+      }}
+    >
+      {children}
+    </span>
+  )
+}
+
+// Measured-height reveal with a presence-latched collapse. `height` seeds fresh
+// enters and in-flight retargets; once open, the wrapper returns to auto height
+// so child directory changes do not replay the parent tree animation.
+function TreeReveal({ open, height, reduceMotion, collapseMs = DUR_MIGRATION.treeCollapse, className, style, children }) {
   const { mounted, onExited } = usePresence(open)
   const ref = useRef(null)
   const enteredRef = useRef(open)
   const animRef = useRef(null)
-  // This element also FLIPs (framer had layout="position" on it too).
-  useFlipPosition(ref, { duration: DUR_MIGRATION.treeExpand, ease: EASE_SPRING, disabled: reduceMotion })
-
+  const openingRef = useRef(false)
+  const targetHeightRef = useRef(open ? height : null)
+  const openRef = useRef(open)
+  openRef.current = open
+  const setRevealRef = useCallback((node) => {
+    ref.current = node
+    if (node && openRef.current && !enteredRef.current) {
+      node.style.height = '0px'
+    }
+  }, [])
   useLayoutEffect(() => {
     if (!mounted) {
       enteredRef.current = false
+      openingRef.current = false
+      targetHeightRef.current = null
+      animRef.current?.cancel()
+      animRef.current = null
       return
     }
     const el = ref.current
@@ -89,28 +148,58 @@ function TreeReveal({ open, height, reduceMotion, instantCollapse = false, colla
       if (!open) onExited()
       return
     }
-    animRef.current?.cancel()
+    const targetHeight = Math.ceil(height || el.scrollHeight || 0)
     if (reduceMotion) {
+      animRef.current?.cancel()
+      animRef.current = null
       if (open) {
         enteredRef.current = true
-        el.style.height = `${height}px`
+        openingRef.current = false
+        targetHeightRef.current = targetHeight
+        el.style.height = 'auto'
       } else {
         onExited()
       }
       return
     }
     if (open) {
+      if (targetHeight <= 0) {
+        el.style.height = '0px'
+        return
+      }
+      if (enteredRef.current && openingRef.current) {
+        targetHeightRef.current = targetHeight
+        return
+      }
+      if (enteredRef.current && (el.style.height === 'auto' || el.style.height === '')) {
+        targetHeightRef.current = targetHeight
+        return
+      }
+      if (enteredRef.current && Math.abs((targetHeightRef.current ?? -1) - targetHeight) < 0.5) {
+        return
+      }
+      animRef.current?.cancel()
       if (!enteredRef.current) el.style.height = '0px' // pre-paint fresh enter
       enteredRef.current = true
+      openingRef.current = true
+      targetHeightRef.current = targetHeight
       animRef.current = animate(el, {
-        height: `${height}px`,
+        height: `${targetHeight}px`,
         duration: DUR_MIGRATION.treeExpand,
         ease: EASE_SPRING,
+        onComplete: () => {
+          openingRef.current = false
+          if (openRef.current) el.style.height = 'auto'
+        },
       })
-    } else if (instantCollapse) {
-      el.style.height = '0px'
-      onExited()
     } else {
+      animRef.current?.cancel()
+      openingRef.current = false
+      if (el.style.height === 'auto' || el.style.height === '') {
+        el.style.height = `${el.offsetHeight || targetHeight}px`
+        void el.offsetHeight
+      }
+      targetHeightRef.current = 0
       animRef.current = animate(el, {
         height: '0px',
         duration: collapseMs,
@@ -118,58 +207,24 @@ function TreeReveal({ open, height, reduceMotion, instantCollapse = false, colla
         onComplete: onExited,
       })
     }
-  }, [open, mounted, height, reduceMotion, instantCollapse, collapseMs, onExited])
+  }, [open, mounted, height, reduceMotion, collapseMs, onExited])
 
   if (!mounted) return null
   return (
     <div
-      ref={ref}
+      ref={setRevealRef}
       className={className}
       style={{
         overflow: 'hidden',
         transformOrigin: 'top left',
         willChange: 'height',
-        pointerEvents: open && height > 0 ? 'auto' : 'none',
+        pointerEvents: open ? 'auto' : 'none',
         ...style,
       }}
     >
       {children}
     </div>
   )
-}
-
-function useMeasuredHeight(deps) {
-  const ref = useRef(null)
-  const [height, setHeight] = useState(0)
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) {
-      setHeight(0)
-      return undefined
-    }
-
-    let frame = 0
-    const measure = () => {
-      if (frame) window.cancelAnimationFrame(frame)
-      frame = window.requestAnimationFrame(() => {
-        frame = 0
-        setHeight(Math.ceil(el.scrollHeight || el.getBoundingClientRect().height || 0))
-      })
-    }
-
-    measure()
-    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
-    observer?.observe(el)
-
-    return () => {
-      if (frame) window.cancelAnimationFrame(frame)
-      observer?.disconnect()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps)
-
-  return [ref, height]
 }
 
 export default function SkillList({ headerStart = null }) {
@@ -541,16 +596,23 @@ function SkillRow({ skill, selected, detail, detailLoading, detailError, suppres
   const [hovered, setHovered] = useState(false)
   const [expandedPaths, setExpandedPaths] = useState(() => new Set())
   const [activeFilePath, setActiveFilePath] = useState(null)
+  const inlineTreeSnapshotRef = useRef({ detail: null, detailError: null })
   const enabled = skill.enabled !== false
+  const inlineTreeReady = selected && !detailLoading && (!!detail || !!detailError)
+  if (inlineTreeReady) {
+    inlineTreeSnapshotRef.current = { detail, detailError }
+  }
+  const renderDetail = inlineTreeReady ? detail : inlineTreeSnapshotRef.current.detail
+  const renderDetailError = inlineTreeReady ? detailError : inlineTreeSnapshotRef.current.detailError
   const visibleActiveFile = selected && !suppressFileActive ? activeFilePath : null
   const hasActiveFile = !!visibleActiveFile
-  const [inlineTreeMeasureRef, inlineTreeHeight] = useMeasuredHeight([
-    selected,
-    detailLoading,
-    detailError,
-    detail?.tree,
-    expandedPaths,
-  ])
+  const inlineTreeHeight = useMemo(() => {
+    if (!inlineTreeReady) return 0
+    if (detail?.tree?.length) {
+      return countVisibleTreeRows(detail.tree, expandedPaths) * TREE_ROW_HEIGHT + TREE_INLINE_PADDING_BOTTOM
+    }
+    return 32
+  }, [inlineTreeReady, detail?.tree, expandedPaths])
 
   useLayoutEffect(() => {
     setActiveFilePath(null)
@@ -575,7 +637,6 @@ function SkillRow({ skill, selected, detail, detailLoading, detailError, suppres
 
   return (
     <FlipPosition
-      disabled={reduceMotion}
       style={{
         '--skill-inline-active-bg': hasActiveFile ? 'var(--bg-elevated)' : 'transparent',
         '--skill-inline-active-border': hasActiveFile ? 'var(--cyan)' : 'transparent',
@@ -594,9 +655,9 @@ function SkillRow({ skill, selected, detail, detailLoading, detailError, suppres
         onMouseEnter={(e) => { setHovered(true); if (!selected) e.currentTarget.style.background = 'var(--bg-elevated)' }}
         onMouseLeave={(e) => { setHovered(false); if (!selected) e.currentTarget.style.background = 'transparent' }}
       >
-        <AnimatedChevron open={selected} style={{ color: 'var(--text-dim)', flexShrink: 0 }}>
+        <AnimeTreeChevron open={inlineTreeReady} reduceMotion={reduceMotion} style={{ color: 'var(--text-dim)', flexShrink: 0 }}>
           <ChevronDown size={12} strokeWidth={1.5} />
-        </AnimatedChevron>
+        </AnimeTreeChevron>
         <span className="truncate flex-1 min-w-0" style={{ color: selected ? 'var(--text-primary)' : 'var(--text-secondary)', fontSize: 13 }}>{skill.name}</span>
         {hovered && (
           <>
@@ -626,26 +687,26 @@ function SkillRow({ skill, selected, detail, detailLoading, detailError, suppres
         )}
       </div>
 
-      {/* Inline file tree for the selected skill — collapses instantly on
-          deselect; the row FLIP makes the rows below slide. */}
+      {/* Inline file tree for the selected skill — waits for detail payload so
+          it does not open an empty shell, and keeps the last ready tree mounted
+          while the close animation runs. */}
       <TreeReveal
-        open={selected}
+        open={inlineTreeReady}
         height={inlineTreeHeight}
         reduceMotion={reduceMotion}
-        instantCollapse
         className="skill-inline-content"
       >
-            <div ref={inlineTreeMeasureRef} style={{ paddingBottom: TREE_INLINE_PADDING_BOTTOM }}>
-              {detailLoading ? null : detailError ? (
+            <div style={{ paddingBottom: TREE_INLINE_PADDING_BOTTOM }}>
+              {detailLoading && !renderDetail && !renderDetailError ? null : renderDetailError ? (
                 <div
                   className="px-3 py-2"
-                  title={detailError}
+                  title={renderDetailError}
                   style={{ color: 'var(--red)', fontSize: 12, overflowWrap: 'break-word' }}
                 >
                   {t('skills.loadFailed', { defaultValue: 'Failed to load files' })}
                 </div>
-              ) : detail?.tree?.length ? (
-                detail.tree.map((node) => (
+              ) : renderDetail?.tree?.length ? (
+                renderDetail.tree.map((node) => (
                   <InlineTreeNode
                     key={node.name}
                     node={node}
@@ -704,14 +765,12 @@ function InlineTreeDirectory({ node, depth, parentPath, selectedFile, onSelectFi
   const path = parentPath ? `${parentPath}/${node.name}` : node.name
   const pad = 22 + depth * 14
   const expanded = expandedPaths.has(path)
-  const [childrenMeasureRef, childrenHeight] = useMeasuredHeight([
-    expanded,
-    node.children,
-    expandedPaths,
-  ])
+  const childrenHeight = useMemo(() => (
+    expanded ? countVisibleTreeRows(node.children || [], expandedPaths, path) * TREE_ROW_HEIGHT : 0
+  ), [expanded, node.children, expandedPaths, path])
 
   return (
-    <FlipPosition disabled={reduceMotion}>
+    <FlipPosition>
       <button
         className="flex items-center gap-1 w-full pr-2 py-1"
         style={{ paddingLeft: pad, height: TREE_ROW_HEIGHT, minHeight: TREE_ROW_HEIGHT, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 12, textAlign: 'left', transition: 'background 150ms ease' }}
@@ -719,9 +778,9 @@ function InlineTreeDirectory({ node, depth, parentPath, selectedFile, onSelectFi
         onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)' }}
         onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
       >
-        <AnimatedChevron open={expanded} style={{ color: 'var(--text-dim)', flexShrink: 0 }}>
+        <AnimeTreeChevron open={expanded} reduceMotion={reduceMotion} style={{ color: 'var(--text-dim)', flexShrink: 0 }}>
           <ChevronDown size={11} strokeWidth={1.5} />
-        </AnimatedChevron>
+        </AnimeTreeChevron>
         {expanded
           ? <FolderOpen size={12} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />
           : <Folder size={12} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />}
@@ -734,7 +793,7 @@ function InlineTreeDirectory({ node, depth, parentPath, selectedFile, onSelectFi
         collapseMs={DUR_MIGRATION.treeCollapse}
         className="skill-inline-content"
       >
-            <div ref={childrenMeasureRef}>
+            <div>
               {(node.children || []).map((c) => (
                 <InlineTreeNode
                   key={c.name}
@@ -760,7 +819,7 @@ function InlineTreeFile({ node, depth, parentPath, selectedFile, onSelectFile, s
   const pad = 22 + depth * 14
   const active = !suppressFileActive && selectedFile === path
   return (
-    <FlipPosition disabled={reduceMotion}>
+    <FlipPosition>
       <button
         className="flex items-center gap-1 w-full pr-2 py-1"
         style={{

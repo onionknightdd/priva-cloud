@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { animate } from 'animejs'
 import { X, RefreshCw, FileText, FolderTree, Copy, Check, ChevronDown, ChevronLeft, CornerDownLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import hljs from 'highlight.js/lib/core'
@@ -26,7 +27,9 @@ import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { downloadFile, listDirectory } from '../../api/userFiles'
 import RichFilePreview from '../shared/RichFilePreview'
 import Tabs, { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
-import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import { usePresence } from '@shared/motion/usePresence'
+import { useReducedMotion } from '@shared/motion/useReducedMotion'
+import { DUR_MIGRATION, EASE_ACCORDION } from '@shared/motion/tokens'
 import MarkdownRenderer from '../markdown/MarkdownRenderer'
 import VirtualizedCodeLines from '../shared/VirtualizedCodeLines'
 import MermaidDiagram from '../markdown/MermaidDiagram'
@@ -80,6 +83,164 @@ const PLAIN_TEXT_EXTENSIONS = new Set([
   '.h', '.hpp', '.swift', '.kt', '.scala', '.r', '.lua', '.sh', '.sql',
   '.excalidraw',
 ])
+
+function AnimeTreeChevron({ open, children, style }) {
+  const ref = useRef(null)
+  const reducedMotion = useReducedMotion()
+  const mountedRef = useRef(false)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const rotate = `${open ? 180 : 0}deg`
+    if (!mountedRef.current || reducedMotion) {
+      mountedRef.current = true
+      el.style.transform = `rotate(${rotate})`
+      return
+    }
+    animate(el, {
+      rotate,
+      duration: DUR_MIGRATION.chevron,
+      ease: EASE_ACCORDION,
+    })
+  }, [open, reducedMotion])
+
+  return (
+    <span
+      ref={ref}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        ...style,
+      }}
+    >
+      {children}
+    </span>
+  )
+}
+
+function AnimeTreeCollapse({ open, id, children }) {
+  const { mounted, onExited } = usePresence(open)
+  const reducedMotion = useReducedMotion()
+  const outerRef = useRef(null)
+  const innerRef = useRef(null)
+  const animRef = useRef(null)
+  const enteredRef = useRef(open)
+  const targetHeightRef = useRef(null)
+  const openRef = useRef(open)
+  const [height, setHeight] = useState(0)
+  openRef.current = open
+
+  useLayoutEffect(() => {
+    if (!mounted) return undefined
+    const inner = innerRef.current
+    if (!inner) return undefined
+
+    const measure = () => {
+      const next = Math.ceil(inner.scrollHeight || inner.getBoundingClientRect().height || 0)
+      setHeight((current) => (Math.abs(current - next) > 0.5 ? next : current))
+    }
+    measure()
+
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(measure)
+    observer.observe(inner)
+    return () => observer.disconnect()
+  }, [mounted])
+
+  useLayoutEffect(() => {
+    if (!mounted) {
+      enteredRef.current = false
+      targetHeightRef.current = null
+      animRef.current?.cancel()
+      animRef.current = null
+      return
+    }
+
+    const outer = outerRef.current
+    if (!outer) {
+      if (!open) onExited()
+      return
+    }
+
+    const target = Math.ceil(height || innerRef.current?.scrollHeight || 0)
+
+    if (reducedMotion) {
+      animRef.current?.cancel()
+      animRef.current = null
+      if (open) {
+        enteredRef.current = true
+        targetHeightRef.current = target
+        outer.style.height = 'auto'
+        outer.style.opacity = '1'
+      } else {
+        onExited()
+      }
+      return
+    }
+
+    if (open) {
+      if (target <= 0) {
+        outer.style.height = '0px'
+        outer.style.opacity = '0'
+        return
+      }
+      if (enteredRef.current && (outer.style.height === 'auto' || outer.style.height === '')) {
+        targetHeightRef.current = target
+        outer.style.opacity = '1'
+        return
+      }
+      if (enteredRef.current && Math.abs((targetHeightRef.current ?? -1) - target) < 0.5) return
+      animRef.current?.cancel()
+      if (!enteredRef.current) {
+        outer.style.height = '0px'
+        outer.style.opacity = '0'
+      }
+      enteredRef.current = true
+      targetHeightRef.current = target
+      animRef.current = animate(outer, {
+        height: `${target}px`,
+        opacity: 1,
+        duration: DUR_MIGRATION.accordionModeB,
+        ease: EASE_ACCORDION,
+        onComplete: () => {
+          if (openRef.current) {
+            outer.style.height = 'auto'
+            outer.style.opacity = '1'
+          }
+        },
+      })
+    } else {
+      animRef.current?.cancel()
+      const current = outer.offsetHeight
+      outer.style.height = `${current}px`
+      void outer.offsetHeight
+      targetHeightRef.current = 0
+      animRef.current = animate(outer, {
+        height: '0px',
+        opacity: 0,
+        duration: DUR_MIGRATION.accordionModeB,
+        ease: EASE_ACCORDION,
+        onComplete: onExited,
+      })
+    }
+  }, [open, mounted, height, reducedMotion, onExited])
+
+  if (!mounted) return null
+  return (
+    <div
+      id={id}
+      ref={outerRef}
+      style={{ overflow: 'hidden', contain: 'layout paint style' }}
+    >
+      <div ref={innerRef}>
+        {typeof children === 'function' ? children() : children}
+      </div>
+    </div>
+  )
+}
 
 function fileName(filePath) {
   if (!filePath) return '(untitled)'
@@ -722,16 +883,16 @@ function FileTreeSidebar({
           aria-expanded={expanded}
           aria-controls={bodyId}
         >
-          <AnimatedChevron open={expanded} style={{ color: 'var(--text-dim)' }}>
+          <AnimeTreeChevron open={expanded} style={{ color: 'var(--text-dim)' }}>
             <ChevronDown size={13} strokeWidth={1.5} />
-          </AnimatedChevron>
+          </AnimeTreeChevron>
           {getFileIcon({ name: label, type: 'directory' }, 13)}
           <span className="truncate text-sm" style={{ minWidth: 0, fontWeight: depth === 0 ? 600 : 400 }}>
             {label}
           </span>
         </button>
 
-        <AnimatedCollapse open={expanded} id={bodyId} animateHeight={false}>
+        <AnimeTreeCollapse open={expanded} id={bodyId}>
           {() => (
           <div>
             {loading && (
@@ -784,7 +945,7 @@ function FileTreeSidebar({
             })}
           </div>
           )}
-        </AnimatedCollapse>
+        </AnimeTreeCollapse>
       </div>
     )
   }

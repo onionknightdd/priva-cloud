@@ -45,6 +45,20 @@ The per-account agent-runner image ref published to the operator (ConfigMap RUNN
 {{- end -}}
 
 {{/*
+imagePullSecrets pod-spec snippet from image.pullSecrets (list of Secret names).
+Renders nothing when the list is empty. Usage (inside a pod template spec):
+  {{- include "priva-cloud.imagePullSecrets" . | nindent 6 }}
+*/}}
+{{- define "priva-cloud.imagePullSecrets" -}}
+{{- with .Values.image.pullSecrets }}
+imagePullSecrets:
+  {{- range . }}
+  - name: {{ . }}
+  {{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
 The dev nfs-xfs image ref.
 */}}
 {{- define "priva-cloud.devStorageImage" -}}

@@ -20,6 +20,7 @@ spec:
     metadata:
       labels: {app: priva-nfs, role: dev-storage}
     spec:
+      {{- include "priva-cloud.imagePullSecrets" . | nindent 6 }}
       containers:
         - name: nfs-xfs
           image: {{ include "priva-cloud.devStorageImage" . }}

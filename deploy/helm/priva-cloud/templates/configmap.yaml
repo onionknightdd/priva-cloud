@@ -30,5 +30,9 @@ data:
   PRIVA_KUBERNETES__STORAGE_BACKEND: {{ .Values.config.kubernetes.storageBackend | quote }}
   PRIVA_KUBERNETES__EXPORT_CLAIM_NAME: {{ .Values.config.kubernetes.exportClaimName | quote }}
   PRIVA_KUBERNETES__QUOTA_MANAGER_URL: {{ .Values.config.kubernetes.quotaManagerUrl | replace "{ns}" $ns | quote }}
+  # cephfs backend: RWX CSI StorageClass for the per-account export PVCs ("" = cluster default).
+  PRIVA_KUBERNETES__CEPHFS_STORAGE_CLASS: {{ .Values.config.kubernetes.cephfsStorageClass | default "" | quote }}
+  # Runner pods pull through the same secret as the chart workloads (first entry).
+  PRIVA_KUBERNETES__RUNNER_IMAGE_PULL_SECRET: {{ (first .Values.image.pullSecrets | default "") | quote }}
   PRIVA_KUBERNETES__RUNNER_UID: {{ .Values.config.kubernetes.runnerUid | quote }}
   PRIVA_KUBERNETES__RUNNER_GID: {{ .Values.config.kubernetes.runnerGid | quote }}

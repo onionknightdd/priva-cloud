@@ -48,6 +48,13 @@ helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace \
   -f deploy/helm/priva-cloud/values-prod.yaml
 ```
 
+```bash
+# UAT — amd64 cluster + CephFS CSI (per-account PVCs, quota = PVC size).
+# Full runbook: deploy/uat/README.md (build-push script, prereqs, verification).
+helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace \
+  -f deploy/helm/priva-cloud/values-uat.yaml
+```
+
 You can still `--set key=value` on top for one-off tweaks.
 
 ## Key values
@@ -55,6 +62,8 @@ You can still `--set key=value` on top for one-off tweaks.
 | Value | Default | Notes |
 |-------|---------|-------|
 | `image.registry` / `image.tag` | `""` / `dev` | registry prepended only if set; per-service `tag` overrides |
+| `image.pullSecrets` | `[]` | dockerconfigjson Secret names → `imagePullSecrets` on every chart pod; first entry is published to the operator for runner pods |
+| `config.kubernetes.cephfsStorageClass` | `""` | cephfs backend: RWX CSI SC for per-account export PVCs (needs `allowVolumeExpansion`); `""` = default SC |
 | `namespaceOverride` | `""` | else the release namespace |
 | `crds.install` / `crds.keep` | `true` / `true` | templated CRD (upgrades apply schema changes), kept on uninstall |
 | `sharedSecret.create` | `true` | random jwt+hmac, preserved across upgrades via `lookup`; set values to pin |

@@ -164,6 +164,9 @@ class KubernetesSettings(BaseModel):
     namespace_tenants: str = "priva-cloud"  # per-account agent-runner pods + CRs
     runner_image: str = "priva/agent-runner:dev"  # stamped into AgentTenant spec.image
     runner_image_pull_policy: str = "IfNotPresent"  # so minikube uses locally-loaded images
+    # Name of an existing kubernetes.io/dockerconfigjson Secret in the tenants namespace,
+    # rendered as imagePullSecrets on every runner pod. "" = none (public/local images).
+    runner_image_pull_secret: str = ""
     runner_service_port: int = 8091  # per-account Service / pod runtime port
     idle_grace_seconds: int = 1800  # default spec.idle.graceSeconds (scale-to-zero)
     min_alive_after_wake_seconds: int = 1800  # anti-thrash floor
@@ -191,6 +194,10 @@ class KubernetesSettings(BaseModel):
     # The quota-manager sidecar (on the dev NFS server) that creates per-account subdirs,
     # sets the XFS project quota, and reports usage (wake-free). Prod uses the Ceph API.
     quota_manager_url: str = "http://priva-quota.priva-cloud.svc:8099"
+    # cephfs backend (prod/UAT): one RWX PVC per account on a CephFS CSI StorageClass —
+    # 1 PVC = 1 subvolume whose size IS the quota. The SC must be RWX-capable and set
+    # allowVolumeExpansion for online quota grow. "" => cluster default StorageClass.
+    cephfs_storage_class: str = ""
     runner_uid: int = 10001  # non-root sandbox uid the runner runs as / owns its subdir
     runner_gid: int = 10001
     # Data-plane gateway observability: the admin scrapes the agentgateway pod's

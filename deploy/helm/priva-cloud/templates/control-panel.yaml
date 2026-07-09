@@ -16,6 +16,7 @@ spec:
     metadata:
       labels: {app: control-panel}
     spec:
+      {{- include "priva-cloud.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: priva-control-panel
       containers:
         - name: control-panel

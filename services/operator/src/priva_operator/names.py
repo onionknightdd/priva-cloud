@@ -19,6 +19,11 @@ def account_subpath(account_id: str) -> str:
     return account_id
 
 
+def export_claim(account_id: str) -> str:
+    """Per-account export PVC (csi_pv storage backends, e.g. cephfs)."""
+    return f"{deploy_name(account_id)}-export"
+
+
 def labels(account_id: str) -> dict[str, str]:
     # app=agent-runner is the InferencePool selector; the account label lets the
     # operator/EPP find the one pod for an account.

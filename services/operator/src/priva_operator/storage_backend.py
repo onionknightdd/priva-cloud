@@ -111,36 +111,93 @@ class NfsXfsBackend(StorageBackend):
 
 
 class CephFsBackend(StorageBackend):
-    """Prod (stub). Intended shape — implement against the Ceph mgr / CSI:
+    """Prod/UAT: one RWX PVC per account on a CephFS CSI StorageClass.
 
-    - ``provision``: create/ensure a CephFS subvolume ``<account_id>`` (or an NFS-EFS
-      access-point) sized to ``volume_gb`` (``ceph fs subvolume create ... --size``), root
-      owned by ``runner_uid``; return ``MountInfo(kind="csi_pv", claim="ar-<id>-export")``.
-    - ``set_quota``: ``ceph fs subvolume resize`` / update the access-point quota.
-    - ``usage``: ``ceph fs subvolume info`` (``bytes_used``/``bytes_quota``).
-
-    The runner mounts only its own subvolume; the reader RO-mounts the CephFS root.
+    Dynamic provisioning maps 1 PVC -> 1 CephFS subvolume whose size IS the hard quota
+    (writes past it ENOSPC) and whose root IS the account dir — the runner mounts the
+    claim at /workspace with no subPath, so sibling isolation holds by construction.
+    Ownership comes from the pod securityContext (kube.py sets fsGroup=runner_gid with
+    OnRootMismatch; cephfs CSI honors fsGroup), so no server-side chown is needed.
+    Quota grow = PVC expand (the StorageClass must set allowVolumeExpansion); shrink is
+    rejected, mirroring the dev backend's 409. No privileged anything.
     """
 
-    def __init__(self, *_, **__):
-        pass
+    def __init__(self, namespace: str, storage_class: str):
+        self._ns = namespace
+        self._sc = storage_class or None  # "" / None => cluster default StorageClass
 
-    def _todo(self) -> None:
-        raise NotImplementedError(
-            "CephFsBackend not implemented — set kubernetes.storage_backend=nfs_xfs for dev")
+    def _core(self):
+        # Lazy import: kube.py imports this module (get_backend), so a module-level
+        # import of priva_operator.kube would be circular.
+        from priva_operator.kube import core
+        return core()
+
+    @staticmethod
+    def _parse_gi(qty: str) -> int:
+        """Parse the Gi sizes this backend writes; raise on anything else so a
+        hand-edited PVC never silently reconciles against a misread number."""
+        if not qty.endswith("Gi"):
+            raise ValueError(f"unexpected PVC storage quantity {qty!r} (expected <n>Gi)")
+        return int(qty[:-2])
+
+    def _grow_if_needed(self, name: str, volume_gb: int, *, strict: bool) -> None:
+        """Grow the claim to volume_gb if larger. strict=True raises on a shrink
+        request (explicit quota edit); strict=False ignores it (idempotent ensure)."""
+        core = self._core()
+        pvc = core.read_namespaced_persistent_volume_claim(name, self._ns)
+        current = self._parse_gi(pvc.spec.resources.requests["storage"])
+        if volume_gb > current:
+            core.patch_namespaced_persistent_volume_claim(
+                name, self._ns,
+                {"spec": {"resources": {"requests": {"storage": f"{volume_gb}Gi"}}}})
+            logger.info("grew export PVC {} {}Gi -> {}Gi", name, current, volume_gb)
+        elif volume_gb < current and strict:
+            raise ValueError(
+                f"shrink not supported: PVC {name} is {current}Gi, requested {volume_gb}Gi")
 
     def provision(self, account_id: str, volume_gb: int) -> MountInfo:
-        self._todo()
+        from kubernetes.client import ApiException
+
+        from priva_operator import names
+        name = names.export_claim(account_id)
+        body = {
+            "apiVersion": "v1",
+            "kind": "PersistentVolumeClaim",
+            "metadata": {"name": name,
+                         "labels": {**names.labels(account_id), "priva.io/role": "export"}},
+            "spec": {
+                "accessModes": ["ReadWriteMany"],
+                "resources": {"requests": {"storage": f"{int(volume_gb)}Gi"}},
+                **({"storageClassName": self._sc} if self._sc else {}),
+            },
+        }
+        # RAISE on failure (like NfsXfsBackend): the claim must exist before the pod
+        # renders, and letting this raise makes kopf retry `ensure`.
+        try:
+            self._core().create_namespaced_persistent_volume_claim(self._ns, body)
+            logger.info("provisioned export PVC {} ({}Gi, sc={})", name, volume_gb, self._sc or "<default>")
+        except ApiException as exc:
+            if exc.status != 409:
+                raise
+            self._grow_if_needed(name, int(volume_gb), strict=False)
+        return MountInfo(kind="csi_pv", claim=name)
 
     def set_quota(self, account_id: str, volume_gb: int) -> None:
-        self._todo()
+        from priva_operator import names
+        try:
+            self._grow_if_needed(names.export_claim(account_id), int(volume_gb), strict=True)
+        except Exception as exc:
+            logger.warning("cephfs set_quota failed account={}: {}", account_id, exc)
+            raise
 
     def usage(self, account_id: str) -> tuple[int, int] | None:
-        self._todo()
+        # Used-bytes lives in kubelet/CSI volume stats we don't scrape yet; report
+        # "unavailable" (the interface's fail-soft contract) rather than a guess.
+        return None
 
 
 def get_backend(settings) -> StorageBackend:
     k = settings.kubernetes
     if k.storage_backend == "cephfs":
-        return CephFsBackend()
+        return CephFsBackend(k.namespace_tenants, k.cephfs_storage_class)
     return NfsXfsBackend(k.quota_manager_url, k.export_claim_name, k.runner_uid, k.runner_gid)

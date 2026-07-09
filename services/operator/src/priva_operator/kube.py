@@ -134,6 +134,8 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
             "template": {
                 "metadata": {"labels": lbl},
                 "spec": {
+                    **({"imagePullSecrets": [{"name": settings.kubernetes.runner_image_pull_secret}]}
+                       if settings.kubernetes.runner_image_pull_secret else {}),
                     # Non-root: run as the sandbox uid that owns /export/<account_id>. fsGroup
                     # makes the mount group-writable; OnRootMismatch skips the recursive chown
                     # once the quota-manager has already chowned the subdir (NFS root_squash).

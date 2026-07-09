@@ -4,6 +4,10 @@ Container images + Kubernetes manifests for running Priva Cloud on a cluster
 (validated on minikube). See `docs/migration_progress/phase-3-agentgateway-operator.md`
 for the as-built design and the agentgateway-EPP-over-TLS gotcha.
 
+> **First time building or deploying? Read `docs/READ_BEFORE_BUILD.md` first** — host
+> toolchain, the build-SPAs-before-the-image rule, secrets you must provide, and the
+> dev/UAT pre-flight gotchas.
+
 ## Layout
 
 | Path | What |
@@ -18,6 +22,7 @@ for the as-built design and the agentgateway-EPP-over-TLS gotcha.
 | `helm/priva-cloud/` | Full Helm chart for the whole control plane (CRD, config/secret, control-plane, RBAC, edge, dev-storage) — `helm install` alternative to the raw `kubectl apply` flow. |
 | `minikube/build.sh` | Build the 4 images and load them into minikube (runtime=containerd). |
 | `minikube/up.sh` | One-shot bring-up: images → Gateway API + GIE CRDs + agentgateway (Helm) → CRD/RBAC → control-plane → edge. |
+| `uat/` | UAT deployment: `build-push.sh` (buildx linux/amd64 → registry) + runbook for the Helm install on a real cluster (cephfs storage backend). |
 
 ## Install via Helm (alternative to `up.sh`)
 

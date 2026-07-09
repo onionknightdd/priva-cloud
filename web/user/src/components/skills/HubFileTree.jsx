@@ -1,9 +1,12 @@
-import { useState, useMemo, useId } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, useId } from 'react'
+import { animate } from 'animejs'
 import { ChevronDown, Folder, FolderOpen, FileText, Search, BookOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useResizable } from '@shared/hooks/useResizable'
+import { usePresence } from '@shared/motion/usePresence'
+import { useReducedMotion } from '@shared/motion/useReducedMotion'
+import { DUR_MIGRATION, EASE_ACCORDION } from '@shared/motion/tokens'
 import useSkillHubStore from '../../stores/skillHubStore'
-import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 
 function filterTree(nodes, query) {
   if (!query) return nodes
@@ -46,6 +49,164 @@ function collectExpandedPaths(nodes, query, parentPath = '') {
     }
   }
   return paths
+}
+
+function AnimeTreeChevron({ open, children, style }) {
+  const ref = useRef(null)
+  const reducedMotion = useReducedMotion()
+  const mountedRef = useRef(false)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const rotate = `${open ? 180 : 0}deg`
+    if (!mountedRef.current || reducedMotion) {
+      mountedRef.current = true
+      el.style.transform = `rotate(${rotate})`
+      return
+    }
+    animate(el, {
+      rotate,
+      duration: DUR_MIGRATION.chevron,
+      ease: EASE_ACCORDION,
+    })
+  }, [open, reducedMotion])
+
+  return (
+    <span
+      ref={ref}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        ...style,
+      }}
+    >
+      {children}
+    </span>
+  )
+}
+
+function AnimeTreeCollapse({ open, id, children }) {
+  const { mounted, onExited } = usePresence(open)
+  const reducedMotion = useReducedMotion()
+  const outerRef = useRef(null)
+  const innerRef = useRef(null)
+  const animRef = useRef(null)
+  const enteredRef = useRef(open)
+  const targetHeightRef = useRef(null)
+  const openRef = useRef(open)
+  const [height, setHeight] = useState(0)
+  openRef.current = open
+
+  useLayoutEffect(() => {
+    if (!mounted) return undefined
+    const inner = innerRef.current
+    if (!inner) return undefined
+
+    const measure = () => {
+      const next = Math.ceil(inner.scrollHeight || inner.getBoundingClientRect().height || 0)
+      setHeight((current) => (Math.abs(current - next) > 0.5 ? next : current))
+    }
+    measure()
+
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(measure)
+    observer.observe(inner)
+    return () => observer.disconnect()
+  }, [mounted])
+
+  useLayoutEffect(() => {
+    if (!mounted) {
+      enteredRef.current = false
+      targetHeightRef.current = null
+      animRef.current?.cancel()
+      animRef.current = null
+      return
+    }
+
+    const outer = outerRef.current
+    if (!outer) {
+      if (!open) onExited()
+      return
+    }
+
+    const target = Math.ceil(height || innerRef.current?.scrollHeight || 0)
+
+    if (reducedMotion) {
+      animRef.current?.cancel()
+      animRef.current = null
+      if (open) {
+        enteredRef.current = true
+        targetHeightRef.current = target
+        outer.style.height = 'auto'
+        outer.style.opacity = '1'
+      } else {
+        onExited()
+      }
+      return
+    }
+
+    if (open) {
+      if (target <= 0) {
+        outer.style.height = '0px'
+        outer.style.opacity = '0'
+        return
+      }
+      if (enteredRef.current && (outer.style.height === 'auto' || outer.style.height === '')) {
+        targetHeightRef.current = target
+        outer.style.opacity = '1'
+        return
+      }
+      if (enteredRef.current && Math.abs((targetHeightRef.current ?? -1) - target) < 0.5) return
+      animRef.current?.cancel()
+      if (!enteredRef.current) {
+        outer.style.height = '0px'
+        outer.style.opacity = '0'
+      }
+      enteredRef.current = true
+      targetHeightRef.current = target
+      animRef.current = animate(outer, {
+        height: `${target}px`,
+        opacity: 1,
+        duration: DUR_MIGRATION.accordionModeB,
+        ease: EASE_ACCORDION,
+        onComplete: () => {
+          if (openRef.current) {
+            outer.style.height = 'auto'
+            outer.style.opacity = '1'
+          }
+        },
+      })
+    } else {
+      animRef.current?.cancel()
+      const current = outer.offsetHeight
+      outer.style.height = `${current}px`
+      void outer.offsetHeight
+      targetHeightRef.current = 0
+      animRef.current = animate(outer, {
+        height: '0px',
+        opacity: 0,
+        duration: DUR_MIGRATION.accordionModeB,
+        ease: EASE_ACCORDION,
+        onComplete: onExited,
+      })
+    }
+  }, [open, mounted, height, reducedMotion, onExited])
+
+  if (!mounted) return null
+  return (
+    <div
+      id={id}
+      ref={outerRef}
+      style={{ overflow: 'hidden', contain: 'layout paint style' }}
+    >
+      <div ref={innerRef}>
+        {typeof children === 'function' ? children() : children}
+      </div>
+    </div>
+  )
 }
 
 export default function HubFileTree() {
@@ -211,15 +372,15 @@ function TreeNode({ node, depth, selectedFile, onSelect, parentPath, forceExpand
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)' }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
         >
-          <AnimatedChevron open={expanded}>
+          <AnimeTreeChevron open={expanded}>
             <ChevronDown size={12} strokeWidth={1.5} />
-          </AnimatedChevron>
+          </AnimeTreeChevron>
           {expanded
             ? <FolderOpen size={12} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--yellow)' }} />
             : <Folder size={12} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--yellow)' }} />}
           <span className="truncate">{node.name}</span>
         </button>
-        <AnimatedCollapse open={expanded} id={bodyId} animateHeight={false}>
+        <AnimeTreeCollapse open={expanded} id={bodyId}>
           {() => node.children?.map((child) => (
             <TreeNode
               key={child.name}
@@ -231,7 +392,7 @@ function TreeNode({ node, depth, selectedFile, onSelect, parentPath, forceExpand
               forceExpandedPaths={forceExpandedPaths}
             />
           ))}
-        </AnimatedCollapse>
+        </AnimeTreeCollapse>
       </>
     )
   }
