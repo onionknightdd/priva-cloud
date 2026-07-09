@@ -84,7 +84,7 @@ const PLAIN_TEXT_EXTENSIONS = new Set([
   '.excalidraw',
 ])
 const MAIN_AREA_HEADER_HEIGHT = 30
-const PATH_MODE_BUTTON_HEIGHT = 26
+const PATH_MODE_BUTTON_HEIGHT = 22
 
 function AnimeTreeChevron({ open, children, style }) {
   const ref = useRef(null)
@@ -413,7 +413,7 @@ function ModeButton({ active, children, onClick, position }) {
         justifyContent: 'center',
         height: PATH_MODE_BUTTON_HEIGHT,
         boxSizing: 'border-box',
-        padding: '2px 10px',
+        padding: '0 9px',
         background: active ? 'var(--bg-elevated)' : 'transparent',
         border: 'none',
         borderRadius: radius,
