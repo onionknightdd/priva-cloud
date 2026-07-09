@@ -34,6 +34,7 @@ import { parseSelectedFile } from '../../utils/selectedFile'
 import DrawIcon from '@shared/components/shared/DrawIcon'
 
 const ASSISTANT_MESSAGE_GAP = 6
+const ASSISTANT_META_MARGIN_TOP = -6
 
 /**
  * Parse text containing <think>...</think> tags into segments.
@@ -1736,7 +1737,7 @@ function MessageActions({ textContent, message, assistantIndex, onRewind, onFork
     background: 'transparent',
     border: 'none',
     cursor: disabled ? 'default' : 'pointer',
-    padding: 4,
+    padding: isUser ? 4 : 0,
     borderRadius: '4px',
     color: 'var(--text-dim)',
     transition: 'color 150ms ease',
@@ -1746,7 +1747,7 @@ function MessageActions({ textContent, message, assistantIndex, onRewind, onFork
       data-message-actions
       className="flex items-center gap-3 text-xs"
       style={{
-        marginTop: isUser ? -3 : 0,
+        marginTop: isUser ? -3 : ASSISTANT_META_MARGIN_TOP,
         color: 'var(--text-dim)',
         alignSelf: isUser ? 'flex-end' : undefined,
         lineHeight: '16px',
@@ -1763,7 +1764,7 @@ function MessageActions({ textContent, message, assistantIndex, onRewind, onFork
           background: 'transparent',
           border: 'none',
           cursor: 'pointer',
-          padding: isUser ? 0 : 4,
+          padding: 0,
           borderRadius: '4px',
           color: copied ? 'var(--green)' : 'var(--text-dim)',
           transition: 'color 150ms ease, background 150ms ease',
