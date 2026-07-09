@@ -51,7 +51,7 @@ export function ToolSectionToggle({ collapsed, onToggle, run, fileOps, t, contro
         width: '100%',
         background: 'transparent',
         border: 'none',
-        padding: compact ? '2px 0' : '4px 0',
+        padding: compact ? '1px 0' : 0,
         cursor: 'pointer',
         color: labelColor,
         fontSize: compact ? 12 : 13,
@@ -168,7 +168,7 @@ export default function ToolRunSection({
   )
 
   return (
-    <div style={{ marginTop: compact ? 2 : 4, marginBottom: compact ? 2 : 4 }}>
+    <div style={{ marginTop: compact ? 2 : 6, marginBottom: compact ? 2 : 6 }}>
       <ToolSectionToggle
         collapsed={collapsed}
         onToggle={onToggle}
