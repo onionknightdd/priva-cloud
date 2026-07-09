@@ -26,9 +26,9 @@ import useSidebarStore from '../../stores/sidebarStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { downloadFile, listDirectory, previewFile } from '../../api/userFiles'
 import RichFilePreview from '../shared/RichFilePreview'
-import { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
 import { usePresence } from '@shared/motion/usePresence'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
+import { useSlidingUnderline } from '@shared/motion/useSlidingUnderline'
 import { DUR_MIGRATION, EASE_ACCORDION } from '@shared/motion/tokens'
 import MarkdownRenderer from '../markdown/MarkdownRenderer'
 import VirtualizedCodeLines from '../shared/VirtualizedCodeLines'
@@ -83,6 +83,8 @@ const PLAIN_TEXT_EXTENSIONS = new Set([
   '.h', '.hpp', '.swift', '.kt', '.scala', '.r', '.lua', '.sh', '.sql',
   '.excalidraw',
 ])
+const MAIN_AREA_HEADER_HEIGHT = 30
+const PATH_MODE_BUTTON_HEIGHT = 24
 
 function AnimeTreeChevron({ open, children, style }) {
   const ref = useRef(null)
@@ -404,8 +406,9 @@ function ModeButton({ active, children, onClick, position }) {
     <button
       type="button"
       onClick={onClick}
-      className="px-2 py-1 text-xs"
+      className="px-2 text-xs"
       style={{
+        height: PATH_MODE_BUTTON_HEIGHT,
         background: active ? 'var(--bg-elevated)' : 'transparent',
         border: 'none',
         borderRadius: radius,
@@ -1097,6 +1100,7 @@ export default function FileBrowserPanel() {
   const refreshFile = useFileBrowserStore((s) => s.refreshFile)
   const openFileTab = useFileBrowserStore((s) => s.openFile)
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null
+  const fileTabUnderline = useSlidingUnderline(activeTab?.id)
   const activeSession = sidebarSessions.find((session) => session.sessionId === sessionId || session.id === sessionId)
   // No authUser.workspace fallback — it is the control-panel's /tmp/cp-workspace
   // path, not the agent-runner's real /workspace cwd where files live.
@@ -1232,7 +1236,6 @@ export default function FileBrowserPanel() {
 
   return (
     <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-      <SlidingTabGroup id="file-browser-tabs">
       <div
         className="flex items-stretch flex-shrink-0 min-w-0"
         style={{
@@ -1240,18 +1243,34 @@ export default function FileBrowserPanel() {
           borderBottom: '1px solid var(--border)',
         }}
       >
-      <div className="flex items-center overflow-x-auto min-w-0" style={{ flex: 1 }}>
+      <div className="flex items-center overflow-x-auto scrollbar-hidden min-w-0" style={{ flex: 1, height: MAIN_AREA_HEADER_HEIGHT, position: 'relative' }}>
+        <span
+          ref={fileTabUnderline.indicatorRef}
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            left: 0,
+            bottom: 0,
+            width: 0,
+            height: 2,
+            opacity: 0,
+            background: 'var(--blue)',
+            pointerEvents: 'none',
+            zIndex: 2,
+          }}
+        />
         {tabs.map((tab) => {
           const active = tab.id === activeTab.id
           return (
             <button
               key={tab.id}
+              ref={fileTabUnderline.setItemRef(tab.id)}
               type="button"
               onClick={() => setActiveTab(tab.id)}
               className="flex items-center gap-2 min-w-0"
               style={{
                 position: 'relative',
-                height: 40,
+                height: MAIN_AREA_HEADER_HEIGHT,
                 maxWidth: 180,
                 flexShrink: 0,
                 border: 'none',
@@ -1264,12 +1283,6 @@ export default function FileBrowserPanel() {
               }}
               title={tab.filePath}
             >
-              {active && (
-                <SlidingTabIndicator
-                  layoutId="file-browser-tab-indicator"
-                  style={{ bottom: -1, height: 2, background: 'var(--blue)' }}
-                />
-              )}
               <FileText size={12} strokeWidth={1.5} style={{ color: active ? 'var(--blue)' : 'var(--text-dim)', flexShrink: 0, position: 'relative', zIndex: 1 }} />
               <span className="truncate text-xs" style={{ fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace", minWidth: 0, position: 'relative', zIndex: 1 }}>
                 {tab.name}
@@ -1294,7 +1307,7 @@ export default function FileBrowserPanel() {
             title={t('fileBrowser.closeAll', 'Close all')}
             className="flex items-center gap-1 text-xs font-semibold uppercase flex-shrink-0"
             style={{
-              height: 40,
+              height: MAIN_AREA_HEADER_HEIGHT,
               borderTop: 'none',
               borderRight: 'none',
               borderBottom: 'none',
@@ -1314,11 +1327,10 @@ export default function FileBrowserPanel() {
           </button>
         )}
       </div>
-      </SlidingTabGroup>
 
       <div
         className="flex items-center gap-2 px-3 flex-shrink-0"
-        style={{ height: 40, borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-base)' }}
+        style={{ height: MAIN_AREA_HEADER_HEIGHT, borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-base)' }}
       >
         <span
           className="truncate text-xs"

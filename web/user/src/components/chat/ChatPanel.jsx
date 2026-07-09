@@ -22,7 +22,7 @@ import { getSplitParams, isSplitPane } from '../../utils/splitMode'
 import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 
 const MessageList = lazyWithChunkReload(() => import('./MessageList'))
-const SESSION_HEADER_HEIGHT = 27
+const SESSION_HEADER_HEIGHT = 30
 const TRACKED_TASK_TOOL_NAMES = new Set([
   'TaskOutput',
   'TaskStop',

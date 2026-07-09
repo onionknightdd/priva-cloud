@@ -4,7 +4,9 @@ import useUiStore from '@shared/stores/uiStore'
 import useFileOpsStore from '../../stores/fileOpsStore'
 import useFileBrowserStore from '../../stores/fileBrowserStore'
 import { RollingInteger } from '../shared/Odometer'
-import Tabs from '@shared/components/shared/Tabs'
+import { useSlidingUnderline } from '@shared/motion/useSlidingUnderline'
+
+const MAIN_AREA_HEADER_HEIGHT = 30
 
 function CountedTabLabel({ label, count }) {
   if (!count) return label
@@ -37,48 +39,73 @@ export default function CanvasHeader() {
     { id: 'browser', label: t('canvas.browserTab', 'BROWSER') },
   ]
   const activeTabKey = activeCanvasTab === 'files' ? 'changes' : activeCanvasTab
+  const headerUnderline = useSlidingUnderline(activeTabKey)
 
   return (
     <div
       className={`flex items-center justify-between flex-shrink-0 ${compact ? 'px-2' : 'px-3'}`}
       style={{
-        height: 40,
+        height: MAIN_AREA_HEADER_HEIGHT,
         borderBottom: '1px solid var(--border)',
         background: 'var(--bg-surface)',
       }}
     >
       <div className={`flex items-center min-w-0 flex-1 overflow-x-auto scrollbar-hidden ${compact ? 'gap-2' : 'gap-4'}`}>
         <GripVertical size={12} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
-        <Tabs
-          tabs={tabItems}
-          activeKey={activeTabKey}
-          onChange={(_, tab) => setActiveCanvasTab(tab.id)}
-          layoutId="canvas-header-tab-indicator"
+        <div
           className={`flex items-center ${compact ? 'gap-2' : 'gap-4'}`}
-          style={{ height: '100%' }}
-          indicatorStyle={{
-            bottom: -1,
-            height: 2,
-            background: 'var(--blue)',
-          }}
-          buttonStyle={{
-            height: 40,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 0,
-            fontSize: 11,
-            fontWeight: 600,
-            lineHeight: '16px',
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
-          }}
-          getButtonStyle={({ active }) => ({
-            color: active ? 'var(--text-primary)' : 'var(--text-dim)',
+          style={{ height: '100%', position: 'relative' }}
+        >
+          <span
+            ref={headerUnderline.indicatorRef}
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: 0,
+              bottom: 0,
+              width: 0,
+              height: 2,
+              opacity: 0,
+              background: 'var(--blue)',
+              pointerEvents: 'none',
+              zIndex: 2,
+            }}
+          />
+          {tabItems.map((tab) => {
+            const active = tab.id === activeTabKey
+            return (
+              <button
+                key={tab.id}
+                ref={headerUnderline.setItemRef(tab.id)}
+                type="button"
+                onClick={() => setActiveCanvasTab(tab.id)}
+                style={{
+                  position: 'relative',
+                  zIndex: 1,
+                  height: MAIN_AREA_HEADER_HEIGHT,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 0,
+                  border: 'none',
+                  background: 'transparent',
+                  color: active ? 'var(--text-primary)' : 'var(--text-dim)',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  lineHeight: '16px',
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  transition: 'color 150ms ease',
+                }}
+              >
+                {tab.label}
+              </button>
+            )
           })}
-        />
+        </div>
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
         <button
