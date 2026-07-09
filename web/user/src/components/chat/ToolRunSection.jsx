@@ -220,7 +220,7 @@ export default function ToolRunSection({
   )
 
   return (
-    <div style={{ marginTop: compact ? 2 : 6, marginBottom: compact ? 2 : 6 }}>
+    <div style={{ marginTop: compact ? 2 : 0, marginBottom: compact ? 2 : 0 }}>
       <ToolSectionToggle
         collapsed={collapsed}
         onToggle={onToggle}

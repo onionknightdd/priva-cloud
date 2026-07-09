@@ -33,6 +33,8 @@ import { parseSelectedXlsx } from '../../utils/selectedXlsx'
 import { parseSelectedFile } from '../../utils/selectedFile'
 import DrawIcon from '@shared/components/shared/DrawIcon'
 
+const ASSISTANT_MESSAGE_GAP = 6
+
 /**
  * Parse text containing <think>...</think> tags into segments.
  * Returns array of { type: 'text' | 'thinking', content: string }
@@ -1573,7 +1575,7 @@ export default memo(function MessageBubble({
         style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: isUser ? 2 : 4,
+          gap: isUser ? 2 : ASSISTANT_MESSAGE_GAP,
           alignItems: isUser ? 'flex-end' : 'stretch',
           width: hasUserReferenceContent ? 'min(720px, 80%)' : undefined,
           maxWidth: isUser ? 'min(720px, 80%)' : undefined,
@@ -1744,7 +1746,7 @@ function MessageActions({ textContent, message, assistantIndex, onRewind, onFork
       data-message-actions
       className="flex items-center gap-3 text-xs"
       style={{
-        marginTop: isUser ? -3 : 2,
+        marginTop: isUser ? -3 : 0,
         color: 'var(--text-dim)',
         alignSelf: isUser ? 'flex-end' : undefined,
         lineHeight: '16px',
