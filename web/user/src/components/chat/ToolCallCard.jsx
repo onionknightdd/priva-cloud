@@ -10,6 +10,7 @@ import { copyTextToClipboard } from '@shared/utils/clipboard'
 import useTaskStore from '../../stores/taskStore'
 import { GENERATED_TOOL_LABEL, GENERATED_TOOL_NAME, getToolDisplayName } from '../../utils/generatedTool'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import AnimatedShimmerText from '@shared/components/shared/AnimatedShimmerText'
 import DrawIcon from '@shared/components/shared/DrawIcon'
 import { useStatusSettle } from '@shared/motion/useStatusSettle'
 import { tweenScrollIntoView } from '@shared/motion/tweenScroll'
@@ -600,7 +601,7 @@ export default function ToolCallCard({ block, reverted = false, compact = false 
               ...chipCompactStyle,
             }}>
               <Loader size={statusIconSize} strokeWidth={1.5} className="icon-running" style={{ marginRight: 2 }} />
-              <span className="thinking-shimmer" style={{ fontSize: compact ? 10 : 11 }}>{statusOverride || t('toolCall.running')}</span>
+              <AnimatedShimmerText style={{ fontSize: compact ? 10 : 11 }}>{statusOverride || t('toolCall.running')}</AnimatedShimmerText>
             </span>
           )}
 

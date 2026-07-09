@@ -6,6 +6,7 @@ import useChatStore from '../../stores/chatStore'
 import useTaskStore from '../../stores/taskStore'
 import useUiStore from '@shared/stores/uiStore'
 import { RollingInteger } from '../shared/Odometer'
+import AnimatedShimmerText from '@shared/components/shared/AnimatedShimmerText'
 
 function formatDuration(ms) {
   if (!ms) return null
@@ -93,9 +94,9 @@ function SubagentFrame({ block, reverted = false }) {
         <Loader size={10} strokeWidth={1.5} className="icon-running" style={{ marginRight: 2 }} />
         <ToolUseCountLabel count={toolUseCount} />
         {latestToolUse ? (
-          <span className="thinking-shimmer" style={{ fontSize: 11 }}>· {latestToolUse.name}...</span>
+          <AnimatedShimmerText style={{ fontSize: 11 }}>· {latestToolUse.name}...</AnimatedShimmerText>
         ) : (
-          <span className="thinking-shimmer" style={{ fontSize: 11 }}>· running</span>
+          <AnimatedShimmerText style={{ fontSize: 11 }}>· running</AnimatedShimmerText>
         )}
       </span>
     )

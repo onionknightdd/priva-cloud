@@ -20,6 +20,7 @@ import SelectedXlsxCard from '../shared/SelectedXlsxCard'
 import SelectedFileCard from '../shared/SelectedFileCard'
 import { RollingInteger } from '../shared/Odometer'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import AnimatedShimmerText from '@shared/components/shared/AnimatedShimmerText'
 import useUiStore from '@shared/stores/uiStore'
 import useChatStore from '../../stores/chatStore'
 import useSkillsStore, { flattenSkillsForPicker } from '../../stores/skillsStore'
@@ -89,7 +90,7 @@ function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
         onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)'; e.currentTarget.style.borderColor = 'var(--border-subtle)' }}
       >
         {streaming ? (
-          <span className="thinking-shimmer">{t('chat.thinking')}</span>
+          <AnimatedShimmerText>{t('chat.thinking')}</AnimatedShimmerText>
         ) : (
           <>
             <Check size={10} strokeWidth={1.5} style={{ color: 'var(--purple)', flexShrink: 0 }} />
@@ -772,7 +773,7 @@ function FileToolCard({ kind, block = null, op = null, reverted = false }) {
               }}
             >
               <Loader size={10} strokeWidth={1.5} className="icon-running" style={{ marginRight: 2 }} />
-              <span className="thinking-shimmer" style={{ fontSize: 11 }}>{t('toolCall.running')}</span>
+              <AnimatedShimmerText style={{ fontSize: 11 }}>{t('toolCall.running')}</AnimatedShimmerText>
             </span>
           ) : (
             <span
@@ -1469,7 +1470,7 @@ export default memo(function MessageBubble({
             padding: '2px 6px',
           }}
         >
-          <span className="thinking-shimmer">{t('chat.thinking')}</span>
+          <AnimatedShimmerText>{t('chat.thinking')}</AnimatedShimmerText>
         </div>
       )}
 

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ChevronDown, Minimize2 } from 'lucide-react'
 import MarkdownRenderer from '../markdown/MarkdownRenderer'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import AnimatedShimmerText from '@shared/components/shared/AnimatedShimmerText'
 import useSkeletonHandoff from '@shared/motion/useSkeletonHandoff'
 
 export default function CompactBoundary({ message }) {
@@ -33,12 +34,12 @@ export default function CompactBoundary({ message }) {
           >
             <Minimize2 size={14} strokeWidth={1.5} style={{ color: 'var(--purple)', marginTop: 2, flexShrink: 0 }} />
             <div className="flex-1 min-w-0">
-              <span
-                className="thinking-shimmer text-sm font-semibold"
+              <AnimatedShimmerText
+                className="text-sm font-semibold"
                 style={{ color: 'var(--purple)' }}
               >
                 {t('compact.compacting')}
-              </span>
+              </AnimatedShimmerText>
               <div className="flex flex-col gap-2 mt-2">
                 <div className="skeleton" style={{ height: 10, width: '80%', borderRadius: 2 }} />
                 <div className="skeleton" style={{ height: 10, width: '60%', borderRadius: 2 }} />

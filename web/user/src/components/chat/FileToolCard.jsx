@@ -18,6 +18,7 @@ import useFileBrowserStore from '../../stores/fileBrowserStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { RollingInteger } from '../shared/Odometer'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import AnimatedShimmerText from '@shared/components/shared/AnimatedShimmerText'
 import DrawIcon from '@shared/components/shared/DrawIcon'
 
 function formatDuration(ms) {
@@ -582,7 +583,7 @@ export default function FileToolCard({ kind, block = null, op = null, reverted =
                 }}
               >
                 <Loader size={compact ? 9 : 10} strokeWidth={1.5} className="icon-running" style={{ marginRight: 2 }} />
-                <span className="thinking-shimmer" style={{ fontSize: compact ? 10 : 11 }}>{t('toolCall.running')}</span>
+                <AnimatedShimmerText style={{ fontSize: compact ? 10 : 11 }}>{t('toolCall.running')}</AnimatedShimmerText>
               </span>
             ) : (
               <span

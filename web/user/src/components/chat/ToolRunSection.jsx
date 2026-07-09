@@ -3,32 +3,62 @@ import { animate } from 'animejs'
 import { ChevronDown } from 'lucide-react'
 import { summarizeRun } from '../../utils/toolRunSummary'
 import { RollingText } from '../shared/Odometer'
+import AnimatedShimmerText from '@shared/components/shared/AnimatedShimmerText'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 import { usePresence } from '@shared/motion/usePresence'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
 import { DUR_MIGRATION, EASE_TAB } from '@shared/motion/tokens'
 
-function SummaryTokens({ summary, fallback, height = 12, fontWeight = 500 }) {
+function findFileOp(fileOps, block) {
+  if (!Array.isArray(fileOps) || !block) return null
+  return fileOps.find((op) => (
+    op.id === block.fileOpId ||
+    op.id === block.id ||
+    (block.fileOpId && op.toolUseId === block.fileOpId) ||
+    (block.id && op.toolUseId === block.id)
+  )) || null
+}
+
+function hasUnfinishedTool(run, fileOps) {
+  if (!Array.isArray(run)) return false
+  return run.some((block) => {
+    if (!block || (block.type !== 'tool_use' && block.type !== 'file_ref')) return false
+    const op = findFileOp(fileOps, block)
+    const status = op?.status || block.status
+    return status === 'running' || status === 'pending'
+  })
+}
+
+function SummaryToken({ children, shimmer, color }) {
+  const style = color ? { color } : undefined
+  return shimmer
+    ? <AnimatedShimmerText style={style}>{children}</AnimatedShimmerText>
+    : <span style={style}>{children}</span>
+}
+
+function SummaryTokens({ summary, fallback, height = 12, fontWeight = 500, shimmer = false }) {
   if (!summary?.tokens?.length) {
     return (
-      <RollingText
-        text={fallback}
-        height={height}
-        color="currentColor"
-        fontWeight={fontWeight}
-      />
+      <SummaryToken shimmer={shimmer}>
+        <RollingText
+          text={fallback}
+          height={height}
+          color="currentColor"
+          fontWeight={fontWeight}
+        />
+      </SummaryToken>
     )
   }
 
   return summary.tokens.map((tok, i) => (
-    <span key={i} style={tok.color ? { color: tok.color } : undefined}>
+    <SummaryToken key={i} color={tok.color} shimmer={shimmer}>
       <RollingText
         text={tok.text}
         height={height}
         color="currentColor"
         fontWeight={fontWeight}
       />
-    </span>
+    </SummaryToken>
   ))
 }
 
@@ -36,6 +66,7 @@ export function ToolSectionToggle({ collapsed, onToggle, run, fileOps, t, contro
   const [hovered, setHovered] = useState(false)
   const summary = summarizeRun(run, fileOps, t)
   const hasSummary = summary && summary.tokens.length > 0
+  const hasRunningTools = hasUnfinishedTool(run, fileOps)
   const labelColor = hovered ? 'var(--text-primary)' : 'var(--text-secondary)'
   const fallback = t('toolCall.toolStepsFallback', { count: run.length })
   const tokenHeight = compact ? 11 : 12
@@ -79,15 +110,15 @@ export function ToolSectionToggle({ collapsed, onToggle, run, fileOps, t, contro
       >
         {collapsed ? (
           hasSummary
-            ? <SummaryTokens summary={summary} fallback={fallback} height={tokenHeight} />
-            : <SummaryTokens fallback={fallback} height={tokenHeight} />
+            ? <SummaryTokens summary={summary} fallback={fallback} height={tokenHeight} shimmer={hasRunningTools} />
+            : <SummaryTokens fallback={fallback} height={tokenHeight} shimmer={hasRunningTools} />
         ) : (
           <>
             <span>{t('toolCall.hideToolSteps')}</span>
             <span style={{ color: 'var(--text-dim)', margin: '0 6px' }}>·</span>
             {hasSummary
-              ? <SummaryTokens summary={summary} fallback={fallback} height={tokenHeight} />
-              : <SummaryTokens fallback={fallback} height={tokenHeight} />}
+              ? <SummaryTokens summary={summary} fallback={fallback} height={tokenHeight} shimmer={hasRunningTools} />
+              : <SummaryTokens fallback={fallback} height={tokenHeight} shimmer={hasRunningTools} />}
           </>
         )}
       </span>

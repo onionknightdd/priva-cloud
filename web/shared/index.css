@@ -453,31 +453,6 @@ html, body {
   outline-offset: -1px;
 }
 
-/* ── Thinking shimmer (from old project) ── */
-@keyframes thinking-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-.thinking-shimmer {
-  display: inline-block;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  background: linear-gradient(
-    90deg,
-    var(--text-dim) 0%,
-    var(--text-dim) 30%,
-    var(--text-primary) 45%,
-    var(--text-primary) 55%,
-    var(--text-dim) 70%,
-    var(--text-dim) 100%
-  );
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: thinking-shimmer 3s infinite linear;
-}
-
 /* ── Pulse border for canvas ── */
 @keyframes pulse-border {
   0%, 100% { border-left-color: var(--purple); }
