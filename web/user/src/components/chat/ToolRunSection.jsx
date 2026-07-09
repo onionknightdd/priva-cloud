@@ -29,36 +29,45 @@ function hasUnfinishedTool(run, fileOps) {
   })
 }
 
-function SummaryToken({ children, shimmer, color }) {
+function SummaryToken({ text, height, fontWeight, shimmer, color }) {
   const style = color ? { color } : undefined
-  return shimmer
-    ? <AnimatedShimmerText style={style}>{children}</AnimatedShimmerText>
-    : <span style={style}>{children}</span>
+  if (shimmer) {
+    return <AnimatedShimmerText style={style}>{text}</AnimatedShimmerText>
+  }
+
+  return (
+    <span style={style}>
+      <RollingText
+        text={text}
+        height={height}
+        color="currentColor"
+        fontWeight={fontWeight}
+      />
+    </span>
+  )
 }
 
 function SummaryTokens({ summary, fallback, height = 12, fontWeight = 500, shimmer = false }) {
   if (!summary?.tokens?.length) {
     return (
-      <SummaryToken shimmer={shimmer}>
-        <RollingText
-          text={fallback}
-          height={height}
-          color="currentColor"
-          fontWeight={fontWeight}
-        />
-      </SummaryToken>
+      <SummaryToken
+        text={fallback}
+        height={height}
+        fontWeight={fontWeight}
+        shimmer={shimmer}
+      />
     )
   }
 
   return summary.tokens.map((tok, i) => (
-    <SummaryToken key={i} color={tok.color} shimmer={shimmer}>
-      <RollingText
-        text={tok.text}
-        height={height}
-        color="currentColor"
-        fontWeight={fontWeight}
-      />
-    </SummaryToken>
+    <SummaryToken
+      key={i}
+      text={tok.text}
+      height={height}
+      fontWeight={fontWeight}
+      color={tok.color}
+      shimmer={shimmer}
+    />
   ))
 }
 
