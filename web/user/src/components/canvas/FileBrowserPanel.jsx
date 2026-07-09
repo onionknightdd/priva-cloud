@@ -28,7 +28,7 @@ import { downloadFile, listDirectory, previewFile } from '../../api/userFiles'
 import RichFilePreview from '../shared/RichFilePreview'
 import { usePresence } from '@shared/motion/usePresence'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
-import { useSlidingUnderline } from '@shared/motion/useSlidingUnderline'
+import { useSlidingUnderline, useSlidingVerticalIndicator } from '@shared/motion/useSlidingUnderline'
 import { DUR_MIGRATION, EASE_ACCORDION } from '@shared/motion/tokens'
 import MarkdownRenderer from '../markdown/MarkdownRenderer'
 import VirtualizedCodeLines from '../shared/VirtualizedCodeLines'
@@ -827,6 +827,9 @@ function FileTreeSidebar({
   const [expandedDirs, setExpandedDirs] = useState({})
   const [dirCache, setDirCache] = useState({})
   const activeFilePath = activeTab?.filePath || ''
+  const activeFileKey = normalizePath(activeFilePath)
+  const treeContentRef = useRef(null)
+  const treeIndicator = useSlidingVerticalIndicator(activeFileKey, treeContentRef)
 
   const loadDir = useCallback(async (path) => {
     if (!path) return
@@ -930,10 +933,12 @@ function FileTreeSidebar({
                 return renderDirectory(childPath, entry.name, depth + 1)
               }
 
-              const active = normalizePath(childPath) === normalizePath(activeFilePath)
+              const fileKey = normalizePath(childPath)
+              const active = fileKey === activeFileKey
               return (
                 <button
                   key={childPath}
+                  ref={treeIndicator.setItemRef(fileKey)}
                   type="button"
                   onClick={() => openFileTab({
                     filePath: childPath,
@@ -945,7 +950,7 @@ function FileTreeSidebar({
                   title={childPath}
                   style={{
                     border: 'none',
-                    borderLeft: active ? '2px solid var(--blue)' : '2px solid transparent',
+                    borderLeft: '2px solid transparent',
                     background: active ? 'var(--bg-elevated)' : 'transparent',
                     color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
                     cursor: 'pointer',
@@ -1040,13 +1045,30 @@ function FileTreeSidebar({
       </div>
 
       <div className="flex-1 overflow-auto" style={{ padding: '4px 0' }}>
-        {rootPath
-          ? renderDirectory(rootPath, fileName(rootPath) || rootPath, 0)
-          : (
-            <div className="text-xs" style={{ color: 'var(--text-dim)', padding: '8px' }}>
-              {t('fileBrowser.empty', 'Open a file from the chat to preview it here')}
-            </div>
-          )}
+        <div ref={treeContentRef} style={{ position: 'relative', minHeight: '100%' }}>
+          <span
+            ref={treeIndicator.indicatorRef}
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: 2,
+              height: 0,
+              opacity: 0,
+              background: 'var(--blue)',
+              pointerEvents: 'none',
+              zIndex: 2,
+            }}
+          />
+          {rootPath
+            ? renderDirectory(rootPath, fileName(rootPath) || rootPath, 0)
+            : (
+              <div className="text-xs" style={{ color: 'var(--text-dim)', padding: '8px' }}>
+                {t('fileBrowser.empty', 'Open a file from the chat to preview it here')}
+              </div>
+            )}
+        </div>
       </div>
 
     </aside>
@@ -1248,7 +1270,7 @@ export default function FileBrowserPanel() {
           borderBottom: '1px solid var(--border)',
         }}
       >
-      <div className="flex items-center overflow-x-auto scrollbar-hidden min-w-0" style={{ flex: 1, height: MAIN_AREA_HEADER_HEIGHT, position: 'relative' }}>
+      <div className="flex items-center overflow-x-auto canvas-file-tabs-scrollbar min-w-0" style={{ flex: 1, height: MAIN_AREA_HEADER_HEIGHT, position: 'relative' }}>
         <span
           ref={fileTabUnderline.indicatorRef}
           aria-hidden="true"

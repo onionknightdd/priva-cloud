@@ -74,3 +74,78 @@ export function useSlidingUnderline(activeKey) {
 
   return { indicatorRef, setItemRef }
 }
+
+export function useSlidingVerticalIndicator(activeKey, containerRef) {
+  const indicatorRef = useRef(null)
+  const itemRefs = useRef(new Map())
+  const animationRef = useRef(null)
+  const measuredRef = useRef(false)
+  const lastRectRef = useRef(null)
+  const reducedMotion = useReducedMotion()
+
+  const setItemRef = useCallback((key) => (node) => {
+    if (node) itemRefs.current.set(key, node)
+    else itemRefs.current.delete(key)
+  }, [])
+
+  useLayoutEffect(() => {
+    const indicator = indicatorRef.current
+    const container = containerRef?.current
+    if (!indicator || !container) return
+
+    const activeEl = itemRefs.current.get(activeKey)
+    if (!activeEl) {
+      indicator.style.opacity = '0'
+      measuredRef.current = false
+      lastRectRef.current = null
+      animationRef.current?.cancel()
+      animationRef.current = null
+      return
+    }
+
+    const containerRect = container.getBoundingClientRect()
+    const activeRect = activeEl.getBoundingClientRect()
+    const next = {
+      top: activeRect.top - containerRect.top,
+      height: activeRect.height,
+    }
+    const previous = lastRectRef.current
+    if (
+      measuredRef.current &&
+      previous &&
+      Math.abs(previous.top - next.top) < 0.5 &&
+      Math.abs(previous.height - next.height) < 0.5
+    ) {
+      indicator.style.opacity = '1'
+      return
+    }
+
+    animationRef.current?.cancel()
+    indicator.style.opacity = '1'
+
+    if (!measuredRef.current || reducedMotion) {
+      indicator.style.top = `${next.top}px`
+      indicator.style.height = `${next.height}px`
+      measuredRef.current = true
+      lastRectRef.current = next
+      return
+    }
+
+    animationRef.current = animate(indicator, {
+      top: `${next.top}px`,
+      height: `${next.height}px`,
+      duration: DUR_MIGRATION.tabSlide,
+      ease: EASE_TAB,
+      onComplete: () => {
+        animationRef.current = null
+      },
+    })
+    lastRectRef.current = next
+  })
+
+  useLayoutEffect(() => () => {
+    animationRef.current?.cancel()
+  }, [])
+
+  return { indicatorRef, setItemRef }
+}
