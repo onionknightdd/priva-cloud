@@ -47,11 +47,14 @@ export default function UserAnalytics() {
   }
 
   return (
-    <div className="flex flex-col flex-1" style={{ padding: '32px 56px 0 56px', minHeight: 0, overflow: 'hidden' }}>
-      <div className="flex items-center gap-3 flex-shrink-0" style={{ margin: '0 0 16px 0' }}>
-        <h2 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>
-          {t('userData.analytics')}
-        </h2>
+    <div className="flex flex-col flex-1" style={{ padding: '24px 56px 0 56px', minHeight: 0, overflow: 'hidden' }}>
+      {/* Time range picker */}
+      <div className="flex items-center gap-3 flex-shrink-0 pb-4">
+        <DateRangePicker
+          startTime={analyticsStartTime}
+          endTime={analyticsEndTime}
+          onChange={handleTimeChange}
+        />
         <button
           style={{
             background: 'transparent',
@@ -73,15 +76,6 @@ export default function UserAnalytics() {
         >
           <RefreshCw size={14} strokeWidth={1.5} />
         </button>
-      </div>
-
-      {/* Time range picker */}
-      <div className="flex-shrink-0 pb-4">
-        <DateRangePicker
-          startTime={analyticsStartTime}
-          endTime={analyticsEndTime}
-          onChange={handleTimeChange}
-        />
       </div>
 
       {/* Charts */}

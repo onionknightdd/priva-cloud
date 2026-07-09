@@ -110,35 +110,7 @@ export default function UserAuditLog() {
   }
 
   return (
-    <div className="flex flex-col flex-1" style={{ padding: '32px 56px 0 56px', minHeight: 0, overflow: 'hidden' }}>
-      {/* Pinned header: title + refresh */}
-      <div className="flex items-center gap-3 flex-shrink-0" style={{ margin: '0 0 16px 0' }}>
-        <h2 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>
-          {t('userData.auditLog')}
-        </h2>
-        <button
-          style={{
-            background: 'transparent',
-            border: 'none',
-            cursor: auditLoading ? 'not-allowed' : 'pointer',
-            color: 'var(--text-dim)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 4,
-            borderRadius: 4,
-            transition: 'color 150ms ease',
-          }}
-          disabled={auditLoading}
-          onClick={handleRefresh}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-          title={t('scheduler.reload')}
-        >
-          <RefreshCw size={14} strokeWidth={1.5} />
-        </button>
-      </div>
-
+    <div className="flex flex-col flex-1" style={{ padding: '24px 56px 0 56px', minHeight: 0, overflow: 'hidden' }}>
       {/* Two-column: entries left, chart right */}
       <div className="flex gap-5 flex-1" style={{ minHeight: 0, overflow: 'hidden' }}>
         {/* Left column */}
@@ -146,11 +118,34 @@ export default function UserAuditLog() {
           {/* Pinned filters */}
           <div className="flex flex-col gap-3 flex-shrink-0 pb-3" style={{ width: 'fit-content' }}>
             {/* Time range filter */}
-            <DateRangePicker
-              startTime={auditStartTime}
-              endTime={auditEndTime}
-              onChange={(start, end) => setAuditTimeRange(start, end)}
-            />
+            <div className="flex items-center gap-3">
+              <DateRangePicker
+                startTime={auditStartTime}
+                endTime={auditEndTime}
+                onChange={(start, end) => setAuditTimeRange(start, end)}
+              />
+              <button
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: auditLoading ? 'not-allowed' : 'pointer',
+                  color: 'var(--text-dim)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 4,
+                  borderRadius: 4,
+                  transition: 'color 150ms ease',
+                }}
+                disabled={auditLoading}
+                onClick={handleRefresh}
+                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+                title={t('scheduler.reload')}
+              >
+                <RefreshCw size={14} strokeWidth={1.5} />
+              </button>
+            </div>
 
             {/* FILTER BY: [dropdown] : [value] */}
             <div className="flex items-center gap-2">

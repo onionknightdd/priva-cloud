@@ -183,8 +183,9 @@ export default function MainLayout() {
           <ContentOverlay
             title={backToSessionsTitle}
             onBack={backToSessions}
+            showHeader={false}
           >
-            <LazyPanel><DataUsageView /></LazyPanel>
+            <LazyPanel><DataUsageView backTitle={backToSessionsTitle} onBack={backToSessions} /></LazyPanel>
           </ContentOverlay>
         )}
         {isPlugins && (

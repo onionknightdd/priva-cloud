@@ -67,11 +67,7 @@ export default function UserUsage() {
   useEffect(() => { fetchStats() }, [])
 
   return (
-    <div className="flex flex-col gap-4 flex-1 overflow-y-auto" style={{ padding: '32px 56px', minHeight: 0 }}>
-      <h2 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>
-        {t('userData.usage')}
-      </h2>
-
+    <div className="flex flex-col gap-4 flex-1 overflow-y-auto" style={{ padding: '24px 56px 32px', minHeight: 0 }}>
       <div className="flex items-stretch gap-4 flex-wrap">
         {statsLoading ? (
           <>

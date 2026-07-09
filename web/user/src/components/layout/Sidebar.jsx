@@ -34,7 +34,6 @@ import NavItem from '@shared/components/shared/NavItem'
 import PanelHeader from '@shared/components/shared/PanelHeader'
 import Chip from '@shared/components/shared/Chip'
 import { AnimatedCollapse } from '@shared/components/shared/Accordion'
-import { SlidingTabIndicator } from '@shared/components/shared/Tabs'
 import { useSlidingVerticalIndicator } from '@shared/motion/useSlidingUnderline'
 import DirectoryPicker from '../shared/DirectoryPicker'
 import TagFilterChip from '../shared/TagFilterChip'
@@ -78,12 +77,13 @@ const PLUGINS_SECTIONS = [
 ]
 
 const SUBMENU_ACTIVE_RAIL_OFFSET = 18
+const SESSION_ACTIVE_RAIL_OFFSET = 20
 
 function SessionItem({
   session, isActive, openMenuId, menuRef, onSelect, onMenuToggle,
   onDelete, onRenameStart, onTagStart, onPinToggle, onArchive, renameEditingId,
   onRenameCommit, onRenameCancel, onDragStartSession, onDragEndSession, t, indent = 0,
-  showActiveRail = true, activeRailLayoutId,
+  itemRef, showActiveRail = true,
 }) {
   const [renameValue, setRenameValue] = useState(session.name || '')
   useEffect(() => {
@@ -103,6 +103,7 @@ function SessionItem({
 
   return (
     <div
+      ref={itemRef}
       className="flex flex-col gap-1 px-3 group"
       draggable={!editing}
       style={{
@@ -151,13 +152,7 @@ function SessionItem({
       onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--bg-elevated)' }}
       onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
     >
-      {showActiveRail && isActive && activeRailLayoutId ? (
-        <SlidingTabIndicator
-          variant="left-border"
-          layoutId={activeRailLayoutId}
-          style={{ zIndex: 2 }}
-        />
-      ) : showActiveRail && isActive ? (
+      {showActiveRail && isActive ? (
         <span
           style={{
             position: 'absolute',
@@ -562,6 +557,7 @@ export default function Sidebar() {
   const searchInputRef = useRef(null)
   const pluginsSubmenuRef = useRef(null)
   const dataSubmenuRef = useRef(null)
+  const sessionListContentRef = useRef(null)
   const [renameEditingId, setRenameEditingId] = useState(null)
   const [tagPopoverSession, setTagPopoverSession] = useState(null)
   const [tagPopoverTop, setTagPopoverTop] = useState(120)
@@ -642,6 +638,10 @@ export default function Sidebar() {
     activeNavTab === 'userdata' && dataMenuOpen ? activeSection : null,
     dataSubmenuRef
   )
+  const sessionIndicator = useSlidingVerticalIndicator(
+    collapsed ? null : activeSessionId,
+    sessionListContentRef
+  )
 
   useEffect(() => {
     fetchSessions()
@@ -654,8 +654,14 @@ export default function Sidebar() {
 
   // Keep the Data & Usage / Plugins submenu open whenever its view is active.
   useEffect(() => {
-    if (activeNavTab === 'userdata') setDataMenuOpen(true)
-    if (activeNavTab === 'plugins') setPluginsMenuOpen(true)
+    if (activeNavTab === 'userdata') {
+      setDataMenuOpen(true)
+      setPluginsMenuOpen(false)
+    }
+    if (activeNavTab === 'plugins') {
+      setPluginsMenuOpen(true)
+      setDataMenuOpen(false)
+    }
   }, [activeNavTab])
 
   // Expanding a nav menu collapses the PROJECT list (it drops to the bottom);
@@ -776,6 +782,7 @@ export default function Sidebar() {
     setActiveNavTab('userdata')
     setActiveSection(id)
     setDataMenuOpen(true)
+    setPluginsMenuOpen(false)
   }
 
   // Open a Plugins/Customize section in the content area.
@@ -783,6 +790,19 @@ export default function Sidebar() {
     setActiveNavTab('plugins')
     setActivePluginSection(id)
     setPluginsMenuOpen(true)
+    setDataMenuOpen(false)
+  }
+
+  const togglePluginsMenu = () => {
+    const nextOpen = !pluginsMenuOpen
+    setPluginsMenuOpen(nextOpen)
+    if (nextOpen) setDataMenuOpen(false)
+  }
+
+  const toggleDataMenu = () => {
+    const nextOpen = !dataMenuOpen
+    setDataMenuOpen(nextOpen)
+    if (nextOpen) setPluginsMenuOpen(false)
   }
 
   const handlePinSession = (session) => togglePinSession(session.id)
@@ -993,7 +1013,7 @@ export default function Sidebar() {
               active={activeNavTab === 'plugins'}
               expandable
               expanded={pluginsMenuOpen}
-              onClick={() => setPluginsMenuOpen((v) => !v)}
+              onClick={togglePluginsMenu}
             />
             <AnimatedCollapse open={pluginsMenuOpen}>
               <div ref={pluginsSubmenuRef} style={{ position: 'relative' }}>
@@ -1035,7 +1055,7 @@ export default function Sidebar() {
               active={activeNavTab === 'userdata'}
               expandable
               expanded={dataMenuOpen}
-              onClick={() => setDataMenuOpen((v) => !v)}
+              onClick={toggleDataMenu}
             />
             <AnimatedCollapse open={dataMenuOpen}>
               <div ref={dataSubmenuRef} style={{ position: 'relative' }}>
@@ -1216,179 +1236,198 @@ export default function Sidebar() {
             ref={listRef}
             style={{ flex: projectAtBottom ? '0 1 auto' : '1 1 auto', minHeight: 0 }}
           >
-            {sessions.length === 0 && !sessionsLoading && (
-              <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 13 }}>
-                {t('sidebar.noSessions')}
-              </div>
-            )}
+            <div ref={sessionListContentRef} style={{ position: 'relative', minHeight: '100%' }}>
+              <span
+                ref={sessionIndicator.indicatorRef}
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  left: SESSION_ACTIVE_RAIL_OFFSET,
+                  top: 0,
+                  width: 2,
+                  height: 0,
+                  opacity: 0,
+                  background: 'var(--blue)',
+                  pointerEvents: 'none',
+                  zIndex: 2,
+                }}
+              />
 
-            {filtersActive && sessions.length > 0 && renderedGroups.length === 0 && (
-              <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 13 }}>
-                {t('sidebar.noResults')}
-              </div>
-            )}
+              {sessions.length === 0 && !sessionsLoading && (
+                <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 13 }}>
+                  {t('sidebar.noSessions')}
+                </div>
+              )}
 
-            {sessions.length === 0 && sessionsLoading && (
-              <div className="px-3 py-2">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="flex items-center gap-2 px-0 py-2">
-                    <div className="skeleton" style={{ width: 14, height: 14, flexShrink: 0 }} />
-                    <div className="skeleton" style={{ height: 14, flex: 1 }} />
-                  </div>
-                ))}
-              </div>
-            )}
+              {filtersActive && sessions.length > 0 && renderedGroups.length === 0 && (
+                <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 13 }}>
+                  {t('sidebar.noResults')}
+                </div>
+              )}
 
-            {renderedGroups.map((group) => {
-              const isActiveGroup = group.cwd === activeCwd
-              // Toggle state fully controls expansion (active cwd defaults open
-              // via the store). While filtering, force every matching group open.
-              const isExpanded = filtersActive || !!expandedCwds[group.cwd]
-              const loadedCount = group.sessions.length
-              const showMore = !filtersActive && loadedCount < group.total
-              return (
-                <div key={group.cwd} style={{ marginBottom: 2 }}>
-                  {/* Group header — toggle + (hover) workdir menu & new-chat */}
-                  <div
-                    className="flex items-center gap-1 w-full px-3 py-1 min-w-0 group"
-                    style={{
-                      borderLeft: isActiveGroup ? '2px solid var(--blue)' : '2px solid transparent',
-                      color: isActiveGroup ? 'var(--text-secondary)' : 'var(--text-dim)',
-                    }}
-                    title={group.cwd}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => toggleGroup(group.cwd)}
-                      className="flex items-center gap-1 flex-1 min-w-0"
-                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'inherit', minWidth: 0, transition: 'color 150ms ease' }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = 'inherit' }}
+              {sessions.length === 0 && sessionsLoading && (
+                <div className="px-3 py-2">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="flex items-center gap-2 px-0 py-2">
+                      <div className="skeleton" style={{ width: 14, height: 14, flexShrink: 0 }} />
+                      <div className="skeleton" style={{ height: 14, flex: 1 }} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {renderedGroups.map((group) => {
+                const isActiveGroup = group.cwd === activeCwd
+                // Toggle state fully controls expansion (active cwd defaults open
+                // via the store). While filtering, force every matching group open.
+                const isExpanded = filtersActive || !!expandedCwds[group.cwd]
+                const loadedCount = group.sessions.length
+                const showMore = !filtersActive && loadedCount < group.total
+                return (
+                  <div key={group.cwd} style={{ marginBottom: 2 }}>
+                    {/* Group header — toggle + (hover) workdir menu & new-chat */}
+                    <div
+                      className="flex items-center gap-1 w-full px-3 py-1 min-w-0 group"
+                      style={{
+                        borderLeft: isActiveGroup ? '2px solid var(--blue)' : '2px solid transparent',
+                        color: isActiveGroup ? 'var(--text-secondary)' : 'var(--text-dim)',
+                      }}
+                      title={group.cwd}
                     >
-                      {isExpanded
-                        ? <ChevronDown size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-                        : <ChevronRight size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />}
-                      <FolderBookmark size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-                      <span className="flex-1 truncate" style={{ fontSize: 12, minWidth: 0, textAlign: 'left' }}>
-                        {shortCwd(group.cwd)}
-                      </span>
-                    </button>
-                    {group.pinned && (
-                      <Pin size={10} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--cyan)' }} />
-                    )}
-                    <span style={{ fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{group.total}</span>
-                    {/* Workdir menu (sliders) */}
-                    <div className="relative" ref={openWorkdirMenu === group.cwd ? workdirMenuRef : undefined} style={{ flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(group.cwd)}
+                        className="flex items-center gap-1 flex-1 min-w-0"
+                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'inherit', minWidth: 0, transition: 'color 150ms ease' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = 'inherit' }}
+                      >
+                        {isExpanded
+                          ? <ChevronDown size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                          : <ChevronRight size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />}
+                        <FolderBookmark size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                        <span className="flex-1 truncate" style={{ fontSize: 12, minWidth: 0, textAlign: 'left' }}>
+                          {shortCwd(group.cwd)}
+                        </span>
+                      </button>
+                      {group.pinned && (
+                        <Pin size={10} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--cyan)' }} />
+                      )}
+                      <span style={{ fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{group.total}</span>
+                      {/* Workdir menu (sliders) */}
+                      <div className="relative" ref={openWorkdirMenu === group.cwd ? workdirMenuRef : undefined} style={{ flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          className="group-hover-visible"
+                          style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 2, display: 'flex', alignItems: 'center', opacity: openWorkdirMenu === group.cwd ? 1 : 0, transition: 'color 150ms ease, opacity 150ms ease' }}
+                          title={t('sidebar.workdirOptions')}
+                          onClick={(e) => { e.stopPropagation(); setOpenWorkdirMenu(openWorkdirMenu === group.cwd ? null : group.cwd) }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+                        >
+                          <SlidersVertical size={12} strokeWidth={1.5} />
+                        </button>
+                        {openWorkdirMenu === group.cwd && (
+                          <div className="absolute" style={{ top: '100%', right: 0, marginTop: 4, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, zIndex: 50, minWidth: 150, overflow: 'hidden' }}>
+                            <button
+                              className="flex items-center gap-2 px-3 w-full"
+                              style={{ ...WD_MENU_ITEM_STYLE, color: 'var(--text-primary)' }}
+                              onClick={(e) => { e.stopPropagation(); handlePinWorkdir(group.cwd) }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                            >
+                              <Pin size={12} strokeWidth={1.5} />
+                              {group.pinned ? t('sidebar.unpinWorkdir') : t('sidebar.pinWorkdir')}
+                            </button>
+                            <button
+                              className="flex items-center gap-2 px-3 w-full"
+                              style={{ ...WD_MENU_ITEM_STYLE, color: 'var(--text-primary)' }}
+                              onClick={(e) => { e.stopPropagation(); handleArchiveWorkdir(group.cwd, group.total) }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                            >
+                              <Archive size={12} strokeWidth={1.5} />
+                              {t('sidebar.archiveWorkdir')}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      {/* New chat in this workdir (square-pen) */}
                       <button
                         type="button"
                         className="group-hover-visible"
-                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 2, display: 'flex', alignItems: 'center', opacity: openWorkdirMenu === group.cwd ? 1 : 0, transition: 'color 150ms ease, opacity 150ms ease' }}
-                        title={t('sidebar.workdirOptions')}
-                        onClick={(e) => { e.stopPropagation(); setOpenWorkdirMenu(openWorkdirMenu === group.cwd ? null : group.cwd) }}
+                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 2, display: 'flex', alignItems: 'center', flexShrink: 0, opacity: 0, transition: 'color 150ms ease, opacity 150ms ease' }}
+                        title={t('sidebar.newChatHere')}
+                        onClick={(e) => { e.stopPropagation(); handleNewChatHere(group.cwd) }}
                         onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
                         onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
                       >
-                        <SlidersVertical size={12} strokeWidth={1.5} />
+                        <SquarePen size={12} strokeWidth={1.5} />
                       </button>
-                      {openWorkdirMenu === group.cwd && (
-                        <div className="absolute" style={{ top: '100%', right: 0, marginTop: 4, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, zIndex: 50, minWidth: 150, overflow: 'hidden' }}>
-                          <button
-                            className="flex items-center gap-2 px-3 w-full"
-                            style={{ ...WD_MENU_ITEM_STYLE, color: 'var(--text-primary)' }}
-                            onClick={(e) => { e.stopPropagation(); handlePinWorkdir(group.cwd) }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                          >
-                            <Pin size={12} strokeWidth={1.5} />
-                            {group.pinned ? t('sidebar.unpinWorkdir') : t('sidebar.pinWorkdir')}
-                          </button>
-                          <button
-                            className="flex items-center gap-2 px-3 w-full"
-                            style={{ ...WD_MENU_ITEM_STYLE, color: 'var(--text-primary)' }}
-                            onClick={(e) => { e.stopPropagation(); handleArchiveWorkdir(group.cwd, group.total) }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                          >
-                            <Archive size={12} strokeWidth={1.5} />
-                            {t('sidebar.archiveWorkdir')}
-                          </button>
-                        </div>
-                      )}
                     </div>
-                    {/* New chat in this workdir (square-pen) */}
-                    <button
-                      type="button"
-                      className="group-hover-visible"
-                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 2, display: 'flex', alignItems: 'center', flexShrink: 0, opacity: 0, transition: 'color 150ms ease, opacity 150ms ease' }}
-                      title={t('sidebar.newChatHere')}
-                      onClick={(e) => { e.stopPropagation(); handleNewChatHere(group.cwd) }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-                    >
-                      <SquarePen size={12} strokeWidth={1.5} />
-                    </button>
-                  </div>
 
-                  {/* Group sessions */}
-                  {isExpanded && (
-                    <>
-                      {group.sessions.map((session) => (
-                        <SessionItem
-                          key={session.id}
-                          session={session}
-                          isActive={session.id === activeSessionId}
-                          openMenuId={openMenuId}
-                          menuRef={menuRef}
-                          onSelect={handleSelectSession}
-                          onMenuToggle={setOpenMenuId}
-                          onDelete={handleDeleteSession}
-                          onRenameStart={handleRenameStart}
-                          onTagStart={handleTagStart}
-                          onPinToggle={handlePinSession}
-                          onArchive={handleArchiveSession}
-                          renameEditingId={renameEditingId}
-                          onRenameCommit={handleRenameCommit}
-                          onRenameCancel={handleRenameCancel}
-                          onDragStartSession={beginSessionDrag}
-                          onDragEndSession={endSessionDrag}
-                          t={t}
-                          indent={28}
-                          activeRailLayoutId="sidebar-session-active-rail"
-                        />
-                      ))}
-                      {showMore && (
-                        <button
-                          type="button"
-                          className="flex items-center gap-1 w-full py-1.5"
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: 'var(--text-dim)',
-                            cursor: groupLoadingCwd === group.cwd ? 'default' : 'pointer',
-                            fontSize: 12,
-                            paddingLeft: 28,
-                            transition: 'color 150ms ease',
-                          }}
-                          onClick={() => fetchMoreInGroup(group.cwd)}
-                          disabled={groupLoadingCwd === group.cwd}
-                          onMouseEnter={(e) => { if (groupLoadingCwd !== group.cwd) e.currentTarget.style.color = 'var(--text-secondary)' }}
-                          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-                        >
-                          {groupLoadingCwd === group.cwd ? (
-                            t('sidebar.loading')
-                          ) : (
-                            <>
-                              <ChevronDown size={12} strokeWidth={1.5} />
-                              {t('sidebar.moreInDir', { count: group.total - loadedCount })}
-                            </>
-                          )}
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              )
-            })}
+                    {/* Group sessions */}
+                    {isExpanded && (
+                      <>
+                        {group.sessions.map((session) => (
+                          <SessionItem
+                            key={session.id}
+                            itemRef={sessionIndicator.setItemRef(session.id)}
+                            showActiveRail={false}
+                            session={session}
+                            isActive={session.id === activeSessionId}
+                            openMenuId={openMenuId}
+                            menuRef={menuRef}
+                            onSelect={handleSelectSession}
+                            onMenuToggle={setOpenMenuId}
+                            onDelete={handleDeleteSession}
+                            onRenameStart={handleRenameStart}
+                            onTagStart={handleTagStart}
+                            onPinToggle={handlePinSession}
+                            onArchive={handleArchiveSession}
+                            renameEditingId={renameEditingId}
+                            onRenameCommit={handleRenameCommit}
+                            onRenameCancel={handleRenameCancel}
+                            onDragStartSession={beginSessionDrag}
+                            onDragEndSession={endSessionDrag}
+                            t={t}
+                            indent={28}
+                          />
+                        ))}
+                        {showMore && (
+                          <button
+                            type="button"
+                            className="flex items-center gap-1 w-full py-1.5"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--text-dim)',
+                              cursor: groupLoadingCwd === group.cwd ? 'default' : 'pointer',
+                              fontSize: 12,
+                              paddingLeft: 28,
+                              transition: 'color 150ms ease',
+                            }}
+                            onClick={() => fetchMoreInGroup(group.cwd)}
+                            disabled={groupLoadingCwd === group.cwd}
+                            onMouseEnter={(e) => { if (groupLoadingCwd !== group.cwd) e.currentTarget.style.color = 'var(--text-secondary)' }}
+                            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+                          >
+                            {groupLoadingCwd === group.cwd ? (
+                              t('sidebar.loading')
+                            ) : (
+                              <>
+                                <ChevronDown size={12} strokeWidth={1.5} />
+                                {t('sidebar.moreInDir', { count: group.total - loadedCount })}
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
             </>
           )}
