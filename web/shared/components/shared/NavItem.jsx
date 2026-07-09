@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { animate } from 'animejs'
 import { AnimatedChevron } from './Accordion'
+import { SlidingTabIndicator } from './Tabs'
 import { useReducedMotion } from '../../motion/useReducedMotion'
 import { EASE_OUT } from '../../motion/tokens'
 
@@ -41,6 +42,7 @@ export default function NavItem({
   scale = 'md',
   itemRef,
   showActiveRail = true,
+  activeRailLayoutId,
   onClick,
   title,
 }) {
@@ -101,7 +103,13 @@ export default function NavItem({
         e.currentTarget.style.color = baseColor
       }}
     >
-      {showActiveRail && active && (
+      {showActiveRail && active && activeRailLayoutId ? (
+        <SlidingTabIndicator
+          variant="left-border"
+          layoutId={activeRailLayoutId}
+          style={{ left: -2, zIndex: 2 }}
+        />
+      ) : showActiveRail && active ? (
         <span
           ref={railRef}
           aria-hidden="true"
@@ -115,7 +123,7 @@ export default function NavItem({
             pointerEvents: 'none',
           }}
         />
-      )}
+      ) : null}
       {Icon && (
         <Icon
           size={large ? 18 : 16}
