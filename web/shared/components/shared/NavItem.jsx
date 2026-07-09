@@ -43,6 +43,7 @@ export default function NavItem({
   itemRef,
   showActiveRail = true,
   activeRailLayoutId,
+  activeRailOffset = -2,
   onClick,
   title,
 }) {
@@ -107,7 +108,7 @@ export default function NavItem({
         <SlidingTabIndicator
           variant="left-border"
           layoutId={activeRailLayoutId}
-          style={{ left: -2, zIndex: 2 }}
+          style={{ left: activeRailOffset, zIndex: 2 }}
         />
       ) : showActiveRail && active ? (
         <span
@@ -115,7 +116,7 @@ export default function NavItem({
           aria-hidden="true"
           style={{
             position: 'absolute',
-            left: -2,
+            left: activeRailOffset,
             top: 0,
             bottom: 0,
             width: 2,

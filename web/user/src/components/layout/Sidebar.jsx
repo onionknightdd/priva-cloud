@@ -76,6 +76,8 @@ const PLUGINS_SECTIONS = [
   { id: 'memory', icon: NotebookPen, labelKey: 'tabs.memory' },
 ]
 
+const SUBMENU_ACTIVE_RAIL_OFFSET = 18
+
 function SessionItem({
   session, isActive, openMenuId, menuRef, onSelect, onMenuToggle,
   onDelete, onRenameStart, onTagStart, onPinToggle, onArchive, renameEditingId,
@@ -974,7 +976,7 @@ export default function Sidebar() {
             <NavItem scale="lg" icon={CalendarClock} label={t('sidebar.scheduler')} disabled />
             <NavItem
               scale="lg"
-              activeRailLayoutId="sidebar-nav-active-rail"
+              activeRailLayoutId="sidebar-nav-parent-active-rail"
               icon={PackageSearch}
               label={t('sidebar.plugins')}
               active={activeNavTab === 'plugins'}
@@ -986,9 +988,10 @@ export default function Sidebar() {
               <div>
                 {PLUGINS_SECTIONS.map((sec) => (
                   <NavItem
-                    scale="lg"
+                    scale="md"
                     key={sec.id}
-                    activeRailLayoutId="sidebar-nav-active-rail"
+                    activeRailLayoutId="sidebar-nav-sub-active-rail"
+                    activeRailOffset={SUBMENU_ACTIVE_RAIL_OFFSET}
                     icon={sec.icon}
                     label={t(sec.labelKey)}
                     indent={16}
@@ -1000,7 +1003,7 @@ export default function Sidebar() {
             </AnimatedCollapse>
             <NavItem
               scale="lg"
-              activeRailLayoutId="sidebar-nav-active-rail"
+              activeRailLayoutId="sidebar-nav-parent-active-rail"
               icon={ChartColumnBig}
               label={t('sidebar.dataUsage')}
               active={activeNavTab === 'userdata'}
@@ -1012,9 +1015,10 @@ export default function Sidebar() {
               <div>
                 {DATA_SECTIONS.map((sec) => (
                   <NavItem
-                    scale="lg"
+                    scale="md"
                     key={sec.id}
-                    activeRailLayoutId="sidebar-nav-active-rail"
+                    activeRailLayoutId="sidebar-nav-sub-active-rail"
+                    activeRailOffset={SUBMENU_ACTIVE_RAIL_OFFSET}
                     icon={sec.icon}
                     label={t(sec.labelKey)}
                     indent={16}
