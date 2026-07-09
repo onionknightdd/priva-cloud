@@ -50,7 +50,7 @@ export async function downloadFile(path, options = {}) {
 export function uploadUserFile(directory, file, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', '/api/sandbox/files/upload')
+    xhr.open('POST', '/api/cp-proxy/files/upload')
     const token = getToken()
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
 

@@ -195,7 +195,7 @@ def create_app() -> FastAPI:
         return Response(content=r.content, status_code=r.status_code, headers=passthru,
                         media_type=r.headers.get("content-type"))
 
-    # Large sandbox GETs are fetched HERE, not via the InferencePool, for the
+    # Large sandbox reads and multipart uploads are fetched HERE, not via the InferencePool, for the
     # same reason as /sandbox/apidocs: the GIE/EPP response path buffers bodies
     # to ~8KB (agentgateway hardcodes the EPP ext_proc to FullDuplexStreamed —
     # not a tunable buffer, no upstream fix), which truncates any response larger
@@ -204,9 +204,9 @@ def create_app() -> FastAPI:
     # ("Unterminated string"). This shared helper rides the "/" catch-all
     # (control-panel face, no ext_proc), so it returns the full body. It re-does
     # the EPP's per-account steering: auth the user's bearer token, wake their
-    # pod, mint a per-account runner token, and proxy GET-only — so a caller
-    # reaches only their OWN pod. Writes/streams/SSE keep using /api/sandbox.
-    async def _proxy_runner_get(request: Request, sandbox_path: str) -> Response:
+    # pod, mint a per-account runner token, and proxy the allowed method — so a caller
+    # reaches only their OWN pod. Streams/SSE keep using /api/sandbox.
+    async def _proxy_runner_request(request: Request, sandbox_path: str, method: str = "GET") -> Response:
         from . import provisioner
         from .services.auth import authenticate_raw_token
         from priva_common.runner_token import mint
@@ -232,11 +232,18 @@ def create_app() -> FastAPI:
         qs = request.url.query
         url = f"http://{endpoint}/api/sandbox/{sandbox_path}" + (f"?{qs}" if qs else "")
         headers = {"X-Priva-Runner-Token": mint(user.account_id, user.username)}
+        content_type = request.headers.get("content-type")
+        if content_type:
+            headers["Content-Type"] = content_type
+        accept = request.headers.get("accept")
+        if accept:
+            headers["Accept"] = accept
+        body = await request.body() if method != "GET" else None
         try:
             # trust_env=False: in-cluster pod-to-pod hop must not honor any host/system proxy.
-            # httpx buffers r.content fully — fine for the ≤1MB max file preview.
+            # httpx buffers r.content fully — fine for file-manager previews/uploads.
             async with httpx.AsyncClient(trust_env=False, timeout=30.0) as cx:
-                r = await cx.get(url, headers=headers)
+                r = await cx.request(method, url, headers=headers, content=body)
         except Exception as exc:
             return Response(f"runner upstream unavailable: {exc}", status_code=502)
         return Response(content=r.content, status_code=r.status_code,
@@ -251,13 +258,19 @@ def create_app() -> FastAPI:
     async def _cp_proxy_get(sandbox_path: str, request: Request):
         if ".." in sandbox_path:  # defense-in-depth: no path escape above /api/sandbox/
             return Response("invalid path", status_code=400)
-        return await _proxy_runner_get(request, sandbox_path)
+        return await _proxy_runner_request(request, sandbox_path)
+
+    @app.post("/api/cp-proxy/{sandbox_path:path}", include_in_schema=False)
+    async def _cp_proxy_post(sandbox_path: str, request: Request):
+        if ".." in sandbox_path:
+            return Response("invalid path", status_code=400)
+        return await _proxy_runner_request(request, sandbox_path, method="POST")
 
     # Back-compat alias for the original session-transcript proxy, now sharing the
     # helper above (the SPA's primary path is the generic /api/cp-proxy lane).
     @app.get("/api/session-history/{session_id}/messages", include_in_schema=False)
     async def _session_messages_proxy(session_id: str, request: Request):
-        return await _proxy_runner_get(request, f"agent/sessions/{session_id}/messages")
+        return await _proxy_runner_request(request, f"agent/sessions/{session_id}/messages")
 
     # --- CP-served routers ---
     from .routers.auth import router as auth_router
