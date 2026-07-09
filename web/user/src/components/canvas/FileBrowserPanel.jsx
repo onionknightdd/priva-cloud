@@ -84,7 +84,7 @@ const PLAIN_TEXT_EXTENSIONS = new Set([
   '.excalidraw',
 ])
 const MAIN_AREA_HEADER_HEIGHT = 30
-const PATH_MODE_BUTTON_HEIGHT = 24
+const PATH_MODE_BUTTON_HEIGHT = 26
 
 function AnimeTreeChevron({ open, children, style }) {
   const ref = useRef(null)
@@ -406,9 +406,14 @@ function ModeButton({ active, children, onClick, position }) {
     <button
       type="button"
       onClick={onClick}
-      className="px-2 text-xs"
+      className="text-xs"
       style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         height: PATH_MODE_BUTTON_HEIGHT,
+        boxSizing: 'border-box',
+        padding: '2px 10px',
         background: active ? 'var(--bg-elevated)' : 'transparent',
         border: 'none',
         borderRadius: radius,
@@ -1307,20 +1312,28 @@ export default function FileBrowserPanel() {
             title={t('fileBrowser.closeAll', 'Close all')}
             className="flex items-center gap-1 text-xs font-semibold uppercase flex-shrink-0"
             style={{
-              height: MAIN_AREA_HEADER_HEIGHT,
-              borderTop: 'none',
-              borderRight: 'none',
-              borderBottom: 'none',
-              borderLeft: '1px solid var(--border-subtle)',
-              background: 'var(--bg-surface)',
+              alignSelf: 'center',
+              height: 22,
+              border: '1px solid var(--border)',
+              borderRadius: 4,
+              background: 'transparent',
               color: 'var(--text-dim)',
               cursor: 'pointer',
               letterSpacing: '0.06em',
-              padding: '0 12px',
-              transition: 'color 150ms ease',
+              padding: '0 8px',
+              margin: '0 8px',
+              transition: 'color 150ms ease, border-color 150ms ease, background 150ms ease',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = 'var(--red)'
+              e.currentTarget.style.borderColor = 'var(--red)'
+              e.currentTarget.style.background = 'var(--bg-elevated)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = 'var(--text-dim)'
+              e.currentTarget.style.borderColor = 'var(--border)'
+              e.currentTarget.style.background = 'transparent'
+            }}
           >
             <X size={12} strokeWidth={1.5} />
             {t('fileBrowser.closeAll', 'Close all')}
@@ -1359,7 +1372,7 @@ export default function FileBrowserPanel() {
         >
           <RefreshCw size={12} strokeWidth={1.5} />
         </button>
-        <div className="flex items-center" style={{ border: '1px solid var(--border)', borderRadius: '4px' }}>
+        <div className="flex items-center" style={{ border: '1px solid var(--border)', borderRadius: '4px', overflow: 'hidden' }}>
           <ModeButton
             active={mode === 'preview'}
             position="left"
