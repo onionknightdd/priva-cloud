@@ -35,6 +35,7 @@ import PanelHeader from '@shared/components/shared/PanelHeader'
 import Chip from '@shared/components/shared/Chip'
 import { AnimatedCollapse } from '@shared/components/shared/Accordion'
 import { SlidingTabIndicator } from '@shared/components/shared/Tabs'
+import { useSlidingVerticalIndicator } from '@shared/motion/useSlidingUnderline'
 import DirectoryPicker from '../shared/DirectoryPicker'
 import TagFilterChip from '../shared/TagFilterChip'
 import safeStorage from '@shared/utils/safeStorage'
@@ -559,6 +560,8 @@ export default function Sidebar() {
   const menuRef = useRef(null)
   const workdirMenuRef = useRef(null)
   const searchInputRef = useRef(null)
+  const pluginsSubmenuRef = useRef(null)
+  const dataSubmenuRef = useRef(null)
   const [renameEditingId, setRenameEditingId] = useState(null)
   const [tagPopoverSession, setTagPopoverSession] = useState(null)
   const [tagPopoverTop, setTagPopoverTop] = useState(120)
@@ -631,6 +634,14 @@ export default function Sidebar() {
   // block to the sidebar bottom and collapses it; collapsing the menu restores it.
   const menuExpanded = dataMenuOpen || pluginsMenuOpen
   const projectAtBottom = menuExpanded
+  const pluginsSubmenuIndicator = useSlidingVerticalIndicator(
+    activeNavTab === 'plugins' && pluginsMenuOpen ? activePluginSection : null,
+    pluginsSubmenuRef
+  )
+  const dataSubmenuIndicator = useSlidingVerticalIndicator(
+    activeNavTab === 'userdata' && dataMenuOpen ? activeSection : null,
+    dataSubmenuRef
+  )
 
   useEffect(() => {
     fetchSessions()
@@ -985,13 +996,28 @@ export default function Sidebar() {
               onClick={() => setPluginsMenuOpen((v) => !v)}
             />
             <AnimatedCollapse open={pluginsMenuOpen}>
-              <div>
+              <div ref={pluginsSubmenuRef} style={{ position: 'relative' }}>
+                <span
+                  ref={pluginsSubmenuIndicator.indicatorRef}
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    left: SUBMENU_ACTIVE_RAIL_OFFSET,
+                    top: 0,
+                    width: 2,
+                    height: 0,
+                    opacity: 0,
+                    background: 'var(--blue)',
+                    pointerEvents: 'none',
+                    zIndex: 2,
+                  }}
+                />
                 {PLUGINS_SECTIONS.map((sec) => (
                   <NavItem
                     scale="md"
                     key={sec.id}
-                    activeRailLayoutId="sidebar-nav-sub-active-rail"
-                    activeRailOffset={SUBMENU_ACTIVE_RAIL_OFFSET}
+                    itemRef={pluginsSubmenuIndicator.setItemRef(sec.id)}
+                    showActiveRail={false}
                     icon={sec.icon}
                     label={t(sec.labelKey)}
                     indent={16}
@@ -1012,13 +1038,28 @@ export default function Sidebar() {
               onClick={() => setDataMenuOpen((v) => !v)}
             />
             <AnimatedCollapse open={dataMenuOpen}>
-              <div>
+              <div ref={dataSubmenuRef} style={{ position: 'relative' }}>
+                <span
+                  ref={dataSubmenuIndicator.indicatorRef}
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    left: SUBMENU_ACTIVE_RAIL_OFFSET,
+                    top: 0,
+                    width: 2,
+                    height: 0,
+                    opacity: 0,
+                    background: 'var(--blue)',
+                    pointerEvents: 'none',
+                    zIndex: 2,
+                  }}
+                />
                 {DATA_SECTIONS.map((sec) => (
                   <NavItem
                     scale="md"
                     key={sec.id}
-                    activeRailLayoutId="sidebar-nav-sub-active-rail"
-                    activeRailOffset={SUBMENU_ACTIVE_RAIL_OFFSET}
+                    itemRef={dataSubmenuIndicator.setItemRef(sec.id)}
+                    showActiveRail={false}
                     icon={sec.icon}
                     label={t(sec.labelKey)}
                     indent={16}
