@@ -24,7 +24,7 @@ import useFileBrowserStore from '../../stores/fileBrowserStore'
 import useChatStore from '../../stores/chatStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
-import { downloadFile, listDirectory } from '../../api/userFiles'
+import { downloadFile, listDirectory, previewFile } from '../../api/userFiles'
 import RichFilePreview from '../shared/RichFilePreview'
 import Tabs, { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
 import { usePresence } from '@shared/motion/usePresence'
@@ -385,6 +385,15 @@ function isPlainText(tab) {
   return PLAIN_TEXT_EXTENSIONS.has(extensionFor(tab))
 }
 
+async function readTextFile(filePath, options = {}) {
+  const data = await previewFile(filePath, options)
+  if (typeof data?.content === 'string') return data.content
+  if (data?.is_binary) {
+    throw new Error('File is binary or too large for text preview')
+  }
+  return ''
+}
+
 function ModeButton({ active, children, onClick, position }) {
   const radius = position === 'left' ? '4px 0 0 4px' : position === 'right' ? '0 4px 4px 0' : 0
   return (
@@ -450,8 +459,7 @@ function RawTextView({ tab, onTextLoaded }) {
     setError(null)
     setContent('')
 
-    downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' })
-      .then((blob) => blob.text())
+    readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
       .then((text) => {
         if (!cancelled) {
           setContent(text)
@@ -563,8 +571,7 @@ function MarkdownPreviewView({ tab, onTextLoaded }) {
     setLoading(true)
     setError(null)
     setContent('')
-    downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' })
-      .then((blob) => blob.text())
+    readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
       .then((text) => {
         if (!cancelled) {
           setContent(text)
@@ -604,8 +611,7 @@ function MermaidPreviewView({ tab, onTextLoaded }) {
     setLoading(true)
     setError(null)
     setContent('')
-    downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' })
-      .then((blob) => blob.text())
+    readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
       .then((text) => {
         if (!cancelled) {
           setContent(text)
@@ -654,8 +660,7 @@ function ExcalidrawPreviewView({ tab, onTextLoaded }) {
     setLoading(true)
     setError(null)
     setContent('')
-    downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' })
-      .then((blob) => blob.text())
+    readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
       .then((text) => {
         if (!cancelled) {
           setContent(text)
@@ -704,8 +709,7 @@ function CodePreviewView({ tab, onTextLoaded }) {
     setLoading(true)
     setError(null)
     setContent('')
-    downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' })
-      .then((blob) => blob.text())
+    readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
       .then((text) => {
         if (!cancelled) {
           setContent(text)
@@ -777,8 +781,7 @@ function RichFilePreviewView({ tab }) {
     [tab.filePath, tab.refreshKey]
   )
   const loadText = useCallback(async () => {
-    const blob = await downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' })
-    return blob.text()
+    return readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
   }, [tab.filePath, tab.refreshKey])
   const loadArrayBuffer = useCallback(async () => {
     const blob = await downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' })
