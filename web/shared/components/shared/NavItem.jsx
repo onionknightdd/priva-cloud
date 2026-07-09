@@ -39,6 +39,8 @@ export default function NavItem({
   expanded = false,
   iconColor,
   scale = 'md',
+  itemRef,
+  showActiveRail = true,
   onClick,
   title,
 }) {
@@ -53,13 +55,14 @@ export default function NavItem({
     if (active === wasActiveRef.current) return
     wasActiveRef.current = active
     const el = railRef.current
-    if (!active || !el || reducedMotion) return
+    if (!showActiveRail || !active || !el || reducedMotion) return
     el.style.transform = 'scaleY(0.6)'
     animate(el, { scaleY: 1, duration: 150, ease: EASE_OUT })
-  }, [active, reducedMotion])
+  }, [active, reducedMotion, showActiveRail])
 
   return (
     <button
+      ref={itemRef}
       type="button"
       disabled={disabled}
       onClick={disabled ? undefined : onClick}
@@ -98,7 +101,7 @@ export default function NavItem({
         e.currentTarget.style.color = baseColor
       }}
     >
-      {active && (
+      {showActiveRail && active && (
         <span
           ref={railRef}
           aria-hidden="true"

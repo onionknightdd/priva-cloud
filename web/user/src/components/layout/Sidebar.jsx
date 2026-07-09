@@ -34,6 +34,7 @@ import NavItem from '@shared/components/shared/NavItem'
 import PanelHeader from '@shared/components/shared/PanelHeader'
 import Chip from '@shared/components/shared/Chip'
 import { AnimatedCollapse } from '@shared/components/shared/Accordion'
+import { useSlidingVerticalIndicator } from '@shared/motion/useSlidingUnderline'
 import DirectoryPicker from '../shared/DirectoryPicker'
 import TagFilterChip from '../shared/TagFilterChip'
 import safeStorage from '@shared/utils/safeStorage'
@@ -79,6 +80,7 @@ function SessionItem({
   session, isActive, openMenuId, menuRef, onSelect, onMenuToggle,
   onDelete, onRenameStart, onTagStart, onPinToggle, onArchive, renameEditingId,
   onRenameCommit, onRenameCancel, onDragStartSession, onDragEndSession, t, indent = 0,
+  itemRef, showActiveRail = true,
 }) {
   const [renameValue, setRenameValue] = useState(session.name || '')
   useEffect(() => {
@@ -98,6 +100,7 @@ function SessionItem({
 
   return (
     <div
+      ref={itemRef}
       className="flex flex-col gap-1 px-3 group"
       draggable={!editing}
       style={{
@@ -146,7 +149,7 @@ function SessionItem({
       onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--bg-elevated)' }}
       onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
     >
-      {isActive && (
+      {showActiveRail && isActive && (
         <span
           style={{
             position: 'absolute',
@@ -549,6 +552,8 @@ export default function Sidebar() {
   const menuRef = useRef(null)
   const workdirMenuRef = useRef(null)
   const searchInputRef = useRef(null)
+  const navIndicatorContainerRef = useRef(null)
+  const sessionIndicatorContentRef = useRef(null)
   const [renameEditingId, setRenameEditingId] = useState(null)
   const [tagPopoverSession, setTagPopoverSession] = useState(null)
   const [tagPopoverTop, setTagPopoverTop] = useState(120)
@@ -621,6 +626,19 @@ export default function Sidebar() {
   // block to the sidebar bottom and collapses it; collapsing the menu restores it.
   const menuExpanded = dataMenuOpen || pluginsMenuOpen
   const projectAtBottom = menuExpanded
+  const activeNavIndicatorKey = collapsed
+    ? null
+    : activeNavTab === 'plugins'
+      ? pluginsMenuOpen && activePluginSection
+        ? `plugin:${activePluginSection}`
+        : 'nav:plugins'
+      : activeNavTab === 'userdata'
+        ? dataMenuOpen && activeSection
+          ? `data:${activeSection}`
+          : 'nav:userdata'
+        : null
+  const navIndicator = useSlidingVerticalIndicator(activeNavIndicatorKey, navIndicatorContainerRef)
+  const sessionIndicator = useSlidingVerticalIndicator(collapsed ? null : activeSessionId, sessionIndicatorContentRef)
 
   useEffect(() => {
     fetchSessions()
@@ -961,11 +979,28 @@ export default function Sidebar() {
       ) : (
         <>
           {/* Primary navigation — full-width rows so the active 2px bar sits flush at the left edge (like sessions) */}
-          <div style={{ padding: '6px 16px 4px', flexShrink: 0 }}>
+          <div ref={navIndicatorContainerRef} style={{ padding: '6px 16px 4px', flexShrink: 0, position: 'relative' }}>
+            <span
+              ref={navIndicator.indicatorRef}
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                left: 14,
+                top: 0,
+                width: 2,
+                height: 0,
+                opacity: 0,
+                background: 'var(--blue)',
+                pointerEvents: 'none',
+                zIndex: 2,
+              }}
+            />
             <NavItem scale="lg" icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
             <NavItem scale="lg" icon={CalendarClock} label={t('sidebar.scheduler')} disabled />
             <NavItem
               scale="lg"
+              itemRef={navIndicator.setItemRef('nav:plugins')}
+              showActiveRail={false}
               icon={PackageSearch}
               label={t('sidebar.plugins')}
               active={activeNavTab === 'plugins'}
@@ -979,6 +1014,8 @@ export default function Sidebar() {
                   <NavItem
                     scale="lg"
                     key={sec.id}
+                    itemRef={navIndicator.setItemRef(`plugin:${sec.id}`)}
+                    showActiveRail={false}
                     icon={sec.icon}
                     label={t(sec.labelKey)}
                     indent={16}
@@ -990,6 +1027,8 @@ export default function Sidebar() {
             </AnimatedCollapse>
             <NavItem
               scale="lg"
+              itemRef={navIndicator.setItemRef('nav:userdata')}
+              showActiveRail={false}
               icon={ChartColumnBig}
               label={t('sidebar.dataUsage')}
               active={activeNavTab === 'userdata'}
@@ -1003,6 +1042,8 @@ export default function Sidebar() {
                   <NavItem
                     scale="lg"
                     key={sec.id}
+                    itemRef={navIndicator.setItemRef(`data:${sec.id}`)}
+                    showActiveRail={false}
                     icon={sec.icon}
                     label={t(sec.labelKey)}
                     indent={16}
@@ -1159,6 +1200,22 @@ export default function Sidebar() {
             ref={listRef}
             style={{ flex: projectAtBottom ? '0 1 auto' : '1 1 auto', minHeight: 0 }}
           >
+            <div ref={sessionIndicatorContentRef} style={{ position: 'relative', minHeight: '100%' }}>
+            <span
+              ref={sessionIndicator.indicatorRef}
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                left: 20,
+                top: 0,
+                width: 2,
+                height: 0,
+                opacity: 0,
+                background: 'var(--blue)',
+                pointerEvents: 'none',
+                zIndex: 2,
+              }}
+            />
             {sessions.length === 0 && !sessionsLoading && (
               <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 13 }}>
                 {t('sidebar.noSessions')}
@@ -1296,6 +1353,8 @@ export default function Sidebar() {
                           onDragEndSession={endSessionDrag}
                           t={t}
                           indent={28}
+                          itemRef={sessionIndicator.setItemRef(session.id)}
+                          showActiveRail={false}
                         />
                       ))}
                       {showMore && (
@@ -1331,6 +1390,7 @@ export default function Sidebar() {
                 </div>
               )
             })}
+            </div>
           </div>
             </>
           )}
