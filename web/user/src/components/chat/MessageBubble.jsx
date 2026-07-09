@@ -1447,12 +1447,9 @@ export default memo(function MessageBubble({
     if (rendered) renderedContent.push(rendered)
   }
 
-  const messageHeader = (
+  const hasMessageHeader = (!isUser && isStreaming && message.timestamp) || (isStreaming && !isUser) || message.error
+  const messageHeader = hasMessageHeader ? (
     <div className="flex items-center gap-2" style={{ alignSelf: isUser ? 'flex-end' : undefined }}>
-      <Chip color={isUser ? 'var(--blue)' : 'var(--purple)'}>
-        {isUser ? 'You' : 'priva'}
-      </Chip>
-
       {/* Duration — live timer while streaming, final duration when done */}
       {!isUser && isStreaming && message.timestamp && (
         <LiveTimer startTime={message.timestamp} />
@@ -1481,7 +1478,7 @@ export default memo(function MessageBubble({
         <Chip color="var(--red)">ERROR</Chip>
       )}
     </div>
-  )
+  ) : null
 
   const messageBody = (
     <>
@@ -1575,7 +1572,7 @@ export default memo(function MessageBubble({
         style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: isUser ? 4 : 6,
+          gap: isUser ? 2 : 4,
           alignItems: isUser ? 'flex-end' : 'stretch',
           width: hasUserReferenceContent ? 'min(720px, 80%)' : undefined,
           maxWidth: isUser ? 'min(720px, 80%)' : undefined,
@@ -1589,14 +1586,14 @@ export default memo(function MessageBubble({
               style={{
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 2,
+                gap: 1,
                 alignItems: hasUserReferenceContent ? 'stretch' : 'flex-end',
                 width: hasUserReferenceContent ? '100%' : undefined,
                 maxWidth: '100%',
                 boxSizing: 'border-box',
                 border: '1px solid var(--border)',
                 borderRadius: 4,
-                padding: '8px 12px',
+                padding: '6px 10px',
                 background: 'var(--bg-elevated)',
               }}
             >
@@ -1746,7 +1743,7 @@ function MessageActions({ textContent, message, assistantIndex, onRewind, onFork
       data-message-actions
       className="flex items-center gap-3 text-xs"
       style={{
-        marginTop: isUser ? -2 : 4,
+        marginTop: isUser ? -3 : 2,
         color: 'var(--text-dim)',
         alignSelf: isUser ? 'flex-end' : undefined,
         lineHeight: '16px',
