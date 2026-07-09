@@ -299,24 +299,6 @@ html, body {
   display: none;
 }
 
-.canvas-file-tabs-scrollbar {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-.canvas-file-tabs-scrollbar::-webkit-scrollbar {
-  height: 6px;
-}
-.canvas-file-tabs-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.canvas-file-tabs-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
-}
-.canvas-file-tabs-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: var(--border-strong);
-}
-
 .overflow-y-auto {
   scroll-behavior: smooth;
 }

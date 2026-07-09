@@ -1130,10 +1130,16 @@ export default function FileBrowserPanel() {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null
   const fileTabUnderline = useSlidingUnderline(activeTab?.id)
   const fileTabsRef = useRef(null)
-  const [fileTabsOverflow, setFileTabsOverflow] = useState(false)
+  const fileTabsScrollbarRef = useRef(null)
+  const [fileTabsScroll, setFileTabsScroll] = useState({
+    overflow: false,
+    thumbLeft: 0,
+    thumbWidth: 0,
+  })
   const fileTabsMeasureKey = useMemo(() => (
     tabs.map((tab) => `${tab.id}:${tab.name || ''}`).join('|')
   ), [tabs])
+  const fileTabsOverflow = fileTabsScroll.overflow
   const activeSession = sidebarSessions.find((session) => session.sessionId === sessionId || session.id === sessionId)
   // No authUser.workspace fallback — it is the control-panel's /tmp/cp-workspace
   // path, not the agent-runner's real /workspace cwd where files live.
@@ -1153,7 +1159,7 @@ export default function FileBrowserPanel() {
   useLayoutEffect(() => {
     const el = fileTabsRef.current
     if (!el) {
-      setFileTabsOverflow(false)
+      setFileTabsScroll({ overflow: false, thumbLeft: 0, thumbWidth: 0 })
       return undefined
     }
 
@@ -1162,16 +1168,42 @@ export default function FileBrowserPanel() {
       if (frame) window.cancelAnimationFrame(frame)
       frame = window.requestAnimationFrame(() => {
         frame = 0
-        const overflowing = el.scrollWidth > el.clientWidth + 1
-        if (!overflowing && el.scrollLeft !== 0) el.scrollLeft = 0
-        setFileTabsOverflow((current) => (current === overflowing ? current : overflowing))
+        const viewportWidth = el.clientWidth
+        const scrollWidth = el.scrollWidth
+        const maxScroll = Math.max(0, scrollWidth - viewportWidth)
+        const overflow = maxScroll > 1
+
+        if (!overflow) {
+          if (el.scrollLeft !== 0) el.scrollLeft = 0
+          setFileTabsScroll((current) => (
+            current.overflow || current.thumbLeft || current.thumbWidth
+              ? { overflow: false, thumbLeft: 0, thumbWidth: 0 }
+              : current
+          ))
+          return
+        }
+
+        const thumbWidth = Math.max(24, Math.round((viewportWidth / scrollWidth) * viewportWidth))
+        const maxThumbLeft = Math.max(0, viewportWidth - thumbWidth)
+        const thumbLeft = maxScroll > 0
+          ? Math.round((el.scrollLeft / maxScroll) * maxThumbLeft)
+          : 0
+        setFileTabsScroll((current) => (
+          current.overflow === overflow
+            && Math.abs(current.thumbLeft - thumbLeft) < 1
+            && Math.abs(current.thumbWidth - thumbWidth) < 1
+            ? current
+            : { overflow, thumbLeft, thumbWidth }
+        ))
       })
     }
 
     update()
+    el.addEventListener('scroll', update, { passive: true })
     window.addEventListener('resize', update)
     if (typeof ResizeObserver === 'undefined') {
       return () => {
+        el.removeEventListener('scroll', update)
         window.removeEventListener('resize', update)
         if (frame) window.cancelAnimationFrame(frame)
       }
@@ -1179,13 +1211,51 @@ export default function FileBrowserPanel() {
 
     const observer = new ResizeObserver(update)
     observer.observe(el)
-    Array.from(el.children).forEach((child) => observer.observe(child))
     return () => {
+      el.removeEventListener('scroll', update)
       window.removeEventListener('resize', update)
       if (frame) window.cancelAnimationFrame(frame)
       observer.disconnect()
     }
   }, [fileTabsMeasureKey, tabs.length])
+
+  const onFileTabsScrollbarMouseDown = useCallback((event) => {
+    const el = fileTabsRef.current
+    const track = fileTabsScrollbarRef.current
+    if (!el || !track || !fileTabsScroll.overflow) return
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    const trackRect = track.getBoundingClientRect()
+    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth)
+    const maxThumbLeft = Math.max(0, trackRect.width - fileTabsScroll.thumbWidth)
+    const target = event.target
+    const targetRole = target instanceof HTMLElement ? target.dataset.scrollbarRole : ''
+    const pointerOffset = targetRole === 'thumb'
+      ? event.clientX - trackRect.left - fileTabsScroll.thumbLeft
+      : fileTabsScroll.thumbWidth / 2
+
+    const setScrollFromClientX = (clientX) => {
+      const nextThumbLeft = Math.max(0, Math.min(maxThumbLeft, clientX - trackRect.left - pointerOffset))
+      el.scrollLeft = maxThumbLeft > 0 ? (nextThumbLeft / maxThumbLeft) * maxScroll : 0
+    }
+
+    if (targetRole !== 'thumb') setScrollFromClientX(event.clientX)
+
+    const onMouseMove = (moveEvent) => setScrollFromClientX(moveEvent.clientX)
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+
+    document.body.style.cursor = 'ew-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [fileTabsScroll])
 
   useEffect(() => {
     const onMouseUp = (e) => {
@@ -1314,71 +1384,110 @@ export default function FileBrowserPanel() {
         }}
       >
       <div
-        ref={fileTabsRef}
-        className="flex items-center overflow-x-auto canvas-file-tabs-scrollbar min-w-0"
+        className="min-w-0"
         style={{
           flex: 1,
           height: MAIN_AREA_HEADER_HEIGHT,
           position: 'relative',
-          overflowX: fileTabsOverflow ? 'scroll' : 'hidden',
-          overflowY: 'hidden',
         }}
       >
-        <span
-          ref={fileTabUnderline.indicatorRef}
-          aria-hidden="true"
+        <div
+          ref={fileTabsRef}
+          className="flex items-center overflow-x-auto scrollbar-hidden min-w-0"
           style={{
-            position: 'absolute',
-            left: 0,
-            bottom: fileTabsOverflow ? 6 : 0,
-            width: 0,
-            height: 2,
-            opacity: 0,
-            background: 'var(--blue)',
-            pointerEvents: 'none',
-            zIndex: 2,
+            height: MAIN_AREA_HEADER_HEIGHT,
+            position: 'relative',
+            overflowX: fileTabsOverflow ? 'scroll' : 'hidden',
+            overflowY: 'hidden',
           }}
-        />
-        {tabs.map((tab) => {
-          const active = tab.id === activeTab.id
-          return (
-            <button
-              key={tab.id}
-              ref={fileTabUnderline.setItemRef(tab.id)}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className="flex items-center gap-2 min-w-0"
-              style={{
-                position: 'relative',
-                height: MAIN_AREA_HEADER_HEIGHT,
-                maxWidth: 180,
-                flexShrink: 0,
-                border: 'none',
-                borderRight: '1px solid var(--border-subtle)',
-                borderBottom: '2px solid transparent',
-                background: active ? 'var(--bg-elevated)' : 'transparent',
-                color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                padding: '0 8px',
-              }}
-              title={tab.filePath}
-            >
-              <FileText size={12} strokeWidth={1.5} style={{ color: active ? 'var(--blue)' : 'var(--text-dim)', flexShrink: 0, position: 'relative', zIndex: 1 }} />
-              <span className="truncate text-xs" style={{ fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace", minWidth: 0, position: 'relative', zIndex: 1 }}>
-                {tab.name}
-              </span>
-              <span
-                onClick={(event) => {
-                  event.stopPropagation()
-                  closeFile(tab.id)
+        >
+          <span
+            ref={fileTabUnderline.indicatorRef}
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: 0,
+              bottom: fileTabsOverflow ? 6 : 0,
+              width: 0,
+              height: 2,
+              opacity: 0,
+              background: 'var(--blue)',
+              pointerEvents: 'none',
+              zIndex: 2,
+            }}
+          />
+          {tabs.map((tab) => {
+            const active = tab.id === activeTab.id
+            return (
+              <button
+                key={tab.id}
+                ref={fileTabUnderline.setItemRef(tab.id)}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className="flex items-center gap-2 min-w-0"
+                style={{
+                  position: 'relative',
+                  height: MAIN_AREA_HEADER_HEIGHT,
+                  maxWidth: 180,
+                  flexShrink: 0,
+                  border: 'none',
+                  borderRight: '1px solid var(--border-subtle)',
+                  borderBottom: '2px solid transparent',
+                  background: active ? 'var(--bg-elevated)' : 'transparent',
+                  color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  padding: '0 8px',
                 }}
-                style={{ display: 'inline-flex', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}
+                title={tab.filePath}
               >
-                <X size={12} strokeWidth={1.5} />
-              </span>
-            </button>
-          )
-        })}
+                <FileText size={12} strokeWidth={1.5} style={{ color: active ? 'var(--blue)' : 'var(--text-dim)', flexShrink: 0, position: 'relative', zIndex: 1 }} />
+                <span className="truncate text-xs" style={{ fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace", minWidth: 0, position: 'relative', zIndex: 1 }}>
+                  {tab.name}
+                </span>
+                <span
+                  onClick={(clickEvent) => {
+                    clickEvent.stopPropagation()
+                    closeFile(tab.id)
+                  }}
+                  style={{ display: 'inline-flex', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}
+                >
+                  <X size={12} strokeWidth={1.5} />
+                </span>
+              </button>
+            )
+          })}
+        </div>
+        {fileTabsOverflow && (
+          <div
+            ref={fileTabsScrollbarRef}
+            onMouseDown={onFileTabsScrollbarMouseDown}
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 6,
+              background: 'var(--bg-elevated)',
+              cursor: 'ew-resize',
+              zIndex: 4,
+            }}
+          >
+            <span
+              data-scrollbar-role="thumb"
+              style={{
+                position: 'absolute',
+                left: fileTabsScroll.thumbLeft,
+                top: 1,
+                width: fileTabsScroll.thumbWidth,
+                height: 4,
+                borderRadius: 4,
+                background: 'var(--border-strong)',
+                cursor: 'ew-resize',
+              }}
+            />
+          </div>
+        )}
       </div>
         {tabs.length > 1 && (
           <button
