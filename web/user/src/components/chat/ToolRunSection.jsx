@@ -32,7 +32,19 @@ function hasUnfinishedTool(run, fileOps) {
 function SummaryToken({ text, height, fontWeight, shimmer, color }) {
   const style = color ? { color } : undefined
   if (shimmer) {
-    return <AnimatedShimmerText style={style}>{text}</AnimatedShimmerText>
+    return (
+      <AnimatedShimmerText
+        style={{
+          ...style,
+          fontSize: height,
+          fontWeight,
+          lineHeight: `${height}px`,
+          verticalAlign: 'middle',
+        }}
+      >
+        {text}
+      </AnimatedShimmerText>
+    )
   }
 
   return (
