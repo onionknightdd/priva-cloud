@@ -890,13 +890,14 @@ function FileTreeSidebar({
         <button
           type="button"
           onClick={() => toggleDir(path)}
-          className="flex items-center gap-1 w-full min-w-0"
+          className="flex items-center w-full min-w-0"
           title={path}
           style={{
             border: 'none',
             background: 'transparent',
             color: 'var(--text-secondary)',
             cursor: 'pointer',
+            gap: 3,
             padding: `4px 8px 4px ${8 + depth * 12}px`,
             textAlign: 'left',
           }}
@@ -1128,6 +1129,11 @@ export default function FileBrowserPanel() {
   const openFileTab = useFileBrowserStore((s) => s.openFile)
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null
   const fileTabUnderline = useSlidingUnderline(activeTab?.id)
+  const fileTabsRef = useRef(null)
+  const [fileTabsOverflow, setFileTabsOverflow] = useState(false)
+  const fileTabsMeasureKey = useMemo(() => (
+    tabs.map((tab) => `${tab.id}:${tab.name || ''}`).join('|')
+  ), [tabs])
   const activeSession = sidebarSessions.find((session) => session.sessionId === sessionId || session.id === sessionId)
   // No authUser.workspace fallback — it is the control-panel's /tmp/cp-workspace
   // path, not the agent-runner's real /workspace cwd where files live.
@@ -1143,6 +1149,43 @@ export default function FileBrowserPanel() {
     setTooltip(null)
     setSelectedFileData(null)
   }, [activeTab?.id, activeTab?.refreshKey, activeTab?.mode])
+
+  useLayoutEffect(() => {
+    const el = fileTabsRef.current
+    if (!el) {
+      setFileTabsOverflow(false)
+      return undefined
+    }
+
+    let frame = 0
+    const update = () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        const overflowing = el.scrollWidth > el.clientWidth + 1
+        if (!overflowing && el.scrollLeft !== 0) el.scrollLeft = 0
+        setFileTabsOverflow((current) => (current === overflowing ? current : overflowing))
+      })
+    }
+
+    update()
+    window.addEventListener('resize', update)
+    if (typeof ResizeObserver === 'undefined') {
+      return () => {
+        window.removeEventListener('resize', update)
+        if (frame) window.cancelAnimationFrame(frame)
+      }
+    }
+
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    Array.from(el.children).forEach((child) => observer.observe(child))
+    return () => {
+      window.removeEventListener('resize', update)
+      if (frame) window.cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [fileTabsMeasureKey, tabs.length])
 
   useEffect(() => {
     const onMouseUp = (e) => {
@@ -1270,14 +1313,24 @@ export default function FileBrowserPanel() {
           borderBottom: '1px solid var(--border)',
         }}
       >
-      <div className="flex items-center overflow-x-auto canvas-file-tabs-scrollbar min-w-0" style={{ flex: 1, height: MAIN_AREA_HEADER_HEIGHT, position: 'relative' }}>
+      <div
+        ref={fileTabsRef}
+        className="flex items-center overflow-x-auto canvas-file-tabs-scrollbar min-w-0"
+        style={{
+          flex: 1,
+          height: MAIN_AREA_HEADER_HEIGHT,
+          position: 'relative',
+          overflowX: fileTabsOverflow ? 'scroll' : 'hidden',
+          overflowY: 'hidden',
+        }}
+      >
         <span
           ref={fileTabUnderline.indicatorRef}
           aria-hidden="true"
           style={{
             position: 'absolute',
             left: 0,
-            bottom: 0,
+            bottom: fileTabsOverflow ? 6 : 0,
             width: 0,
             height: 2,
             opacity: 0,
