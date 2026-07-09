@@ -11,6 +11,7 @@ import { RollingInteger } from '../shared/Odometer'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 import DrawIcon from '@shared/components/shared/DrawIcon'
 import safeStorage from '@shared/utils/safeStorage'
+import { useSlidingVerticalIndicator } from '@shared/motion/useSlidingUnderline'
 
 const STORAGE_KEY_SPLIT = 'fileops-split-width'
 
@@ -93,17 +94,19 @@ function fileName(filePath) {
   return parts[parts.length - 1]
 }
 
-function FileOpItem({ op, selected, onClick, reverted = false }) {
+function FileOpItem({ op, selected, onClick, itemRef, reverted = false }) {
   const { t } = useTranslation()
   const [hovered, setHovered] = useState(false)
   const { color, label } = getFileOpMeta(op)
   return (
     <div
-      className="flex items-center gap-2 px-3 py-2"
+      ref={itemRef}
+      className="flex items-center px-3 py-1"
       style={{
         cursor: 'pointer',
-        background: selected ? 'var(--bg-elevated)' : hovered ? 'rgba(33, 38, 45, 0.5)' : 'transparent',
-        borderLeft: selected ? '2px solid var(--blue)' : '2px solid transparent',
+        background: selected ? 'var(--bg-elevated)' : hovered ? 'var(--bg-elevated)' : 'transparent',
+        borderLeft: '2px solid transparent',
+        gap: 6,
         opacity: reverted ? 0.55 : 1,
         transition: 'background 150ms ease',
       }}
@@ -168,6 +171,8 @@ function FileOpItem({ op, selected, onClick, reverted = false }) {
 function TurnGroup({ turnIndex, ops, selectedFileOpId, onSelect, defaultOpen, revertedSet }) {
   const { t } = useTranslation()
   const bodyId = useId()
+  const bodyRef = useRef(null)
+  const opIndicator = useSlidingVerticalIndicator(selectedFileOpId, bodyRef)
   const [open, setOpen] = useState(defaultOpen)
   const [hovered, setHovered] = useState(false)
   const operationCount = ops.length
@@ -228,15 +233,33 @@ function TurnGroup({ turnIndex, ops, selectedFileOpId, onSelect, defaultOpen, re
 
       {/* Expanded file list */}
       <AnimatedCollapse open={open} id={bodyId}>
-        {ops.map((op) => (
-          <FileOpItem
-            key={op.id}
-            op={op}
-            selected={op.id === selectedFileOpId}
-            onClick={() => onSelect(op.id)}
-            reverted={revertedSet?.has(op.id) || false}
+        <div ref={bodyRef} style={{ position: 'relative', padding: '2px 0' }}>
+          <span
+            ref={opIndicator.indicatorRef}
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: 2,
+              height: 0,
+              opacity: 0,
+              background: 'var(--blue)',
+              pointerEvents: 'none',
+              zIndex: 2,
+            }}
           />
-        ))}
+          {ops.map((op) => (
+            <FileOpItem
+              key={op.id}
+              itemRef={opIndicator.setItemRef(op.id)}
+              op={op}
+              selected={op.id === selectedFileOpId}
+              onClick={() => onSelect(op.id)}
+              reverted={revertedSet?.has(op.id) || false}
+            />
+          ))}
+        </div>
       </AnimatedCollapse>
     </div>
   )
