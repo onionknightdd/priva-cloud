@@ -386,12 +386,16 @@ function isPlainText(tab) {
 }
 
 async function readTextFile(filePath, options = {}) {
-  const data = await previewFile(filePath, options)
-  if (typeof data?.content === 'string') return data.content
-  if (data?.is_binary) {
-    throw new Error('File is binary or too large for text preview')
-  }
-  return ''
+  try {
+    const data = await previewFile(filePath, options)
+    if (typeof data?.content === 'string') return data.content
+  } catch { /* fall back to the download lane below */ }
+
+  const blob = await downloadFile(filePath, {
+    ...options,
+    cacheMode: 'no-store',
+  })
+  return blob.text()
 }
 
 function ModeButton({ active, children, onClick, position }) {
@@ -517,7 +521,11 @@ function HighlightedCode({ content, language }) {
     return highlighted.replace(/\n$/, '').split('\n').map((html) => ({ text: null, html }))
   }, [content, highlighted])
 
-  return <VirtualizedCodeLines lines={lines} />
+  return (
+    <div className="flex-1 min-w-0 min-h-0 overflow-hidden" style={{ width: '100%', height: '100%' }}>
+      <VirtualizedCodeLines lines={lines} />
+    </div>
+  )
 }
 
 function NonPlainRawNotice({ onPreview }) {
@@ -1391,7 +1399,7 @@ export default function FileBrowserPanel() {
             }}
           />
         )}
-        <div ref={previewContentRef} className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
+        <div ref={previewContentRef} className="flex-1 min-w-0 min-h-0 overflow-hidden">
           {mode === 'raw'
             ? plain
               ? <RawTextView tab={activeTab} onTextLoaded={handleTextLoaded} />
