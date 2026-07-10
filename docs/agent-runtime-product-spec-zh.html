@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Priva Cloud · Agent Runtime — 产品规格说明</title>
+<style>
+:root{
+  --paper:#f6f7f8; --surface:#ffffff; --ink:#171a1f; --ink2:#4d5560; --muted:#8a919c;
+  --line:#e3e6ea; --accent:#1c5cab; --accent-bg:#eaf1fa;
+  --code-bg:#14171d; --code-ink:#dfe5ec; --code-c:#7d8794; --code-f:#7fb3ee; --code-e:#e0b76c;
+  --edge:#5b6472; --cp:#2a78d6; --op:#b97a00; --ar:#8347c8; --ds:#1baf7a;
+  --warn:#b97a00; --warn-bg:#fdf6e8; --danger:#d03b3b; --danger-bg:#fbeeee; --ok:#0ca30c;
+  --gap-bg:#f2f3f5;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --paper:#0e0f11; --surface:#17191d; --ink:#e8eaee; --ink2:#b3bac4; --muted:#7d8590;
+    --line:#2a2e34; --accent:#5f9de2; --accent-bg:#1b2634;
+    --code-bg:#101216;
+    --edge:#8b95a5; --cp:#3987e5; --op:#e0a437; --ar:#a06ee0; --ds:#199e70;
+    --warn:#e0a437; --warn-bg:#252017; --danger:#e66767; --danger-bg:#291a1a;
+    --gap-bg:#1d2025;
+  }
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:24px}
+body{background:var(--paper);color:var(--ink);
+  font:15px/1.75 -apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI","Helvetica Neue",Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+code,pre,.mono{font-family:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace}
+
+/* ---------- header ---------- */
+header{background:var(--code-bg);color:#dfe5ec;padding:56px 32px 44px;border-bottom:3px solid var(--accent)}
+.hwrap{max-width:1240px;margin:0 auto}
+.kicker{color:#7fb3ee;font-size:13px;letter-spacing:.22em;text-transform:uppercase;font-weight:600}
+header h1{font-size:clamp(24px,3.4vw,36px);line-height:1.3;font-weight:700;margin:14px 0 10px;text-wrap:balance;color:#fff}
+header .sub{color:#9aa3af;font-size:15px;max-width:72ch}
+.badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+.badge{font-size:12.5px;padding:4px 12px;border:1px solid #333a44;border-radius:999px;color:#b8c0cb;font-family:ui-monospace,Menlo,monospace}
+.badge b{color:#7fb3ee;font-weight:600}
+
+/* ---------- layout ---------- */
+.shell{max-width:1240px;margin:0 auto;display:grid;grid-template-columns:248px minmax(0,1fr);gap:36px;padding:36px 32px 96px}
+nav.toc{position:sticky;top:24px;align-self:start;font-size:13.5px;max-height:calc(100vh - 48px);overflow-y:auto;padding-right:4px}
+nav.toc .toct{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;font-weight:600}
+nav.toc a{display:block;color:var(--ink2);text-decoration:none;padding:5px 10px;border-left:2px solid var(--line);line-height:1.45}
+nav.toc a:hover{color:var(--accent)}
+nav.toc a.on{color:var(--accent);border-left-color:var(--accent);background:var(--accent-bg);font-weight:600}
+nav.toc a.sub2{padding-left:22px;font-size:12.5px}
+main{min-width:0}
+@media (max-width:980px){.shell{grid-template-columns:1fr;padding:24px 16px 72px}nav.toc{position:static;max-height:none;display:flex;flex-wrap:wrap;gap:4px}nav.toc a{border:1px solid var(--line);border-radius:6px}nav.toc .toct{width:100%}}
+
+/* ---------- sections ---------- */
+section{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:34px 36px;margin-bottom:26px}
+@media (max-width:640px){section{padding:22px 16px}}
+h2{font-size:23px;line-height:1.35;font-weight:700;letter-spacing:-.01em;display:flex;align-items:baseline;gap:12px;text-wrap:balance}
+h2 .no{color:var(--accent);font-size:14px;font-weight:700;font-family:ui-monospace,Menlo,monospace}
+h3{font-size:17.5px;font-weight:700;margin:34px 0 12px;letter-spacing:-.005em}
+h4{font-size:15px;font-weight:700;margin:24px 0 8px}
+section>p,section>div>p{margin:12px 0;max-width:76ch;color:var(--ink)}
+p.lead{font-size:16px;color:var(--ink2);margin:14px 0 4px;max-width:72ch}
+ul,ol{margin:10px 0 12px 22px;max-width:76ch}
+li{margin:5px 0}
+a{color:var(--accent)}
+strong{font-weight:650}
+hr{border:0;border-top:1px solid var(--line);margin:30px 0}
+p code,li code,td code,dd code{background:var(--accent-bg);color:var(--accent);padding:1px 6px;border-radius:4px;font-size:.88em;white-space:nowrap}
+td code{white-space:normal;word-break:break-all}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto;margin:14px 0;border:1px solid var(--line);border-radius:6px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:left;font-weight:600;
+   padding:9px 12px;border-bottom:1.5px solid var(--line);background:color-mix(in srgb,var(--surface) 60%,var(--paper));white-space:nowrap}
+td{padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top;font-variant-numeric:tabular-nums}
+tr:last-child td{border-bottom:0}
+td:first-child{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;white-space:nowrap;color:var(--ink)}
+table.wrapflag td:first-child{white-space:normal;min-width:190px}
+table.plain td:first-child{font-family:inherit;font-size:13.5px;white-space:normal}
+td .dim{color:var(--muted);font-size:12px;display:block}
+
+/* ---------- code ---------- */
+.code{position:relative;margin:14px 0}
+pre{background:var(--code-bg);color:var(--code-ink);padding:18px 20px;border-radius:8px;overflow-x:auto;
+    font-size:12.8px;line-height:1.68;border:1px solid #262b33}
+pre .c{color:var(--code-c)}
+pre .f{color:var(--code-f)}
+pre .e{color:var(--code-e)}
+.code button.copy{position:absolute;top:8px;right:8px;background:#262b33;color:#9aa3af;border:1px solid #333a44;
+  border-radius:5px;font-size:11.5px;padding:3px 10px;cursor:pointer;font-family:inherit}
+.code button.copy:hover{color:#dfe5ec;border-color:#4a5361}
+
+/* ---------- callouts ---------- */
+.co{border:1px solid var(--line);border-left:3px solid var(--muted);border-radius:6px;padding:13px 18px;margin:16px 0;font-size:14px;max-width:none}
+.co p{margin:6px 0;max-width:none}
+.co .cot{font-weight:700;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:4px}
+.co.info{border-left-color:var(--accent);background:var(--accent-bg)}.co.info .cot{color:var(--accent)}
+.co.warn{border-left-color:var(--warn);background:var(--warn-bg)}.co.warn .cot{color:var(--warn)}
+.co.danger{border-left-color:var(--danger);background:var(--danger-bg)}.co.danger .cot{color:var(--danger)}
+.co.gap{border-left-color:var(--muted);background:var(--gap-bg)}
+.co.gap .cot{color:var(--muted)}
+
+/* ---------- chips / facts / cards ---------- */
+.chip{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;padding:3px 12px;border-radius:999px;border:1px solid var(--line);color:var(--ink2)}
+.chip::before{content:"";width:9px;height:9px;border-radius:3px;background:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.chip.edge::before{background:var(--edge)}
+.chip.cp::before{background:var(--cp)}
+.chip.op::before{background:var(--op)}
+.chip.ar::before{background:var(--ar)}
+.chip.ds::before{background:var(--ds)}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:18px 0}
+.fact{border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+.fact .fl{font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.fact .fv{font-size:15px;font-weight:650;margin-top:3px;line-height:1.45}
+.fact .fv small{font-weight:400;color:var(--ink2);font-size:12.5px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:18px 0 6px}
+.card{border:1px solid var(--line);border-radius:8px;padding:18px;color:var(--ink);display:block}
+.card .ct{font-weight:700;font-size:15.5px;margin:0 0 6px}
+.card p{font-size:13px;color:var(--ink2);margin:0;line-height:1.6}
+
+/* ---------- status pills ---------- */
+.st{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+    padding:1px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+.st.ship{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.st.defer{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+.st.stub{color:var(--muted)}
+.st.open{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,var(--line))}
+
+/* ---------- interactive diagrams ---------- */
+.ix{border:1px solid var(--line);border-radius:8px;padding:18px;margin:16px 0;background:var(--surface)}
+.ix .ixh{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:12px}
+.ix .node{cursor:pointer}
+.ix .node:focus{outline:none}
+.ix .node rect.box{fill:var(--paper);stroke:var(--line);stroke-width:1.5;transition:stroke .15s ease,fill .15s ease,stroke-width .15s ease}
+.ix .node:hover rect.box,.ix .node:focus-visible rect.box{stroke-width:2.5}
+.ix .node.sel rect.box{stroke:var(--accent);stroke-width:2.5;fill:var(--accent-bg)}
+.ix .node.edge-c rect.box{stroke:var(--edge)}
+.ix .node.cp-c rect.box{stroke:var(--cp)}
+.ix .node.op-c rect.box{stroke:var(--op)}
+.ix .node.ar-c rect.box{stroke:var(--ar)}
+.ix .node.ds-c rect.box{stroke:var(--ds)}
+.ix .node text{fill:var(--ink);font-size:13px;font-weight:600}
+.ix .node text.sub,.ix text.sub{fill:var(--ink2);font-size:11px;font-weight:400}
+.ix .static rect{fill:var(--gap-bg);stroke:var(--line);stroke-width:1.5}
+.ix .static text{fill:var(--ink2);font-size:12px;font-weight:600}
+.ix .edge{stroke:var(--muted);stroke-width:1.5;fill:none;marker-end:url(#arr)}
+.ix .elabel{fill:var(--muted);font-size:10.5px}
+.ix .node.done rect.box{stroke:var(--accent)}
+.ix .node.hot rect.box{stroke:var(--ok);stroke-width:2.5;fill:color-mix(in srgb,var(--ok) 8%,var(--surface))}
+.ix .edge.hot{stroke:var(--accent);stroke-width:2.5}
+.ix .edge.flow{stroke-dasharray:6 7;animation:ixdash 1.1s linear infinite}
+@keyframes ixdash{to{stroke-dashoffset:-13}}
+@media (prefers-reduced-motion: reduce){.ix .edge.flow{animation:none}.ix *{transition:none!important}}
+.ixd{border-top:1px solid var(--line);margin-top:14px;padding-top:12px;font-size:13.5px;color:var(--ink2);min-height:3.2em}
+.ixbar{display:flex;gap:8px;align-items:center;margin-top:12px}
+.ixbar button{background:var(--surface);border:1px solid var(--line);border-radius:5px;padding:4px 14px;cursor:pointer;font:inherit;font-size:13px;color:var(--ink)}
+.ixbar button:hover{border-color:var(--accent);color:var(--accent)}
+.ixbar button:disabled{opacity:.45;cursor:default}
+.ixbar button:disabled:hover{border-color:var(--line);color:var(--ink)}
+.ixbar .stp{font-size:12px;color:var(--muted);font-family:ui-monospace,Menlo,monospace}
+
+/* ---------- tabs (§9) ---------- */
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:16px 0 0;border-bottom:1px solid var(--line);padding-bottom:0}
+.tabs button{background:none;border:1px solid var(--line);border-bottom:none;border-radius:6px 6px 0 0;
+  padding:7px 16px;cursor:pointer;font:inherit;font-size:13.5px;font-weight:600;color:var(--ink2);position:relative;top:1px}
+.tabs button:hover{color:var(--accent)}
+.tabs button.on{color:var(--accent);background:var(--surface);border-color:var(--line);border-bottom:1px solid var(--surface)}
+.tabpane{display:none;border:1px solid var(--line);border-top:none;border-radius:0 0 8px 8px;padding:18px 20px 8px;margin-bottom:16px}
+.tabpane.on{display:block}
+
+/* ---------- roadmap timeline (§10) ---------- */
+.phases{display:flex;gap:0;margin:18px 0 0;overflow-x:auto;padding-bottom:4px}
+.phase{flex:1;min-width:104px;border:1px solid var(--line);border-left:none;padding:12px 14px;cursor:pointer;background:var(--surface);
+  font:inherit;text-align:left;transition:background .15s ease}
+.phase:first-child{border-left:1px solid var(--line);border-radius:6px 0 0 6px}
+.phase:last-child{border-radius:0 6px 6px 0}
+.phase:hover{background:var(--accent-bg)}
+.phase .pn{font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;font-family:ui-monospace,Menlo,monospace;color:var(--muted)}
+.phase .pt{font-size:13px;font-weight:650;margin-top:2px;line-height:1.4;color:var(--ink)}
+.phase.done{border-top:3px solid var(--ok)}
+.phase.next{border-top:3px solid var(--warn)}
+.phase.later{border-top:3px solid var(--line)}
+.phase.sel{background:var(--accent-bg);outline:2px solid var(--accent);outline-offset:-2px}
+
+/* ---------- comparison matrix marks ---------- */
+td.y{color:var(--ok);font-weight:700;text-align:center}
+td.n{color:var(--danger);font-weight:700;text-align:center}
+td.p{color:var(--warn);font-weight:700;text-align:center}
+table.matrix td{text-align:center}
+table.matrix td:first-child{text-align:left}
+
+footer{max-width:1240px;margin:0 auto;padding:0 32px 60px;color:var(--muted);font-size:12.5px}
+footer a{color:var(--muted)}
+@media print{nav.toc,.code button.copy{display:none}section{border:none;padding:12px 0;break-inside:avoid-page}header{background:#fff;color:#000}header h1{color:#000}}
+</style>
+</head>
+<body>
+
+<header>
+<div class="hwrap">
+  <div class="kicker">Priva Cloud · Agent Runtime</div>
+  <h1>Priva Cloud — Agent Runtime 产品规格说明</h1>
+  <p class="sub">一个基于 Claude Agent SDK 构建的、可自托管、Kubernetes 原生、多租户的 agent 运行时：每个内部用户都获得一个隔离的、scale-to-zero 的 agent pod —— 在单一 edge 之后、在你自己的集群上、用你自己的模型凭证，交付完整的 Claude Code 能力。</p>
+  <div class="badges">
+    <span class="badge">版本 <b>v1.0</b></span>
+    <span class="badge">日期 <b>2026-07-10</b></span>
+    <span class="badge">状态 <b>Alpha · Phase 0–3 merged</b></span>
+    <span class="badge">基线 <b>claude-agent-sdk 0.1.81 · claude CLI ≥ 2.0</b></span>
+  </div>
+</div>
+</header>
+
+<div class="shell">
+<nav class="toc">
+  <div class="toct">目录</div>
+  <a href="#positioning">1 · 产品定义</a>
+  <a class="sub2" href="#personas">1.2 用户与角色</a>
+  <a class="sub2" href="#non-goals">1.4 非目标</a>
+  <a href="#principles">2 · 设计原则</a>
+  <a href="#architecture">3 · 运行时架构</a>
+  <a class="sub2" href="#byte-path">3.1 请求字节路径</a>
+  <a class="sub2" href="#components">3.2 核心组件</a>
+  <a href="#security">4 · 租户与安全</a>
+  <a class="sub2" href="#trust-chain">4.1 信任链</a>
+  <a class="sub2" href="#isolation">4.2 隔离清单</a>
+  <a class="sub2" href="#egress">4.5 出站控制</a>
+  <a href="#features">5 · 核心功能规格</a>
+  <a href="#api">6 · API 与可扩展性</a>
+  <a href="#nfr">7 · 非功能需求</a>
+  <a class="sub2" href="#monitoring">7.2 监控与指标</a>
+  <a class="sub2" href="#auditing">7.3 审计</a>
+  <a class="sub2" href="#tracing">7.4 追踪</a>
+  <a class="sub2" href="#warm-pools">7.7 Warm Pools</a>
+  <a class="sub2" href="#failure-modes">7.8 故障模式</a>
+  <a href="#operations">8 · 运维与部署</a>
+  <a class="sub2" href="#data-lifecycle">8.5 数据生命周期与 DR</a>
+  <a class="sub2" href="#upgrades">8.6 升级生命周期</a>
+  <a href="#competitive">9 · 竞争格局</a>
+  <a class="sub2" href="#matrix">9.2 对比矩阵</a>
+  <a class="sub2" href="#build-vs-adopt">9.3 自建 vs 采用</a>
+  <a href="#roadmap">10 · 路线图</a>
+  <a href="#evolution">11 · 设计演进</a>
+  <a class="sub2" href="#a2a">11.1 Agent 间互通</a>
+  <a class="sub2" href="#hitl">11.2 异步 HITL 收件箱</a>
+  <a class="sub2" href="#publishable">11.3 可发布 Agent</a>
+  <a class="sub2" href="#unified-auth">11.4 统一 MCP 鉴权</a>
+  <a href="#risks">12 · 风险与未决问题</a>
+  <a href="#glossary">13 · 术语表</a>
+  <a href="#challenges">14 · 干系人质询</a>
+  <a class="sub2" href="#challenge-user">14.1 终端用户</a>
+  <a class="sub2" href="#challenge-leader">14.2 工程负责人</a>
+  <a class="sub2" href="#challenge-security">14.3 安全 / CISO</a>
+  <a class="sub2" href="#challenge-sre">14.4 SRE / 运维</a>
+  <a class="sub2" href="#challenge-compliance">14.5 合规与财务</a>
+</nav>
+
+<main>
+
+<!-- ================= §1 Product Definition ================= -->
+<section id="positioning">
+<h2><span class="no">§1</span>产品定义与定位</h2>
+
+<h3 id="one-liner">1.1 它是什么</h3>
+<p class="lead">Priva Cloud 是一个基于 Claude Agent SDK 构建的<strong>可自托管、Kubernetes 原生、多租户 Agent Runtime</strong>。它为每个用户提供一个隔离的、scale-to-zero 的 agent-runner pod，运行完整的 Claude Agent SDK 会话 —— skills、MCP 服务器、hooks、subagents、Web 终端以及功能丰富的 Web 控制台 —— 同时由一个无状态控制平面负责身份、路由、pod 生命周期与持久化状态。</p>
+
+<div class="facts">
+  <div class="fact"><div class="fl">租户模型</div><div class="fv">1 pod / 用户 <small>按需 scale 0↔1</small></div></div>
+  <div class="fact"><div class="fl">目标人群</div><div class="fv">数百人 <small>半可信内部用户</small></div></div>
+  <div class="fact"><div class="fl">冷启动</div><div class="fv">≈ 4 s <small>0→1 唤醒，端到端实测</small></div></div>
+  <div class="fact"><div class="fl">模型凭证</div><div class="fv">BYOK <small>每用户 base URL + token</small></div></div>
+  <div class="fact"><div class="fl">Agent 引擎</div><div class="fv">Claude Agent SDK <small>拉起真实的 <code>claude</code> CLI</small></div></div>
+  <div class="fact"><div class="fl">Edge</div><div class="fv">agentgateway + GIE <small>逐请求 ext_proc 转向</small></div></div>
+</div>
+
+<p>本产品占据了一个刻意选择的交集，而（如 §9 所示）现有产品无一覆盖：<strong>完整 Claude Code 能力</strong> × <strong>每用户计算隔离</strong> × <strong>完全本地部署</strong> × <strong>自带密钥（BYOK）</strong>。它是一个内部平台产品：客户是组织本身；用户是组织的员工，以及治理他们的平台团队。</p>
+
+<h3 id="personas">1.2 用户与角色</h3>
+<div class="cards">
+  <div class="card"><div class="ct">终端用户 —— 内部员工</div>
+    <p>获得一个拥有真实、持久工作区的个人 AI 助手：带流式与 canvas 的聊天控制台、支持 fork/rewind 的会话历史、PTY Web 终端、文件浏览器、以及个人 skills / MCP 服务器 / subagents / hooks。自带模型凭证（<code>ANTHROPIC_BASE_URL</code> / <code>ANTHROPIC_AUTH_TOKEN</code>）。</p></div>
+  <div class="card"><div class="ct">平台管理员 —— 集群的运维者</div>
+    <p>通过管理端 SPA 开通并治理用户：用户 CRUD 与自助注册审批、每租户资源规格与存储配额、runner 默认值、强制 hooks（含 PII 脱敏）、风险工具策略、集群快照、资源用量、系统健康图、gateway 指标，以及一个进入控制平面 pod 的受审计控制台。</p></div>
+  <div class="card"><div class="ct">平台工程师 —— 扩展运行时</div>
+    <p>通过编写 MCP 服务器、skills 与 plugins 集成内部系统；消费运行时 API（<code>/api/sandbox/*</code>、SSE / WebSocket）以将 agent 会话嵌入其他内部工具。</p></div>
+</div>
+
+<h3 id="use-cases">1.3 主要用例</h3>
+<ul>
+  <li><strong>拥有真实工作区的个人 AI 助手</strong> —— 长期存续、可恢复的 agent 会话，能读写文件、运行命令，并以用户为单位持久化状态，而非以浏览器标签页为单位。</li>
+  <li><strong>Agent 访问内部系统</strong> —— 由管理员治理的 MCP 服务器与 skills，在每用户凭证与 hook 强制策略下，将内部 API、数据库与工具暴露给每个用户的 agent。</li>
+  <li><strong>编码与运维工作</strong> —— 在用户自己隔离的 pod 内运行完整的 Claude Code 循环（终端、文件编辑、git），从浏览器驱动。</li>
+  <li><strong>受治理的集群运营</strong> —— 一个平台团队即可运行数百个 agent，带每租户配额、审计轨迹与集中强制的护栏。</li>
+</ul>
+
+<h3 id="non-goals">1.4 非目标</h3>
+<p>明确的非目标让竞争论证（§9）保持诚实，也让架构保持精简：</p>
+<ul>
+  <li><strong>不是公有 SaaS。</strong>面向共享集群基础设施上的半可信内部人群设计 —— 不面向匿名、对抗性的租户。</li>
+  <li><strong>不是模型 gateway 或计量代理。</strong>BYOK 是一项设计决策：没有虚拟密钥，也没有中心化的 token 计费路径；用量由 pod 自行上报。经由 Bedrock / Vertex / 内部代理的路由，取决于用户对 base URL 的选择。</li>
+  <li><strong>不是对 agent 循环的重新实现。</strong>运行时通过 Claude Agent SDK 封装并拉起真实的 <code>claude</code> CLI。Priva 从不 fork 该循环；它继承上游能力。</li>
+  <li><strong>不是无代码工作流构建器。</strong>可扩展性是代码形态（skills、MCP、hooks），而非 DAG 形态。工作流产品（Dify、n8n）是补充，而非竞争目标。</li>
+  <li><strong>不是纯聊天。</strong>一个没有隔离执行工作区的聊天 UI，正是 Priva 存在的意义所在 —— 要去超越它。</li>
+</ul>
+</section>
+
+<!-- ================= §2 Design Principles ================= -->
+<section id="principles">
+<h2><span class="no">§2</span>设计原则</h2>
+
+<h3>2.1 平台原则</h3>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:26%">原则</th><th>陈述与后果</th></tr></thead>
+<tbody>
+<tr><td><strong>SDK 原生，绝不重新实现</strong></td><td>agent-runner 封装 <code>claude-agent-sdk</code>，后者拉起烘焙进镜像的真实 <code>claude</code> CLI。Skills、hooks、权限模式、subagents、fork/rewind 从上游免费获得 —— Priva 的工程预算投向租户与产品，而非追逐 agent 循环。</td></tr>
+<tr><td><strong>每租户一 pod 的隔离</strong></td><td>租户边界是一个 Kubernetes 对象（由 <code>AgentTenant</code> CR 调谐出的 Deployment / Service / PVC / Secret），而非应用层校验。每个运行时请求都终结在一个永远只属于某一用户的 pod 内。</td></tr>
+<tr><td><strong>Scale-to-zero 的经济性</strong></td><td>空闲租户的算力成本近乎为零：pod 保持 0 副本，直到 EPP 唤醒它们（≈4 s），随后 operator 在一段空闲宽限期后将其回收。数百个已开通用户 ≠ 数百个运行中的 pod。</td></tr>
+<tr><td><strong>控制平面绝不接触运行时数据</strong></td><td>会话、transcript 与文件仅存于租户 pod 及其每账号卷上。control-panel 只看到控制元数据（账号、配额、规格）—— 控制平面被攻破也读不到用户工作区。</td></tr>
+<tr><td><strong>单写者持久化状态</strong></td><td>所有持久化的控制平面状态都流经 data-spine：一个位于稳定 gRPC 契约（<code>priva.dataplane.v1</code>）之后的 SQLite WAL 写者。任何服务都不直接触碰数据库；存储引擎可替换（已有 Postgres stub）而不破坏契约。</td></tr>
+<tr><td><strong>唯一扩缩者 operator</strong></td><td>恰有一个组件（kopf operator）扩缩租户 pod，且仅由 <code>AgentTenant</code> CR 驱动。唤醒请求即 CR patch；不存在第二条可变更集群状态的路径。</td></tr>
+<tr><td><strong>权威鉴权位于 edge 的大脑</strong></td><td>每个运行时请求都逐请求转向：edge 经由 Envoy <code>ext_proc</code> 咨询 EPP，后者验证 JWT、解析出账号，并签发一枚绑定该账号的 runner token。Runner 只信任该签名，别无其他。</td></tr>
+<tr><td><strong>BYOK，无计量代理</strong></td><td>模型凭证归用户自有，且仅存于用户自己的 pod —— 由 pod 自身写入租户 PVC 上的 <code>/workspace/.claude/settings.json</code>，由 <code>claude</code> CLI 原生读取。平台从不终结、存储或计量模型流量；token 用量由 pod 自行上报。</td></tr>
+<tr><td><strong>文件系统即会话存储</strong></td><td>会话是租户卷上 <code>~/.claude/projects/</code> 下的 JSON-Lines —— 文件<em>就是</em>记录。中心数据库只保存账号与控制元数据，绝不保存 transcript 内容；<code>claude</code> CLI 原生读取的文件（<code>.mcp.json</code>、<code>settings.json</code>）以文件形式存在，没有会漂移的数据库镜像。</td></tr>
+<tr><td><strong>平台铸造的、不可变会话 ID</strong></td><td>每一处锁、路由与绑定都以平台铸造的稳定 <code>session_uuid</code> 为键，绝不用 CLI 派生的 id。唯一被许可铸造新 id 的路径是显式的 fork。</td></tr>
+<tr><td><strong>Strangler 迁移</strong></td><td>平台正被逐阶段地从一个可用的单机 monolith 中剥离出来；在 Phase 4 移除它之前，monolith 一直作为行为参照物。每个阶段都在 minikube 上端到端验证落地。</td></tr>
+</tbody>
+</table></div>
+
+<h3>2.2 体验原则</h3>
+<p>Web 控制台遵循一套锁定的设计系统（<code>web/design-spec.md</code>）—— 隐喻：<em>一本活的精装技术手册 —— 严肃、精确、尽在掌控</em>。</p>
+<ul>
+  <li><strong>GitHub-Dark 工业极简主义</strong> —— Vercel × Linear 式的克制；无渐变、无玻璃拟态、无阴影；深度仅靠分层的背景色调呈现。</li>
+  <li><strong>状态是一条 2px 左边框</strong> —— running/success/error/pending 均为边框颜色，绝不用圆点或填充背景；同一套语言延伸至实时 System Map 中带动画的字节路径连线。</li>
+  <li><strong>用骨架屏，不用转圈</strong> —— 首次加载以真实内容的形状微光闪烁；状态流转为 <code>skeleton → loaded</code>，中间无过渡态。</li>
+  <li><strong>永不横向滚动</strong> —— 每个容器都会断词，并在内部滚动过宽内容。</li>
+  <li><strong>危险操作需键入确认</strong> —— 破坏性操作（删除历史、停止任务）要求键入确认文本，与平台服务端的风险工具强制策略相呼应。</li>
+</ul>
+</section>
+
+<!-- ================= §3 Runtime Architecture ================= -->
+<section id="architecture">
+<h2><span class="no">§3</span>运行时架构与拓扑</h2>
+
+<h3 id="byte-path">3.1 请求字节路径</h3>
+<p>每个运行时请求都<strong>逐请求</strong>转向：edge 在转发至租户 pod 之前，经由 Envoy <code>ext_proc</code> 咨询 control-panel EPP。edge 终结客户端传输并转发字节；<strong>权威的鉴权与账号解析发生在 EPP</strong>。agentgateway 从不位于字节路径的远端 —— 它只转发；EPP 只做决策。</p>
+
+<div class="ix" id="byte-path-ix">
+  <div class="ixh">请求字节路径 · 点击某个组件查看详情，或逐步走查一次请求</div>
+  <div class="chips">
+    <span class="chip edge">agentgateway (edge)</span>
+    <span class="chip cp">control-panel · EPP</span>
+    <span class="chip op">operator</span>
+    <span class="chip ar">agent-runner</span>
+    <span class="chip ds">data-spine</span>
+  </div>
+  <svg viewBox="0 0 760 344" role="img" aria-label="Priva Cloud byte path: client to agentgateway edge, per-request ext_proc to the control-panel EPP, operator wakes the tenant agent-runner pod, which calls the user's model gateway; control-plane state in data-spine" style="width:100%;height:auto;display:block">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0L10 5L0 10z" style="fill:var(--muted)"></path>
+      </marker>
+    </defs>
+    <g class="static">
+      <rect x="8" y="36" width="104" height="52" rx="6"></rect>
+      <text x="60" y="59" text-anchor="middle">浏览器 / IM</text>
+      <text x="60" y="76" text-anchor="middle" class="sub">HTTP · WS · SSE</text>
+    </g>
+    <g class="node edge-c" data-k="edge" tabindex="0" role="button" aria-label="agentgateway edge">
+      <rect class="box" x="170" y="30" width="150" height="64" rx="6"></rect>
+      <text x="245" y="57" text-anchor="middle">agentgateway</text>
+      <text x="245" y="75" text-anchor="middle" class="sub">edge :80 · Rust L7</text>
+    </g>
+    <g class="node ar-c" data-k="ar" tabindex="0" role="button" aria-label="agent-runner">
+      <rect class="box" x="420" y="30" width="150" height="64" rx="6"></rect>
+      <text x="495" y="57" text-anchor="middle">agent-runner</text>
+      <text x="495" y="75" text-anchor="middle" class="sub">:8091 · 1 pod / 租户 · 0↔1</text>
+    </g>
+    <g class="static">
+      <rect x="630" y="36" width="122" height="52" rx="6"></rect>
+      <text x="691" y="59" text-anchor="middle">模型 gateway</text>
+      <text x="691" y="76" text-anchor="middle" class="sub">BYOK · Anthropic API</text>
+    </g>
+    <g class="node cp-c" data-k="cp" tabindex="0" role="button" aria-label="control-panel and EPP">
+      <rect class="box" x="170" y="160" width="150" height="64" rx="6"></rect>
+      <text x="245" y="187" text-anchor="middle">control-panel · EPP</text>
+      <text x="245" y="205" text-anchor="middle" class="sub">:8080 http · :9000 ext_proc</text>
+    </g>
+    <g class="node op-c" data-k="op" tabindex="0" role="button" aria-label="operator">
+      <rect class="box" x="420" y="160" width="150" height="64" rx="6"></rect>
+      <text x="495" y="187" text-anchor="middle">operator</text>
+      <text x="495" y="205" text-anchor="middle" class="sub">kopf · 唯一扩缩者</text>
+    </g>
+    <g class="node ds-c" data-k="ds" tabindex="0" role="button" aria-label="data-spine">
+      <rect class="box" x="295" y="272" width="150" height="60" rx="6"></rect>
+      <text x="370" y="297" text-anchor="middle">data-spine</text>
+      <text x="370" y="315" text-anchor="middle" class="sub">:50051 gRPC · SQLite WAL</text>
+    </g>
+    <path id="bp-e1" class="edge" d="M112 62 H166"></path>
+    <text class="elabel" x="126" y="54">①</text>
+    <path id="bp-e2" class="edge" d="M245 96 V156"></path>
+    <text class="elabel" x="253" y="130">② ext_proc</text>
+    <path id="bp-e3" class="edge" d="M322 192 H416"></path>
+    <text class="elabel" x="336" y="184">③ patch CR</text>
+    <path id="bp-e3b" class="edge" d="M495 158 V98"></path>
+    <text class="elabel" x="503" y="132">scale 0→1</text>
+    <path id="bp-e4" class="edge" d="M322 62 H416"></path>
+    <text class="elabel" x="338" y="54">④ 流式</text>
+    <path id="bp-e5" class="edge" d="M572 62 H626"></path>
+    <text class="elabel" x="588" y="54">⑤</text>
+    <path class="edge" d="M268 226 L336 270"></path>
+    <path class="edge" d="M472 226 L404 270"></path>
+    <text class="elabel" x="228" y="256">控制状态</text>
+  </svg>
+  <div class="ixd">点击上方任一组件查看其角色，或用<em>下一步</em>端到端走查一次请求。</div>
+  <div class="ixbar">
+    <button class="prev">‹ 上一步</button>
+    <button class="next">下一步 ›</button>
+    <span class="stp">步骤 0 / 5</span>
+  </div>
+</div>
+
+<div class="co info"><span class="cot">第二条读取通道（ADR-0003）</span>
+<p>InferencePool 通道会把缓冲的 GET 响应体截断在 ~8 KB（上游在 <code>FullDuplexStreamed</code> 路径中硬编码）。因此大读取 —— transcript、预览 —— 改走 <code>/</code> 路由上的 <code>GET /api/cp-proxy/{path}</code>：control-panel 校验 bearer、唤醒 pod、铸造一枚每账号 runner token，并将该 GET 代理至 <code>&lt;pod&gt;:8091</code>。设计上仅限 GET；写入、流、SSE/WS 与 blob 下载从不使用它。</p></div>
+
+<h3 id="components">3.2 核心组件</h3>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th>服务</th><th>端口</th><th>角色</th><th>副本数</th></tr></thead>
+<tbody>
+<tr><td><strong>control-panel</strong></td><td><code>8080</code> HTTP · <code>9000</code> ext_proc (TLS)</td><td>大脑：EPP endpoint picker、auth/admin/resource API、SPA 宿主、<code>AgentTenant</code> 开通器、cp-proxy 读取通道。从不看到运行时数据。</td><td>N，无状态</td></tr>
+<tr><td><strong>agent-runner</strong></td><td><code>8091</code></td><td>每租户运行时，封装 claude-agent-sdk 0.1.81，后者拉起烘焙进镜像的原生 <code>claude</code> CLI。提供 <code>/api/sandbox/*</code>：runs、sessions、skills、MCP、hooks、subagents、PTY、files。</td><td>每租户 0↔1</td></tr>
+<tr><td><strong>data-spine</strong></td><td><code>50051</code> gRPC</td><td>基于 SQLite（WAL、STRICT、RWO PVC）的单写者持久化状态，位于稳定的 <code>priva.dataplane.v1</code> 契约之后 —— 8 张表、7 个已注册服务。177 个测试通过。</td><td>1，<code>Recreate</code></td></tr>
+<tr><td><strong>operator</strong></td><td>—</td><td>kopf 控制器，将 <code>AgentTenant</code> CR 调谐为 Deployment/Service/PVC。<em>唯一</em>扩缩者；10 s 定时器用于空闲回收、podIP 自愈、配额调谐。存储后端驱动（dev NFS / prod CephFS）。</td><td>1</td></tr>
+<tr><td><strong>agentgateway</strong></td><td><code>80</code></td><td>外部 Rust L7 edge（agentgateway.dev v1.3.0），经由 Gateway API + Inference Extension 开通。终结客户端传输、咨询 EPP、向 runner 流式转发。非 Priva 代码。</td><td>托管</td></tr>
+<tr><td><strong>nfs-xfs</strong> <span class="dim">仅 dev</span></td><td><code>2049</code> NFSv4 · <code>8099</code> quota</td><td>集群内 NFS 服务器，为每账号固定大小的 ext4 loop 镜像（文件系统大小 = 硬配额）提供后端 + 一个 quota-manager API。在 prod 中由外部 CephFS/NFS CSI 取代。</td><td>1（dev）</td></tr>
+</tbody></table></div>
+
+<h3 id="crd">3.3 AgentTenant CR —— 每用户一个对象</h3>
+<p>一个租户的整个运行时存在，由一个带命名空间的自定义资源声明（<code>priva.io/v1alpha1</code>，短名 <code>at</code>）。开通一个用户 = 创建一个 CR；唤醒一个 pod = 修改一个字段；下线 = 翻转 <code>desiredState</code>。</p>
+<div class="code"><pre>apiVersion: priva.io/v1alpha1
+kind: AgentTenant                  <span class="c"># one per account; CR name == accountId</span>
+spec:
+  accountId: u-alice               <span class="c"># required</span>
+  username: alice
+  desiredState: active             <span class="c"># active | offboarding | purge</span>
+  image: priva/agent-runner:dev
+  agentRunnerType: auto_scale      <span class="c"># auto_scale | persistent (sweep-exempt)</span>
+  resources: { cpu: 1.0, memoryMb: 2048 }   <span class="c"># requests == limits → Guaranteed QoS</span>
+  storageGb: 1                     <span class="c"># hard quota; grow-only online expand</span>
+  idle: { graceSeconds: 1800, minAliveAfterWakeSeconds: 120 }
+  concurrency: { maxConcurrentSessions: 3 }
+  wake: { requestedAt: "…" }       <span class="c"># the ONLY scale-up trigger (EPP patches it)</span>
+status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritative</span></pre></div>
+</section>
+
+<!-- ================= §4 Tenancy & Security ================= -->
+<section id="security">
+<h2><span class="no">§4</span>租户与安全模型</h2>
+<p class="lead">对一个 agent 运行时而言，隔离<em>就是</em>产品本身。本节按设计规格给出信任链与隔离清单 —— 并坦白指出 alpha 目前在何处尚未达标（§4.4）。</p>
+
+<h3 id="trust-chain">4.1 信任链</h3>
+<div class="ix" id="trust-ix">
+  <div class="ixh">逐请求信任链 · 逐步走查</div>
+  <svg viewBox="0 0 760 128" role="img" aria-label="Trust chain: client JWT, EPP verification, wake and reconcile, steering headers with runner token, pod account pin check" style="width:100%;height:auto;display:block">
+    <g class="node" data-step="1" tabindex="0" role="button"><rect class="box" x="8" y="30" width="128" height="64" rx="6"></rect>
+      <text x="72" y="57" text-anchor="middle">客户端 JWT</text><text x="72" y="75" text-anchor="middle" class="sub">HS256 · 登录 / sk-*</text></g>
+    <g class="node" data-step="2" tabindex="0" role="button"><rect class="box" x="164" y="30" width="128" height="64" rx="6"></rect>
+      <text x="228" y="57" text-anchor="middle">EPP 校验</text><text x="228" y="75" text-anchor="middle" class="sub">解析账号</text></g>
+    <g class="node" data-step="3" tabindex="0" role="button"><rect class="box" x="320" y="30" width="128" height="64" rx="6"></rect>
+      <text x="384" y="57" text-anchor="middle">唤醒 + 调谐</text><text x="384" y="75" text-anchor="middle" class="sub">CR patch → operator</text></g>
+    <g class="node" data-step="4" tabindex="0" role="button"><rect class="box" x="476" y="30" width="128" height="64" rx="6"></rect>
+      <text x="540" y="57" text-anchor="middle">转向头</text><text x="540" y="75" text-anchor="middle" class="sub">铸造 runner token</text></g>
+    <g class="node" data-step="5" tabindex="0" role="button"><rect class="box" x="632" y="30" width="120" height="64" rx="6"></rect>
+      <text x="692" y="57" text-anchor="middle">pod 绑定校验</text><text x="692" y="75" text-anchor="middle" class="sub">== ACCOUNT_ID</text></g>
+    <path class="edge tc" d="M136 62 H160"></path>
+    <path class="edge tc" d="M292 62 H316"></path>
+    <path class="edge tc" d="M448 62 H472"></path>
+    <path class="edge tc" d="M604 62 H628"></path>
+  </svg>
+  <div class="ixd"></div>
+  <div class="ixbar">
+    <button class="prev">‹ 上一步</button>
+    <button class="next">下一步 ›</button>
+    <span class="stp">步骤 1 / 5</span>
+  </div>
+</div>
+
+<h3 id="isolation">4.2 隔离清单（as-built）</h3>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th>机制</th><th>细节</th></tr></thead>
+<tbody>
+<tr><td><strong>每租户一 pod</strong></td><td>一个 Deployment <code>ar-&lt;account_id&gt;</code>，副本 0|1，<code>strategy: Recreate</code>；在入口处由 <code>ACCOUNT_ID</code>/<code>USERNAME</code> 环境变量绑定到单一账号。</td></tr>
+<tr><td><strong>加固的 runc</strong></td><td>非 root uid/gid <code>10001</code> · <code>capabilities: drop [ALL]</code> · <code>readOnlyRootFilesystem: true</code> · <code>seccompProfile: RuntimeDefault</code>。gVisor/Kata 只是一次每租户的 <code>runtimeClassName</code> 翻转，而非重新设计。</td></tr>
+<tr><td><strong>工作区作用域</strong></td><td>每账号工作区 = 共享 RWX <code>priva-export</code> 卷的 <code>subPath &lt;account_id&gt;</code>（venv 与 <code>~/.claude/projects</code> 就在其中）；每账号审计卷 <code>/audit/&lt;account_id&gt;</code>；SDK 运行时以只读挂载；每账号 Python venv 位于 <code>&lt;workspace&gt;/.venv</code>。</td></tr>
+<tr><td><strong>签名的 runner token</strong></td><td><code>x-priva-runner-token</code>（HS256，<code>{account_id, username, exp}</code>）仅当 <code>token.account_id ==</code> pod 自身的 <code>ACCOUNT_ID</code> 时才被接受 —— 即便被直接访问，一个 runner 也无法服务另一个租户。</td></tr>
+<tr><td><strong>工具策略</strong></td><td>权限模式 <code>default | acceptEdits | plan | bypassPermissions</code>；一份管理员配置的风险工具清单会强制审批，<em>即便在</em> <code>bypassPermissions</code> 之下亦然；内置禁用工具：<code>WebFetch</code>、<code>WebSearch</code>、<code>NotebookEdit</code>、cron/worktree/remote-trigger 类工具。</td></tr>
+<tr><td><strong>护栏 hooks</strong></td><td>管理员强制 + 用户的 hooks 作为进程内 Python <code>PreToolUse</code>/<code>PostToolUse</code> 回调运行，其中包括一个带管理员可编辑模式的 PII 脱敏 hook —— 运行时的治理接缝。</td></tr>
+<tr><td><strong>凭证（BYOK）</strong></td><td>自 2026-07-01 起的 as-built：每个账号的凭证存于其自己 PVC 上的 <code>/workspace/.claude/settings.json</code>，由 pod 自身写入与读取 —— 无需在唤醒时物化、也无需在休眠时 GC 的每 pod Secret。密码用 bcrypt；用户 API 密钥用 Fernet 加密，并带一个 HMAC-SHA256 查找列。</td></tr>
+</tbody></table></div>
+
+<h3 id="deferred-hardening">4.3 推迟的加固（Phase 6）</h3>
+<p>alpha 在集群内以明文运行（除那一跳 TLS ext_proc 外），且控制平面与租户共享同一命名空间。以下已设计但尚未落地：<strong>NetworkPolicies</strong>（默认拒绝 + 收窄出站）· <strong>mTLS / JWKS pod 信任</strong>（alpha 使用 HS256 签名头）· <strong>每账号 KMS/DEK</strong> 信封加密 · <strong>edge TLS 终结</strong> · <strong>基于 Redis 的唤醒/空闲协调</strong> · 一个<strong>独立的审计 PVC</strong>，以及在扩容副本之前把 control-panel 的每 pod 本地审计迁入 data-spine（否则副本会分叉审计历史）。</p>
+
+<h3 id="webterminal-risk">4.4 未决、高风险：Web 终端</h3>
+<div class="co danger"><span class="cot">上线阻断项 —— 2026-07-07 评审，未修复</span>
+<p>面向租户的 PTY 是一条活的跨租户攻陷链。一个 shell（<code>bash -l</code>）会继承 <code>os.environ</code>，后者经由 <code>envFrom</code> 包含<strong>共享的</strong> <code>priva-shared-secret</code> —— JWT 与 HMAC 签名密钥，<em>在每个租户 pod 中完全相同</em>。因此单个租户即可为<strong>任意</strong>账号或管理员伪造一枚有效的 runner token。而由于<strong>没有 NetworkPolicy</strong>，该 shell 已能通过 TCP 直接抵达其他每一个 <code>ar-*</code> pod、data-spine、redis 与 control-panel —— 于是伪造的 token 便能在另一个租户的 pod 中打开一个 shell，而该 pod 唯一的防护只是拿 token 的 <code>account_id</code> 去比对<em>目标</em> pod。BYOK 模型建立在两个假设之上 ——「pod 除经 edge 外不可达」与「签名密钥是保密的」—— 二者当前均不成立。</p>
+<p><strong>Tier-0 修复（~1 天，尚未应用）：</strong>经由 <code>execvpe</code> 的环境变量白名单（~10 行）· 默认拒绝的 NetworkPolicy + 收窄出站 · <code>automountServiceAccountToken: false</code>。完整记述：<code>docs/webterminal-blind-spot.md</code>。</p></div>
+
+<h3 id="egress">4.5 出站与数据外泄控制</h3>
+<p>§4.1–4.4 回答的是「租户 A 能否抵达租户 B？」它们并未回答「数据能否离开平台？」—— 而对一个以主权为卖点的产品，这才是承重的问题。有两条<em>被授权的</em>通道，无论任何 pod 间策略如何，都会把数据搬出去：</p>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:22%">通道</th><th>暴露面</th><th>防护措施（未构建）</th></tr></thead>
+<tbody>
+<tr><td>模型端点（BYOK）</td><td><code>ANTHROPIC_BASE_URL</code> 可指向任意主机。每一轮都会把 agent 的上下文 —— 它读过的文件、工具输出、作用域内的秘密 —— 送往该端点。一个错误或敌意的 base URL，就是一条完全被授权、且没有任何 pod NetworkPolicy 检查的外泄管道。</td><td>一份管理员<strong>端点白名单</strong>（仅限已批准的模型 gateway / 内部代理），在 pod 出站处强制，<em>并</em>在保存 BYOK 凭证时校验。除非在白名单内，否则阻断直连互联网的模型调用。</td></tr>
+<tr><td>Agent 工具出站</td><td>一个能浏览网页或调用 API 的自主 agent，既可以把数据 POST 出去，也可以 SSRF <em>进入</em>它本不该抵达的内部服务。</td><td><strong>默认拒绝的出站 NetworkPolicy</strong> + 每租户可达主机白名单；一个强制的、带 DLP 检查的<strong>出站代理</strong>作为唯一的出站路径；把 PII 脱敏 hook 扩展到出站载荷，而不仅限于工具输入。</td></tr>
+</tbody>
+</table></div>
+<div class="co danger"><span class="cot">为何这件事的优先级高于租户隔离工作</span><p>本地部署把数据挡在厂商云之外；但它本身<em>并不</em>能阻止 agent 把数据寄出去。这与 Web 终端发现属于同一类风险，但范围更广 —— 它适用于<strong>每一个</strong> agent，而不仅是终端用户，并且它直接违背了作为 Priva 头号差异化卖点的主权保证（§9）。建议：把两条通道都收束到一个咽喉点 —— 一个同时强制模型端点白名单的强制出站代理 —— 使外泄只有单一控制点与单一审计日志。与经纪凭证（§11.4）及入站信任画像（§11.5）配套。</p></div>
+</section>
+
+<!-- ================= §5 Core Feature Spec ================= -->
+<section id="features">
+<h2><span class="no">§5</span>核心功能规格</h2>
+<p class="lead">功能 → 实现组件 → 机制 → 状态。<span class="st ship">已交付</span> = 在 Phase 0–3 合入并已在 minikube 上验证；<span class="st defer">推迟</span> = Phase 4–6；<span class="st stub">占位</span> = 仅占位。</p>
+
+<h4>Agent 运行时</h4>
+<div class="tw"><table class="wrapflag">
+<thead><tr><th>功能</th><th>组件</th><th>机制</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>One-shot / SSE / WebSocket 运行</td><td>agent-runner</td><td><code>POST /agent/run</code>、<code>/run/stream</code>（SSE）、<code>WS /ws/run</code>（子协议 <code>priva.ws.v1</code>）；重试退避，<code>MAX_ATTEMPTS=10</code></td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>会话 CRUD · 置顶 · 归档 · 标签</td><td>agent-runner</td><td><code>~/.claude/projects/</code> 下的 JSON-Lines；置顶/归档元数据在 <code>priva_meta.json</code>；恢复时修复孤儿 tool-use 块</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td><strong>Rewind</strong> <span class="dim">（与 fork 不同）</span></td><td>agent-runner</td><td>SDK <em>文件检查点</em>：<code>enable_file_checkpointing=True</code> → <code>rewind_files(checkpoint_uuid)</code> 恢复工作区文件（<code>POST /agent/rewind</code>）</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td><strong>Fork</strong> <span class="dim">（与 rewind 不同）</span></td><td>agent-runner</td><td>SDK <em>会话分叉</em>：<code>fork_session=True</code> → <code>sdk_fork_session(session_id, up_to_message_uuid)</code> 将对话分叉为一个带自己不可变 session_uuid 的新子会话；父会话不受影响（<code>POST /agent/fork</code>）</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>权限协调 + 模式</td><td>agent-runner + SPA</td><td>把 SDK <code>can_use_tool</code> 桥接到流：发出 <code>permission_request</code>，挂起一个 <code>asyncio.Future</code>，经由 <code>POST /agent/permission/respond</code> 解决。模式：<code>default</code>、<code>acceptEdits</code>、<code>plan</code>、<code>bypassPermissions</code></td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>风险工具强制</td><td>agent-runner</td><td>管理员配置的风险工具清单会强制审批，<em>即便在</em> <code>bypassPermissions</code> 之下</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>多 agent 工作流巡视器</td><td>agent-runner + SPA</td><td>由 SSE <code>task_started/progress</code> 驱动的实时工作流卡片 + Canvas 巡视器；快照在 <code>workflows/&lt;runId&gt;.json</code></td><td><span class="st ship">已交付</span></td></tr>
+</tbody>
+</table></div>
+
+<h4>能力插件与工作区</h4>
+<div class="tw"><table class="wrapflag">
+<thead><tr><th>功能</th><th>组件</th><th>机制</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>Skills</td><td>agent-runner + SPA</td><td>枚举全局 <code>~/.claude/skills</code> + 项目 <code>.claude/skills</code>；每用户 <code>skill_exclude</code> 拒绝清单 → <code>options.skills</code>；skills hub / 市场弹窗</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>MCP 服务器</td><td>agent-runner + SPA</td><td>读取项目 <code>.mcp.json</code> + 全局设置；内置的进程内 <code>priva_File</code> 服务器（FileCanvas）驱动 Canvas 面板；按 <code>{level}/{name}</code> 做 CRUD，能力 + 工具校验</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>Hooks + PII 脱敏</td><td>agent-runner</td><td>管理员强制 + 用户的 hooks 作为进程内 Python <code>PreToolUse</code>/<code>PostToolUse</code> 回调；带管理员可编辑模式的 PII 脱敏 hook</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>Subagents</td><td>agent-runner</td><td><code>/subagents</code> 目录 + 按名 CRUD + <code>POST /{name}/test/stream</code></td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>PTY Web 终端</td><td>agent-runner + xterm.js</td><td><code>WS /pty/ws</code> 进入租户自己的 pod；用户 SPA 中的底部抽屉 <em>（见 §4.4 未决风险）</em></td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>文件浏览器 / 文件操作</td><td>agent-runner + Canvas</td><td><code>/files/{list,download,preview,upload}</code> + agent-attachments；管理员经 control-panel 跨文件浏览</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>Data &amp; Usage 视图</td><td>agent-runner + SPA</td><td><code>/user/{overview,stats,audit,analytics}</code> —— 183 天用量热力图、审计日志、分析时间线</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>Memory（控制台栏目）</td><td>用户 SPA</td><td>仅占位</td><td><span class="st stub">占位</span></td></tr>
+</tbody>
+</table></div>
+
+<h4>管理端控制台与身份</h4>
+<div class="tw"><table class="wrapflag">
+<thead><tr><th>功能</th><th>组件</th><th>机制</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>用户 CRUD + 自助注册审批</td><td>control-panel + data-spine</td><td>公开 <code>POST /auth/register</code> → <code>pending_registration</code> 行 → 管理员 approve/reject 创建账号 + 开通 AgentTenant CR</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>集群快照 + pod 操作</td><td>control-panel provisioner</td><td><code>GET /admin/fleet</code> 内省 CR + pod 状态；<code>restart-pod</code> / <code>shutdown</code></td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>资源用量 + gateway 指标</td><td>control-panel</td><td>经 metrics-server 获取 CPU/内存/卷；gateway 经 agentgateway Prometheus 端点</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>系统健康图（System Map）</td><td>control-panel + SPA</td><td><code>GET /admin/system-health</code>；实时字节路径连线以动画呈现流动，不可达时冻结 + ✕</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>管理端控制台终端</td><td>control-panel</td><td><code>WS /admin/console/ws</code> —— 进入<em>控制平面</em> pod 的受审计 Kubernetes-exec 桥（区别于用户 PTY）</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>Runner 默认值 + 每账号规格</td><td>control-panel + operator</td><td>继承：CR 覆盖 → data-spine 默认值 → 环境变量种子；实时编辑 —— CPU/内存 → <code>Recreate</code>，卷 → 仅增长的在线 PVC 扩容</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>平台配置开关</td><td>control-panel</td><td><code>preset-prompt</code>、<code>cli-path</code>、<code>history-retention</code>、<code>retryable-tools</code>、<code>risky-tools</code>、<code>sensitive-patterns</code></td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>鉴权 —— JWT + API 密钥 + BYOK CRUD</td><td>control-panel + agent-runner</td><td>HS256 JWT + refresh + 首次运行初始化；每用户 <code>sk-*</code> 密钥；BYOK 凭证经 <code>GET/PUT /credentials</code> 写入 pod 自己的 PVC</td><td><span class="st ship">已交付</span></td></tr>
+</tbody>
+</table></div>
+
+<h4>推迟的子系统</h4>
+<div class="tw"><table class="wrapflag">
+<thead><tr><th>功能</th><th>当前状态</th><th>计划</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>调度器（cron / 定时 agent 作业）</td><td>表 + 完整的 <code>SchedulerService</code> proto 与服务代码已存在，但它<em>未在</em> gRPC 服务器上注册（进程内客户端可用）</td><td>无主 fire→claim→wake→dispatch；带退避+抖动重试 5 次</td><td><span class="st defer">Phase 4</span></td></tr>
+<tr><td>IM 渠道绑定 / channel-connector</td><td><code>channel_binding</code> 表 + <code>BindingService</code> 已存在，Feishu 形态；全新构建，无 Phase-1 写者，alpha 中未使用</td><td>IM 扇出（Feishu）</td><td><span class="st defer">Phase 4</span></td></tr>
+<tr><td>state-reader（免唤醒 transcript 读取）</td><td>在 pod 处于 0 副本时读取 transcript</td><td>可嵌入的 RO-JSONL 路由器；prod 中为挂载隔离而独立部署</td><td><span class="st defer">Phase 5</span></td></tr>
+</tbody>
+</table></div>
+</section>
+
+<!-- ================= §6 API & Extensibility ================= -->
+<section id="api">
+<h2><span class="no">§6</span>API 与可扩展性面</h2>
+<p class="lead">运行时的契约本身即一项产品特性：每 pod 一套稳定的 HTTP/WS 端点、一份用于状态的稳定 gRPC 契约，以及三个代码形态的扩展点。</p>
+
+<h3 id="runtime-api">6.1 agent-runner 运行时 API</h3>
+<p>全部位于 <code>:8091</code> 上的 <code>/api/sandbox</code> 之下；鉴权为签名的 <code>X-Priva-Runner-Token</code>。</p>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:18%">分组</th><th>端点</th></tr></thead>
+<tbody>
+<tr><td><code>/agent</code></td><td><code>POST /run</code> · <code>POST /run/stream</code> (SSE) · <code>WS /ws/run</code> · <code>GET /sessions</code> · <code>GET /sessions/running</code> · <code>GET /sessions/{id}/messages</code> · <code>DELETE /sessions/{id}</code> · <code>PATCH /sessions/{id}</code> · <code>PUT /sessions/{id}/{tag,add_dirs,pin,archive}</code> · <code>POST /permission/respond</code> · <code>POST /rewind</code> · <code>POST /fork</code> · <code>GET /workflow-agent/{id}</code> · <code>GET /workflow-state/{run_id}</code></td></tr>
+<tr><td><code>/credentials</code></td><td><code>GET</code> · <code>PUT</code> · <code>GET /status</code> · <code>GET /models</code></td></tr>
+<tr><td><code>/resource/mcp</code></td><td><code>GET /</code> · <code>GET|PUT|DELETE /{level}/{name}</code> · <code>GET /{level}/{name}/capabilities</code> · <code>POST /validate</code> · <code>POST /validate/tool</code></td></tr>
+<tr><td><code>/resource/skills</code></td><td><code>GET /</code> · <code>GET|PUT /config</code> · <code>GET /detail</code> · <code>GET /file</code> · <code>GET /download</code> · <code>POST /upload</code> · <code>DELETE /item</code> · <code>/resource/skill-hub</code></td></tr>
+<tr><td><code>/hooks</code></td><td><code>GET /catalog</code> · <code>POST /catalog/{id}/{enable,disable}</code> · <code>GET|PUT /config</code> · <code>POST /test</code> · <code>POST /test/builtin</code> · <code>GET /logs</code></td></tr>
+<tr><td><code>/subagents</code></td><td><code>GET /catalog</code> · <code>GET /list</code> · <code>GET|POST|PUT|DELETE /{name}</code> · <code>POST /{name}/test/stream</code></td></tr>
+<tr><td><code>/pty</code> · <code>/files</code> · <code>/user</code></td><td><code>WS /pty/ws</code>, <code>GET|PUT /pty/{feature,config}</code> · <code>/files/{list,download,preview,upload}</code> · <code>/user/{overview,stats,audit,analytics}</code></td></tr>
+</tbody>
+</table></div>
+
+<h3 id="control-api">6.2 control-panel API 与 data-spine 契约</h3>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:22%">面</th><th>要点</th></tr></thead>
+<tbody>
+<tr><td>control-panel <code>/api/auth</code></td><td><code>setup</code> · <code>register</code> · <code>login</code> · <code>refresh</code> · <code>me</code> · <code>audit</code> · <code>me/apikey</code>（CRUD）· <code>me/password</code></td></tr>
+<tr><td>control-panel <code>/api/admin</code></td><td>runner-defaults · runner-images · users CRUD · pending-registrations + approve/reject · fleet · accounts restart/shutdown · gateway-metrics · resource-usage · system-health · audit · 配置开关 · admin-files</td></tr>
+<tr><td>control-panel 专用通道</td><td><code>WS /api/admin/console/ws</code>（K8s-exec 桥）· <code>GET /api/cp-proxy/{path}</code>（大读取通道）· <code>:9000</code> gRPC <code>ExternalProcessor/Process</code>（ext_proc，TLS）</td></tr>
+<tr><td>data-spine gRPC <span class="dim">（已服务 7 个）</span></td><td><strong>Account</strong> · <strong>Binding</strong> · <strong>Quota</strong> · <strong>Admin</strong>（Healthz/Readyz/Stats）· <strong>ResourceSpec</strong> · <strong>RunnerDefaults</strong> · <strong>Registration</strong>。<strong>SchedulerService</strong> 已定义但尚未服务（Phase 4）。表：8。</td></tr>
+</tbody>
+</table></div>
+
+<h3 id="extensibility">6.3 可扩展性模型</h3>
+<div class="cards">
+  <div class="card"><div class="ct">Skills</div><p><code>.claude/skills</code> 中的 Markdown + 资产。每用户拒绝清单治理允许清单；一个 hub/市场呈现共享的 skills。由 <code>claude</code> CLI 原生读取。</p></div>
+  <div class="card"><div class="ct">MCP 服务器</div><p>标准 <code>.mcp.json</code> 配置，外加一个为 Canvas 内置的进程内 <code>priva_File</code> 服务器。由管理员治理，使 agent 在策略之下抵达内部系统。</p></div>
+  <div class="card"><div class="ct">Hooks</div><p>进程内 Python <code>PreToolUse</code>/<code>PostToolUse</code> 回调 —— 管理员强制（含 PII 脱敏）加用户 hooks。运行时的治理接缝。</p></div>
+</div>
+</section>
+
+<!-- ================= §7 Non-Functional Requirements ================= -->
+<section id="nfr">
+<h2><span class="no">§7</span>非功能需求</h2>
+<p class="lead">先谈性能与规模，再谈可观测性栈 —— 平台如何被监控、审计、追踪与记录日志，以及这些面在何处仍显单薄。</p>
+
+<h3 id="perf-envelope">7.1 性能与规模包络</h3>
+<div class="facts">
+  <div class="fact"><div class="fl">冷启动 0→1</div><div class="fv">≈ 4 s <small>热态 = 即时</small></div></div>
+  <div class="fact"><div class="fl">唤醒等待 → 503</div><div class="fv">dev 5 s <small>prod overlay 120 s</small></div></div>
+  <div class="fact"><div class="fl">空闲回收</div><div class="fv">10 s 定时器 <small>宽限 dev 1800 s / prod 600 s</small></div></div>
+  <div class="fact"><div class="fl">Runner 默认</div><div class="fv">1 核 · 2048 MB <small>Guaranteed QoS</small></div></div>
+  <div class="fact"><div class="fl">并发</div><div class="fv">3 会话 <small>min(mem, quota)</small></div></div>
+  <div class="fact"><div class="fl">规模目标</div><div class="fv">数百 <small>逃生舱 &gt;800 CR</small></div></div>
+</div>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:26%">关注点</th><th>行为</th></tr></thead>
+<tbody>
+<tr><td>冷启动 UX</td><td><code>fetchWithWake()</code> 在 <code>WAKE_SLOW_MS=900ms</code> 处检测到早期 503，弹出「waking…」提示，以退避 <code>[1,2,4,8,16]</code> s 重试 ≤6 次。</td></tr>
+<tr><td>空闲经济性</td><td>operator 10 s 定时器：空闲回收 + podIP 自愈（在拆除前翻转为不可路由以收窄 EPP 竞态）+ 配额调谐。<code>persistent</code> runner 豁免；批准前置钉住会让一个 pod 在整个审批窗口内以近乎零花费驻留。</td></tr>
+<tr><td>存储配额</td><td>Dev：每账号固定大小的 ext4 loop 镜像 —— 文件系统大小<em>就是</em>硬配额（1 Gi ≈ 974 MiB 可用）。增长在线进行；在线缩容 → <code>409 "shrink not supported on the dev loop backend"</code>。</td></tr>
+<tr><td>可用性形态</td><td>control-panel：N 个无状态副本。data-spine：1 个副本，<code>Recreate</code>（单写者）—— 控制平面的可用性下限，也是在任何 HA 主张之前需处理的持久化状态 SPOF。</td></tr>
+<tr><td>资源限制（PTY）</td><td><code>rlimit_cpu_seconds=600</code>；<code>rlimit_as_bytes=0</code>（已禁用 —— bun/JSC 的 <code>claude</code> 二进制在 AS 上限 ≤3 GiB 时会 SIGTRAP）；每用户 ≤3 个 PTY 会话。</td></tr>
+</tbody>
+</table></div>
+
+<h3 id="monitoring">7.2 监控与指标</h3>
+<p>指标使用原始 <code>prometheus-client</code>，无框架（ADR 0002）。两个高度：每 pod <code>/metrics</code> 上的每服务应用指标，以及由 control-panel 呈现给管理端控制台的集群级汇总。</p>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:26%">面</th><th>它暴露什么</th></tr></thead>
+<tbody>
+<tr><td>HTTP 指标</td><td>计数 + 延迟记录于既有的 <code>AccessLogMiddleware</code> 内，按路由模板 <code>handler</code> / <code>method</code> / <code>status</code> 打标签（未匹配的路由折叠为 <code>__unmatched__</code>）。<code>user_name</code> 被刻意地<em>从不</em>作为标签 —— 在大集群上它会使基数无界。</td></tr>
+<tr><td>领域计数器</td><td><code>agent_runs_started_total</code> 与 <code>agent_runs_finished_total{outcome}</code> —— 平台核心的吞吐/成功信号。</td></tr>
+<tr><td>多进程正确性</td><td><code>PROMETHEUS_MULTIPROC_DIR</code> 由启动器拥有，并在每次启动时清空 + 重建（否则陈旧的每进程 <code>.db</code> 文件会永久虚增计数器）；每次抓取都构建一个全新的 <code>CollectorRegistry</code> + <code>MultiProcessCollector</code>。</td></tr>
+<tr><td>集群汇总</td><td>管理端控制台读取 <code>GET /api/admin/resource-usage</code>（经 metrics-server 的每 pod CPU/内存/卷）、<code>GET /api/admin/gateway-metrics</code>（agentgateway Prometheus 端点）与 <code>GET /api/admin/system-health</code> —— 即 <strong>System Map</strong>，其实时字节路径连线会在某一跳健康时以动画呈现粒子流动，在其不可达时冻结并显示 ✕。</td></tr>
+</tbody>
+</table></div>
+<div class="co warn"><span class="cot">注</span><p><code>/metrics</code> 被刻意设为<strong>无鉴权</strong> —— 它假定一条由网络控制的抓取路径。可选的 <code>METRICS_TOKEN</code> 是计划中的加固。告警规则与仪表盘由运维者自行定义；平台交付的是信号，而非 SLO 策略。</p></div>
+
+<h3 id="auditing">7.3 审计</h3>
+<p>审计在两个平面上运行，均经由 <code>priva_common.audit_log</code> —— <strong>按天分区、带游标分页的 JSON-Lines</strong>：</p>
+<ul>
+  <li><strong>每账号（数据平面）</strong> —— 由 agent-runner 写入每账号审计卷 <code>/audit/&lt;account_id&gt;</code>：工具与 skill 调用、运行完成、会话操作与权限决策。经 <strong>Data &amp; Usage</strong> 视图（<code>/user/{overview,stats,audit,analytics}</code> —— 183 天用量热力图、审计日志与分析时间线）呈现给用户。</li>
+  <li><strong>控制平面</strong> —— 由 control-panel 为管理员操作写入：用户 CRUD、注册审批、配置变更，以及<strong>受审计的 K8s-exec 控制台</strong>（<code>WS /api/admin/console/ws</code>）。保留期由管理员 <code>history-retention</code> 开关治理。</li>
+</ul>
+<div class="co gap"><span class="cot">已知缺口</span><p>control-panel 的审计当前是每 pod 本地 JSONL —— 它必须在把 control-panel 扩容至一个以上副本<em>之前</em>迁入 data-spine，否则副本会分叉审计历史。在 §12 中跟踪。</p></div>
+
+<h3 id="tracing">7.4 分布式追踪</h3>
+<div class="co warn"><span class="cot">当前状态 —— 尚未实现</span><p>当前<strong>没有端到端的分布式追踪</strong>。单个运行时请求已跨越四跳 —— edge → EPP（ext_proc）→ operator（CR patch）→ agent-runner → 模型 gateway —— 而目前关联它们意味着手工拼接每服务日志与审计行。</p></div>
+<p>难点在结构上：唤醒路径是<em>异步且最终一致的</em> —— EPP 修改 <code>AgentTenant</code> CR，operator 将其调谐为一个运行中的 pod；没有一个可挂子 span 的同步调用。一个真正的追踪方案需要在 edge 注入 W3C <code>traceparent</code> 传播，经 ext_proc 元数据携带进 EPP，再往下进入 runner 与 SDK 的一轮，并让 CR 携带一个关联 id，使 operator 的调谐能发出一个链接的 span，全部导出至一个 OpenTelemetry collector。这是一项前瞻工作，而非一次配置翻转。</p>
+
+<h3 id="logging">7.5 日志</h3>
+<p>各服务通过一个共享的、基于 <code>loguru</code> 的 logger（<code>get_app_logger</code>）向 stdout 记录日志，供集群级聚合。由于是 <code>loguru</code>，消息使用花括号 <code>{}</code> 占位符 —— 一个 <code>printf</code> 风格的 <code>%s</code> 会被原样打印 —— 这是平台自己笔记里记下的一个小但真实的坑。结构化字段（account、session、run id）随日志记录一同传递，以便下游聚合据此透视；同样的标识符也作为 §7.3 中审计行的键。</p>
+
+<h3 id="obs-gaps">7.6 可观测性缺口（诚实版）</h3>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:30%">缺口</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>端到端追踪</td><td>无 —— 跨异步唤醒路径没有 OTel / traceparent 传播（§7.4）。</td></tr>
+<tr><td><code>/metrics</code> 鉴权</td><td>无鉴权；仅靠网络控制。<code>METRICS_TOKEN</code> 是将来项。</td></tr>
+<tr><td>集中式审计</td><td>control-panel 审计是每 pod 本地的 —— 在迁入 data-spine 之前阻断副本扩容。</td></tr>
+<tr><td>SLO 告警 / 仪表盘</td><td>信号已有；告警规则与仪表盘未交付 —— 由运维者定义。</td></tr>
+<tr><td>Token / 成本可观测性</td><td>BYOK 下由 pod 自行上报（无计量代理）—— 利于可见性，不利于计费强制。见 §11.5。</td></tr>
+</tbody>
+</table></div>
+
+<h3 id="warm-pools">7.7 公平性、唤醒踩踏与 warm pools</h3>
+<p><strong>当前状态（诚实版）。</strong>每次唤醒都是一次冷启动（≈4 s）；<em>没有</em> warm pool。由于空闲租户处于 0 副本，一次同步的突发 —— 早 9 点的登录浪潮，或一次定时作业扇出 —— 就是 N 个同时发生的冷启动，一齐冲击调度器、镜像缓存与节点容量。所设计的全局唤醒并发限制器（约 20 个在途）为踩踏封顶，但把它转化为一个队列；每账号并发上限（默认 3 会话）为单个吵闹的租户封顶。当前没有跨账号的集群级公平配额。</p>
+<h4>搭建一个 warm pool（提案）</h4>
+<p>三档，由廉到贵 —— 每档均可独立部署：</p>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:22%">档位</th><th>机制</th><th>权衡</th></tr></thead>
+<tbody>
+<tr><td>1 · 预热节点 / 预拉取镜像</td><td>在一个专用节点池上保持 <code>agent-runner</code> 镜像已预拉取（一个极小的 image-holder DaemonSet 或节点镜像缓存策略）。从每次冷启动中移除镜像拉取延迟。</td><td>最廉价，无需改应用；能省下数秒，但 pod 仍是从零创建。</td></tr>
+<tr><td>2 · 预热的通用 pod 池</td><td>维持 K 个从镜像启动但<strong>未绑定</strong>的备用 agent-runner pod（无 <code>ACCOUNT_ID</code>，仅一个临时 <code>emptyDir</code>）。唤醒时 operator <em>认领</em>一个预热 pod 并把它绑定到账号，而非从冷态创建一个 Deployment。</td><td>绑定是难点（见下）。成功时近乎即时。</td></tr>
+<tr><td>3 · 预测式 / 定时预热</td><td>在已知峰值之前预唤醒可能活跃的账号，由已采集的 183 天用量信号或一个排程驱动；定时作业（Phase 4）在一批作业触发前预热它将需要的 pod。既有的 <code>persistent</code> runner 类型即其手动版本。</td><td>需要一个需求模型；若预测失误则浪费容量。</td></tr>
+</tbody>
+</table></div>
+<div class="co warn"><span class="cot">绑定约束（档位 2）</span><p>Kubernetes 无法把每账号的 <code>subPath</code> 卷热挂载到一个已在运行的 pod 上，因此一个被认领的预热 pod 有两种解法之一：<strong>(a) 应用作用域绑定</strong> —— 预热 pod 挂载共享 RWX <code>priva-export</code> 根，运行时在认领时把作用域限定到 <code>/&lt;account_id&gt;</code>（最快，无需重启，但在 pod 被回收前隔离变为应用强制 —— 仅在配合 §4.5 出站控制与一条硬性的会话后回收策略时可接受）；或 <strong>(b) 预热后重建</strong> —— 预热 pod 证明节点 + 镜像 + 进程就绪，随后一次快速的 <code>Recreate</code> 挂载真正的每账号卷（保留内核挂载边界，仍远快于冷态，因为节点与镜像都是热的）。<strong>规模测算：</strong>池 ≈ P95 峰值时预期的并发冷启动数；一个公平配额唤醒队列（跨账号轮询，而非 FIFO）可阻止一个账号的扇出饿死其他账号。</p></div>
+<div class="co info"><span class="cot">上游路径</span><p>kubernetes-sigs 的 <strong>Agent Sandbox</strong> 正为此提供一个 <code>SandboxWarmPool</code> CRD（warm pools + 挂起/恢复），并明确援引类 Claude-Code 的 agent（§9）。日后采用它，即把 Priva 定制的池换成一个标准的 —— 与保持运行时层可替换（§12）相一致。</p></div>
+
+<h3 id="failure-modes">7.8 故障模式与降级运行</h3>
+<p>当某个组件宕机时，还有什么仍能工作 —— SRE 首先索要的爆炸半径表。由架构推导而来；待在 Phase 6（§10）计划的混沌测试下验证。</p>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:20%">宕机组件</th><th>运行中的 pod</th><th>新请求</th><th>爆炸半径</th></tr></thead>
+<tbody>
+<tr><td>agentgateway（edge）</td><td>在途的流中断</td><td>完全不可用 —— 无入口点</td><td><strong>全面。</strong>单一前门 → 运行 HA edge 副本。</td></tr>
+<tr><td>control-panel / EPP</td><td>已转向的请求完成</td><td>无法转向新的 <code>/api/sandbox/*</code>；SPA + admin 也随之宕机（同一进程）</td><td><strong>对新流量全面。</strong>无状态 → N 副本本就是设计；单副本丢失可存活，EPP 全体丢失则为不可用。</td></tr>
+<tr><td>operator</td><td>继续服务</td><td>热账号可用；<strong>冷账号无法唤醒</strong>（503）；无空闲回收，无扩缩</td><td><strong>降级，非宕机。</strong>热用户不受影响；空闲用户被锁在外；未回收的 pod 花的是钱，而非正确性。重启后从 CR 状态恢复。</td></tr>
+<tr><td>data-spine</td><td>会话进行中的 pod 继续运行（会话状态在 PVC 上，而非 data-spine）</td><td>登录、开通、配额 + 配置读取失败 → 控制平面失明</td><td><strong>高。</strong>单一 SQLite 写者，<code>Recreate</code> —— 持久化状态 SPOF。需要备份/恢复（§8.5）；Postgres HA 路径尚为 stub。</td></tr>
+<tr><td>存储后端</td><td>pod 丢失工作区 I/O → 会话失败</td><td>新 pod 无法挂载</td><td>dev 中为<strong>高</strong>（单一 <code>nfs-xfs</code>）；prod 使用带自有 HA 的外部 CephFS/NFS CSI。</td></tr>
+<tr><td>单个租户 pod</td><td>仅该租户</td><td>该租户等待重启</td><td><strong>设计上隔离</strong> —— 每租户一 pod 的意义所在。</td></tr>
+<tr><td>模型 gateway（用户 BYOK）</td><td>该用户的轮次失败</td><td>—</td><td><strong>按用户隔离</strong>（BYOK）；非平台级事件。</td></tr>
+</tbody>
+</table></div>
+<div class="co gap"><span class="cot">HA 从何处最先见效</span><p>两个全面不可用的组件（edge、EPP）与那一个真正的 SPOF（data-spine）是排序后的 HA 投资重点；其余不是降级但仍服务，就是设计上隔离。此矩阵为推导得出，尚未验证 —— 组件击杀与 offboard→purge 混沌测试是一项 Phase 6 交付物。</p></div>
+</section>
+
+<!-- ================= §8 Operations & Deployment ================= -->
+<section id="operations">
+<h2><span class="no">§8</span>运维与部署</h2>
+
+<h3 id="environments">8.1 环境</h3>
+<p><strong>Dev（minikube）：</strong><code>./deploy/minikube/build.sh</code> 构建/加载 5 个镜像（<code>priva/{data-spine,control-panel,operator,agent-runner,nfs-xfs}:dev</code>，Python 3.12-slim，uv；agent-runner 烘焙原生 <code>claude</code> CLI）；<code>up.sh</code> 运行一次幂等的 9 步拉起（打上 <code>allowVolumeExpansion</code> 补丁的 CSI hostpath → 命名空间 → dev NFS+quota → Gateway API v1.5 + GIE v1.5 CRD → 经 Helm OCI 的 agentgateway 1.3.0 → CRD/RBAC → 共享 secret → 控制平面 → edge）。经 <code>port-forward svc/priva-gateway 8080:80</code> 访问。</p>
+<p><strong>Prod（Helm + values-prod overlay）：</strong>该 chart 与原始 manifest 一一对应；<code>values-prod.yaml</code> 换用带固定标签的真实 registry、禁用 dev 存储、设置 <code>storageBackend=cephfs</code>（外部 CephFS/NFS CSI —— 无特权存储 pod）、一个持久的 5 Gi data-spine PVC、显式的控制平面 requests/limits，以及可固定的 JWT/HMAC secret。Gateway API、GIE 与 agentgateway 是前置条件，不在 chart 内。</p>
+
+<h3 id="change-workflow">8.2 变更工作流</h3>
+<div class="co info"><span class="cot">前端热加载</span><p>SPA 在宿主上构建，并由 control-panel 经 <code>StaticFiles</code> 从磁盘提供，因此前端变更无需重建镜像：把新鲜的 <code>dist/</code> 用 <code>tar | kubectl exec</code> 送进运行中的 pod，它即刻实时提供。热加载的文件在重新调度时丢失；使其持久化的是镜像重建。<strong>后端变更总是需要重建镜像。</strong></p></div>
+
+<h3 id="observability">8.3 可观测性（ADR 0002）</h3>
+<p>原始 <code>prometheus-client</code>，无框架。HTTP 计数/延迟记录于既有的 <code>AccessLogMiddleware</code> 内（标签：路由模板 <code>handler</code>、<code>method</code>、<code>status</code>；<code>user_name</code> 被刻意地从不作为标签 —— 基数无界）。领域计数器：<code>agent_runs_started_total</code>、<code>agent_runs_finished_total{outcome}</code>。多进程目录由启动器拥有（每次启动清空 + 重建，使陈旧的每进程文件无法永久虚增计数器）。<code>/metrics</code> 被刻意设为无鉴权（由网络控制；可选的将来 <code>METRICS_TOKEN</code>）。</p>
+
+<h3 id="migration-status">8.4 迁移状态（strangler）</h3>
+<p>Phase 0–3 已完成，于 2026-06-21 合入，在 minikube 上端到端验证。遗留的 monolith（<code>priva/</code>）仍作为行为参照启动，将在 Phase 4 移除。完整的阶段计划见 §10。</p>
+
+<h3 id="data-lifecycle">8.5 数据生命周期、保留与 DR</h3>
+<p>用户数据存于何处、存多久、如何可证明地消失，以及如何在故障中存活。设计已具备接入点（CRD 的 <code>desiredState</code>、<code>history-retention</code> 开关），但尚无完整的生命周期或任何备份方案。</p>
+<h4>用户数据存于何处</h4>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:26%">数据</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td>工作区 + 会话</td><td>RWX <code>priva-export</code> 卷的每账号 <code>subPath</code>；<code>~/.claude/projects</code> 的 JSONL <em>就是</em>会话的权威记录，外加 venv。</td></tr>
+<tr><td>审计</td><td>每账号 <code>/audit/&lt;account_id&gt;</code> 卷（按天分区的 JSONL）。</td></tr>
+<tr><td>控制元数据</td><td>data-spine —— account、quota、specs、registrations。永不含 transcript 内容。</td></tr>
+<tr><td>凭证</td><td>BYOK 存于 pod 自己的 <code>/workspace/.claude/settings.json</code>；用户 API 密钥在 data-spine 中经 Fernet 加密。</td></tr>
+</tbody>
+</table></div>
+<h4>生命周期与被遗忘权</h4>
+<p>CRD 已建模若干状态：<code>active</code> → <code>offboarding</code>（pod 缩至 0，数据保留，访问撤销）→ <code>purge</code>（数据销毁）。建议新增、均未构建：一个可配置的<strong>保留窗口</strong>（purge 前的宽限）、<strong>法律保留</strong>（对指定账号阻断 purge），以及 purge 前的<strong>导出我的数据</strong>（一份工作区 + 审计打包）。</p>
+<div class="co warn"><span class="cot">擦除与备份是同一个问题</span><p>一个站得住脚的被遗忘权，必须销毁<em>每一份</em>副本 —— 工作区 subPath、审计卷、data-spine 行、API 密钥密文，<strong>以及任何备份/快照</strong> —— 随后发出一条防篡改的 purge 记录（唯一保留的产物）。没有一份「持有副本的每个备份」的清单，你就无法证明擦除，这正是二者不可分割的原因。</p></div>
+<h4>备份与 DR（当前缺失 —— 建议）</h4>
+<ul>
+  <li><strong>data-spine：</strong>单个 SQLite 文件 → 定时在线备份（WAL 拷贝）至节点外存储，并有文档化的 RPO（例如 ≤ 24 h）/ RTO；Postgres HA 路径（当前为 stub）才是真正的解法。</li>
+  <li><strong>工作区：</strong>在 prod CephFS/NFS 后端上按排程做每账号 CSI <code>VolumeSnapshot</code>。会话 JSONL 即记录，<em>当前无任何其他冗余</em> —— 卷丢失即 agent 记忆丢失。</li>
+  <li><strong>恢复演练：</strong>未经测试的备份不算备份 —— 定期演练恢复，与 offboard→purge 混沌测试（Phase 6）一并进行。</li>
+</ul>
+<div class="co gap"><span class="cot">诚实状态</span><p>CRD 生命周期状态已存在；保留窗口、法律保留、导出、擦除证明以及整个备份/DR 层都是建议，而非代码。在任何 HA 或合规主张之前先设定 RPO/RTO 目标。在 §12 中跟踪。</p></div>
+
+<h3 id="upgrades">8.6 升级与发布生命周期</h3>
+<p>当 agent-runner 镜像、烘焙进去的 <code>claude</code> CLI 或 SDK 发生变化时，集群如何向前推进 —— 这是「SDK 变动」风险（§12）在运维上的对应物。</p>
+<ul>
+  <li><strong>控制平面：</strong>无状态服务正常滚动。两处要点：control-panel 在 <code>:9000</code> 上绑定进程内 EPP，因此按<strong>副本数</strong>扩缩/滚动，绝不用 <code>uvicorn --workers</code>；并且其每 pod 本地审计必须在运行 &gt;1 副本之前迁入 data-spine（§7.3），否则一次滚动升级会分叉审计历史。</li>
+  <li><strong>租户 pod：</strong>CRD 携带每租户 <code>image</code>，因此集群可保持刻意的<strong>版本偏斜</strong> —— 但当前没有任何东西治理发布。建议：一个金丝雀队列（少数账号钉在新镜像上），以一次 eval 通过为闸门，随后分阶段推进默认镜像。驻留的 pod 在其<em>下次唤醒</em>时取用新镜像 —— scale-to-zero 兼作对空闲用户的免费滚动升级，零协调停机。运行中的 pod 在会话结束时或管理员强制重启时排空并重建。</li>
+  <li><strong>会话兼容性：</strong>会话自愈（恢复时修复孤儿 tool-use）吸收轻微漂移；一次破坏性的 <code>claude</code>/SDK 变更需要一次会话格式兼容性检查，最坏情况下需为旧 transcript 提供一个只读回退（与推迟的 state-reader 相关，§5）。按镜像固定 CLI 版本，使偏斜显式化。</li>
+  <li><strong>回滚：</strong>由于唤醒会拉取当前默认镜像，回滚 = 把默认指回并强制重启；驻留的 pod 在下次唤醒时自愈。</li>
+</ul>
+<div class="co info"><span class="cot">Scale-to-zero 让升级变廉价</span><p>大多数 pod 处于关闭状态，因此多数用户在下次登录时升级，零协调停机 —— 这是租户模型一个被低估的好处。真正的工作是金丝雀/eval 闸门与会话格式兼容性检查，而非机制本身。</p></div>
+</section>
+
+<!-- ================= §9 Competitive Landscape ================= -->
+<section id="competitive">
+<h2><span class="no">§9</span>竞争格局与自建 vs 采用</h2>
+
+<p class="lead">对照厂商文档、许可证与新闻，截至 2026 年 7 月核实。对比以 <strong>Manus 一类的自主 agent 品类</strong>为中心 —— 给一个目标，agent 在自己的 sandbox 中端到端规划并执行，返回交付物 —— 同时纳入开源个人 agent、Anthropic 的第一方选项，以及 Priva 所组合的 K8s 基座。每一个都在至少一条决定性维度上未能满足 Priva 的需求集 —— <em>完整 Claude-SDK 面 × 每用户隔离 × 完全本地部署 × BYOK</em>。</p>
+
+<h3 id="categories">9.1 四个品类</h3>
+<div class="tabs" id="comp-tabs">
+  <button class="on" data-pane="pane-manus">自主 agent（SaaS）</button>
+  <button data-pane="pane-oss">开源个人 agent</button>
+  <button data-pane="pane-anthropic">Anthropic 第一方</button>
+  <button data-pane="pane-eco">生态与基座</button>
+</div>
+
+<div class="tabpane on" id="pane-manus">
+  <p><strong>Manus · Genspark · Devin · Flowith。</strong>重定向所指向的品类：托管产品，投入一个目标、产出一个成品，在厂商云中自主执行。业界一流的自主性 —— 而且，除一个部分例外，无法在你自己的网络上运行。</p>
+  <div class="tw"><table class="plain wrapflag">
+  <thead><tr><th>产品</th><th>执行模型</th><th>托管 / 主权</th><th>相对 Priva 的解读</th></tr></thead>
+  <tbody>
+  <tr><td><strong>Manus</strong> <span class="dim">Butterfly Effect</span></td><td>每个<em>任务</em>一个隔离云 VM（"Manus Sandbox"，构建于 E2B Firecracker microVM 之上）；并行任务集群；基于 Claude 的推理（确认发布时为 Claude 3.5 Sonnet），置于一个封闭的专有 harness 之后</td><td><strong>仅 SaaS</strong> —— 无自托管 / 本地部署；credits 计价（Plus $39 / Pro $199/月）</td><td>打磨得当的自主性的品类领导者 —— 但零数据驻留控制、无 BYOK、模型路由不透明。厂商延续性风险如今很具体：Meta 约 20 亿美元的收购被<strong>中国 NDRC 叫停并勒令拆分（2026 年 4 月）</strong>。</td></tr>
+  <tr><td><strong>Genspark</strong> <span class="dim">Super Agent</span></td><td>agent 混合（8–9 个 LLM + 80+ 工具）配一个每用户的 "Cloud Computer"；自主，含真实电话呼叫；也转售一款 OpenClaw 风格的 "Genspark Claw"</td><td>仅 SaaS；Plus $24.99 / Pro $249.99 / Team $30 每席</td><td>宽广的自主性与工具广度 —— 但无自托管、无 BYOK，且评测者指出其安全文档单薄。在本地部署强制要求下不可选。</td></tr>
+  <tr><td><strong>Devin</strong> <span class="dim">Cognition</span></td><td>云 VM 中的自主<em>软件工程</em> agent（shell/编辑器/浏览器）；ACU 消耗计价；自有模型栈</td><td><strong>唯一真正的边界方案：</strong>"Customer Dedicated" 单租户 VPC（PrivateLink/IPSec，"代码从不离开你的云边界"）+ SAML/OIDC SSO</td><td>在主权上最接近的商业选项 —— 但一个厂商运营的 VPC 并非裸机本地部署，它仅限编码，且没有 BYOK 或 Claude-SDK 面。</td></tr>
+  <tr><td><strong>Flowith</strong></td><td>Canvas 式 agent 工作区；"Agent Neo" 被宣传为一个 7×24、无限上下文的云 agent；40+ 模型</td><td>SaaS，共享云；Pro $19.90 / Ultimate $49.90</td><td>面向消费者/创作者；企业或主权方面几乎没有说法。并非为受治理的内部集群而建。</td></tr>
+  </tbody></table></div>
+  <div class="co gap"><span class="cot">品类结论</span><p>打磨得当的自主性、零运维 —— 而对本地部署强制要求而言，皆不可选：仅 SaaS 且无 BYOK，Devin 的单租户 VPC 是唯一的部分例外（仍是厂商运营、仅限编码）。Manus 被 NDRC 拆分的 Meta 交易是一个活生生的提醒：即便是领导者，也背负着你从外部无法对冲的厂商延续性与地缘政治风险。</p></div>
+</div>
+
+<div class="tabpane" id="pane-oss">
+  <p><strong>OpenClaw · Hermes Agent · OpenManus · OpenHands。</strong>可自托管且 BYOK —— 与 Priva 共享的信念 —— 但都构建为单用户守护进程或框架，无一是 Claude-SDK 原生，也无一具备 K8s 多租户运行时或集中治理。</p>
+  <div class="tw"><table class="plain wrapflag">
+  <thead><tr><th>产品</th><th>它是什么</th><th>隔离 / 多租户</th><th>相对 Priva 的解读</th></tr></thead>
+  <tbody>
+  <tr><td><strong>OpenClaw</strong> <span class="dim">MIT · ~247k ★</span></td><td>本地优先的个人 agent 守护进程，可经你的消息渠道抵达（谱系 Warelay→Clawdbot→Moltbot→OpenClaw，源于一起 Anthropic 商标投诉）；BYOK、亲和 Claude、自有 harness</td><td>默认<strong>单用户；主会话工具以完全访问权在宿主上运行</strong>（旁会话可选启用 sandbox）</td><td>完全相同的 BYOK 信念与巨大势能 —— 但与每用户 pod 隔离恰恰相反。它的历史即前车之鉴：数以万计的暴露实例、"ClawJacked" 劫持、提示注入作为头号实际风险。Anthropic 甚至<em>封禁了它的订阅 OAuth</em>（2026 年 4 月），随后恢复了按量计费的 API 速率使用。</td></tr>
+  <tr><td><strong>Hermes Agent</strong> <span class="dim">Nous Research · MIT</span></td><td>自托管的<em>自我改进</em>个人 agent（持久记忆 + 一个撰写可复用 skill 文档的循环）；模型无关的 BYOK，含 Anthropic；可插拔 Docker/SSH/Modal/Daytona 后端。2026 年 2 月发布</td><td>单实例、单用户；无 SSO、配额、审计或每用户隔离</td><td>一个 Priva 尚不具备的、确实新颖的记忆/skill 循环，免费且模型无关 —— 但单用户、非 K8s 多租户，且自有 harness（无 sessions/fork/rewind/hooks 对等）。</td></tr>
+  <tr><td><strong>OpenManus</strong> <span class="dim">MetaGPT · MIT</span></td><td>原版发布数日后即推出的开源 Manus 克隆；一个 Python 规划/工具使用框架，可配置 LLM 提供方</td><td>DIY —— 无多租户运行时，无控制台</td><td>完全可自托管且免费，但是一个<em>框架</em>而非产品：研究级稳定性，agent 循环之上的一切都需你自建。</td></tr>
+  <tr><td><strong>OpenHands</strong> <span class="dim">All Hands AI · MIT</span></td><td>开源的自主<em>编码</em> agent；每会话一个容器；已有 K8s 远程运行时；模型无关，含 Claude</td><td>真正的每会话隔离；多用户 SSO/RBAC/K8s 需付费企业许可</td><td>最接近 Priva 运行时层的 OSS 类比 —— 但限于 SWE 范畴，多用户实为商业化，且它并非 Claude-SDK 原生。</td></tr>
+  </tbody></table></div>
+  <div class="co gap"><span class="cot">品类结论</span><p>全部本地部署且 BYOK —— 而且全都是单用户守护进程或 DIY 框架。无人交付一个 K8s 原生、scale-to-zero、每用户一 pod、带集中治理、并以 Claude Agent SDK 为原生面的运行时。OpenClaw 的暴露实例记录，活生生展示了「数百名半可信内部用户」会对一个宿主特权的单用户设计造成什么 —— 正是 Priva 的每用户 pod 边界存在以防范的失败模式。</p></div>
+</div>
+
+<div class="tabpane" id="pane-anthropic">
+  <p><strong>Claude Code on the web · Claude Managed Agents · Claude Team/Enterprise。</strong>「为何不直接买 Anthropic 的托管版」这一问题 —— 按定义具备完美的 Claude 兼容性，且有一个共同的答案：主权与 BYOK。</p>
+  <div class="tw"><table class="plain wrapflag">
+  <thead><tr><th>产品</th><th>你得到什么</th><th>它为何不合格</th></tr></thead>
+  <tbody>
+  <tr><td><strong>Claude Code on the web</strong></td><td>由 Anthropic 托管的真实 Claude Code 云会话；加固的每会话 sandbox（文件系统 + 网络隔离）、环境配置、GitHub 集成；随 Pro/Max/Team/Enterprise 席位捆绑</td><td>代码与 agent 状态存于 Anthropic 的云；无 BYOK / base-URL 重定向（绑定席位与 Anthropic 计费）；仓库形态，而非面向内部系统的工作区；没有面向你网络、由管理员治理的 MCP 拓扑。</td></tr>
+  <tr><td><strong>Managed Agents（API，beta 2026-04）</strong></td><td>托管 agent 运行时 —— <code>POST /v1/agents</code> + sessions，每会话一个容器，tools/MCP/skills/vaults/memory；已核实计价：token 费率 + $0.08/会话小时；一个 <code>self_hosted</code> 模式经轮询 worker 在你的 VPC 中运行<em>工具执行</em></td><td>即便在自托管模式下，循环与 agent 状态仍留在 Anthropic 基础设施上 —— 只有工具副作用回到本地。无 BYOK。无终端用户产品：面向数百名员工的控制台、身份、终端、文件浏览器仍未构建。beta 头部频繁变动。</td></tr>
+  <tr><td><strong>Team / Enterprise 席位</strong></td><td>claude.ai 界面 —— 聊天、projects、connectors、Claude Code —— Enterprise 上带 SSO/审计（约 $20/席/月 + 用量）</td><td>「什么都不做」的基线：采用最快，完全 SaaS。无主权，无你网络上的每用户计算，无平台团队对工具拓扑的控制。</td></tr>
+  </tbody></table></div>
+  <div class="co warn"><span class="cot">采用侧最尖锐的威胁</span><p>Managed Agents 是 Anthropic 明确地把 Priva 所构建的那一层产品化 —— sandbox、状态、秘密、编排，以 $0.08/用户小时计价，变动由版本化的 agent 配置吸收。因此自建论据必须立足于<strong>主权、BYOK 与产品面</strong> —— 而非成本，在成本上租用者胜出。</p></div>
+</div>
+
+<div class="tabpane" id="pane-eco">
+  <p><strong>E2B / Firecracker · agentgateway · Gateway API Inference Extension · kagent · Agent Sandbox（kubernetes-sigs）。</strong>它们不是竞争者 —— 而是 Priva 所组合（或可采用）的基座，也是其架构正成为新兴标准的最有力证据。</p>
+  <ul>
+    <li><strong>E2B Firecracker microVM</strong> 是 Manus 的 sandbox<em>所运行于</em>的东西 —— 位于 Priva 共享内核 pod 之上的硬件级隔离层。Priva 无需第二套编排器，只要把 <code>runtimeClassName</code> 翻转为 gVisor/Kata 即可达到同一层；边界是一次配置变更，而非重新设计。</li>
+    <li><strong>agentgateway</strong>（Linux Foundation，v1.0.0，CNCF Agentic-AI 雷达 "Trial"）如今已由 kgateway 与 Istio 双双在 beta 中实现 —— Priva 的 edge 是一个主流路线的押注，而非异类。</li>
+    <li><strong>Gateway API Inference Extension</strong> 达到 v1.0.0 并有合规实现；Priva 的 <code>InferencePool</code> + EPP 接线坐落于一个已稳定的上游 API 之上。</li>
+    <li><strong>kagent</strong>（CNCF Sandbox）将 agent 定义为 CRD，但面向平台/DevOps 自动化，而非多租户个人助手。</li>
+    <li><strong>Agent Sandbox</strong>（kubernetes-sigs，2026-03 公布）—— 为带挂起/恢复、warm pools 与 gVisor/Kata 运行时的单例有状态 agent 工作负载提供 <code>Sandbox</code> / <code>SandboxWarmPool</code> / <code>SandboxClaim</code> CRD，并明确援引「像 Claude Code 那样的 agent」。仍处于预发布 —— 但它恰是 Priva 每用户 scale-to-zero pod 的上游标准化，也是运行时层的一个候选未来基座。</li>
+  </ul>
+  <div class="co info"><span class="cot">战略解读</span><p>底层管道正在向 Priva 的形态收敛。它们无一交付控制台、会话持久化或 Claude SDK 功能映射 —— 即便 pod 运行时层被商品化，产品层仍保持差异化。把那一层设计得可替换（§12）。</p></div>
+</div>
+
+<h3 id="matrix">9.2 对比矩阵</h3>
+<div class="tw"><table class="matrix">
+<thead><tr><th>产品</th><th>自托管</th><th>本地部署主权</th><th>每用户隔离</th><th>自主 agent</th><th>Claude-SDK 原生</th><th>BYOK</th><th>许可</th></tr></thead>
+<tbody>
+<tr><td><strong>Priva Cloud</strong></td><td class="y">✓ K8s</td><td class="y">✓ 完全</td><td class="y">✓ pod/用户 0↔1</td><td class="y">✓ 完整 SDK</td><td class="y">✓</td><td class="y">✓</td><td>内部</td></tr>
+<tr><td>Manus</td><td class="n">✗</td><td class="n">✗ SaaS</td><td class="y">✓ VM/任务（云）</td><td class="y">✓ 业界一流</td><td class="n">✗ 内含 Claude</td><td class="n">✗</td><td>专有</td></tr>
+<tr><td>Genspark</td><td class="n">✗</td><td class="n">✗ SaaS</td><td class="p">△ cloud computer</td><td class="y">✓</td><td class="n">✗</td><td class="n">✗</td><td>专有</td></tr>
+<tr><td>Devin</td><td class="p">△ VPC</td><td class="p">△ 单租户 VPC</td><td class="y">✓ VM/会话</td><td class="y">✓ 仅 SWE</td><td class="n">✗</td><td class="n">✗</td><td>专有</td></tr>
+<tr><td>Flowith</td><td class="n">✗</td><td class="n">✗ SaaS</td><td class="n">✗ 共享云</td><td class="y">✓</td><td class="n">✗</td><td class="n">✗</td><td>专有</td></tr>
+<tr><td>OpenClaw</td><td class="y">✓</td><td class="y">✓</td><td class="n">✗ 单用户宿主</td><td class="p">△ 个人</td><td class="n">✗ 自有 harness</td><td class="y">✓</td><td>MIT</td></tr>
+<tr><td>Hermes Agent</td><td class="y">✓</td><td class="y">✓</td><td class="n">✗ 单用户</td><td class="p">△ 个人</td><td class="n">✗ 自有 harness</td><td class="y">✓</td><td>MIT</td></tr>
+<tr><td>OpenManus</td><td class="y">✓</td><td class="y">✓</td><td class="n">✗ DIY 框架</td><td class="p">△ 粗糙</td><td class="n">✗</td><td class="y">✓</td><td>MIT</td></tr>
+<tr><td>OpenHands</td><td class="p">△ 多用户付费</td><td class="y">✓</td><td class="y">✓ 容器/会话</td><td class="y">✓ SWE</td><td class="n">✗ 自有 SDK</td><td class="y">✓</td><td>MIT + Polyform</td></tr>
+<tr><td>Claude Code on web</td><td class="n">✗</td><td class="n">✗</td><td class="y">✓ Anthropic sandbox</td><td class="y">✓</td><td class="y">✓ 第一方</td><td class="n">✗</td><td>专有 SaaS</td></tr>
+<tr><td>Managed Agents</td><td class="p">△ 仅工具执行</td><td class="n">✗ 状态在云</td><td class="y">✓ 容器/会话</td><td class="y">✓</td><td class="y">✓ 第一方</td><td class="n">✗</td><td>专有 API</td></tr>
+</tbody></table></div>
+<div class="co info"><span class="cot">要点解读</span><p>只有 Priva 这一行在自托管、主权、每用户隔离、自主性、SDK 原生性与 BYOK 上全绿。各品类在不同处失手：<strong>商业自主产品</strong>（Manus、Genspark、Flowith、Devin）在主权与 BYOK 上失手；<strong>开源个人 agent</strong>（OpenClaw、Hermes、OpenManus）在多租户隔离与 SDK 原生性上失手；<strong>Anthropic 第一方</strong>在主权与 BYOK 上失手。没有现有产品占据 Priva 所在的格子。</p></div>
+
+<h3 id="build-vs-adopt">9.3 自建 vs 采用：论据及其诚实的代价</h3>
+<div class="cards">
+  <div class="card"><div class="ct" style="color:var(--ok)">为何自建</div>
+    <p><strong>1 · 交集为空。</strong>完整 Claude-SDK 面 × 每用户隔离 × 本地部署 × BYOK，在任何品类中被零个产品满足 —— 商业 agent 缺主权/BYOK，开源 agent 缺多租户/SDK 原生性。<br>
+    <strong>2 · 主权使商业一列出局。</strong>Manus、Genspark 与 Flowith 仅 SaaS 且无驻留控制；Devin 的单租户 VPC 是唯一的部分例外，仍是厂商运营且仅限编码。Manus 被 NDRC 拆分的 Meta 交易表明，即便领导者也背负厂商延续性风险。<br>
+    <strong>3 · BYOK 在商业侧无处存在。</strong>Manus credits、Genspark credits、Devin ACU 都通过厂商计量。OpenClaw 的 OAuth 封禁证明自带订阅的取巧终会被切断；只有干净的 API 密钥 BYOK 模型才可持久。<br>
+    <strong>4 · 每用户隔离是开源侧的缺口。</strong>OpenClaw 与 Hermes 是单用户宿主守护进程 —— OpenClaw 的暴露实例记录正是那种架构在规模下的表现。无人交付带治理的 K8s 每用户 pod scale-to-zero。<br>
+    <strong>5 · SDK 原生性带来复利。</strong>这十者无一把 sessions、fork/rewind、hooks、subagents、权限模式作为一等公民暴露；每个 OSS agent 都重建了自己的 harness。Priva 继承 Anthropic 的升级路径。</p></div>
+  <div class="card"><div class="ct" style="color:var(--warn)">它的代价（诚实版）</div>
+    <p><strong>1 · 自主性的打磨是实打实的工作。</strong>Manus 与 Genspark 交付一个调校过的目标→交付物循环（规划、浏览器控制、产物生成、并行 VM 集群），零运维。Priva 的原始 SDK 会话 + 聊天/PTY/文件控制台并不自动等于那个产品；达到「给一个目标、拿回幻灯片」的对等仍是持续的 agent-UX 工程。<br>
+    <strong>2 · sandbox 加固转移到你身上。</strong>Manus 把隔离外包给 E2B Firecracker 的专业团队；Priva 必须自己加固 pod 逃逸、出站与秘密 —— 而未决的 Web 终端发现（§4.4）正好印证了这一点。<br>
+    <strong>3 · OSS agent 迭代更快。</strong>Hermes 四个月 ~175k ★，OpenClaw ~247k ★；它们的 skills/记忆/渠道生态每周复利。计划与之互通（导入 skills、MCP 服务器），而非在功能上一较高下。<br>
+    <strong>4 · 对纯 SWE 而言，更便宜的选项已存在。</strong>Devin-in-VPC 或自托管 OpenHands 已覆盖大部分编码领域；Priva 的差异化必须立足于通用 agent、BYOK 与真正的本地部署 —— 而非仅靠编码自主性。<br>
+    <strong>5 · Anthropic 正在把这一层产品化。</strong>Managed Agents 以 $0.08/会话小时租用该运行时并吸收变动；自建论据立足于主权/BYOK/产品，绝不立足于成本。</p></div>
+</div>
+</section>
+
+<!-- ================= §10 Roadmap ================= -->
+<section id="roadmap">
+<h2><span class="no">§10</span>路线图</h2>
+<p class="lead">一次从可用单机 monolith 中分阶段剥离的「strangler」迁移。每个阶段都独立可交付，并在 minikube 上端到端验证落地。点击某一阶段查看其范围。</p>
+
+<div class="phases" id="roadmap-phases">
+  <button class="phase done sel" data-k="p03"><span class="pn">Ph 0–3</span><span class="pt">拆分与运行时</span></button>
+  <button class="phase next" data-k="p4"><span class="pn">Ph 4</span><span class="pt">调度器与 IM</span></button>
+  <button class="phase later" data-k="p5"><span class="pn">Ph 5</span><span class="pt">state-reader</span></button>
+  <button class="phase later" data-k="p6"><span class="pn">Ph 6</span><span class="pt">生产加固</span></button>
+</div>
+<div class="ixd" id="roadmap-detail" style="border-top:1px solid var(--line);margin-top:0;border-radius:0 0 8px 8px;border:1px solid var(--line);border-top:none;padding:16px 18px"></div>
+
+<div class="co gap"><span class="cot">截至 2026-07-10 的状态</span><p>Phase 0–3 已合入 <code>main</code>（2026-06-21）。静息时，control-panel、operator、data-spine 与 edge 以 <code>1/1 Ready</code> 运行；agent-runner pod 按需 <code>0→1</code> 扩容（≈4 s 冷启动，已验证真实 LLM 运行 + WebSocket 聊天），空闲时归零。Phase 4–6 推迟。</p></div>
+</section>
+
+<!-- ================= §11 Design Evolution ================= -->
+<section id="evolution">
+<h2><span class="no">§11</span>设计演进与扩展路径</h2>
+<p class="lead">当前架构是为「一个用户从浏览器驱动一个 agent」而建。下述能力将其延伸至 <strong>agent 驱动 agent</strong>、<strong>人类带外审批</strong>，以及 <strong>agent 跨用户共享</strong>。对每一项，设计都已提供大部分基座；价值在于精准看清它在何处成立、又必须在何处改变。这些是设计方向，而非已承诺的路线图（§10）。</p>
+
+<div class="co info"><span class="cot">贯穿主线</span><p>每租户一 pod + EPP 转向 + 权限/hook 治理，事实证明是全部四项扩展的强力基座：<em>一个已发布的 agent 不过是一个租户，一次 A2A 调用不过是一次唤醒，一次带外审批不过是一个持久化的 <code>permission_request</code>，而经纪的 MCP 鉴权，不过是 control-panel 为工具做它早已为 runner token 所做的事。</em>而它们各自要求的回报，大多是已在 Phase 6 清单上的加固（NetworkPolicy、mTLS/JWKS、KMS/DEK），外加权限协调器的持久性。这些扩展并不与架构相抗 —— 它们兑现的是架构那些被推迟的安全支票。</p></div>
+
+<h3 id="a2a">11.1 Agent 间（A2A）互通</h3>
+<p><strong>当前基座。</strong>agent-runner 已经经 MCP <em>消费</em>工具（agent→工具）并运行 pod 内 subagents；agentgateway edge 是一个 AI 原生的 L7 代理；且 EPP 已提供每 agent 身份、按需唤醒与逐请求转向。多 agent 工作流巡视器已对多 agent 运行进行建模与持久化。</p>
+<p><strong>已有原型 —— <code>priva-agent-gateway</code> skill。</strong>A2A 在此并非假设：一个捆绑的 skill（<code>services/agent-runner/.../bundled/skills/priva-agent-gateway</code>）已让一个 Priva agent 经<em>标准</em>运行时 SSE 契约把任务委派给另一个。该机制刻意做得很薄 —— 这正是要点所在：一个 agent 调用另一个 agent，不过是一个 agent 充当运行时 API 的普通客户端，没有发明任何新协议。</p>
+<div class="co info"><span class="cot">它今天如何工作</span>
+<p>调用方 agent 带 <code>Authorization: Bearer &lt;token&gt;</code> 将普通的 <code>AgentRunRequest</code> 主体 <code>{message, session_id?}</code> POST 至 <code>POST /api/agent/run/stream</code>（端点由 <code>PRIVA_AGENT_GATEWAY_URL</code> 设定），流式接收 SSE 事件，丢弃中间的 <code>assistant / tool_use / tool_result / task_*</code> 事件，只保留终结的 <code>result</code> —— 其载荷已携带 <code>session_id</code>、<code>is_error</code>、<code>num_turns</code>、<code>duration_ms</code>、<strong><code>total_cost_usd</code></strong> 与 <code>usage</code>。多轮连续性是一个持久化在本地 <code>session.json</code> 中的、平台铸造的 <code>session_id</code>（不可变会话 id 原则，§2）。并发由一个对 <code>&lt;session_id&gt;.lock</code> 的非阻塞 <code>fcntl.flock</code> 守护，它快速失败（退出码 4）—— 因为远端 agent 保有磁盘上的对话状态，并发调用会将其破坏。bearer token 仅存于请求头中，从不抵达模型。</p></div>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:50%">原型证明了什么</th><th>它仍缺什么（一般化）</th></tr></thead>
+<tbody>
+<tr><td>A2A 复用既有的 SSE + Bearer + 不可变会话契约 —— 无新协议，无新传输。</td><td>鉴权是工作目录文件中的一个<em>静态</em> bearer token，没有调用方身份 → 经纪的、按调用方限定作用域的 token（§11.4）与身份联邦（§11.5）。</td></tr>
+<tr><td>跨 agent 成本归因已可处理：每个 <code>result</code> 都返回 <code>total_cost_usd</code> / <code>usage</code>，因此被调方可把花费上报给调用方。</td><td>无发现/注册 —— 对端只是单个环境变量 → 一个 agent-card 注册表（§11.3）。</td></tr>
+<tr><td>每会话串行化（flock）是 A2A 顺序保障的具体形态 —— 远端状态是权威的，不可被并发竞争。</td><td>该锁守护的是一个会话的并发，而非跨 agent 的 <strong>A→B→A 递归</strong> → 跳深 + 环路限制。</td></tr>
+<tr><td>HITL 存在于委派接缝处：该 skill 指示调用方在执行破坏性生产操作前先与人类确认。</td><td>该确认是提示指示的，而非平台强制的 → 审批收件箱（§11.2）；且被调方没有入站授权（谁可驱动它）→ 下方 §11.1 保障。</td></tr>
+</tbody>
+</table></div>
+
+<p><strong>完整 A2A 带来什么。</strong>每个租户 agent 既成为其他平台 agent（例如新兴的 Agent2Agent 协议与 agent card）的调用方，也成为其可调用端点。一个外部 agent 寻址「用户 X 的 agent」；EPP 唤醒那个 pod 的方式与处理一次浏览器请求完全相同 —— 按需唤醒 + runner-token 模型几乎原封不动地映射到 A2A，而 gateway skill 就是调用方一半的可用证明。</p>
+<p><strong>未来用法。</strong>从原型到平台能力的路径清晰可辨：把 <code>AgentRunRequest</code>/SSE 契约提升为 Priva 原生的 A2A 方言，并加一个适配器，将外部 Agent2Agent / agent-card 映射到同一端点，从而让 edge + EPP 把<em>每一个</em>租户 agent 呈现为一个可寻址、按需唤醒的 A2A 对端，并以 runner token 为其能力凭证。这将解锁一张 <strong>agent 网格</strong> —— 多跳 A→B→C 委派，而这正是多 agent 工作流巡视器已在 pod 内建模的 —— 其中已发布的「生产 agent」是它们各自的租户（§11.3），经这同一个 gateway、在经纪的按调用方凭证（§11.4）、强制的人类审批（§11.2）之下被抵达，成本则由每一跳已经返回的 <code>total_cost_usd</code> 跨网格汇总（§11.5）。</p>
+<div class="co warn"><span class="cot">这要求的保障</span><p>一次入站 A2A 调用，是一个不受信的外部方在驱动一个特权 pod —— 经典的混淆代理问题。它需要：<strong>agent 级 ACL</strong>（谁可调用谁）、一个<strong>受约束的入站权限画像</strong>（绝不 <code>bypassPermissions</code>、一份扩展的禁用工具集、强制 hooks）、<strong>环路/递归限制</strong>（A→B→A）、限流，以及对每次跨 agent 调用的完整审计。BYOK 成本归因也会失效 —— 当 B 驱动 A 时由谁的密钥买单？（见 §11.5）。</p></div>
+
+<h3 id="hitl">11.2 异步 HITL 与 Feishu 审批收件箱</h3>
+<p><strong>当前基座。</strong>同步的、会话内的 human-in-the-loop 已可工作：权限协调器发出一个 <code>permission_request</code>，挂起一个 pod 内的 <code>asyncio.Future</code>，并在 <code>POST …/permission/respond</code> 时解决它。推迟的 channel-connector（Phase 4）加上 <code>channel_binding</code> 表（Feishu 用户 ↔ account，已在 schema 中）提供了寻址。</p>
+<p><strong>收件箱带来什么。</strong>当一个 agent 在<em>脱离</em>运行时命中一个审批点 —— 一个定时作业、一个 A2A 驱动的任务、一个长批处理 —— 而没有浏览器打开时，把请求路由到用户的 Feishu 收件箱；人类在那里审批；agent 随后恢复。</p>
+<div class="co danger"><span class="cot">架构上的难点</span><p>pod 内的 <code>asyncio.Future</code> 是<strong>易逝的</strong>。若 pod 在等待一个耗时数小时的人类期间缩至零，待决的决策就丢失了。因此异步 HITL 迫使当前 scale-to-zero + 内存协调器的设计获得持久性：<strong>(1)</strong> 持久化待决审批（data-spine 或 PVC），而非一个 Future；<strong>(2)</strong> 让有未决审批的 pod 豁免于空闲回收，<em>或</em>使该决策在唤醒时可重新水化；<strong>(3)</strong> 用短有效期签名审批链接，使一条 Feishu 消息无法被伪造成一次审批；<strong>(4)</strong> 一条默认为<em>拒绝</em>的超时/升级策略；<strong>(5)</strong> 对审批者身份的审计。权限模型是正确的接缝 —— 改变的是持久性与投递，而这恰是 Phase 4 的调度器 + channel-connector 工作。</p></div>
+
+<h3 id="publishable">11.3 可共享 / 可发布 agent 与文件系统保障</h3>
+<p><strong>当前基座。</strong>一个 subagent + 其 skills + MCP 服务器 + system prompt + hooks 已构成一个可复用的「agent 定义」，而 Skills hub 是一个可用的发布/消费模式。由此衍生两种共享模型，风险迥异：</p>
+<ul>
+  <li><strong>(a) 发布配置</strong> —— 他人在<em>他们自己</em>隔离的 pod 中实例化该 agent。安全，且契合当前设计：隔离与 BYOK 保持在每个实例化者一侧。</li>
+  <li><strong>(b) 共享一个运行中的 agent</strong> —— 他人向<em>你的</em>实例发送任务。危险：他们的输入现在驱动着一个位于持有你工作区、你的 BYOK、你的 MCP 凭证的 pod 内的 agent。</li>
+</ul>
+<div class="co info"><span class="cot">干净的模型</span><p>把一个已发布的 agent 当作<strong>它自己的租户</strong> —— 它自己的 <code>AgentTenant</code> CR、它自己的 pod、它自己作用域受限的卷与<em>服务</em>凭证 —— 由他人经 A2A（§11.1）在按调用方鉴权与审计之下调用。这原封不动地复用了 scale-to-zero、pod 隔离与 EPP 转向：一个可发布 agent 不过是一个「用户」为共享服务身份的租户。</p></div>
+<div class="co danger"><span class="cot">文件系统保障（模型 b，或任何入站共享的会话）</span><p>一个不受信的消费方可能要求一个共享 agent 读取作者的文件并返回 —— 混淆代理式的数据外泄。必备防护：一个仅注入 agent 所需内容的<strong>受囚禁 / 易逝暂存工作区</strong>，绝不含作者的 <code>~/.claude/projects</code>；<strong>只读或每次调用的临时目录</strong>；一个<strong>锁定的权限画像 + 强制 hooks</strong>；一条<strong>默认拒绝的出站 NetworkPolicy</strong>，使其既不能提权工具也不能外泄；以及<strong>凭证解耦</strong> —— 专用服务凭证或经纪的 MCP token（§11.4），绝不用作者的个人 BYOK。共享放大了爆炸半径，这把 §4.4 的 Web 终端 / NetworkPolicy 加固从「推迟」提升为「前置条件」。</p></div>
+
+<h3 id="unified-auth">11.4 统一 MCP / skill 鉴权</h3>
+<p><strong>当前基座。</strong>MCP 配置来自 <code>.mcp.json</code> + <code>settings.json</code>；内置的 <code>priva_File</code> 服务器在进程内且无需鉴权。然而外部 MCP 服务器的凭证当前是每 pod 存放的（settings / secret 挂载）—— 实质上是每用户手动配置。</p>
+<p><strong>统一带来什么。</strong>当众多用户的 agent 抵达同一批内部 MCP 服务器（工单系统、数据库、内部 API）时，任何用户都不应持有原始服务凭证。沿新兴的 MCP OAuth 2.1 / resource-indicator 方向，一个中心经纪方签发<strong>每用户、每服务作用域受限的 token</strong>，把用户身份贯穿传递，使 MCP 服务器强制每用户访问，并集中轮换与吊销。</p>
+<div class="co info"><span class="cot">设计契合度</span><p>control-panel 是天然的经纪方 —— 它已在铸造 runner token 并掌握身份。它会为每个 MCP 服务器登记其鉴权方式（OAuth client / API key / mTLS），在唤醒时或按需经纪短生命周期的每用户访问 token，作用域受限地注入 pod 的 MCP 配置，以实际用户身份审计 MCP 工具调用，并在不触碰 pod 的情况下轮换。会向外部服务 shell out 的 skills，也以同样的经纪方式获得凭证，而非嵌入秘密。</p></div>
+<div class="co warn"><span class="cot">需管理的张力</span><p>这会把高价值秘密集中到控制平面 —— 与「控制平面绝不接触运行时数据」原则相冲突。化解之道是让经纪方只持有长生命周期的刷新材料，并交给 pod <strong>短生命周期、作用域受限的访问 token</strong>，这反而强化了 Phase 6 的每账号 KMS/DEK 需求，而非与之相悖。</p></div>
+
+<h3 id="cross-cutting">11.5 横切影响</h3>
+<p>上述四项扩展浮现出同一小撮平台级问题 —— 那些值得一次性、集中决定，而非逐特性决定的问题：</p>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:24%">关注点</th><th>它迫使什么</th></tr></thead>
+<tbody>
+<tr><td>BYOK 下的成本归因</td><td>A2A 与共享 agent 打破了「用户自己的密钥买单」。需要每次调用的归因，并很可能是一种混合：<em>服务</em> agent 携带一个服务密钥，用量回收计费。这与无计量代理非目标存在真实张力 —— 可作为仅面向共享/服务 agent 的、可选启用的计量面来化解，个人 BYOK 不受触动。</td></tr>
+<tr><td>身份联邦</td><td>当前为 JWT/HS256 + API 密钥。A2A 与企业级 HITL 需要联邦身份（OIDC/JWKS），使外部平台与 Feishu 身份映射到 Priva 账号。<code>channel_binding</code> 是一个开端；Phase 6 的 mTLS/JWKS 工作是通用层。</td></tr>
+<tr><td>入站信任与提示注入</td><td>每一次入站 A2A / HITL / 共享驱动，都是进入特权 pod 的不受信输入 —— OpenClaw 的教训（§9）。一个加固的「入站画像」（受约束工具、强制 hooks、出站 DLP）成为一等构件，而非逐 agent 的事后补救。</td></tr>
+<tr><td>版本化与注册表治理</td><td>一个已发布的 agent 是一个共享依赖：消费方需要固定版本与安全发布；一个已发布 agent 注册表需要管理员审查、溯源与签名（供应链姿态）—— 与 Anthropic Managed Agents 的版本化配置及 Skills hub 相呼应。</td></tr>
+<tr><td>agent 网格 / 跨 pod 编排</td><td>pod 内 subagents 自然延伸为一个主管派生易逝的 worker pod（各为其自己的 <code>AgentTenant</code> CR）。工作流巡视器 + EPP + A2A 已然是其基座。</td></tr>
+</tbody>
+</table></div>
+</section>
+
+<!-- ================= §12 Risks & Open Issues ================= -->
+<section id="risks">
+<h2><span class="no">§12</span>风险与未决问题</h2>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:22%">风险</th><th>细节与处置</th><th>严重度</th></tr></thead>
+<tbody>
+<tr><td><strong>Web 终端秘密暴露</strong></td><td>共享签名密钥可从任意租户 PTY 读取 + 无 NetworkPolicy → 跨租户 token 伪造与 pod 访问（§4.4）。Tier-0 修复已界定范围（~1 天），<strong>尚未应用</strong>；是面向租户终端的上线阻断项。</td><td><span class="st open">未决 · 高</span></td></tr>
+<tr><td><strong>出站 / BYOK 外泄</strong></td><td>一个任意的 <code>ANTHROPIC_BASE_URL</code> 加上未受治理的 agent 出站，可把数据送出平台，尽管本地托管仍击败主权保证（§4.5）。端点白名单 + 强制出站代理/DLP <strong>未构建</strong>。</td><td><span class="st open">未决 · 高</span></td></tr>
+<tr><td><strong>备份 / DR 缺失</strong></td><td>会话 JSONL（即记录）与每账号工作区没有备份；data-spine 是单写者 SPOF。RPO/RTO、卷快照与恢复演练均未构建（§8.5）。</td><td><span class="st open">未决 · 高</span></td></tr>
+<tr><td><strong>集群内明文传输</strong></td><td>alpha 中除 ext_proc EPP 外的所有集群内跳都是明文 HTTP/gRPC。Edge TLS + pod mTLS/JWKS 推迟至 Phase 6。</td><td><span class="st defer">推迟</span></td></tr>
+<tr><td><strong>pod 边界隔离</strong></td><td>对持有 PTY 的半可信用户而言，共享内核的 runc 边界弱于 Firecracker/gVisor；一次容器逃逸会攻陷该节点。缓解路径：<code>runtimeClassName</code> → gVisor/Kata（配置翻转），跟踪 kubernetes-sigs Agent Sandbox。</td><td><span class="st defer">已知</span></td></tr>
+<tr><td><strong>data-spine SPOF</strong></td><td>单一 SQLite 写者，1 副本 <code>Recreate</code> —— 控制平面的可用性下限。Postgres 后端当前仅为接口占位 stub。</td><td><span class="st defer">已知</span></td></tr>
+<tr><td><strong>Skill / MCP 供应链</strong></td><td>共享的 skills 与 MCP 服务器以代码形式在特权 pod 中运行，没有签名、审查或溯源。缓解：一个签名注册表 + 管理员审查（§11.3、§11.5）。</td><td><span class="st defer">已知</span></td></tr>
+<tr><td><strong>花费失控（BYOK）</strong></td><td>无 token 计量 → 对一个循环、正在烧用户密钥的自主 agent 没有熔断。缓解：每用户花费上限 + 失控检测（§11.5）。</td><td><span class="st defer">已知</span></td></tr>
+<tr><td><strong>集群升级 / 版本偏斜</strong></td><td>每租户镜像偏斜且无受治理的发布；一次破坏性 SDK 变更可能搁浅会话。缓解：金丝雀 + eval 闸门 + 会话格式兼容性检查（§8.6）。</td><td><span class="st defer">已知</span></td></tr>
+<tr><td><strong>SDK / CLI 上游变动</strong></td><td>与快速演进的 <code>claude-agent-sdk</code> / CLI 紧耦合（破坏性变更、beta 头部、权限模型修订）。逐版本吸收；这是 SDK 原生性的代价。</td><td><span class="st defer">持续</span></td></tr>
+<tr><td><strong>文档与代码漂移</strong></td><td>部分仓库文档仍描述已被取代的 data-spine Fernet→Secret BYOK 流程与第 9 张 <code>secret</code> 表；as-built（自 2026-07-01 起）使用 pod 本地 <code>settings.json</code> 与 8 张表 / 7 个已服务的服务。本规格反映 as-built。</td><td><span class="st stub">次要</span></td></tr>
+<tr><td><strong>生态收敛</strong></td><td>若 Agent Sandbox CRD + Managed Agents 的自托管 worker + agentgateway 收敛为一个开箱即用的「你集群上的 Claude agent」方案，pod 运行时层的一部分会被商品化。缓解：把差异化保持在租户/控制台/BYOK 层；把运行时层设计得可替换。</td><td><span class="st defer">战略</span></td></tr>
+</tbody>
+</table></div>
+</section>
+
+<!-- ================= §13 Glossary ================= -->
+<section id="glossary">
+<h2><span class="no">§13</span>术语表</h2>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:20%">术语</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td><strong>EPP</strong></td><td>Endpoint Picker —— 由 control-panel 运行的逐请求路由大脑；edge 对每个运行时请求都咨询它，以解析租户并转向到正确的 pod。</td></tr>
+<tr><td><strong>ext_proc</strong></td><td>Envoy 的 External Processing gRPC API（<code>envoy.service.ext_proc.v3</code>）。edge 在转发前经 ext_proc 调用 EPP，以变更/转向请求。</td></tr>
+<tr><td><strong>GIE</strong></td><td>Gateway-API-Inference-Extension —— 提供把 edge 接线到 EPP 的 <code>InferencePool</code> CRD。</td></tr>
+<tr><td><strong>InferencePool</strong></td><td>GIE 资源，在端口 <code>8091</code> 上选择 <code>app=agent-runner</code> 的 pod，并以 <code>endpointPickerRef</code> → control-panel EPP。</td></tr>
+<tr><td><strong>AgentTenant CR</strong></td><td>operator 调谐为 Deployment/Service/PVC 的每账号自定义资源（<code>priva.io/v1alpha1</code>）。每用户一个；唤醒即一次 CR patch。</td></tr>
+<tr><td><strong>scale-to-zero</strong></td><td>租户 pod 空闲时运行 0 副本；operator 按需将其 0→1 唤醒，并在一段空闲宽限后将其回收至 0。</td></tr>
+<tr><td><strong>BYOK</strong></td><td>Bring-Your-Own-Key（自带密钥）—— 每个用户提供自己的模型 gateway 凭证（<code>ANTHROPIC_BASE_URL</code>/<code>ANTHROPIC_AUTH_TOKEN</code>）；无虚拟密钥，无计量代理。</td></tr>
+<tr><td><strong>Fork vs Rewind</strong></td><td>两种不同的 SDK 机制 —— <em>rewind</em> 经文件检查点恢复工作区文件；<em>fork</em> 把对话分叉为一个新的子会话。见 §5。</td></tr>
+<tr><td><strong>RWO / RWX</strong></td><td>Kubernetes 卷访问模式：<code>ReadWriteOnce</code>（data-spine 的 SQLite PVC）与 <code>ReadWriteMany</code>（共享的 <code>priva-export</code> 工作区卷）。</td></tr>
+<tr><td><strong>Managed Agents</strong></td><td>Anthropic 的第一方托管 agent 运行时（API beta 2026-04）—— 最接近的「采用而非自建」替代方案；见 §9。</td></tr>
+</tbody>
+</table></div>
+</section>
+
+<!-- ================= §14 Stakeholder Challenges ================= -->
+<section id="challenges">
+<h2><span class="no">§14</span>干系人质询 —— 那些难题</h2>
+<p class="lead">同一份规格，从每类受众的座位上以对抗视角来读。这些是每个角色中的怀疑者会向团队抛出的问题 —— 刻意瞄准文档自己已承认诚实答案是「尚未」的那些地方。一个产品赢得会议室，靠的不是毫无缺口，而是在评审者之前先把它们说出来。</p>
+
+<h3 id="challenge-user">14.1 终端用户 —— 「这对我有帮助吗，我的东西安全吗？」</h3>
+<ul>
+  <li>为什么我的 agent 每次空闲后我都要等约 4 秒？<span class="dim">（§7.7 —— warm pool 已设计，未构建。）</span></li>
+  <li>如果我 pod 的卷坏了，我的会话历史与工作区就这么<em>没了</em>吗？什么被备份了？<span class="dim">（§8.5 —— 当前无备份；JSONL 是唯一副本。）</span></li>
+  <li>付费的是<em>我的</em> API 密钥 —— 有什么能阻止一个失控的 agent 在我离开时一夜烧光它？<span class="dim">（§12 —— 无花费上限或熔断。）</span></li>
+  <li>究竟谁能读到我的文件与 transcript —— 管理员？其他用户？<span class="dim">（控制平面从不看到运行时数据，§2 —— 但管理员跨文件浏览，§5，以及 Web 终端暴露，§4.4，使这个干净的答案复杂化。）</span></li>
+  <li>说实话，为什么不直接用 claude.ai 或 Claude Code on the web？<span class="dim">（§9 —— 主权 + BYOK 就是答案，但控制台必须跟上节奏。）</span></li>
+</ul>
+
+<h3 id="challenge-leader">14.2 工程负责人 —— 「为何自建，又凭什么它不会被丢弃？」</h3>
+<ul>
+  <li>Anthropic 以 $0.08/会话小时租用的正是这套运行时，且 sandbox、vaults 与 SDK 变动都替你搞定。请为改而自建并运营的人力编制作出论证。<span class="dim">（§9.3 —— 论据立足于主权/BYOK/产品，绝不立足于成本。）</span></li>
+  <li>你被焊死在一个快速演进的 SDK/CLI 上。当某一周一次破坏性变更搁浅了在线会话，会发生什么？<span class="dim">（§8.6 升级生命周期，§12 变动。）</span></li>
+  <li>这是 Manus 一类的自主性，还是一个聊天 + 终端的外壳？给我看「给一个目标、拿到一份成品交付物」的路径。<span class="dim">（§9 诚实代价卡片，第 1 条 —— 真实的、持续的 agent-UX 工作。）</span></li>
+  <li>Agent Sandbox 可能在 12–18 个月内商品化 pod 运行时层。为什么这里没有一半被浪费？<span class="dim">（§9 / §12 —— 保持运行时层可替换，在租户/控制台/BYOK 的上层做差异化。）</span></li>
+  <li>你声称「数百」。到 2000 时什么会崩，多集群 / HA 的方案又在哪里？<span class="dim">（kopf 逃生舱 &gt;800 CR；单命名空间 alpha；data-spine SPOF，§7.8。）</span></li>
+</ul>
+
+<h3 id="challenge-security">14.3 安全负责人（CISO）—— 「我的爆炸半径是多大？」</h3>
+<ul>
+  <li>一个拿到 shell 的租户能读取共享签名密钥，并为任意账号或管理员伪造一枚 token —— 而你却未修复就发布了它。为什么其他任何事情反而被优先讨论？<span class="dim">（§4.4 —— 未决，阻断上线。）</span></li>
+  <li>BYOK 指向任意 base URL，加上未受治理的出站，意味着 agent 能把我们的数据寄到任何地方。「主权」何以成立？<span class="dim">（§4.5 —— 最尖锐的缺口；出站控制未构建。）</span></li>
+  <li>Skills 与 MCP 服务器是特权 pod 中未经审查的代码。有什么能阻止一个被投毒的共享 skill？<span class="dim">（§12 供应链；§11.3 —— 尚无签名/审查/溯源。）</span></li>
+  <li>为持有 PTY、运行任意代码的半可信用户提供共享内核隔离 —— gVisor/Kata、NetworkPolicy、mTLS 在哪里？<span class="dim">（§4.3 —— 全在 Phase 6。）</span></li>
+  <li>来自被抓取页面或文件的提示注入 → 外泄。实际的防御是什么，而非愿景？<span class="dim">（§11.5 入站信任画像；OpenClaw 的教训，§9。）</span></li>
+</ul>
+
+<h3 id="challenge-sre">14.4 SRE / 运维 —— 「凌晨 3 点会发生什么？」</h3>
+<ul>
+  <li>data-spine 是一个无备份的 SQLite 写者 —— 一个没有 runbook 的告警。RPO/RTO？恢复演练？<span class="dim">（§7.8 故障矩阵；§8.5 —— 未构建。）</span></li>
+  <li>跨四跳异步唤醒路径没有端到端追踪。我如何对一个缓慢或失败的请求做根因分析？<span class="dim">（§7.4 —— 未实现；异步 CR 唤醒是难点段。）</span></li>
+  <li>早 9 点是 N 个同时的冷启动。容量模型是什么，warm pool 又在哪里？<span class="dim">（§7.7 —— 三档设计已提案，均未构建。）</span></li>
+  <li>control-panel 审计是每 pod 本地的，因此我无法在不分叉历史的情况下以 HA 运行它。修复日期？<span class="dim">（§7.3 / §8.6。）</span></li>
+  <li>向数百个驻留 pod 安全地滚动一个新 runner 镜像 —— 并安全回滚。给我看流程。<span class="dim">（§8.6 —— 金丝雀 + eval 闸门；scale-to-zero 有帮助，治理才是工作量。）</span></li>
+</ul>
+
+<h3 id="challenge-compliance">14.5 合规与财务 —— 「我们能向审计师与预算为此辩护吗？」</h3>
+<ul>
+  <li>GDPR 擦除：证明一名离职员工的数据 —— 包括每一份备份 —— 都已消失。<span class="dim">（§8.5 —— 擦除与备份是同一个、未构建的问题。）</span></li>
+  <li>数据在物理上存于何处，保留窗口是多久，是否有法律保留？<span class="dim">（§8.5 —— 建议，未构建。）</span></li>
+  <li>你的竞争者声称 SOC 2。我们的控制框架与审计证据方案是什么？<span class="dim">（审计轨迹已有，§7.3；正式的合规姿态尚未成节 —— 一个未决缺口。）</span></li>
+  <li>BYOK 意味着无中心计量 —— 我们如何在数百名用户间预测、归因并封顶花费？<span class="dim">（§7.6 pod 自行上报；§11.5 归因；§12 封顶 —— 均未构建。）</span></li>
+  <li>相对于就为同样的人力直接购买 Claude Enterprise 席位的总体拥有成本？<span class="dim">（§9.3。）</span></li>
+</ul>
+
+<div class="co gap"><span class="cot">诚实的记分卡</span>
+<p>把上述每一项质询，按团队今天实际能公开说出口的程度分类：</p>
+<ul>
+  <li><strong>现在可答</strong> —— 租户隔离模型、主权/BYOK 论据、自建 vs 采用逻辑，以及已交付的功能面（§3–§6、§9）。这些能挺过会议室。</li>
+  <li><strong>已设计，未构建</strong> —— warm pools、备份/DR、追踪、统一鉴权、HITL 收件箱（§7.7、§8.5、§7.4、§11.4、§11.2）。纸面上有可信的答案；无一经过实战。</li>
+  <li><strong>未决且阻断</strong> —— Web 终端秘密暴露（§4.4）与出站/BYOK 外泄（§4.5）。在它们闭合之前，给 CISO 的诚实答案是「尚未」，而这正是决定上线与否的答案。</li>
+</ul>
+<p>本节设定的检验很简单：团队能否毫不退缩地给出这些答案？在不能之处，本规格至少完成了它唯一不可让步的职责 —— 在评审者之前先把缺口说出来。</p></div>
+</section>
+
+</main>
+</div>
+
+<footer>
+  <p>Priva Cloud · Agent Runtime —— 产品规格说明 v1.0 · 2026-07-10。来源：仓库 <code>README.md</code>、<code>docs/architecture/*</code>、<code>docs/adr/*</code>、<code>web/design-spec.md</code>；竞争主张于 2026 年 7 月对照厂商文档、许可证与新闻核实（Manus、Genspark、Devin、Flowith、OpenClaw、Hermes Agent / Nous Research、OpenManus、OpenHands、Anthropic 定价文档、CNCF / kubernetes-sigs 公告）。</p>
+</footer>
+
+<script>
+// copy buttons on code blocks
+document.querySelectorAll('pre').forEach(pre=>{
+  const host=pre.parentElement;
+  if(!host.classList.contains('code')){
+    const w=document.createElement('div');w.className='code';
+    pre.replaceWith(w);w.appendChild(pre);
+  }
+  const box=pre.parentElement;
+  const b=document.createElement('button');b.className='copy';b.textContent='复制';
+  b.addEventListener('click',()=>{
+    navigator.clipboard.writeText(pre.innerText).then(()=>{b.textContent='已复制';setTimeout(()=>b.textContent='复制',1500)});
+  });
+  box.appendChild(b);
+});
+// TOC scrollspy
+const links=[...document.querySelectorAll('nav.toc a')];
+const map={};links.forEach(l=>map[l.getAttribute('href').slice(1)]=l);
+const obs=new IntersectionObserver(es=>{
+  es.forEach(e=>{
+    if(e.isIntersecting){
+      links.forEach(l=>l.classList.remove('on'));
+      const l=map[e.target.id];if(l)l.classList.add('on');
+    }
+  });
+},{rootMargin:'-8% 0px -78% 0px'});
+document.querySelectorAll('section[id]').forEach(s=>obs.observe(s));
+
+// §9 tabs
+(function(){
+  const tabs=document.getElementById('comp-tabs');if(!tabs)return;
+  const btns=[...tabs.querySelectorAll('button')];
+  btns.forEach(b=>b.addEventListener('click',()=>{
+    btns.forEach(x=>x.classList.remove('on'));
+    document.querySelectorAll('.tabpane').forEach(p=>p.classList.remove('on'));
+    b.classList.add('on');
+    document.getElementById(b.dataset.pane).classList.add('on');
+  }));
+})();
+
+// §3 byte-path: clickable node detail + step-through walkthrough
+(function(){
+  const ix=document.getElementById('byte-path-ix');if(!ix)return;
+  const detail=ix.querySelector('.ixd');
+  const nodes=[...ix.querySelectorAll('.node')];
+  const D={
+    edge:'<strong>agentgateway（edge，:80）</strong> —— 经 Gateway API + Inference Extension 开通的外部 Rust L7 代理。终结客户端传输（HTTP/2、WS、SSE），转发字节，并咨询 EPP 以做转向。它<em>转发</em>；它从不决策。非 Priva 代码。',
+    cp:'<strong>control-panel · EPP</strong> —— 大脑。HTTP :8080 提供 SPA、auth、admin 与 cp-proxy 读取通道；gRPC :9000 是 Envoy <code>ext_proc</code> EPP（TLS），它验证 JWT、解析账号、合并并发唤醒，并铸造转向头。无状态，N 副本。',
+    op:'<strong>operator</strong> —— kopf 控制器与<em>唯一</em>扩缩者（0↔1）。将 <code>AgentTenant</code> CR 调谐为 Deployment/Service/PVC；一个 10 s 定时器运行空闲回收 + podIP 自愈 + 配额调谐。它从不服务流量。',
+    ar:'<strong>agent-runner（:8091）</strong> —— 封装 claude-agent-sdk 并拉起原生 <code>claude</code> CLI 的每租户 pod。在自己的卷上持有全部运行时数据（sessions、files）。空闲时缩至零；只接受绑定到自身 <code>ACCOUNT_ID</code> 的 runner token。',
+    ds:'<strong>data-spine（:50051）</strong> —— 位于 <code>priva.dataplane.v1</code> gRPC 契约之后、基于 SQLite（WAL）的单写者持久化状态。对 accounts、quotas、specs、registrations 具权威性。从不在运行时字节路径上 —— 仅控制平面状态。'
+  };
+  const STEPS=[
+    {t:'<strong>空闲。</strong>点击某个组件查看其角色，或逐步走查一次冷请求。租户 pod 处于 <code>0</code> 副本；此用户没有任何东西在运行。',n:[],e:[]},
+    {t:'<strong>① 客户端 → edge。</strong>一个浏览器/IM 客户端访问 agentgateway :80。HTTPRoute 把 <code>/</code> 送往 control-panel，把 <code>/api/sandbox/*</code> 送往 InferencePool。',n:['edge'],e:['bp-e1']},
+    {t:'<strong>② 逐请求 ext_proc。</strong>对每个 <code>/api/sandbox/*</code> 请求，edge 经 gRPC ext_proc（TLS）调用 control-panel EPP。EPP 验证 JWT 并解析账号。',n:['cp'],e:['bp-e2']},
+    {t:'<strong>③ 唤醒。</strong>EPP 修改 <code>AgentTenant.spec.wake.requestedAt</code>；operator 把租户 Deployment 扩容 0→1（≈4 s 冷态），若在唤醒等待窗口内未 Ready 则返回 503。',n:['op'],e:['bp-e3','bp-e3b']},
+    {t:'<strong>④ 流式转发到 pod。</strong>EPP 返回转向头（<code>x-gateway-destination-endpoint</code>、<code>x-priva-runner-token</code>）；edge 把请求流式转发给被唤醒的 agent-runner，后者仅当其 <code>account_id</code> 与 pod 匹配时才接受该 token。',n:['ar'],e:['bp-e4']},
+    {t:'<strong>⑤ 模型调用。</strong>agent-runner 针对用户自己的模型 gateway（BYOK base URL + token）运行 SDK 的一轮，并经 SSE/WebSocket 把事件流式回传。',n:['ar'],e:['bp-e5']}
+  ];
+  const bar=ix.querySelector('.ixbar'), stp=bar&&bar.querySelector('.stp');
+  const prev=bar&&bar.querySelector('.prev'), next=bar&&bar.querySelector('.next');
+  let s=0;
+  function paint(){
+    const st=STEPS[s];
+    nodes.forEach(n=>{n.classList.remove('hot','done','sel')});
+    ix.querySelectorAll('.edge').forEach(e=>e.classList.remove('hot','flow'));
+    st.n.forEach(k=>{const n=nodes.find(x=>x.dataset.k===k);if(n)n.classList.add('hot')});
+    st.e.forEach(id=>{const e=document.getElementById(id);if(e){e.classList.add('hot','flow')}});
+    detail.innerHTML=st.t;
+    if(stp)stp.textContent='步骤 '+s+' / 5';
+    if(prev)prev.disabled=(s===0);if(next)next.disabled=(s===5);
+  }
+  nodes.forEach(n=>{
+    const act=()=>{s=0;nodes.forEach(m=>m.classList.remove('hot','done'));
+      ix.querySelectorAll('.edge').forEach(e=>e.classList.remove('hot','flow'));
+      nodes.forEach(m=>m.classList.remove('sel'));n.classList.add('sel');
+      detail.innerHTML=D[n.dataset.k];if(stp)stp.textContent='步骤 0 / 5';
+      if(prev)prev.disabled=true;if(next)next.disabled=false;};
+    n.addEventListener('click',act);
+    n.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();act()}});
+  });
+  if(prev)prev.addEventListener('click',()=>{s=Math.max(0,s-1);paint()});
+  if(next)next.addEventListener('click',()=>{s=Math.min(5,s+1);paint()});
+  paint();
+})();
+
+// §4 trust chain: step-through only
+(function(){
+  const ix=document.getElementById('trust-ix');if(!ix)return;
+  const detail=ix.querySelector('.ixd');
+  const nodes=[...ix.querySelectorAll('.node')];
+  const edges=[...ix.querySelectorAll('.edge')];
+  const CAP=[
+    '<strong>1 · 客户端 JWT。</strong>请求携带一个 HS256 JWT（来自登录）或一个每用户 <code>sk-*</code> API 密钥。下游不直接信任客户端 —— 只信任 EPP 对它作出的断言。',
+    '<strong>2 · EPP 校验。</strong>control-panel EPP 验证 JWT 并将其解析为单一账号。这是唯一权威的鉴权点；edge 只做转发。',
+    '<strong>3 · 唤醒 + 调谐。</strong>EPP 修改 <code>AgentTenant</code> CR；operator 把租户 pod 扩容 0→1。同一账号的并发唤醒会被合并。',
+    '<strong>4 · 转向头。</strong>EPP 铸造一枚 <code>x-priva-runner-token</code>（HS256，<code>{account_id, username, exp}</code>）并连同目标端点一并返回。这枚签名 token 是 runner 唯一认可的凭证。',
+    '<strong>5 · pod 绑定校验。</strong>agent-runner 仅当 token 的 <code>account_id</code> 等于其自身 <code>ACCOUNT_ID</code> 环境变量时才接受请求。即便被直接访问，一个 runner 也无法服务另一个租户 —— 防护是每 pod 身份，而非网络位置。'
+  ];
+  const bar=ix.querySelector('.ixbar'), stp=bar&&bar.querySelector('.stp');
+  const prev=bar&&bar.querySelector('.prev'), next=bar&&bar.querySelector('.next');
+  let s=1;
+  function go(n){
+    s=Math.min(5,Math.max(1,n));
+    nodes.forEach(el=>{const k=+el.dataset.step;el.classList.toggle('hot',k===s);el.classList.toggle('done',k<s)});
+    edges.forEach((el,i)=>el.classList.toggle('hot',i<s-1));
+    detail.innerHTML=CAP[s-1];
+    if(stp)stp.textContent='步骤 '+s+' / 5';
+    if(prev)prev.disabled=(s===1);if(next)next.disabled=(s===5);
+  }
+  if(prev)prev.addEventListener('click',()=>go(s-1));
+  if(next)next.addEventListener('click',()=>go(s+1));
+  nodes.forEach(el=>{
+    const act=()=>go(+el.dataset.step);
+    el.addEventListener('click',act);
+    el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();act()}});
+  });
+  go(1);
+})();
+
+// §10 roadmap phase selector
+(function(){
+  const wrap=document.getElementById('roadmap-phases');if(!wrap)return;
+  const detail=document.getElementById('roadmap-detail');
+  const btns=[...wrap.querySelectorAll('.phase')];
+  const D={
+    p03:'<strong>Phase 0–3 · 拆分与运行时</strong> <span class="st ship">完成 · 合入 2026-06-21</span><br>把平台从 monolith 中剥离为 control-panel、agent-runner、data-spine 与 operator；搭起 agentgateway + GIE edge 与逐请求 EPP；交付 scale-to-zero 租户 pod、完整的 Claude Agent SDK 面（sessions、skills、MCP、hooks、subagents、fork/rewind、权限）、用户 + 管理端 SPA、PTY 终端、文件浏览器、自助注册与 BYOK。在 minikube 上端到端验证。',
+    p4:'<strong>Phase 4 · 调度器与 IM + 移除 monolith</strong> <span class="st defer">下一步</span><br>在 gRPC 上注册 <code>SchedulerService</code> 并交付 cron / 定时 agent 作业（无主 fire→claim→wake→dispatch，带退避+抖动重试）；构建用于 IM 扇出的 channel-connector（Feishu 形态的绑定已在 schema 中）；移除遗留的 monolith（<code>priva/</code>），因它已不再是行为参照。',
+    p5:'<strong>Phase 5 · state-reader</strong> <span class="st defer">推迟</span><br>在租户 pod 处于 0 副本时进行免唤醒 transcript 读取 —— 一个可嵌入的只读 JSONL 路由器，在 prod 中为挂载隔离而提升为独立服务。消除「仅为读历史而唤醒」的成本。',
+    p6:'<strong>Phase 6 · 生产加固</strong> <span class="st defer">推迟</span><br>NetworkPolicies（默认拒绝 + 收窄出站）、以 mTLS / JWKS pod 信任取代共享 HS256 密钥、每账号 KMS/DEK 信封加密、edge TLS 终结、基于 Redis 的唤醒/空闲协调，以及 offboard→retain→purge 混沌测试。闭合 §4.3 / §4.4 的缺口 —— 包括未决的 Web 终端风险。'
+  };
+  btns.forEach(b=>{
+    const act=()=>{btns.forEach(x=>x.classList.remove('sel'));b.classList.add('sel');detail.innerHTML=D[b.dataset.k]};
+    b.addEventListener('click',act);
+  });
+  detail.innerHTML=D.p03;
+})();
+</script>
+</body>
+</html>
