@@ -248,6 +248,12 @@ footer a{color:var(--muted)}
   <a class="sub2" href="#unified-auth">11.4 Unified MCP Auth</a>
   <a href="#risks">12 · Risks &amp; Open Issues</a>
   <a href="#glossary">13 · Glossary</a>
+  <a href="#challenges">14 · Stakeholder Challenges</a>
+  <a class="sub2" href="#challenge-user">14.1 End User</a>
+  <a class="sub2" href="#challenge-leader">14.2 Eng Leader</a>
+  <a class="sub2" href="#challenge-security">14.3 Security / CISO</a>
+  <a class="sub2" href="#challenge-sre">14.4 SRE / Operator</a>
+  <a class="sub2" href="#challenge-compliance">14.5 Compliance &amp; Finance</a>
 </nav>
 
 <main>
@@ -973,6 +979,66 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <tr><td><strong>Managed Agents</strong></td><td>Anthropic's first-party hosted agent runtime (API beta 2026-04) — the closest "adopt instead of build" alternative; see §9.</td></tr>
 </tbody>
 </table></div>
+</section>
+
+<!-- ================= §14 Stakeholder Challenges ================= -->
+<section id="challenges">
+<h2><span class="no">§14</span>Stakeholder Challenges — the hard questions</h2>
+<p class="lead">The same spec, read adversarially from each audience's seat. These are the questions a skeptic in each role would put to the team — deliberately aimed at the places the document itself already admits the honest answer is "not yet." A product earns the room not by having no gaps, but by naming them before the reviewer does.</p>
+
+<h3 id="challenge-user">14.1 The end user — "will this help me, and is my stuff safe?"</h3>
+<ul>
+  <li>Why do I wait ~4 seconds every time my agent was idle? <span class="dim">(§7.7 — warm pool designed, not built.)</span></li>
+  <li>If my pod's volume dies, is my session history and workspace just <em>gone</em>? What's backed up? <span class="dim">(§8.5 — no backup today; the JSONL is the only copy.)</span></li>
+  <li>It's <em>my</em> API key paying — what stops a runaway agent from burning it overnight while I'm away? <span class="dim">(§12 — no spend cap or circuit breaker.)</span></li>
+  <li>Who can actually read my files and transcripts — admins? other users? <span class="dim">(Control plane never sees runtime data, §2 — but admin cross-file browse, §5, and the web-terminal exposure, §4.4, complicate the clean answer.)</span></li>
+  <li>Honestly, why not just use claude.ai or Claude Code on the web? <span class="dim">(§9 — sovereignty + BYOK is the answer, but the console has to keep pace.)</span></li>
+</ul>
+
+<h3 id="challenge-leader">14.2 The engineering leader — "why build, and why won't it be throwaway?"</h3>
+<ul>
+  <li>Anthropic rents this exact runtime at $0.08/session-hour with the sandbox, vaults, and SDK churn handled. Justify the headcount to build and operate instead. <span class="dim">(§9.3 — the case rests on sovereignty/BYOK/product, never on cost.)</span></li>
+  <li>You're welded to a fast-moving SDK/CLI. What happens the week a breaking change strands live sessions? <span class="dim">(§8.6 upgrade lifecycle, §12 churn.)</span></li>
+  <li>Is this Manus-class autonomy, or a chat + terminal wrapper? Show me the path to "give it a goal, get a finished deliverable." <span class="dim">(§9 honest-costs card, item 1 — real, ongoing agent-UX work.)</span></li>
+  <li>Agent Sandbox may commoditize the pod-runtime layer in 12–18 months. Why isn't half of this wasted? <span class="dim">(§9 / §12 — keep the runtime layer swappable, differentiate up-stack in tenancy/console/BYOK.)</span></li>
+  <li>You claim "hundreds." What breaks at 2,000, and where's the multi-cluster / HA story? <span class="dim">(kopf escape hatch &gt;800 CRs; single-namespace alpha; data-spine SPOF, §7.8.)</span></li>
+</ul>
+
+<h3 id="challenge-security">14.3 The security lead (CISO) — "what's my blast radius?"</h3>
+<ul>
+  <li>A tenant with a shell can read the shared signing secret and forge a token for any account or admin — and you shipped it unremediated. Why is anything else being discussed first? <span class="dim">(§4.4 — open, launch-gating.)</span></li>
+  <li>BYOK to any base URL plus un-governed egress means the agent can mail our data anywhere. How is "sovereign" true? <span class="dim">(§4.5 — the sharpest gap; egress control not built.)</span></li>
+  <li>Skills and MCP servers are unreviewed code in privileged pods. What stops a poisoned shared skill? <span class="dim">(§12 supply chain; §11.3 — no signing/review/provenance yet.)</span></li>
+  <li>Shared-kernel isolation for semi-trusted users running arbitrary code with a PTY — where are gVisor/Kata, NetworkPolicy, mTLS? <span class="dim">(§4.3 — all Phase 6.)</span></li>
+  <li>Prompt injection from a fetched page or file → exfiltration. What's the actual defense, not the aspiration? <span class="dim">(§11.5 inbound-trust profile; the OpenClaw lesson, §9.)</span></li>
+</ul>
+
+<h3 id="challenge-sre">14.4 The SRE / operator — "what happens at 3am?"</h3>
+<ul>
+  <li>data-spine is one SQLite writer with no backup — a pager with no runbook. RPO/RTO? Restore drill? <span class="dim">(§7.8 failure matrix; §8.5 — unbuilt.)</span></li>
+  <li>No end-to-end tracing across a four-hop async wake path. How do I root-cause a slow or failed request? <span class="dim">(§7.4 — not implemented; the async CR-wake is the hard segment.)</span></li>
+  <li>9am is N simultaneous cold starts. What's the capacity model, and where's the warm pool? <span class="dim">(§7.7 — three-tier design proposed, none built.)</span></li>
+  <li>control-panel audit is per-pod local, so I can't run it HA without forking history. Fix date? <span class="dim">(§7.3 / §8.6.)</span></li>
+  <li>Rolling a new runner image to hundreds of parked pods — and rolling back — safely. Show me the procedure. <span class="dim">(§8.6 — canary + eval gate; scale-to-zero helps, governance is the work.)</span></li>
+</ul>
+
+<h3 id="challenge-compliance">14.5 Compliance &amp; finance — "can we defend this to an auditor and a budget?"</h3>
+<ul>
+  <li>GDPR erasure: prove a departed employee's data — including every backup — is gone. <span class="dim">(§8.5 — erasure and backup are one, unbuilt, problem.)</span></li>
+  <li>Where does data physically live, what's the retention window, is there a legal hold? <span class="dim">(§8.5 — recommended, not built.)</span></li>
+  <li>Your competitors claim SOC 2. What's our control framework and audit-evidence story? <span class="dim">(Audit trail exists, §7.3; a formal compliance posture is not yet a section — an open gap.)</span></li>
+  <li>BYOK means no central metering — how do we forecast, attribute, and cap spend across hundreds of users? <span class="dim">(§7.6 pod-self-reported; §11.5 attribution; §12 cap — all unbuilt.)</span></li>
+  <li>Total cost of ownership versus just buying Claude Enterprise seats for the same headcount? <span class="dim">(§9.3.)</span></li>
+</ul>
+
+<div class="co gap"><span class="cot">The honest scorecard</span>
+<p>Sorting every challenge above by what the team can actually say out loud today:</p>
+<ul>
+  <li><strong>Answerable now</strong> — the tenant-isolation model, the sovereignty/BYOK rationale, the build-vs-adopt logic, and the shipped feature surface (§3–§6, §9). These survive the room.</li>
+  <li><strong>Designed, not built</strong> — warm pools, backup/DR, tracing, unified auth, the HITL inbox (§7.7, §8.5, §7.4, §11.4, §11.2). Credible answers exist on paper; none has run in anger.</li>
+  <li><strong>Open and gating</strong> — the web-terminal secret exposure (§4.4) and egress/BYOK exfiltration (§4.5). Until these close, the honest answer to the CISO is "not yet," and that is the answer that decides launch.</li>
+</ul>
+<p>The test this section sets is simple: can the team give these answers without flinching? Where it can't, the spec has at least done its one non-negotiable job — naming the gap before the reviewer does.</p></div>
 </section>
 
 </main>
