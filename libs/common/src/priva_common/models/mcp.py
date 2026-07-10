@@ -20,6 +20,9 @@ class McpServerCreateRequest(BaseModel):
     headers: list[McpHeaderItem] = Field(default_factory=list)
     timeout: int = Field(default=60, ge=5, le=600)
     level: McpLevel = "project"
+    # Absolute workdir for project-level servers (writes {cwd}/.mcp.json).
+    # None => the user's default workspace. Ignored for global servers.
+    cwd: str | None = None
 
 
 class McpServerUpdateRequest(BaseModel):
@@ -34,6 +37,8 @@ class McpServerSummary(BaseModel):
     type: McpServerType
     url: str
     level: McpLevel
+    # Workdir a project server belongs to (None for global servers).
+    cwd: str | None = None
     header_count: int = 0
     timeout: int = 60
 
@@ -43,6 +48,8 @@ class McpServerDetail(BaseModel):
     type: McpServerType
     url: str
     level: McpLevel
+    # Workdir a project server belongs to (None for global servers).
+    cwd: str | None = None
     headers: list[McpHeaderItem] = Field(default_factory=list)
     timeout: int = 60
 

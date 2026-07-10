@@ -184,7 +184,14 @@ const useSidebarStore = create((set, get) => ({
         for (const s of g.sessions || []) {
           if (seen.has(s.session_id)) continue
           seen.add(s.session_id)
-          flat.push(mapSession(s))
+          const mapped = mapSession(s)
+          // The SDK leaves cwd null when a session's `cwd` field sits past its
+          // 64 KB metadata head-read window (e.g. a large inline image in the
+          // first user message). The backend still buckets it into a real group
+          // (g.cwd, via `s.cwd or active_cwd`); inherit that so the client doesn't
+          // re-bucket the session into a phantom '~' group.
+          if (!mapped.cwd) mapped.cwd = g.cwd
+          flat.push(mapped)
         }
       }
       const activeCwd = data.active_cwd || null
@@ -213,7 +220,13 @@ const useSidebarStore = create((set, get) => ({
     set({ groupLoadingCwd: cwd })
     try {
       const data = await fetchCwdSessions(cwd, GROUP_PAGE_SIZE, loaded)
-      const incoming = (data.sessions || []).map(mapSession)
+      // Inherit the group cwd for any session the SDK left null-cwd (see
+      // fetchSessions) so it stays in this group instead of a phantom '~' group.
+      const incoming = (data.sessions || []).map((s) => {
+        const mapped = mapSession(s)
+        if (!mapped.cwd) mapped.cwd = cwd
+        return mapped
+      })
       set((s) => {
         const have = new Set(s.sessions.map((x) => x.id))
         const merged = [...s.sessions, ...incoming.filter((x) => !have.has(x.id))]

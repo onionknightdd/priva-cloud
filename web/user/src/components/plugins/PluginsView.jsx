@@ -1,11 +1,14 @@
 import { useTranslation } from 'react-i18next'
 import useUiStore from '@shared/stores/uiStore'
 import SkillsPanel from '../skills/SkillsPanel'
+import MCPPanel from '../mcp/MCPPanel'
+import HooksPanel from '../hooks/HooksPanel'
+import SubAgentsPanel from '../subagents/SubAgentsPanel'
 
 // Content-only "Plugins/Customize" view. Section navigation lives in the
 // persistent sidebar (Plugins submenu); this renders just the active section's
-// body. Skills is live; the other four are placeholders until each is redesigned
-// one by one (Phase 2, incremental).
+// body. Skills + MCP + Hooks + SubAgents are live; the rest are placeholders
+// until each is redesigned one by one (Phase 2, incremental).
 function Placeholder({ labelKey }) {
   const { t } = useTranslation()
   return (
@@ -27,9 +30,9 @@ export default function PluginsView({ backTitle, onBack }) {
       style={{ background: 'var(--bg-base)', minHeight: 0, minWidth: 0, overflow: 'hidden' }}
     >
       {section === 'skills' && <SkillsPanel backTitle={backTitle} onBack={onBack} />}
-      {section === 'mcp' && <Placeholder labelKey="tabs.mcp" />}
-      {section === 'hooks' && <Placeholder labelKey="tabs.hooks" />}
-      {section === 'subagents' && <Placeholder labelKey="tabs.subagents" />}
+      {section === 'mcp' && <MCPPanel backTitle={backTitle} onBack={onBack} />}
+      {section === 'hooks' && <HooksPanel backTitle={backTitle} onBack={onBack} />}
+      {section === 'subagents' && <SubAgentsPanel backTitle={backTitle} onBack={onBack} />}
       {section === 'memory' && <Placeholder labelKey="tabs.memory" />}
     </div>
   )

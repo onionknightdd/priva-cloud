@@ -310,7 +310,7 @@ async def build_agent_options(
 
     if _should_inject:
         mcp_mgr = McpConfigManager(username)
-        mcp_dict = mcp_mgr.build_mcp_dict(filter_names=_filter_names)
+        mcp_dict = mcp_mgr.build_mcp_dict(cwd=cwd, filter_names=_filter_names)
         if mcp_dict:
             options.mcp_servers = mcp_dict
             # When a specific subset is requested, enforce strict mode so the

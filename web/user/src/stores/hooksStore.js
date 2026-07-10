@@ -9,6 +9,7 @@ const useHooksStore = create((set, get) => ({
   activeDetailTab: 'config',
   configuredHooks: {},
   detailWidth: safeStorage.getNumber('hooks-detail-width', DEFAULT_DETAIL_WIDTH, { min: 280, max: 600 }),
+  listWidth: safeStorage.getNumber('hooks-list-width', 240, { min: 220, max: 420 }),
 
   // Config state
   configLoading: false,
@@ -47,6 +48,10 @@ const useHooksStore = create((set, get) => ({
   setDetailWidth: (w) => {
     safeStorage.setItem('hooks-detail-width', String(w))
     set({ detailWidth: w })
+  },
+  setListWidth: (w) => {
+    safeStorage.setItem('hooks-list-width', String(w))
+    set({ listWidth: w })
   },
 
   // --- Config ---

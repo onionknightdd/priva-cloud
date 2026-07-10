@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from priva_common.logging import get_app_logger
 from priva_common.models.auth import UserRecord
@@ -28,7 +28,7 @@ logger = get_app_logger(__name__)
 router = APIRouter(prefix="/api/sandbox/resource/mcp", tags=["mcp"])
 
 
-def _config_to_detail(name: str, config: dict, level: str) -> McpServerDetail:
+def _config_to_detail(name: str, config: dict, level: str, cwd: str | None = None) -> McpServerDetail:
     headers_dict = config.get("headers", {})
     headers = [McpHeaderItem(key=k, value=v) for k, v in headers_dict.items()]
     return McpServerDetail(
@@ -36,17 +36,19 @@ def _config_to_detail(name: str, config: dict, level: str) -> McpServerDetail:
         type=config.get("type", "http"),
         url=config.get("url", ""),
         level=level,
+        cwd=cwd,
         headers=headers,
         timeout=config.get("timeout", 60),
     )
 
 
-def _config_to_summary(name: str, config: dict, level: str) -> McpServerSummary:
+def _config_to_summary(name: str, config: dict, level: str, cwd: str | None = None) -> McpServerSummary:
     return McpServerSummary(
         name=name,
         type=config.get("type", "http"),
         url=config.get("url", ""),
         level=level,
+        cwd=cwd,
         header_count=len(config.get("headers", {})),
         timeout=config.get("timeout", 60),
     )
@@ -55,38 +57,44 @@ def _config_to_summary(name: str, config: dict, level: str) -> McpServerSummary:
 @router.get("/", response_model=McpServerListResponse)
 async def list_mcp_servers(user: UserRecord = Depends(require_user)):
     mgr = McpConfigManager(user.username)
-    all_servers = mgr.read_all_servers()
-    return McpServerListResponse(
-        servers=[_config_to_summary(name, config, level) for name, config, level in all_servers]
-    )
+    summaries: list[McpServerSummary] = []
+    # Project servers grouped per workdir ({cwd}/.mcp.json), then global.
+    for cwd, servers in mgr.read_project_groups():
+        for name, config in servers.items():
+            summaries.append(_config_to_summary(name, config, "project", cwd))
+    for name, config in mgr.read_global_servers().items():
+        summaries.append(_config_to_summary(name, config, "global", None))
+    return McpServerListResponse(servers=summaries)
 
 
 @router.get("/{level}/{name}", response_model=McpServerDetail)
 async def get_mcp_server(
     level: McpLevel,
     name: str,
+    cwd: str | None = Query(None),
     user: UserRecord = Depends(require_user),
 ):
     mgr = McpConfigManager(user.username)
     if level == "project":
-        servers = mgr.read_project_servers()
+        servers = mgr.read_project_servers(cwd)
     else:
         servers = mgr.read_global_servers()
 
     if name not in servers:
         raise HTTPException(404, f"MCP server '{name}' not found at {level} level")
-    return _config_to_detail(name, servers[name], level)
+    return _config_to_detail(name, servers[name], level, cwd if level == "project" else None)
 
 
 @router.get("/{level}/{name}/capabilities", response_model=McpServerCapabilities)
 async def get_mcp_server_capabilities(
     level: McpLevel,
     name: str,
+    cwd: str | None = Query(None),
     user: UserRecord = Depends(require_user),
 ):
     mgr = McpConfigManager(user.username)
     if level == "project":
-        servers = mgr.read_project_servers()
+        servers = mgr.read_project_servers(cwd)
     else:
         servers = mgr.read_global_servers()
 
@@ -127,7 +135,7 @@ async def create_mcp_server(
     }
 
     if request.level == "project":
-        mgr.add_project_server(request.name, config)
+        mgr.add_project_server(request.cwd, request.name, config)
     else:
         mgr.add_global_server(request.name, config)
 
@@ -137,11 +145,11 @@ async def create_mcp_server(
             actor=user.username,
             action="mcp.created",
             target=request.name,
-            details={"level": request.level, "type": request.type},
+            details={"level": request.level, "type": request.type, "cwd": request.cwd},
         )
     )
 
-    return _config_to_detail(request.name, config, request.level)
+    return _config_to_detail(request.name, config, request.level, request.cwd if request.level == "project" else None)
 
 
 @router.put("/{level}/{name}", response_model=McpServerDetail)
@@ -149,6 +157,7 @@ async def update_mcp_server(
     level: McpLevel,
     name: str,
     request: McpServerUpdateRequest,
+    cwd: str | None = Query(None),
     user: UserRecord = Depends(require_user),
 ):
     mgr = McpConfigManager(user.username)
@@ -163,7 +172,7 @@ async def update_mcp_server(
         updates["timeout"] = request.timeout
 
     if level == "project":
-        updated = mgr.update_project_server(name, updates)
+        updated = mgr.update_project_server(cwd, name, updates)
     else:
         updated = mgr.update_global_server(name, updates)
 
@@ -176,22 +185,23 @@ async def update_mcp_server(
             actor=user.username,
             action="mcp.updated",
             target=name,
-            details={"level": level, "fields": list(updates.keys())},
+            details={"level": level, "cwd": cwd, "fields": list(updates.keys())},
         )
     )
 
-    return _config_to_detail(name, updated, level)
+    return _config_to_detail(name, updated, level, cwd if level == "project" else None)
 
 
 @router.delete("/{level}/{name}")
 async def delete_mcp_server(
     level: McpLevel,
     name: str,
+    cwd: str | None = Query(None),
     user: UserRecord = Depends(require_user),
 ):
     mgr = McpConfigManager(user.username)
     if level == "project":
-        deleted = mgr.delete_project_server(name)
+        deleted = mgr.delete_project_server(cwd, name)
     else:
         deleted = mgr.delete_global_server(name)
 
@@ -204,7 +214,7 @@ async def delete_mcp_server(
             actor=user.username,
             action="mcp.deleted",
             target=name,
-            details={"level": level},
+            details={"level": level, "cwd": cwd},
         )
     )
 

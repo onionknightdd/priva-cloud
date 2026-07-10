@@ -15,12 +15,18 @@ PermissionMode = Literal[
 ]
 MemoryMode = Literal["none", "user", "project", "local"]
 
+# Where a subagent lives on disk: "user" -> ~/.claude/agents, "project" ->
+# {cwd}/.claude/agents (per-workdir). Mirrors the Claude Code sub-agent scopes.
+SubAgentScope = Literal["user", "project"]
+
 
 class SubAgentSummary(BaseModel):
     name: str
     description: str | None = None
     model: str | None = None
     tools_count: int = 0
+    scope: SubAgentScope = "project"
+    cwd: str | None = None
 
 
 class SubAgentListResponse(BaseModel):
@@ -30,6 +36,8 @@ class SubAgentListResponse(BaseModel):
 class SubAgentDetail(BaseModel):
     name: str
     description: str
+    scope: SubAgentScope = "project"
+    cwd: str | None = None
     prompt: str = ""
     tools: list[str] = Field(default_factory=list)
     disallowedTools: list[str] = Field(default_factory=list)
@@ -45,6 +53,8 @@ class SubAgentDetail(BaseModel):
 class SubAgentCreateRequest(BaseModel):
     name: str
     description: str
+    scope: SubAgentScope = "project"
+    cwd: str | None = None
     prompt: str = ""
     tools: list[str] = Field(default_factory=list)
     disallowedTools: list[str] = Field(default_factory=list)

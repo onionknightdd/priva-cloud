@@ -18,6 +18,8 @@ const DEFAULT_ALLOWED_TOOLS = ['Read', 'Write', 'Edit', 'Grep', 'Glob', 'Bash']
 const emptyDraft = () => ({
   __mode: 'create', // 'create' or 'edit'
   __originalName: null,
+  scope: 'project', // 'user' | 'project'
+  cwd: null, // workdir for project scope (null = default workspace)
   name: '',
   description: '',
   prompt: '',
@@ -35,6 +37,8 @@ const emptyDraft = () => ({
 const detailToDraft = (detail) => ({
   __mode: 'edit',
   __originalName: detail.name,
+  scope: detail.scope || 'project',
+  cwd: detail.cwd ?? null,
   name: detail.name,
   description: detail.description || '',
   prompt: detail.prompt || '',
@@ -71,17 +75,29 @@ const useSubagentsStore = create((set, get) => ({
   list: [],
   listLoading: false,
   selectedName: null,
+  selectedScope: null,
+  selectedCwd: null,
   detail: null,
   detailLoading: false,
   formDraft: null,
   dirty: false,
+
+  // Scope picker (chooses user vs a project workdir before the editor, like MCP)
+  scopePickerOpen: false,
+  scopePickerTemplate: null, // template to seed after scope is chosen, or null = blank
   catalog: { tools: [], skills: [], mcp_servers: [], reserved_names: [] },
   catalogLoaded: false,
 
+  listWidth: safeStorage.getNumber('subagents-list-width', 260, { min: 220, max: 420 }),
   testWidth: safeStorage.getNumber(STORAGE_KEY, DEFAULT_TEST_WIDTH, { min: 320, max: 720 }),
   testRunning: false,
   testEvents: [],
   testAbort: null,
+
+  setListWidth: (w) => {
+    safeStorage.setItem('subagents-list-width', String(w))
+    set({ listWidth: w })
+  },
 
   setTestWidth: (w) => {
     safeStorage.setItem(STORAGE_KEY, String(w))
@@ -110,10 +126,10 @@ const useSubagentsStore = create((set, get) => ({
     }
   },
 
-  selectAgent: async (name) => {
-    set({ selectedName: name, detailLoading: true, dirty: false })
+  selectAgent: async (scope, cwd, name) => {
+    set({ selectedName: name, selectedScope: scope, selectedCwd: cwd ?? null, detailLoading: true, dirty: false })
     try {
-      const detail = await fetchAgent(name)
+      const detail = await fetchAgent(scope, cwd, name)
       set({ detail, formDraft: detailToDraft(detail) })
     } catch (e) {
       console.error('Failed to load agent detail:', e)
@@ -124,22 +140,43 @@ const useSubagentsStore = create((set, get) => ({
   },
 
   clearSelection: () =>
-    set({ selectedName: null, detail: null, formDraft: null, dirty: false, testEvents: [] }),
+    set({ selectedName: null, selectedScope: null, selectedCwd: null, detail: null, formDraft: null, dirty: false, testEvents: [] }),
 
-  startNewAgent: () => {
+  // --- Scope picker → new-agent flow (choose user/project before the editor) ---
+  openScopePicker: (template = null) => set({ scopePickerOpen: true, scopePickerTemplate: template }),
+  closeScopePicker: () => set({ scopePickerOpen: false, scopePickerTemplate: null }),
+  chooseScope: (scope, cwd = null) => {
+    const template = get().scopePickerTemplate
+    set({ scopePickerOpen: false, scopePickerTemplate: null })
+    if (template) get().startFromTemplate(template, scope, cwd)
+    else get().startNewAgent(scope, cwd)
+  },
+
+  startNewAgent: (scope = 'project', cwd = null) => {
     set({
       selectedName: null,
+      selectedScope: null,
+      selectedCwd: null,
       detail: null,
-      formDraft: { ...emptyDraft() },
+      formDraft: { ...emptyDraft(), scope, cwd: scope === 'project' ? (cwd ?? null) : null },
       dirty: false,
     })
   },
 
-  startFromTemplate: (template) => {
+  startFromTemplate: (template, scope = 'project', cwd = null) => {
     set({
       selectedName: null,
+      selectedScope: null,
+      selectedCwd: null,
       detail: null,
-      formDraft: { ...emptyDraft(), ...template, __mode: 'create', __originalName: null },
+      formDraft: {
+        ...emptyDraft(),
+        ...template,
+        scope,
+        cwd: scope === 'project' ? (cwd ?? null) : null,
+        __mode: 'create',
+        __originalName: null,
+      },
       dirty: true,
     })
   },
@@ -179,20 +216,24 @@ const useSubagentsStore = create((set, get) => ({
     if (!formDraft) return null
 
     const body = draftToBody(formDraft)
+    const scope = formDraft.scope || 'project'
+    const cwd = scope === 'project' ? (formDraft.cwd ?? null) : null
     let detail = null
     if (formDraft.__mode === 'create') {
-      detail = await createAgentApi(body)
+      detail = await createAgentApi({ ...body, scope, cwd })
     } else {
       const updateBody = { ...body }
       if (formDraft.name !== formDraft.__originalName) {
         updateBody.new_name = formDraft.name
       }
-      detail = await updateAgentApi(formDraft.__originalName, updateBody)
+      detail = await updateAgentApi(scope, cwd, formDraft.__originalName, updateBody)
     }
 
     set({
       detail,
       selectedName: detail.name,
+      selectedScope: detail.scope || scope,
+      selectedCwd: detail.cwd ?? null,
       formDraft: detailToDraft(detail),
       dirty: false,
     })
@@ -201,20 +242,29 @@ const useSubagentsStore = create((set, get) => ({
   },
 
   deleteSelected: async () => {
-    const { selectedName } = get()
+    const { selectedName, selectedScope, selectedCwd } = get()
     if (!selectedName) return
-    await deleteAgentApi(selectedName)
-    set({ selectedName: null, detail: null, formDraft: null, dirty: false })
+    await deleteAgentApi(selectedScope, selectedCwd, selectedName)
+    set({
+      selectedName: null,
+      selectedScope: null,
+      selectedCwd: null,
+      detail: null,
+      formDraft: null,
+      dirty: false,
+    })
     await get().loadList()
   },
 
   runTest: (prompt) => {
-    const { selectedName, testAbort } = get()
+    const { selectedName, selectedScope, selectedCwd, testAbort } = get()
     if (!selectedName) return
     if (testAbort) testAbort.abort?.()
 
     set({ testRunning: true, testEvents: [] })
     const abort = streamAgentTest(
+      selectedScope,
+      selectedCwd,
       selectedName,
       prompt,
       (event, data) => {
@@ -240,9 +290,13 @@ const useSubagentsStore = create((set, get) => ({
       list: [],
       listLoading: false,
       selectedName: null,
+      selectedScope: null,
+      selectedCwd: null,
       detail: null,
       formDraft: null,
       dirty: false,
+      scopePickerOpen: false,
+      scopePickerTemplate: null,
       testRunning: false,
       testEvents: [],
       testAbort: null,

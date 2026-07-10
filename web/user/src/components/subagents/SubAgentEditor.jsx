@@ -1,5 +1,5 @@
 import { useId, useState, useMemo } from 'react'
-import { Save, RotateCcw, Trash2, ChevronDown, AlertCircle } from 'lucide-react'
+import { Save, RotateCcw, Trash2, ChevronDown, AlertCircle, UsersRound, FolderGit2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSubagentsStore from '../../stores/subagentsStore'
 import useUiStore from '@shared/stores/uiStore'
@@ -53,6 +53,36 @@ const inputStyle = {
   fontSize: 13,
   height: 30,
   outline: 'none',
+}
+
+function shortCwd(p) {
+  if (!p) return '~'
+  const parts = String(p).split('/').filter(Boolean)
+  return parts.length ? parts[parts.length - 1] : p
+}
+
+// Read-only pill showing where the agent lives: USER (~/.claude/agents, green) or
+// a project workdir ({cwd}/.claude/agents, blue). Scope is fixed at creation.
+function ScopeBadge({ scope, cwd }) {
+  const { t } = useTranslation()
+  const isUser = (scope || 'project') === 'user'
+  const color = isUser ? 'var(--green)' : 'var(--blue)'
+  const Icon = isUser ? UsersRound : FolderGit2
+  const label = isUser ? t('subagents.user') : shortCwd(cwd)
+  return (
+    <span
+      className="inline-flex items-center gap-1 flex-shrink-0 px-1"
+      title={isUser ? '~/.claude/agents' : (cwd || '~/.claude/agents')}
+      style={{
+        fontSize: 10, fontWeight: 600, letterSpacing: '0.06em',
+        color, border: `1px solid ${color}`, borderRadius: 2,
+        height: 18, textTransform: 'uppercase',
+      }}
+    >
+      <Icon size={11} strokeWidth={1.5} />
+      <span className="truncate" style={{ maxWidth: 160 }}>{label}</span>
+    </span>
+  )
 }
 
 export default function SubAgentEditor() {
@@ -145,9 +175,12 @@ export default function SubAgentEditor() {
         className="flex items-center gap-3 px-4 flex-shrink-0"
         style={{ height: 48, borderBottom: '1px solid var(--border-subtle)' }}
       >
-        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>
-          {isEditMode ? draft.__originalName : t('subagents.newAgent')}
-        </span>
+        <div className="flex items-center gap-2" style={{ flex: 1, minWidth: 0 }}>
+          <span className="truncate" style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', minWidth: 0 }}>
+            {isEditMode ? draft.__originalName : t('subagents.newAgent')}
+          </span>
+          <ScopeBadge scope={draft.scope} cwd={draft.cwd} />
+        </div>
 
         <button
           onClick={handleSave}

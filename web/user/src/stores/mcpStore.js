@@ -8,10 +8,9 @@ const useMcpStore = create((set, get) => ({
   serversLoading: true,
   serversLoaded: false,
   searchQuery: '',
-  levelFilter: 'all', // 'all' | 'project' | 'global'
 
   // Selected server
-  selectedServer: null, // { level, name }
+  selectedServer: null, // { level, name, cwd }
   serverDetail: null,
   detailLoading: false,
 
@@ -24,15 +23,22 @@ const useMcpStore = create((set, get) => ({
   // Selected tool (for tool drawer)
   selectedTool: null, // tool object from capabilities
 
+  // List column width (persisted) — content-only left column
+  listWidth: safeStorage.getNumber('mcp-list-width', 280, { min: 220, max: 420 }),
+
   // Meta panel width (persisted)
   metaPanelWidth: safeStorage.getNumber('mcp-meta-width', 320, { min: 240, max: 480 }),
 
   // Tool drawer width (persisted)
   toolDrawerWidth: safeStorage.getNumber('mcp-tool-drawer-width', 360, { min: 280, max: 600 }),
 
+  // Add-server scope picker (chooses project vs global before the form, like Skills)
+  scopePickerOpen: false,
+
   // Add/edit dialog
   addDialogOpen: false,
   addDialogLevel: 'project',
+  addDialogCwd: null, // workdir for a project server being added (null = default workspace / global)
   editMode: false,
   editInitialData: null,
   validating: false,
@@ -49,30 +55,30 @@ const useMcpStore = create((set, get) => ({
     }
   },
 
-  selectServer: async (level, name) => {
+  selectServer: async (level, name, cwd = null) => {
     set({
-      selectedServer: { level, name },
+      selectedServer: { level, name, cwd: cwd ?? null },
       detailLoading: true,
       capabilities: null,
       capabilitiesError: null,
       selectedTool: null,
     })
     try {
-      const detail = await mcpApi.getMcpServerDetail(level, name)
+      const detail = await mcpApi.getMcpServerDetail(level, name, cwd)
       set({ serverDetail: detail, detailLoading: false })
       // Auto-load capabilities
-      get().fetchCapabilities(level, name)
+      get().fetchCapabilities(level, name, cwd)
     } catch {
       set({ detailLoading: false })
     }
   },
 
-  fetchCapabilities: async (level, name) => {
-    const target = level && name ? { level, name } : get().selectedServer
+  fetchCapabilities: async (level, name, cwd = null) => {
+    const target = level && name ? { level, name, cwd } : get().selectedServer
     if (!target) return
     set({ capabilitiesLoading: true, capabilitiesError: null })
     try {
-      const caps = await mcpApi.getMcpServerCapabilities(target.level, target.name)
+      const caps = await mcpApi.getMcpServerCapabilities(target.level, target.name, target.cwd)
       set({ capabilities: caps, capabilitiesLoading: false })
     } catch (e) {
       set({ capabilitiesLoading: false, capabilitiesError: e.message || 'Failed to load capabilities' })
@@ -85,20 +91,20 @@ const useMcpStore = create((set, get) => ({
     return result
   },
 
-  updateServer: async (level, name, data) => {
-    const result = await mcpApi.updateMcpServer(level, name, data)
+  updateServer: async (level, name, cwd, data) => {
+    const result = await mcpApi.updateMcpServer(level, name, cwd, data)
     const { selectedServer } = get()
-    if (selectedServer?.level === level && selectedServer?.name === name) {
+    if (selectedServer?.level === level && selectedServer?.name === name && (selectedServer?.cwd || null) === (cwd || null)) {
       set({ serverDetail: result })
     }
     get().fetchServers()
     return result
   },
 
-  deleteServer: async (level, name) => {
-    await mcpApi.deleteMcpServer(level, name)
+  deleteServer: async (level, name, cwd) => {
+    await mcpApi.deleteMcpServer(level, name, cwd)
     const { selectedServer } = get()
-    if (selectedServer?.level === level && selectedServer?.name === name) {
+    if (selectedServer?.level === level && selectedServer?.name === name && (selectedServer?.cwd || null) === (cwd || null)) {
       set({ selectedServer: null, serverDetail: null, capabilities: null })
     }
     get().fetchServers()
@@ -137,10 +143,13 @@ const useMcpStore = create((set, get) => ({
 
   // UI state setters
   setSearchQuery: (q) => set({ searchQuery: q }),
-  setLevelFilter: (f) => set({ levelFilter: f }),
   setActiveDetailTab: (t) => set({ activeDetailTab: t }),
   selectTool: (tool) => set({ selectedTool: tool }),
   closeTool: () => set({ selectedTool: null }),
+  setListWidth: (w) => {
+    safeStorage.setItem('mcp-list-width', String(w))
+    set({ listWidth: w })
+  },
   setToolDrawerWidth: (w) => {
     safeStorage.setItem('mcp-tool-drawer-width', String(w))
     set({ toolDrawerWidth: w })
@@ -150,9 +159,14 @@ const useMcpStore = create((set, get) => ({
     set({ metaPanelWidth: w })
   },
 
-  openAddDialog: (level) => set({
+  openScopePicker: () => set({ scopePickerOpen: true }),
+  closeScopePicker: () => set({ scopePickerOpen: false }),
+
+  openAddDialog: (level, cwd = null) => set({
+    scopePickerOpen: false,
     addDialogOpen: true,
     addDialogLevel: level || 'project',
+    addDialogCwd: cwd ?? null,
     editMode: false,
     editInitialData: null,
     validateResult: null,
@@ -162,6 +176,7 @@ const useMcpStore = create((set, get) => ({
   openEditDialog: (detail) => set({
     addDialogOpen: true,
     addDialogLevel: detail.level,
+    addDialogCwd: detail.cwd ?? null,
     editMode: true,
     editInitialData: detail,
     validateResult: null,
@@ -185,10 +200,11 @@ const useMcpStore = create((set, get) => ({
   }),
 
   reset: () => set({
-    servers: [], serversLoading: true, serversLoaded: false, searchQuery: '', levelFilter: 'all',
+    servers: [], serversLoading: true, serversLoaded: false, searchQuery: '',
     selectedServer: null, serverDetail: null, detailLoading: false,
     capabilities: null, capabilitiesLoading: false, capabilitiesError: null,
     activeDetailTab: 'tools', selectedTool: null,
+    scopePickerOpen: false,
     addDialogOpen: false, validating: false, validateResult: null,
     editMode: false, editInitialData: null,
   }),

@@ -63,12 +63,21 @@ VALID_PERMISSION_MODES = {
 VALID_MEMORY_MODES = {"none", "user", "project", "local"}
 
 
-def _agents_dir(username: str) -> Path:
-    """Return the per-user .claude/agents/ directory, creating on demand."""
-    base = get_user_workspace(_fake_user_record(username))
-    path = Path(base) / ".claude" / "agents"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def _agents_dir(username: str, scope: str = "project", cwd: str | None = None) -> Path:
+    """Resolve a (scope, cwd) pair to its .claude/agents directory (no mkdir).
+
+    - scope "user"    -> ~/.claude/agents
+    - scope "project" -> {cwd}/.claude/agents  (cwd=None -> default workspace)
+    """
+    if scope == "user":
+        return Path.home() / ".claude" / "agents"
+    if cwd:
+        if not os.path.isabs(cwd):
+            raise HTTPException(400, "An absolute 'cwd' is required for project subagents")
+        base = cwd
+    else:
+        base = get_user_workspace(_fake_user_record(username))
+    return Path(base).expanduser() / ".claude" / "agents"
 
 
 def _fake_user_record(username: str):
@@ -152,7 +161,7 @@ def _normalize_list_value(value: Any) -> list[str]:
     return []
 
 
-def _parse_agent_md(path: Path) -> SubAgentDetail:
+def _parse_agent_md(path: Path, scope: str = "project", cwd: str | None = None) -> SubAgentDetail:
     if not path.exists() or not path.is_file():
         raise HTTPException(404, f"Agent file not found: {path.name}")
     text = path.read_text(encoding="utf-8")
@@ -183,6 +192,8 @@ def _parse_agent_md(path: Path) -> SubAgentDetail:
     return SubAgentDetail(
         name=str(name),
         description=str(description),
+        scope=scope,
+        cwd=cwd,
         prompt=body,
         tools=raw_tools,
         disallowedTools=raw_disallowed,
@@ -226,43 +237,54 @@ def _serialize_agent_md(detail: SubAgentDetail) -> str:
     return f"---\n{fm_text}\n---\n\n{body}\n"
 
 
-def _detail_path(username: str, name: str) -> Path:
-    base = _agents_dir(username)
+def _detail_path(username: str, scope: str, cwd: str | None, name: str) -> Path:
+    base = _agents_dir(username, scope, cwd)
     return _safe_resolve(base, f"{name}.md")
 
 
-def list_agents(username: str) -> SubAgentListResponse:
-    base = _agents_dir(username)
+def _scan_agents_dir(base: Path, scope: str, cwd: str | None) -> list[SubAgentSummary]:
     items: list[SubAgentSummary] = []
     if not base.exists():
-        return SubAgentListResponse(agents=items)
-
+        return items
     for entry in sorted(base.iterdir()):
         if not entry.is_file() or entry.suffix != ".md":
             continue
         try:
-            detail = _parse_agent_md(entry)
+            detail = _parse_agent_md(entry, scope, cwd)
         except HTTPException:
             logger.warning("Failed to parse agent file: {}", entry)
             continue
-
         items.append(
             SubAgentSummary(
                 name=detail.name,
                 description=detail.description,
                 model=detail.model,
                 tools_count=len(detail.tools or []),
+                scope=scope,
+                cwd=cwd,
             )
         )
+    return items
+
+
+def list_agents(username: str) -> SubAgentListResponse:
+    """All subagents for the user: user scope (~/.claude/agents) + one group per
+    project workdir ({cwd}/.claude/agents). Flat list; each item carries scope+cwd."""
+    from .mcp.config_manager import list_user_workdirs
+
+    items: list[SubAgentSummary] = []
+    items.extend(_scan_agents_dir(_agents_dir(username, "user", None), "user", None))
+    for cwd in list_user_workdirs(username):
+        items.extend(_scan_agents_dir(_agents_dir(username, "project", cwd), "project", cwd))
     return SubAgentListResponse(agents=items)
 
 
-def get_agent(username: str, name: str) -> SubAgentDetail:
+def get_agent(username: str, scope: str, cwd: str | None, name: str) -> SubAgentDetail:
     _validate_agent_name(name)
-    path = _detail_path(username, name)
+    path = _detail_path(username, scope, cwd, name)
     if not path.exists():
         raise HTTPException(404, f"Agent '{name}' not found")
-    return _parse_agent_md(path)
+    return _parse_agent_md(path, scope, cwd)
 
 
 def _validate_full(detail: SubAgentDetail) -> None:
@@ -279,6 +301,8 @@ def create_agent(username: str, req: SubAgentCreateRequest) -> SubAgentDetail:
     detail = SubAgentDetail(
         name=req.name,
         description=req.description,
+        scope=req.scope,
+        cwd=req.cwd,
         prompt=req.prompt or "",
         tools=req.tools or [],
         disallowedTools=req.disallowedTools or [],
@@ -292,7 +316,7 @@ def create_agent(username: str, req: SubAgentCreateRequest) -> SubAgentDetail:
     )
     _validate_full(detail)
 
-    path = _detail_path(username, detail.name)
+    path = _detail_path(username, req.scope, req.cwd, detail.name)
     if path.exists():
         raise HTTPException(409, f"Agent '{detail.name}' already exists")
 
@@ -301,9 +325,9 @@ def create_agent(username: str, req: SubAgentCreateRequest) -> SubAgentDetail:
     return detail
 
 
-def update_agent(username: str, name: str, req: SubAgentUpdateRequest) -> SubAgentDetail:
+def update_agent(username: str, scope: str, cwd: str | None, name: str, req: SubAgentUpdateRequest) -> SubAgentDetail:
     _validate_agent_name(name)
-    existing = get_agent(username, name)
+    existing = get_agent(username, scope, cwd, name)
 
     new_name = req.new_name or existing.name
     if new_name != existing.name:
@@ -312,6 +336,8 @@ def update_agent(username: str, name: str, req: SubAgentUpdateRequest) -> SubAge
     merged = SubAgentDetail(
         name=new_name,
         description=req.description if req.description is not None else existing.description,
+        scope=scope,
+        cwd=cwd,
         prompt=req.prompt if req.prompt is not None else existing.prompt,
         tools=req.tools if req.tools is not None else existing.tools,
         disallowedTools=req.disallowedTools if req.disallowedTools is not None else existing.disallowedTools,
@@ -325,8 +351,8 @@ def update_agent(username: str, name: str, req: SubAgentUpdateRequest) -> SubAge
     )
     _validate_full(merged)
 
-    old_path = _detail_path(username, name)
-    new_path = _detail_path(username, new_name)
+    old_path = _detail_path(username, scope, cwd, name)
+    new_path = _detail_path(username, scope, cwd, new_name)
     if new_name != existing.name:
         if new_path.exists():
             raise HTTPException(409, f"Agent '{new_name}' already exists")
@@ -336,9 +362,9 @@ def update_agent(username: str, name: str, req: SubAgentUpdateRequest) -> SubAge
     return merged
 
 
-def delete_agent(username: str, name: str) -> None:
+def delete_agent(username: str, scope: str, cwd: str | None, name: str) -> None:
     _validate_agent_name(name)
-    path = _detail_path(username, name)
+    path = _detail_path(username, scope, cwd, name)
     if not path.exists():
         raise HTTPException(404, f"Agent '{name}' not found")
     path.unlink()
@@ -378,7 +404,9 @@ def get_catalog(username: str) -> SubAgentCatalogResponse:
     try:
         from .mcp.config_manager import McpConfigManager
         mgr = McpConfigManager(username)
-        mcp_names = sorted({name for name, _cfg, _level in mgr.read_all_servers()})
+        names = {n for _cwd, servers in mgr.read_project_groups() for n in servers}
+        names.update(mgr.read_global_servers().keys())
+        mcp_names = sorted(names)
     except Exception:
         logger.warning("Failed to load MCP servers for subagent catalog", exc_info=True)
 

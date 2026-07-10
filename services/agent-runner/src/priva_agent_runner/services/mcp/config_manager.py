@@ -21,6 +21,34 @@ def _get_work_dir() -> Path:
     return Path(settings.server.work_dir).expanduser()
 
 
+def _default_workspace(username: str) -> str:
+    return str(_get_work_dir() / username)
+
+
+def list_user_workdirs(username: str) -> list[str]:
+    """Distinct session cwds ∪ the user's default workspace, in stable order.
+
+    Mirrors the skills service so the MCP panel groups project servers by the
+    same set of known project directories the rest of the app uses.
+    """
+    cwds: list[str] = []
+    seen: set[str] = set()
+    default_ws = _default_workspace(username)
+    cwds.append(default_ws)
+    seen.add(default_ws)
+    try:
+        from claude_agent_sdk import list_sessions
+
+        for s in list_sessions(directory=None):
+            cwd = getattr(s, "cwd", None)
+            if cwd and cwd not in seen:
+                seen.add(cwd)
+                cwds.append(cwd)
+    except Exception:
+        logger.warning("list_sessions failed during MCP workdir enumeration", exc_info=True)
+    return cwds
+
+
 def _read_json(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -53,42 +81,58 @@ class McpConfigManager:
 
     def __init__(self, username: str) -> None:
         self.username = username
-        self._project_path = _get_work_dir() / username / ".mcp.json"
+        self._default_project_path = _get_work_dir() / username / ".mcp.json"
         self._global_path = GLOBAL_SETTINGS_PATH
 
-    # ── Project-level (per-user workspace) ──
+    # ── Project-level (per-workdir {cwd}/.mcp.json) ──
 
-    def read_project_servers(self) -> dict[str, dict]:
-        data = _read_json(self._project_path)
+    def _project_path(self, cwd: str | None) -> Path:
+        """Path to a workdir's ``.mcp.json``. ``cwd=None`` -> default workspace."""
+        if cwd:
+            return Path(cwd).expanduser() / ".mcp.json"
+        return self._default_project_path
+
+    def read_project_servers(self, cwd: str | None = None) -> dict[str, dict]:
+        data = _read_json(self._project_path(cwd))
         servers = data.get("mcpServers", {})
         return servers if isinstance(servers, dict) else {}
 
-    def write_project_servers(self, servers: dict[str, dict]) -> None:
+    def write_project_servers(self, cwd: str | None, servers: dict[str, dict]) -> None:
         # Preserve existing non-mcpServers keys
-        existing = _read_json(self._project_path)
+        path = self._project_path(cwd)
+        existing = _read_json(path)
         existing["mcpServers"] = servers
-        _write_json(self._project_path, existing)
+        _write_json(path, existing)
 
-    def add_project_server(self, name: str, config: dict) -> None:
-        servers = self.read_project_servers()
+    def add_project_server(self, cwd: str | None, name: str, config: dict) -> None:
+        servers = self.read_project_servers(cwd)
         servers[name] = config
-        self.write_project_servers(servers)
+        self.write_project_servers(cwd, servers)
 
-    def update_project_server(self, name: str, updates: dict) -> dict | None:
-        servers = self.read_project_servers()
+    def update_project_server(self, cwd: str | None, name: str, updates: dict) -> dict | None:
+        servers = self.read_project_servers(cwd)
         if name not in servers:
             return None
         servers[name].update({k: v for k, v in updates.items() if v is not None})
-        self.write_project_servers(servers)
+        self.write_project_servers(cwd, servers)
         return servers[name]
 
-    def delete_project_server(self, name: str) -> bool:
-        servers = self.read_project_servers()
+    def delete_project_server(self, cwd: str | None, name: str) -> bool:
+        servers = self.read_project_servers(cwd)
         if name not in servers:
             return False
         del servers[name]
-        self.write_project_servers(servers)
+        self.write_project_servers(cwd, servers)
         return True
+
+    def read_project_groups(self) -> list[tuple[str, dict[str, dict]]]:
+        """[(cwd, {name: config}), ...] for each known workdir that has servers."""
+        groups: list[tuple[str, dict[str, dict]]] = []
+        for cwd in list_user_workdirs(self.username):
+            servers = self.read_project_servers(cwd)
+            if servers:
+                groups.append((cwd, servers))
+        return groups
 
     # ── Global-level (~/.claude/settings.json .mcpServers) ──
 
@@ -125,15 +169,16 @@ class McpConfigManager:
 
     # ── Merged view ──
 
-    def read_all_servers(self) -> list[tuple[str, dict, str]]:
-        """Return [(name, config, level), ...] merging project and global.
+    def read_all_servers(self, cwd: str | None = None) -> list[tuple[str, dict, str]]:
+        """Return [(name, config, level), ...] merging a workdir's project servers
+        and global. ``cwd=None`` uses the default workspace.
 
         Project servers take precedence over global servers with the same name.
         """
         result: list[tuple[str, dict, str]] = []
         seen: set[str] = set()
 
-        for name, config in self.read_project_servers().items():
+        for name, config in self.read_project_servers(cwd).items():
             result.append((name, config, "project"))
             seen.add(name)
 
@@ -146,10 +191,11 @@ class McpConfigManager:
     # ── For agent options ──
 
     def build_mcp_dict(
-        self, filter_names: list[str] | None = None
+        self, cwd: str | None = None, filter_names: list[str] | None = None
     ) -> dict[str, Any]:
         """Build the dict suitable for ClaudeAgentOptions.mcp_servers.
 
+        - cwd -> the session workdir whose project servers apply (None = default)
         - filter_names=None -> all servers
         - filter_names=[] -> empty dict (disable all)
         - filter_names=["A","B"] -> only those servers
@@ -157,7 +203,7 @@ class McpConfigManager:
         if filter_names is not None and len(filter_names) == 0:
             return {}
 
-        all_servers = self.read_all_servers()
+        all_servers = self.read_all_servers(cwd)
         result: dict[str, Any] = {}
 
         for name, config, _level in all_servers:

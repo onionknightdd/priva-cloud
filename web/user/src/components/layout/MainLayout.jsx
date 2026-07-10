@@ -16,6 +16,12 @@ const DataUsageView = lazyWithChunkReload(() => import('../userdata/DataUsageVie
 const PluginsView = lazyWithChunkReload(() => import('../plugins/PluginsView'))
 const WebTerminalDrawer = lazyWithChunkReload(() => import('../terminal/WebTerminalDrawer'))
 
+// Plugin sections whose panel draws its own back-button + title header
+// (content-only views like Skills/MCP). The generic ContentOverlay header is
+// suppressed for these; placeholder sections (e.g. memory) still get it so
+// there's a way back. Add each section here as it's converted to content-only.
+const SELF_HEADERED_PLUGIN_SECTIONS = new Set(['skills', 'mcp', 'hooks', 'subagents'])
+
 function LazyPanel({ children }) {
   return (
     <Suspense fallback={<div className="flex-1" style={{ background: 'var(--bg-base)' }} />}>
@@ -107,7 +113,7 @@ export default function MainLayout() {
   // area swaps between the chat view, Data & Usage, and Plugins/Customize.
   const isData = activeNavTab === 'userdata'
   const isPlugins = activeNavTab === 'plugins'
-  const isSkillsPlugin = isPlugins && activePluginSection === 'skills'
+  const selfHeaderedPlugin = isPlugins && SELF_HEADERED_PLUGIN_SECTIONS.has(activePluginSection)
   const splitActive = panes.length > 0
   const backToSessionsTitle = t('split.backToSessions', { defaultValue: '返回 session view' })
   const backToSessions = () => setActiveNavTab('priva')
@@ -192,7 +198,7 @@ export default function MainLayout() {
           <ContentOverlay
             title={backToSessionsTitle}
             onBack={backToSessions}
-            showHeader={!isSkillsPlugin}
+            showHeader={!selfHeaderedPlugin}
           >
             <LazyPanel><PluginsView backTitle={backToSessionsTitle} onBack={backToSessions} /></LazyPanel>
           </ContentOverlay>

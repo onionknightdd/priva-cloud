@@ -1,58 +1,17 @@
 import { useTranslation } from 'react-i18next'
-import { Zap, Wrench, Bot, Bell } from 'lucide-react'
 import useHooksStore from '../../stores/hooksStore'
 import { HOOK_DEFINITIONS, HOOK_GROUPS, PHASE_COLORS } from '../../data/hookDefinitions'
 import Chip from '@shared/components/shared/Chip'
 
-const PHASE_ICONS = {
-  session: Zap,
-  tool: Wrench,
-  agent: Bot,
-  misc: Bell,
-}
-
 const hookMap = Object.fromEntries(HOOK_DEFINITIONS.map(h => [h.id, h]))
 
-export default function HooksSidebar({ collapsed }) {
+// Hook-event list column for the content-only Hooks view — events grouped by
+// lifecycle phase (session / tool / agent / misc).
+export default function HooksSidebar() {
   const { t } = useTranslation()
   const selectedHookId = useHooksStore((s) => s.selectedHookId)
   const selectHook = useHooksStore((s) => s.selectHook)
   const configuredHooks = useHooksStore((s) => s.configuredHooks)
-
-  if (collapsed) {
-    const selectedHook = selectedHookId ? hookMap[selectedHookId] : null
-    return (
-      <>
-        {HOOK_GROUPS.map((group) => {
-          const Icon = PHASE_ICONS[group.id]
-          const isActivePhase = selectedHook?.phase === group.id
-          return (
-            <button
-              key={group.id}
-              style={{
-                width: 32,
-                height: 32,
-                background: 'transparent',
-                border: 'none',
-                borderLeft: isActivePhase ? '2px solid var(--blue)' : '2px solid transparent',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                color: isActivePhase ? 'var(--text-primary)' : 'var(--text-dim)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'color 150ms ease',
-              }}
-              title={t(group.labelKey)}
-              onClick={() => selectHook(group.hookIds[0])}
-            >
-              <Icon size={14} strokeWidth={1.5} />
-            </button>
-          )
-        })}
-      </>
-    )
-  }
 
   return (
     <div className="flex-1 overflow-y-auto py-1">

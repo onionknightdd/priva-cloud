@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, Plus, Check, AlertCircle, Loader } from 'lucide-react'
+import { X, Plus, Check, AlertCircle, Loader, FolderGit2, Globe } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Dropdown from '@shared/components/shared/Dropdown'
 import useMcpStore from '../../stores/mcpStore'
@@ -13,6 +13,7 @@ export default function MCPAddDialog() {
   const validating = useMcpStore((s) => s.validating)
   const validateResult = useMcpStore((s) => s.validateResult)
   const addDialogLevel = useMcpStore((s) => s.addDialogLevel)
+  const addDialogCwd = useMcpStore((s) => s.addDialogCwd)
   const editMode = useMcpStore((s) => s.editMode)
   const editInitialData = useMcpStore((s) => s.editInitialData)
 
@@ -46,6 +47,11 @@ export default function MCPAddDialog() {
     setHeaders(updated)
   }
 
+  // The scope this server belongs to — chosen in the picker (create) or fixed
+  // by the server being edited. Surfaced as a badge (+ project path) in the header.
+  const level = editMode ? editInitialData?.level : addDialogLevel
+  const cwd = editMode ? editInitialData?.cwd : addDialogCwd
+
   const isTestPassed = validateResult?.success === true
   const canSubmit = name.trim() && url.trim() && (editMode || isTestPassed) && !submitting
 
@@ -64,7 +70,7 @@ export default function MCPAddDialog() {
     try {
       const headersPayload = headers.filter((h) => h.key.trim())
       if (editMode && editInitialData) {
-        await updateServer(editInitialData.level, editInitialData.name, {
+        await updateServer(editInitialData.level, editInitialData.name, editInitialData.cwd, {
           type, url, headers: headersPayload, timeout,
         })
       } else {
@@ -72,6 +78,7 @@ export default function MCPAddDialog() {
           name: name.trim(),
           type, url, headers: headersPayload, timeout,
           level: addDialogLevel,
+          cwd: addDialogLevel === 'project' ? addDialogCwd : null,
         })
       }
       closeAddDialog()
@@ -104,9 +111,19 @@ export default function MCPAddDialog() {
           className="flex items-center justify-between px-4 py-3"
           style={{ borderBottom: '1px solid var(--border-subtle)' }}
         >
-          <span className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 14 }}>
-            {editMode ? t('mcp.editServer') : t('mcp.addServer')}
-          </span>
+          <div className="flex flex-col min-w-0" style={{ gap: 2 }}>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-semibold truncate" style={{ color: 'var(--text-primary)', fontSize: 14 }}>
+                {editMode ? t('mcp.editServer') : t('mcp.addServer')}
+              </span>
+              {level && <ScopeBadge level={level} label={level === 'global' ? t('mcp.global') : t('mcp.project')} />}
+            </div>
+            {level === 'project' && cwd && (
+              <span className="truncate" style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace" }}>
+                {cwd}
+              </span>
+            )}
+          </div>
           <button
             style={{
               background: 'transparent', border: 'none', cursor: 'pointer',
@@ -360,6 +377,24 @@ export default function MCPAddDialog() {
         }
       `}</style>
     </div>
+  )
+}
+
+function ScopeBadge({ level, label }) {
+  const isGlobal = level === 'global'
+  const color = isGlobal ? 'var(--green)' : 'var(--blue)'
+  const Icon = isGlobal ? Globe : FolderGit2
+  return (
+    <span
+      className="inline-flex items-center gap-1 uppercase flex-shrink-0 px-1"
+      style={{
+        fontSize: 10, fontWeight: 600, letterSpacing: '0.06em',
+        color, border: `1px solid ${color}`, borderRadius: 2, lineHeight: '16px',
+      }}
+    >
+      <Icon size={11} strokeWidth={1.5} />
+      {label}
+    </span>
   )
 }
 

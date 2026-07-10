@@ -76,8 +76,7 @@ const TEMPLATES = [
 
 export default function SubAgentEmptyState() {
   const { t } = useTranslation()
-  const startNewAgent = useSubagentsStore((s) => s.startNewAgent)
-  const startFromTemplate = useSubagentsStore((s) => s.startFromTemplate)
+  const openScopePicker = useSubagentsStore((s) => s.openScopePicker)
 
   return (
     <div
@@ -99,7 +98,7 @@ export default function SubAgentEmptyState() {
           {TEMPLATES.map(({ id, icon: Icon, template }) => (
             <button
               key={id}
-              onClick={() => startFromTemplate(template)}
+              onClick={() => openScopePicker(template)}
               className="flex flex-col items-start gap-2 p-4"
               style={{
                 background: 'var(--bg-surface)',
@@ -132,7 +131,7 @@ export default function SubAgentEmptyState() {
         </div>
 
         <button
-          onClick={startNewAgent}
+          onClick={() => openScopePicker()}
           className="px-3"
           style={{
             background: 'transparent',

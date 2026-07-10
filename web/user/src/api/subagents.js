@@ -2,31 +2,41 @@ import { sandboxGet, sandboxRead, sandboxPost, sandboxPut, sandboxDelete, getAut
 
 const BASE_URL = '/api/sandbox'
 
+// Subagents are keyed by (scope, cwd, name). scope 'user' or 'project'; cwd only
+// meaningful for project scope. These ride as query params on the item endpoints.
+const scopeQuery = (scope, cwd) => {
+  const params = new URLSearchParams()
+  if (scope) params.set('scope', scope)
+  if (cwd) params.set('cwd', cwd)
+  const s = params.toString()
+  return s ? `?${s}` : ''
+}
+
 export const fetchAgents = () => sandboxGet('/subagents/list')
 
 // sandboxRead: detail carries the agent's full prompt body — can exceed the ~8KB EPP cap.
-export const fetchAgent = (name) =>
-  sandboxRead(`/subagents/${encodeURIComponent(name)}`)
+export const fetchAgent = (scope, cwd, name) =>
+  sandboxRead(`/subagents/${encodeURIComponent(name)}${scopeQuery(scope, cwd)}`)
 
 export const fetchCatalog = () => sandboxGet('/subagents/catalog')
 
 export const createAgent = (body) => sandboxPost('/subagents/', body)
 
-export const updateAgent = (name, body) =>
-  sandboxPut(`/subagents/${encodeURIComponent(name)}`, body)
+export const updateAgent = (scope, cwd, name, body) =>
+  sandboxPut(`/subagents/${encodeURIComponent(name)}${scopeQuery(scope, cwd)}`, body)
 
-export const deleteAgent = (name) =>
-  sandboxDelete(`/subagents/${encodeURIComponent(name)}`)
+export const deleteAgent = (scope, cwd, name) =>
+  sandboxDelete(`/subagents/${encodeURIComponent(name)}${scopeQuery(scope, cwd)}`)
 
 /**
  * Stream a one-shot test run against the named agent. Returns { abort } to cancel.
  */
-export function streamAgentTest(name, prompt, onEvent, onComplete) {
+export function streamAgentTest(scope, cwd, name, prompt, onEvent, onComplete) {
   const controller = new AbortController()
 
   const run = async () => {
     const res = await fetch(
-      `${BASE_URL}/subagents/${encodeURIComponent(name)}/test/stream`,
+      `${BASE_URL}/subagents/${encodeURIComponent(name)}/test/stream${scopeQuery(scope, cwd)}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },

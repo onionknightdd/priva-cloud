@@ -4,7 +4,7 @@ import asyncio
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from priva_common.logging import get_app_logger
@@ -45,8 +45,13 @@ async def list_subagents(user: UserRecord = Depends(require_user)):
 
 
 @router.get("/{name}", response_model=SubAgentDetail)
-async def get_subagent(name: str, user: UserRecord = Depends(require_user)):
-    return get_agent(user.username, name)
+async def get_subagent(
+    name: str,
+    scope: str = Query("project"),
+    cwd: str | None = Query(None),
+    user: UserRecord = Depends(require_user),
+):
+    return get_agent(user.username, scope, cwd, name)
 
 
 @router.post("/", response_model=SubAgentDetail)
@@ -70,9 +75,11 @@ async def create_subagent(
 async def update_subagent(
     name: str,
     request: SubAgentUpdateRequest,
+    scope: str = Query("project"),
+    cwd: str | None = Query(None),
     user: UserRecord = Depends(require_user),
 ):
-    detail = update_agent(user.username, name, request)
+    detail = update_agent(user.username, scope, cwd, name, request)
     audit = get_audit_logger()
 
     if request.new_name and request.new_name != name:
@@ -97,8 +104,13 @@ async def update_subagent(
 
 
 @router.delete("/{name}")
-async def delete_subagent(name: str, user: UserRecord = Depends(require_user)):
-    delete_agent(user.username, name)
+async def delete_subagent(
+    name: str,
+    scope: str = Query("project"),
+    cwd: str | None = Query(None),
+    user: UserRecord = Depends(require_user),
+):
+    delete_agent(user.username, scope, cwd, name)
     get_audit_logger().append(
         AuditEntry(
             actor=user.username,
@@ -113,13 +125,17 @@ async def delete_subagent(name: str, user: UserRecord = Depends(require_user)):
 async def test_subagent_stream(
     name: str,
     request: SubAgentTestRequest,
+    scope: str = Query("project"),
+    cwd: str | None = Query(None),
     user: UserRecord = Depends(require_user),
 ):
     """Spawn a fresh agent run that delegates to the named subagent."""
     # Ensure the agent exists before opening the stream so 404s land cleanly.
-    get_agent(user.username, name)
+    get_agent(user.username, scope, cwd, name)
 
-    cwd = get_user_workspace(user)
+    # Run at the agent's project cwd so the CLI discovers project-scoped agents;
+    # user-scoped agents are found in ~/.claude/agents from any cwd.
+    run_cwd = cwd if (scope == "project" and cwd) else get_user_workspace(user)
     wrapped_prompt = f"Use the {name} agent to: {request.prompt}"
 
     get_audit_logger().append(
@@ -145,7 +161,7 @@ async def test_subagent_stream(
                 wrapped_prompt,
                 session_id=None,
                 permission_mode="bypassPermissions",
-                cwd=cwd,
+                cwd=run_cwd,
                 username=user.username,
                 emit=emit,
                 extra_allowed_tools=["Agent", "Task"],

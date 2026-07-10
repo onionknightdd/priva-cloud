@@ -46,7 +46,7 @@ export default function MCPServerMeta() {
       confirmLabel: t('sidebar.delete'),
       danger: true,
       requireText: selectedServer.name,
-      onConfirm: () => deleteServer(selectedServer.level, selectedServer.name),
+      onConfirm: () => deleteServer(selectedServer.level, selectedServer.name, selectedServer.cwd),
     })
   }
 
@@ -152,6 +152,14 @@ export default function MCPServerMeta() {
                 {serverDetail.level}
               </span>
             </MetaField>
+
+            {serverDetail.level === 'project' && serverDetail.cwd && (
+              <MetaField label={t('mcp.workdir')}>
+                <span className="break-words" style={{ color: 'var(--text-primary)', fontSize: 13, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace" }}>
+                  {serverDetail.cwd}
+                </span>
+              </MetaField>
+            )}
 
             {capabilities?.server_name && (
               <MetaField label={t('mcp.serverVersion')}>

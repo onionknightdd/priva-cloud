@@ -536,7 +536,7 @@ export default function FileManagerTab() {
 
 
   return (
-    <div className="flex flex-col" style={{ minHeight: 0, height: '100%' }}>
+    <div className="flex flex-col flex-1" style={{ minHeight: 0, minWidth: 0, height: '100%' }}>
       {/* Top bar: Breadcrumb + Path input */}
       <div
         className="flex items-center gap-2 px-4 py-2 flex-shrink-0"
@@ -880,7 +880,7 @@ export default function FileManagerTab() {
                     <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>{formatSize(preview.size)}</span>
                   </div>
                 ) : (
-                  <div className="flex flex-col items-center justify-center flex-1" style={{ color: 'var(--text-dim)', fontSize: 12 }}>
+                  <div className="flex flex-col items-center justify-center" style={{ color: 'var(--text-dim)', fontSize: 12, height: '100%' }}>
                     <FileText size={28} strokeWidth={1.5} style={{ color: 'var(--text-dim)', marginBottom: 8 }} />
                     <span>{t('settings.fileManagerSelectFile', 'Select a file to preview')}</span>
                   </div>

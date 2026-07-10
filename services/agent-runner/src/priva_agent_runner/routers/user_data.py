@@ -62,18 +62,26 @@ def _load_vision_model(username: str) -> str | None:
 def _load_mcp_servers(username: str) -> list[McpServerSummary]:
     mgr = McpConfigManager(username)
     servers: list[McpServerSummary] = []
-    for name, config, level in mgr.read_all_servers():
+
+    def _append(name: str, config: dict, level: str, cwd: str | None) -> None:
         try:
             servers.append(McpServerSummary(
                 name=name,
                 type=config.get("type", "http"),
                 url=config.get("url", ""),
                 level=level,
+                cwd=cwd,
                 header_count=len(config.get("headers", {})),
                 timeout=config.get("timeout", 60),
             ))
         except Exception:
             logger.warning("Skipping invalid MCP server config in overview bootstrap: %s", name)
+
+    for cwd, project_servers in mgr.read_project_groups():
+        for name, config in project_servers.items():
+            _append(name, config, "project", cwd)
+    for name, config in mgr.read_global_servers().items():
+        _append(name, config, "global", None)
     return servers
 
 

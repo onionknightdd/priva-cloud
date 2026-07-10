@@ -1454,11 +1454,6 @@ export default memo(function MessageBubble({
   const hasMessageHeader = (!isUser && isStreaming && message.timestamp) || (isStreaming && !isUser) || message.error
   const messageHeader = hasMessageHeader ? (
     <div className="flex items-center gap-2" style={{ alignSelf: isUser ? 'flex-end' : undefined }}>
-      {/* Duration — live timer while streaming, final duration when done */}
-      {!isUser && isStreaming && message.timestamp && (
-        <LiveTimer startTime={message.timestamp} />
-      )}
-
       {/* Streaming indicator */}
       {isStreaming && !isUser && (
         <div
@@ -1475,6 +1470,11 @@ export default memo(function MessageBubble({
         >
           <AnimatedShimmerText>{t('chat.thinking')}</AnimatedShimmerText>
         </div>
+      )}
+
+      {/* Duration — live timer while streaming, final duration when done */}
+      {!isUser && isStreaming && message.timestamp && (
+        <LiveTimer startTime={message.timestamp} />
       )}
 
       {/* Error indicator */}
