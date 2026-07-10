@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Priva Cloud · Agent Runtime — Product Specification</title>
+<style>
+:root{
+  --paper:#f6f7f8; --surface:#ffffff; --ink:#171a1f; --ink2:#4d5560; --muted:#8a919c;
+  --line:#e3e6ea; --accent:#1c5cab; --accent-bg:#eaf1fa;
+  --code-bg:#14171d; --code-ink:#dfe5ec; --code-c:#7d8794; --code-f:#7fb3ee; --code-e:#e0b76c;
+  --edge:#5b6472; --cp:#2a78d6; --op:#b97a00; --ar:#8347c8; --ds:#1baf7a;
+  --warn:#b97a00; --warn-bg:#fdf6e8; --danger:#d03b3b; --danger-bg:#fbeeee; --ok:#0ca30c;
+  --gap-bg:#f2f3f5;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --paper:#0e0f11; --surface:#17191d; --ink:#e8eaee; --ink2:#b3bac4; --muted:#7d8590;
+    --line:#2a2e34; --accent:#5f9de2; --accent-bg:#1b2634;
+    --code-bg:#101216;
+    --edge:#8b95a5; --cp:#3987e5; --op:#e0a437; --ar:#a06ee0; --ds:#199e70;
+    --warn:#e0a437; --warn-bg:#252017; --danger:#e66767; --danger-bg:#291a1a;
+    --gap-bg:#1d2025;
+  }
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:24px}
+body{background:var(--paper);color:var(--ink);
+  font:15px/1.75 -apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+code,pre,.mono{font-family:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace}
+
+/* ---------- header ---------- */
+header{background:var(--code-bg);color:#dfe5ec;padding:56px 32px 44px;border-bottom:3px solid var(--accent)}
+.hwrap{max-width:1240px;margin:0 auto}
+.kicker{color:#7fb3ee;font-size:13px;letter-spacing:.22em;text-transform:uppercase;font-weight:600}
+header h1{font-size:clamp(24px,3.4vw,36px);line-height:1.3;font-weight:700;margin:14px 0 10px;text-wrap:balance;color:#fff}
+header .sub{color:#9aa3af;font-size:15px;max-width:72ch}
+.badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+.badge{font-size:12.5px;padding:4px 12px;border:1px solid #333a44;border-radius:999px;color:#b8c0cb;font-family:ui-monospace,Menlo,monospace}
+.badge b{color:#7fb3ee;font-weight:600}
+
+/* ---------- layout ---------- */
+.shell{max-width:1240px;margin:0 auto;display:grid;grid-template-columns:248px minmax(0,1fr);gap:36px;padding:36px 32px 96px}
+nav.toc{position:sticky;top:24px;align-self:start;font-size:13.5px;max-height:calc(100vh - 48px);overflow-y:auto;padding-right:4px}
+nav.toc .toct{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;font-weight:600}
+nav.toc a{display:block;color:var(--ink2);text-decoration:none;padding:5px 10px;border-left:2px solid var(--line);line-height:1.45}
+nav.toc a:hover{color:var(--accent)}
+nav.toc a.on{color:var(--accent);border-left-color:var(--accent);background:var(--accent-bg);font-weight:600}
+nav.toc a.sub2{padding-left:22px;font-size:12.5px}
+main{min-width:0}
+@media (max-width:980px){.shell{grid-template-columns:1fr;padding:24px 16px 72px}nav.toc{position:static;max-height:none;display:flex;flex-wrap:wrap;gap:4px}nav.toc a{border:1px solid var(--line);border-radius:6px}nav.toc .toct{width:100%}}
+
+/* ---------- sections ---------- */
+section{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:34px 36px;margin-bottom:26px}
+@media (max-width:640px){section{padding:22px 16px}}
+h2{font-size:23px;line-height:1.35;font-weight:700;letter-spacing:-.01em;display:flex;align-items:baseline;gap:12px;text-wrap:balance}
+h2 .no{color:var(--accent);font-size:14px;font-weight:700;font-family:ui-monospace,Menlo,monospace}
+h3{font-size:17.5px;font-weight:700;margin:34px 0 12px;letter-spacing:-.005em}
+h4{font-size:15px;font-weight:700;margin:24px 0 8px}
+section>p,section>div>p{margin:12px 0;max-width:76ch;color:var(--ink)}
+p.lead{font-size:16px;color:var(--ink2);margin:14px 0 4px;max-width:72ch}
+ul,ol{margin:10px 0 12px 22px;max-width:76ch}
+li{margin:5px 0}
+a{color:var(--accent)}
+strong{font-weight:650}
+hr{border:0;border-top:1px solid var(--line);margin:30px 0}
+p code,li code,td code,dd code{background:var(--accent-bg);color:var(--accent);padding:1px 6px;border-radius:4px;font-size:.88em;white-space:nowrap}
+td code{white-space:normal;word-break:break-all}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto;margin:14px 0;border:1px solid var(--line);border-radius:6px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:left;font-weight:600;
+   padding:9px 12px;border-bottom:1.5px solid var(--line);background:color-mix(in srgb,var(--surface) 60%,var(--paper));white-space:nowrap}
+td{padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top;font-variant-numeric:tabular-nums}
+tr:last-child td{border-bottom:0}
+td:first-child{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;white-space:nowrap;color:var(--ink)}
+table.wrapflag td:first-child{white-space:normal;min-width:190px}
+table.plain td:first-child{font-family:inherit;font-size:13.5px;white-space:normal}
+td .dim{color:var(--muted);font-size:12px;display:block}
+
+/* ---------- code ---------- */
+.code{position:relative;margin:14px 0}
+pre{background:var(--code-bg);color:var(--code-ink);padding:18px 20px;border-radius:8px;overflow-x:auto;
+    font-size:12.8px;line-height:1.68;border:1px solid #262b33}
+pre .c{color:var(--code-c)}
+pre .f{color:var(--code-f)}
+pre .e{color:var(--code-e)}
+.code button.copy{position:absolute;top:8px;right:8px;background:#262b33;color:#9aa3af;border:1px solid #333a44;
+  border-radius:5px;font-size:11.5px;padding:3px 10px;cursor:pointer;font-family:inherit}
+.code button.copy:hover{color:#dfe5ec;border-color:#4a5361}
+
+/* ---------- callouts ---------- */
+.co{border:1px solid var(--line);border-left:3px solid var(--muted);border-radius:6px;padding:13px 18px;margin:16px 0;font-size:14px;max-width:none}
+.co p{margin:6px 0;max-width:none}
+.co .cot{font-weight:700;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:4px}
+.co.info{border-left-color:var(--accent);background:var(--accent-bg)}.co.info .cot{color:var(--accent)}
+.co.warn{border-left-color:var(--warn);background:var(--warn-bg)}.co.warn .cot{color:var(--warn)}
+.co.danger{border-left-color:var(--danger);background:var(--danger-bg)}.co.danger .cot{color:var(--danger)}
+.co.gap{border-left-color:var(--muted);background:var(--gap-bg)}
+.co.gap .cot{color:var(--muted)}
+
+/* ---------- chips / facts / cards ---------- */
+.chip{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;padding:3px 12px;border-radius:999px;border:1px solid var(--line);color:var(--ink2)}
+.chip::before{content:"";width:9px;height:9px;border-radius:3px;background:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.chip.edge::before{background:var(--edge)}
+.chip.cp::before{background:var(--cp)}
+.chip.op::before{background:var(--op)}
+.chip.ar::before{background:var(--ar)}
+.chip.ds::before{background:var(--ds)}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:18px 0}
+.fact{border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+.fact .fl{font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.fact .fv{font-size:15px;font-weight:650;margin-top:3px;line-height:1.45}
+.fact .fv small{font-weight:400;color:var(--ink2);font-size:12.5px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:18px 0 6px}
+.card{border:1px solid var(--line);border-radius:8px;padding:18px;color:var(--ink);display:block}
+.card .ct{font-weight:700;font-size:15.5px;margin:0 0 6px}
+.card p{font-size:13px;color:var(--ink2);margin:0;line-height:1.6}
+
+/* ---------- status pills ---------- */
+.st{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+    padding:1px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+.st.ship{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.st.defer{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+.st.stub{color:var(--muted)}
+.st.open{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,var(--line))}
+
+/* ---------- interactive diagrams ---------- */
+.ix{border:1px solid var(--line);border-radius:8px;padding:18px;margin:16px 0;background:var(--surface)}
+.ix .ixh{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:12px}
+.ix .node{cursor:pointer}
+.ix .node:focus{outline:none}
+.ix .node rect.box{fill:var(--paper);stroke:var(--line);stroke-width:1.5;transition:stroke .15s ease,fill .15s ease,stroke-width .15s ease}
+.ix .node:hover rect.box,.ix .node:focus-visible rect.box{stroke-width:2.5}
+.ix .node.sel rect.box{stroke:var(--accent);stroke-width:2.5;fill:var(--accent-bg)}
+.ix .node.edge-c rect.box{stroke:var(--edge)}
+.ix .node.cp-c rect.box{stroke:var(--cp)}
+.ix .node.op-c rect.box{stroke:var(--op)}
+.ix .node.ar-c rect.box{stroke:var(--ar)}
+.ix .node.ds-c rect.box{stroke:var(--ds)}
+.ix .node text{fill:var(--ink);font-size:13px;font-weight:600}
+.ix .node text.sub,.ix text.sub{fill:var(--ink2);font-size:11px;font-weight:400}
+.ix .static rect{fill:var(--gap-bg);stroke:var(--line);stroke-width:1.5}
+.ix .static text{fill:var(--ink2);font-size:12px;font-weight:600}
+.ix .edge{stroke:var(--muted);stroke-width:1.5;fill:none;marker-end:url(#arr)}
+.ix .elabel{fill:var(--muted);font-size:10.5px}
+.ix .node.done rect.box{stroke:var(--accent)}
+.ix .node.hot rect.box{stroke:var(--ok);stroke-width:2.5;fill:color-mix(in srgb,var(--ok) 8%,var(--surface))}
+.ix .edge.hot{stroke:var(--accent);stroke-width:2.5}
+.ix .edge.flow{stroke-dasharray:6 7;animation:ixdash 1.1s linear infinite}
+@keyframes ixdash{to{stroke-dashoffset:-13}}
+@media (prefers-reduced-motion: reduce){.ix .edge.flow{animation:none}.ix *{transition:none!important}}
+.ixd{border-top:1px solid var(--line);margin-top:14px;padding-top:12px;font-size:13.5px;color:var(--ink2);min-height:3.2em}
+.ixbar{display:flex;gap:8px;align-items:center;margin-top:12px}
+.ixbar button{background:var(--surface);border:1px solid var(--line);border-radius:5px;padding:4px 14px;cursor:pointer;font:inherit;font-size:13px;color:var(--ink)}
+.ixbar button:hover{border-color:var(--accent);color:var(--accent)}
+.ixbar button:disabled{opacity:.45;cursor:default}
+.ixbar button:disabled:hover{border-color:var(--line);color:var(--ink)}
+.ixbar .stp{font-size:12px;color:var(--muted);font-family:ui-monospace,Menlo,monospace}
+
+/* ---------- tabs (§9) ---------- */
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:16px 0 0;border-bottom:1px solid var(--line);padding-bottom:0}
+.tabs button{background:none;border:1px solid var(--line);border-bottom:none;border-radius:6px 6px 0 0;
+  padding:7px 16px;cursor:pointer;font:inherit;font-size:13.5px;font-weight:600;color:var(--ink2);position:relative;top:1px}
+.tabs button:hover{color:var(--accent)}
+.tabs button.on{color:var(--accent);background:var(--surface);border-color:var(--line);border-bottom:1px solid var(--surface)}
+.tabpane{display:none;border:1px solid var(--line);border-top:none;border-radius:0 0 8px 8px;padding:18px 20px 8px;margin-bottom:16px}
+.tabpane.on{display:block}
+
+/* ---------- roadmap timeline (§10) ---------- */
+.phases{display:flex;gap:0;margin:18px 0 0;overflow-x:auto;padding-bottom:4px}
+.phase{flex:1;min-width:104px;border:1px solid var(--line);border-left:none;padding:12px 14px;cursor:pointer;background:var(--surface);
+  font:inherit;text-align:left;transition:background .15s ease}
+.phase:first-child{border-left:1px solid var(--line);border-radius:6px 0 0 6px}
+.phase:last-child{border-radius:0 6px 6px 0}
+.phase:hover{background:var(--accent-bg)}
+.phase .pn{font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;font-family:ui-monospace,Menlo,monospace;color:var(--muted)}
+.phase .pt{font-size:13px;font-weight:650;margin-top:2px;line-height:1.4;color:var(--ink)}
+.phase.done{border-top:3px solid var(--ok)}
+.phase.next{border-top:3px solid var(--warn)}
+.phase.later{border-top:3px solid var(--line)}
+.phase.sel{background:var(--accent-bg);outline:2px solid var(--accent);outline-offset:-2px}
+
+/* ---------- comparison matrix marks ---------- */
+td.y{color:var(--ok);font-weight:700;text-align:center}
+td.n{color:var(--danger);font-weight:700;text-align:center}
+td.p{color:var(--warn);font-weight:700;text-align:center}
+table.matrix td{text-align:center}
+table.matrix td:first-child{text-align:left}
+
+footer{max-width:1240px;margin:0 auto;padding:0 32px 60px;color:var(--muted);font-size:12.5px}
+footer a{color:var(--muted)}
+@media print{nav.toc,.code button.copy{display:none}section{border:none;padding:12px 0;break-inside:avoid-page}header{background:#fff;color:#000}header h1{color:#000}}
+</style>
+</head>
+<body>
+
+<header>
+<div class="hwrap">
+  <div class="kicker">Priva Cloud · Agent Runtime</div>
+  <h1>Priva Cloud — Agent Runtime Product Specification</h1>
+  <p class="sub">A self-hostable, Kubernetes-native, multi-tenant agent runtime built on the Claude Agent SDK: every internal user gets an isolated, scale-to-zero agent pod — full Claude Code capability behind one edge, on your own cluster, with your own model credentials.</p>
+  <div class="badges">
+    <span class="badge">Version <b>v1.0</b></span>
+    <span class="badge">Date <b>2026-07-10</b></span>
+    <span class="badge">Status <b>Alpha · Phase 0–3 merged</b></span>
+    <span class="badge">Base <b>claude-agent-sdk 0.1.81 · claude CLI ≥ 2.0</b></span>
+  </div>
+</div>
+</header>
+
+<div class="shell">
+<nav class="toc">
+  <div class="toct">Contents</div>
+  <a href="#positioning">1 · Product Definition</a>
+  <a class="sub2" href="#personas">1.2 Users &amp; Personas</a>
+  <a class="sub2" href="#non-goals">1.4 Non-Goals</a>
+  <a href="#principles">2 · Design Principles</a>
+  <a href="#architecture">3 · Runtime Architecture</a>
+  <a class="sub2" href="#byte-path">3.1 Request Byte Path</a>
+  <a class="sub2" href="#components">3.2 Core Components</a>
+  <a href="#security">4 · Tenancy &amp; Security</a>
+  <a class="sub2" href="#trust-chain">4.1 Trust Chain</a>
+  <a class="sub2" href="#isolation">4.2 Isolation Inventory</a>
+  <a href="#features">5 · Core Feature Spec</a>
+  <a href="#api">6 · API &amp; Extensibility</a>
+  <a href="#nfr">7 · Non-Functional Reqs</a>
+  <a href="#operations">8 · Operations &amp; Deploy</a>
+  <a href="#competitive">9 · Competitive Landscape</a>
+  <a class="sub2" href="#matrix">9.2 Comparison Matrix</a>
+  <a class="sub2" href="#build-vs-adopt">9.3 Build vs Adopt</a>
+  <a href="#roadmap">10 · Roadmap</a>
+  <a href="#risks">11 · Risks &amp; Open Issues</a>
+  <a href="#glossary">12 · Glossary</a>
+</nav>
+
+<main>
+
+<!-- ================= §1 Product Definition ================= -->
+<section id="positioning">
+<h2><span class="no">§1</span>Product Definition &amp; Positioning</h2>
+
+<h3 id="one-liner">1.1 What it is</h3>
+<p class="lead">Priva Cloud is a <strong>self-hostable, Kubernetes-native, multi-tenant Agent Runtime</strong> built on the Claude Agent SDK. It gives each user an isolated, scale-to-zero agent-runner pod that runs full Claude Agent SDK sessions — skills, MCP servers, hooks, subagents, a web terminal, and a rich web console — while a stateless control plane handles identity, routing, pod lifecycle, and durable state.</p>
+
+<div class="facts">
+  <div class="fact"><div class="fl">Tenancy model</div><div class="fv">1 pod / user <small>scale 0↔1 on demand</small></div></div>
+  <div class="fact"><div class="fl">Target population</div><div class="fv">Hundreds <small>semi-trusted internal users</small></div></div>
+  <div class="fact"><div class="fl">Cold start</div><div class="fv">≈ 4 s <small>0→1 wake, measured e2e</small></div></div>
+  <div class="fact"><div class="fl">Model credentials</div><div class="fv">BYOK <small>per-user base URL + token</small></div></div>
+  <div class="fact"><div class="fl">Agent engine</div><div class="fv">Claude Agent SDK <small>spawns the real <code>claude</code> CLI</small></div></div>
+  <div class="fact"><div class="fl">Edge</div><div class="fv">agentgateway + GIE <small>per-request ext_proc steering</small></div></div>
+</div>
+
+<p>The product occupies a deliberate intersection that (as §9 shows) no existing product covers: <strong>full Claude Code capability</strong> × <strong>per-user compute isolation</strong> × <strong>fully on-prem</strong> × <strong>bring-your-own-key</strong>. It is an internal platform product: the customer is the organization; the users are its employees and the platform team that governs them.</p>
+
+<h3 id="personas">1.2 Users &amp; personas</h3>
+<div class="cards">
+  <div class="card"><div class="ct">End user — internal employee</div>
+    <p>Gets a personal AI assistant with a real, persistent workspace: chat console with streaming and canvas, session history with fork/rewind, a PTY web terminal, a file explorer, personal skills / MCP servers / subagents / hooks. Brings their own model credentials (<code>ANTHROPIC_BASE_URL</code> / <code>ANTHROPIC_AUTH_TOKEN</code>).</p></div>
+  <div class="card"><div class="ct">Platform admin — operator of the fleet</div>
+    <p>Provisions and governs users via the admin SPA: user CRUD and self-registration approval, per-tenant resource specs and storage quotas, runner defaults, enforced hooks (incl. PII masking), risky-tool policy, fleet snapshot, resource usage, system-health graph, gateway metrics, and an audited console into control-plane pods.</p></div>
+  <div class="card"><div class="ct">Platform engineer — extends the runtime</div>
+    <p>Integrates internal systems by authoring MCP servers, skills, and plugins; consumes the runtime API (<code>/api/sandbox/*</code>, SSE / WebSocket) to embed agent sessions into other internal tools.</p></div>
+</div>
+
+<h3 id="use-cases">1.3 Primary use cases</h3>
+<ul>
+  <li><strong>Personal AI assistant with a real workspace</strong> — long-lived, resumable agent sessions that read and write files, run commands, and persist state per user, not per browser tab.</li>
+  <li><strong>Agent access to internal systems</strong> — admin-governed MCP servers and skills expose internal APIs, databases, and tools to each user's agent under per-user credentials and hook-enforced policy.</li>
+  <li><strong>Coding and operations work</strong> — the full Claude Code loop (terminal, file edits, git) inside the user's own isolated pod, driven from the browser.</li>
+  <li><strong>Governed fleet operation</strong> — one platform team runs hundreds of agents with per-tenant quotas, audit trails, and centrally enforced guardrails.</li>
+</ul>
+
+<h3 id="non-goals">1.4 Non-goals</h3>
+<p>Explicit non-goals keep the competitive argument (§9) honest and the architecture small:</p>
+<ul>
+  <li><strong>Not a public SaaS.</strong> Designed for semi-trusted internal populations on shared cluster infrastructure — not for anonymous, adversarial tenants.</li>
+  <li><strong>Not a model gateway or metering proxy.</strong> BYOK is a design decision: there are no virtual keys and no central token-billing path; usage is pod-self-reported. Routing via Bedrock / Vertex / internal proxies is the user's choice of base URL.</li>
+  <li><strong>Not a re-implementation of the agent loop.</strong> The runtime wraps and spawns the real <code>claude</code> CLI via the Claude Agent SDK. Priva never forks the loop; it inherits upstream capability.</li>
+  <li><strong>Not a no-code workflow builder.</strong> Extensibility is code-shaped (skills, MCP, hooks), not DAG-shaped. Workflow products (Dify, n8n) are complements, not targets.</li>
+  <li><strong>Not chat-only.</strong> A chat UI without an isolated execution workspace is explicitly the thing Priva exists to surpass.</li>
+</ul>
+</section>
+
+<!-- ================= §2 Design Principles ================= -->
+<section id="principles">
+<h2><span class="no">§2</span>Design Principles</h2>
+
+<h3>2.1 Platform principles</h3>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:26%">Principle</th><th>Statement &amp; consequence</th></tr></thead>
+<tbody>
+<tr><td><strong>SDK-native, never re-implemented</strong></td><td>agent-runner wraps <code>claude-agent-sdk</code>, which spawns the real <code>claude</code> CLI baked into the image. Skills, hooks, permission modes, subagents, fork/rewind arrive from upstream for free — Priva's engineering budget goes to tenancy and product, not to chasing the loop.</td></tr>
+<tr><td><strong>Pod-per-tenant isolation</strong></td><td>The tenancy boundary is a Kubernetes object (Deployment / Service / PVC / Secret reconciled from an <code>AgentTenant</code> CR), not an app-level check. Every runtime request terminates inside a pod that can only ever be one user's.</td></tr>
+<tr><td><strong>Scale-to-zero economics</strong></td><td>An idle tenant costs ~zero compute: pods run 0 replicas until the EPP wakes them (≈4 s) and the operator sweeps them back after an idle grace. Hundreds of provisioned users ≠ hundreds of running pods.</td></tr>
+<tr><td><strong>Control plane never touches runtime data</strong></td><td>Sessions, transcripts, and files live only on tenant pods and their per-account volumes. control-panel sees control metadata (accounts, quotas, specs) — a breach of the control plane does not read user workspaces.</td></tr>
+<tr><td><strong>Single-writer durable state</strong></td><td>All durable control-plane state flows through data-spine: one SQLite WAL writer behind a stable gRPC contract (<code>priva.dataplane.v1</code>). No service touches the database directly; the storage engine can be swapped (Postgres stub exists) without breaking the contract.</td></tr>
+<tr><td><strong>Sole-scaler operator</strong></td><td>Exactly one component (the kopf operator) scales tenant pods, driven only by the <code>AgentTenant</code> CR. Wake requests are CR patches; there is no second path that can mutate fleet state.</td></tr>
+<tr><td><strong>Authoritative auth at the edge's brain</strong></td><td>Every runtime request is steered per-request: the edge consults the EPP over Envoy <code>ext_proc</code>, which verifies the JWT, resolves the account, and signs a runner token pinned to that account. Runners trust nothing but that signature.</td></tr>
+<tr><td><strong>BYOK, no metering proxy</strong></td><td>Model credentials are the user's own and live only in the user's own pod — written by the pod itself to <code>/workspace/.claude/settings.json</code> on the tenant PVC, read natively by the <code>claude</code> CLI. The platform never terminates, stores, or meters model traffic; token usage is pod-self-reported.</td></tr>
+<tr><td><strong>The filesystem is the session store</strong></td><td>Sessions are JSON-Lines under <code>~/.claude/projects/</code> on the tenant volume — the file <em>is</em> the record. The central DB holds accounts and control metadata, never transcript content; files the <code>claude</code> CLI reads natively (<code>.mcp.json</code>, <code>settings.json</code>) exist as files, with no database mirror to drift.</td></tr>
+<tr><td><strong>Platform-minted, immutable session IDs</strong></td><td>Every lock, route, and binding keys on a platform-minted stable <code>session_uuid</code>, never a CLI-derived id. The only sanctioned path that mints a new id is an explicit fork.</td></tr>
+<tr><td><strong>Strangler migration</strong></td><td>The platform is being carved out of a working single-machine monolith phase by phase; the monolith remains a behavioral reference until Phase 4 removes it. Every phase lands end-to-end verified on minikube.</td></tr>
+</tbody>
+</table></div>
+
+<h3>2.2 Experience principles</h3>
+<p>The web console follows a locked design system (<code>web/design-spec.md</code>) — metaphor: <em>a living, hardcover technical manual — serious, precise, in control</em>.</p>
+<ul>
+  <li><strong>GitHub-Dark industrial minimalism</strong> — Vercel × Linear restraint; no gradients, no glassmorphism, no shadows; depth via layered background tones only.</li>
+  <li><strong>Status is a 2px left border</strong> — running/success/error/pending are border colors, never dots or filled backgrounds; the same language extends to the live System Map's animated byte-path edges.</li>
+  <li><strong>Skeletons, not spinners</strong> — initial loads shimmer in the shape of the real content; state flow is <code>skeleton → loaded</code> with nothing in between.</li>
+  <li><strong>No horizontal scroll, ever</strong> — every container breaks words and scrolls wide content internally.</li>
+  <li><strong>Danger requires typing</strong> — destructive actions (delete history, stop tasks) demand typed confirmation, mirroring the platform's server-side risky-tool enforcement.</li>
+</ul>
+</section>
+
+<!-- ================= §3 Runtime Architecture ================= -->
+<section id="architecture">
+<h2><span class="no">§3</span>Runtime Architecture &amp; Topology</h2>
+
+<h3 id="byte-path">3.1 Request byte path</h3>
+<p>Every runtime request is steered <strong>per-request</strong>: the edge consults the control-panel EPP over Envoy <code>ext_proc</code> before forwarding to the tenant's pod. The edge terminates client transport and relays bytes; <strong>authoritative authentication and account resolution happen at the EPP</strong>. agentgateway is never on the byte path's far side — it relays; the EPP only decides.</p>
+
+<div class="ix" id="byte-path-ix">
+  <div class="ixh">Request byte path · click a component for details, or step through a request</div>
+  <div class="chips">
+    <span class="chip edge">agentgateway (edge)</span>
+    <span class="chip cp">control-panel · EPP</span>
+    <span class="chip op">operator</span>
+    <span class="chip ar">agent-runner</span>
+    <span class="chip ds">data-spine</span>
+  </div>
+  <svg viewBox="0 0 760 344" role="img" aria-label="Priva Cloud byte path: client to agentgateway edge, per-request ext_proc to the control-panel EPP, operator wakes the tenant agent-runner pod, which calls the user's model gateway; control-plane state in data-spine" style="width:100%;height:auto;display:block">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0L10 5L0 10z" style="fill:var(--muted)"></path>
+      </marker>
+    </defs>
+    <g class="static">
+      <rect x="8" y="36" width="104" height="52" rx="6"></rect>
+      <text x="60" y="59" text-anchor="middle">Browser / IM</text>
+      <text x="60" y="76" text-anchor="middle" class="sub">HTTP · WS · SSE</text>
+    </g>
+    <g class="node edge-c" data-k="edge" tabindex="0" role="button" aria-label="agentgateway edge">
+      <rect class="box" x="170" y="30" width="150" height="64" rx="6"></rect>
+      <text x="245" y="57" text-anchor="middle">agentgateway</text>
+      <text x="245" y="75" text-anchor="middle" class="sub">edge :80 · Rust L7</text>
+    </g>
+    <g class="node ar-c" data-k="ar" tabindex="0" role="button" aria-label="agent-runner">
+      <rect class="box" x="420" y="30" width="150" height="64" rx="6"></rect>
+      <text x="495" y="57" text-anchor="middle">agent-runner</text>
+      <text x="495" y="75" text-anchor="middle" class="sub">:8091 · 1 pod / tenant · 0↔1</text>
+    </g>
+    <g class="static">
+      <rect x="630" y="36" width="122" height="52" rx="6"></rect>
+      <text x="691" y="59" text-anchor="middle">model gateway</text>
+      <text x="691" y="76" text-anchor="middle" class="sub">BYOK · Anthropic API</text>
+    </g>
+    <g class="node cp-c" data-k="cp" tabindex="0" role="button" aria-label="control-panel and EPP">
+      <rect class="box" x="170" y="160" width="150" height="64" rx="6"></rect>
+      <text x="245" y="187" text-anchor="middle">control-panel · EPP</text>
+      <text x="245" y="205" text-anchor="middle" class="sub">:8080 http · :9000 ext_proc</text>
+    </g>
+    <g class="node op-c" data-k="op" tabindex="0" role="button" aria-label="operator">
+      <rect class="box" x="420" y="160" width="150" height="64" rx="6"></rect>
+      <text x="495" y="187" text-anchor="middle">operator</text>
+      <text x="495" y="205" text-anchor="middle" class="sub">kopf · sole scaler</text>
+    </g>
+    <g class="node ds-c" data-k="ds" tabindex="0" role="button" aria-label="data-spine">
+      <rect class="box" x="295" y="272" width="150" height="60" rx="6"></rect>
+      <text x="370" y="297" text-anchor="middle">data-spine</text>
+      <text x="370" y="315" text-anchor="middle" class="sub">:50051 gRPC · SQLite WAL</text>
+    </g>
+    <path id="bp-e1" class="edge" d="M112 62 H166"></path>
+    <text class="elabel" x="126" y="54">①</text>
+    <path id="bp-e2" class="edge" d="M245 96 V156"></path>
+    <text class="elabel" x="253" y="130">② ext_proc</text>
+    <path id="bp-e3" class="edge" d="M322 192 H416"></path>
+    <text class="elabel" x="336" y="184">③ patch CR</text>
+    <path id="bp-e3b" class="edge" d="M495 158 V98"></path>
+    <text class="elabel" x="503" y="132">scale 0→1</text>
+    <path id="bp-e4" class="edge" d="M322 62 H416"></path>
+    <text class="elabel" x="338" y="54">④ stream</text>
+    <path id="bp-e5" class="edge" d="M572 62 H626"></path>
+    <text class="elabel" x="588" y="54">⑤</text>
+    <path class="edge" d="M268 226 L336 270"></path>
+    <path class="edge" d="M472 226 L404 270"></path>
+    <text class="elabel" x="228" y="256">control state</text>
+  </svg>
+  <div class="ixd">Click any component above for its role, or use <em>Next</em> to walk one request end-to-end.</div>
+  <div class="ixbar">
+    <button class="prev">‹ Prev</button>
+    <button class="next">Next ›</button>
+    <span class="stp">step 0 / 5</span>
+  </div>
+</div>
+
+<div class="co info"><span class="cot">A second read lane (ADR-0003)</span>
+<p>The InferencePool lane truncates buffered GET bodies at ~8 KB (hardcoded upstream in the <code>FullDuplexStreamed</code> path). Large reads — transcripts, previews — therefore ride <code>GET /api/cp-proxy/{path}</code> on the <code>/</code> route: control-panel authenticates the bearer, wakes the pod, mints a per-account runner token, and proxies the GET to <code>&lt;pod&gt;:8091</code>. GET-only by design; writes, streams, SSE/WS, and blob downloads never use it.</p></div>
+
+<h3 id="components">3.2 Core components</h3>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th>Service</th><th>Port(s)</th><th>Role</th><th>Replicas</th></tr></thead>
+<tbody>
+<tr><td><strong>control-panel</strong></td><td><code>8080</code> HTTP · <code>9000</code> ext_proc (TLS)</td><td>The brain: EPP endpoint picker, auth/admin/resource APIs, SPA host, <code>AgentTenant</code> provisioner, cp-proxy read lane. Never sees runtime data.</td><td>N, stateless</td></tr>
+<tr><td><strong>agent-runner</strong></td><td><code>8091</code></td><td>Per-tenant runtime wrapping claude-agent-sdk 0.1.81, which spawns the baked-in native <code>claude</code> CLI. Serves <code>/api/sandbox/*</code>: runs, sessions, skills, MCP, hooks, subagents, PTY, files.</td><td>0↔1 per tenant</td></tr>
+<tr><td><strong>data-spine</strong></td><td><code>50051</code> gRPC</td><td>Single-writer durable state on SQLite (WAL, STRICT, RWO PVC) behind the stable <code>priva.dataplane.v1</code> contract — 8 tables, 7 registered services. 177 passing tests.</td><td>1, <code>Recreate</code></td></tr>
+<tr><td><strong>operator</strong></td><td>—</td><td>kopf controller reconciling <code>AgentTenant</code> CRs into Deployment/Service/PVC. The <em>sole</em> scaler; 10 s timer for idle sweep, podIP self-heal, quota reconcile. Storage backend drivers (dev NFS / prod CephFS).</td><td>1</td></tr>
+<tr><td><strong>agentgateway</strong></td><td><code>80</code></td><td>External Rust L7 edge (agentgateway.dev v1.3.0) provisioned via Gateway API + Inference Extension. Terminates client transport, consults the EPP, streams to the runner. Not Priva code.</td><td>managed</td></tr>
+<tr><td><strong>nfs-xfs</strong> <span class="dim">dev only</span></td><td><code>2049</code> NFSv4 · <code>8099</code> quota</td><td>In-cluster NFS server backing per-account fixed-size ext4 loop images (filesystem size = hard quota) + a quota-manager API. Replaced by external CephFS/NFS CSI in prod.</td><td>1 (dev)</td></tr>
+</tbody></table></div>
+
+<h3 id="crd">3.3 The AgentTenant CR — one object per user</h3>
+<p>A tenant's entire runtime existence is declared by one namespaced custom resource (<code>priva.io/v1alpha1</code>, short name <code>at</code>). Provisioning a user = creating a CR; waking a pod = patching one field; offboarding = flipping <code>desiredState</code>.</p>
+<div class="code"><pre>apiVersion: priva.io/v1alpha1
+kind: AgentTenant                  <span class="c"># one per account; CR name == accountId</span>
+spec:
+  accountId: u-alice               <span class="c"># required</span>
+  username: alice
+  desiredState: active             <span class="c"># active | offboarding | purge</span>
+  image: priva/agent-runner:dev
+  agentRunnerType: auto_scale      <span class="c"># auto_scale | persistent (sweep-exempt)</span>
+  resources: { cpu: 1.0, memoryMb: 2048 }   <span class="c"># requests == limits → Guaranteed QoS</span>
+  storageGb: 1                     <span class="c"># hard quota; grow-only online expand</span>
+  idle: { graceSeconds: 1800, minAliveAfterWakeSeconds: 120 }
+  concurrency: { maxConcurrentSessions: 3 }
+  wake: { requestedAt: "…" }       <span class="c"># the ONLY scale-up trigger (EPP patches it)</span>
+status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritative</span></pre></div>
+</section>
+
+<!-- ================= §4 Tenancy & Security ================= -->
+<section id="security">
+<h2><span class="no">§4</span>Tenancy &amp; Security Model</h2>
+<p class="lead">For an agent runtime, isolation <em>is</em> the product. This section specifies the trust chain and isolation inventory as designed — and states plainly where the alpha falls short of it (§4.4).</p>
+
+<h3 id="trust-chain">4.1 Trust chain</h3>
+<div class="ix" id="trust-ix">
+  <div class="ixh">Per-request trust chain · step through</div>
+  <svg viewBox="0 0 760 128" role="img" aria-label="Trust chain: client JWT, EPP verification, wake and reconcile, steering headers with runner token, pod account pin check" style="width:100%;height:auto;display:block">
+    <g class="node" data-step="1" tabindex="0" role="button"><rect class="box" x="8" y="30" width="128" height="64" rx="6"></rect>
+      <text x="72" y="57" text-anchor="middle">client JWT</text><text x="72" y="75" text-anchor="middle" class="sub">HS256 · login / sk-*</text></g>
+    <g class="node" data-step="2" tabindex="0" role="button"><rect class="box" x="164" y="30" width="128" height="64" rx="6"></rect>
+      <text x="228" y="57" text-anchor="middle">EPP verify</text><text x="228" y="75" text-anchor="middle" class="sub">resolve account</text></g>
+    <g class="node" data-step="3" tabindex="0" role="button"><rect class="box" x="320" y="30" width="128" height="64" rx="6"></rect>
+      <text x="384" y="57" text-anchor="middle">wake + reconcile</text><text x="384" y="75" text-anchor="middle" class="sub">CR patch → operator</text></g>
+    <g class="node" data-step="4" tabindex="0" role="button"><rect class="box" x="476" y="30" width="128" height="64" rx="6"></rect>
+      <text x="540" y="57" text-anchor="middle">steering headers</text><text x="540" y="75" text-anchor="middle" class="sub">runner token minted</text></g>
+    <g class="node" data-step="5" tabindex="0" role="button"><rect class="box" x="632" y="30" width="120" height="64" rx="6"></rect>
+      <text x="692" y="57" text-anchor="middle">pod pin check</text><text x="692" y="75" text-anchor="middle" class="sub">== ACCOUNT_ID</text></g>
+    <path class="edge tc" d="M136 62 H160"></path>
+    <path class="edge tc" d="M292 62 H316"></path>
+    <path class="edge tc" d="M448 62 H472"></path>
+    <path class="edge tc" d="M604 62 H628"></path>
+  </svg>
+  <div class="ixd"></div>
+  <div class="ixbar">
+    <button class="prev">‹ Prev</button>
+    <button class="next">Next ›</button>
+    <span class="stp">step 1 / 5</span>
+  </div>
+</div>
+
+<h3 id="isolation">4.2 Isolation inventory (as-built)</h3>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th>Mechanism</th><th>Detail</th></tr></thead>
+<tbody>
+<tr><td><strong>Pod per tenant</strong></td><td>One Deployment <code>ar-&lt;account_id&gt;</code>, replicas 0|1, <code>strategy: Recreate</code>; pinned to one account by <code>ACCOUNT_ID</code>/<code>USERNAME</code> env at entry.</td></tr>
+<tr><td><strong>Hardened runc</strong></td><td>Non-root uid/gid <code>10001</code> · <code>capabilities: drop [ALL]</code> · <code>readOnlyRootFilesystem: true</code> · <code>seccompProfile: RuntimeDefault</code>. gVisor/Kata is a per-tenant <code>runtimeClassName</code> flip, not a redesign.</td></tr>
+<tr><td><strong>Workspace scoping</strong></td><td>Per-account workspace = <code>subPath &lt;account_id&gt;</code> of the shared RWX <code>priva-export</code> volume (venv + <code>~/.claude/projects</code> live there); per-account audit volume <code>/audit/&lt;account_id&gt;</code>; SDK runtime mounted read-only; per-account Python venv at <code>&lt;workspace&gt;/.venv</code>.</td></tr>
+<tr><td><strong>Signed runner token</strong></td><td><code>x-priva-runner-token</code> (HS256, <code>{account_id, username, exp}</code>) accepted only when <code>token.account_id ==</code> the pod's own <code>ACCOUNT_ID</code> — a runner cannot serve another tenant even if reached directly.</td></tr>
+<tr><td><strong>Tool policy</strong></td><td>Permission modes <code>default | acceptEdits | plan | bypassPermissions</code>; an admin-configured risky-tool list forces approval <em>even under</em> <code>bypassPermissions</code>; built-in disallowed tools: <code>WebFetch</code>, <code>WebSearch</code>, <code>NotebookEdit</code>, cron/worktree/remote-trigger tools.</td></tr>
+<tr><td><strong>Guardrail hooks</strong></td><td>Admin-enforced + user hooks run as in-process Python <code>PreToolUse</code>/<code>PostToolUse</code> callbacks, including a PII-masking hook with admin-editable patterns — the runtime's governance seam.</td></tr>
+<tr><td><strong>Credentials (BYOK)</strong></td><td>As-built since 2026-07-01: each account's credentials live in its own <code>/workspace/.claude/settings.json</code> on the PVC, written and read by the pod itself — no per-pod Secret to materialize at wake or GC at sleep. Passwords are bcrypt; user API keys are Fernet-encrypted with an HMAC-SHA256 lookup column.</td></tr>
+</tbody></table></div>
+
+<h3 id="deferred-hardening">4.3 Deferred hardening (Phase 6)</h3>
+<p>The alpha runs plaintext in-cluster (except the one TLS ext_proc hop) and shares a namespace between control plane and tenants. The following are designed but not yet in place: <strong>NetworkPolicies</strong> (default-deny + narrow egress) · <strong>mTLS / JWKS pod trust</strong> (alpha uses an HS256 signed header) · <strong>per-account KMS/DEK</strong> envelope encryption · <strong>edge TLS termination</strong> · <strong>Redis-based wake/idle coordination</strong> · a <strong>separate audit PVC</strong>, and moving control-panel's per-pod local audit into data-spine before scaling replicas (otherwise replicas fork audit history).</p>
+
+<h3 id="webterminal-risk">4.4 Open, high-risk: the web terminal</h3>
+<div class="co danger"><span class="cot">Launch blocker — review 2026-07-07, unremediated</span>
+<p>The tenant-facing PTY is a live cross-tenant compromise chain. A shell (<code>bash -l</code>) inherits <code>os.environ</code>, which via <code>envFrom</code> contains the <strong>shared</strong> <code>priva-shared-secret</code> — the JWT and HMAC signing secrets, <em>identical in every tenant pod</em>. A single tenant can therefore forge a valid runner token for <strong>any</strong> account or admin. And with <strong>no NetworkPolicy</strong>, that shell can already reach every other <code>ar-*</code> pod, data-spine, redis, and control-panel directly by TCP — so the forged token opens a shell in another tenant's pod, whose only guard checks the token's <code>account_id</code> against the <em>target</em> pod. The BYOK model rests on two assumptions — "the pod is unreachable except via the edge" and "the signing secret is secret" — both currently false.</p>
+<p><strong>Tier-0 remediation (~1 day, not yet applied):</strong> env allowlist via <code>execvpe</code> (~10 lines) · default-deny NetworkPolicy + narrow egress · <code>automountServiceAccountToken: false</code>. Full write-up: <code>docs/webterminal-blind-spot.md</code>.</p></div>
+</section>
+
+<!-- ================= §5 Core Feature Spec ================= -->
+<section id="features">
+<h2><span class="no">§5</span>Core Feature Specification</h2>
+<p class="lead">Feature → implementing component → mechanism → status. <span class="st ship">Shipped</span> = merged in Phase 0–3 and verified on minikube; <span class="st defer">Deferred</span> = Phase 4–6; <span class="st stub">Stub</span> = placeholder only.</p>
+
+<h4>Agent runtime</h4>
+<div class="tw"><table class="wrapflag">
+<thead><tr><th>Feature</th><th>Component</th><th>Mechanism</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>One-shot / SSE / WebSocket run</td><td>agent-runner</td><td><code>POST /agent/run</code>, <code>/run/stream</code> (SSE), <code>WS /ws/run</code> (subprotocol <code>priva.ws.v1</code>); retry backoff, <code>MAX_ATTEMPTS=10</code></td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Session CRUD · pin · archive · tag</td><td>agent-runner</td><td>JSON-Lines under <code>~/.claude/projects/</code>; pin/archive metadata in <code>priva_meta.json</code>; resume heals orphan tool-use blocks</td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td><strong>Rewind</strong> <span class="dim">(distinct from fork)</span></td><td>agent-runner</td><td>SDK <em>file checkpointing</em>: <code>enable_file_checkpointing=True</code> → <code>rewind_files(checkpoint_uuid)</code> restores workspace files (<code>POST /agent/rewind</code>)</td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td><strong>Fork</strong> <span class="dim">(distinct from rewind)</span></td><td>agent-runner</td><td>SDK <em>session forking</em>: <code>fork_session=True</code> → <code>sdk_fork_session(session_id, up_to_message_uuid)</code> branches the conversation into a new child with its own immutable session_uuid; parent untouched (<code>POST /agent/fork</code>)</td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Permission coordination + modes</td><td>agent-runner + SPA</td><td>Bridges SDK <code>can_use_tool</code> to the stream: emits <code>permission_request</code>, parks an <code>asyncio.Future</code>, resolves via <code>POST /agent/permission/respond</code>. Modes: <code>default</code>, <code>acceptEdits</code>, <code>plan</code>, <code>bypassPermissions</code></td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Risky-tool enforcement</td><td>agent-runner</td><td>Admin-configured risky-tool list forces approval <em>even under</em> <code>bypassPermissions</code></td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Multi-agent workflow inspector</td><td>agent-runner + SPA</td><td>Live workflow cards + Canvas inspector fed by SSE <code>task_started/progress</code>; snapshot in <code>workflows/&lt;runId&gt;.json</code></td><td><span class="st ship">Shipped</span></td></tr>
+</tbody>
+</table></div>
+
+<h4>Capability plugins &amp; workspace</h4>
+<div class="tw"><table class="wrapflag">
+<thead><tr><th>Feature</th><th>Component</th><th>Mechanism</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Skills</td><td>agent-runner + SPA</td><td>Enumerate global <code>~/.claude/skills</code> + project <code>.claude/skills</code>; per-user <code>skill_exclude</code> denylist → <code>options.skills</code>; skills hub / marketplace modal</td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>MCP servers</td><td>agent-runner + SPA</td><td>Reads project <code>.mcp.json</code> + global settings; built-in in-process <code>priva_File</code> server (FileCanvas) powers the Canvas panel; CRUD per <code>{level}/{name}</code>, capability + tool validation</td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Hooks + PII masking</td><td>agent-runner</td><td>Admin-enforced + user hooks as in-process Python <code>PreToolUse</code>/<code>PostToolUse</code> callbacks; PII-masking hook with admin-editable patterns</td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Subagents</td><td>agent-runner</td><td><code>/subagents</code> catalog + CRUD by name + <code>POST /{name}/test/stream</code></td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>PTY web terminal</td><td>agent-runner + xterm.js</td><td><code>WS /pty/ws</code> into the tenant's own pod; bottom drawer in the user SPA <em>(see §4.4 open risk)</em></td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>File explorer / file ops</td><td>agent-runner + Canvas</td><td><code>/files/{list,download,preview,upload}</code> + agent-attachments; admin cross-file browse via control-panel</td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Data &amp; Usage view</td><td>agent-runner + SPA</td><td><code>/user/{overview,stats,audit,analytics}</code> — 183-day usage heatmap, audit log, analytics timeline</td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Memory (console section)</td><td>user SPA</td><td>Placeholder only</td><td><span class="st stub">Stub</span></td></tr>
+</tbody>
+</table></div>
+
+<h4>Admin console &amp; identity</h4>
+<div class="tw"><table class="wrapflag">
+<thead><tr><th>Feature</th><th>Component</th><th>Mechanism</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>User CRUD + self-registration approval</td><td>control-panel + data-spine</td><td>Public <code>POST /auth/register</code> → <code>pending_registration</code> row → admin approve/reject creates the account + provisions the AgentTenant CR</td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Fleet snapshot + pod actions</td><td>control-panel provisioner</td><td><code>GET /admin/fleet</code> introspects CRs + pod status; <code>restart-pod</code> / <code>shutdown</code></td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Resource usage + gateway metrics</td><td>control-panel</td><td>CPU/mem/volume via metrics-server; gateway via agentgateway Prometheus endpoint</td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>System-health graph (System Map)</td><td>control-panel + SPA</td><td><code>GET /admin/system-health</code>; live byte-path edges animate flow, freeze + ✕ when unreachable</td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Admin console terminal</td><td>control-panel</td><td><code>WS /admin/console/ws</code> — audited Kubernetes-exec bridge into <em>control-plane</em> pods (distinct from the user PTY)</td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Runner defaults + per-account specs</td><td>control-panel + operator</td><td>Inheritance: CR override → data-spine defaults → env seeds; live edits — CPU/mem → <code>Recreate</code>, volume → grow-only online PVC expand</td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Platform config knobs</td><td>control-panel</td><td><code>preset-prompt</code>, <code>cli-path</code>, <code>history-retention</code>, <code>retryable-tools</code>, <code>risky-tools</code>, <code>sensitive-patterns</code></td><td><span class="st ship">Shipped</span></td></tr>
+<tr><td>Auth — JWT + API keys + BYOK CRUD</td><td>control-panel + agent-runner</td><td>HS256 JWT + refresh + first-run setup; per-user <code>sk-*</code> keys; BYOK creds via <code>GET/PUT /credentials</code> written to the pod's own PVC</td><td><span class="st ship">Shipped</span></td></tr>
+</tbody>
+</table></div>
+
+<h4>Deferred subsystems</h4>
+<div class="tw"><table class="wrapflag">
+<thead><tr><th>Feature</th><th>State today</th><th>Plan</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Scheduler (cron / scheduled agent jobs)</td><td>Tables + full <code>SchedulerService</code> proto and service code exist, but it is <em>not registered</em> on the gRPC server (in-process client works)</td><td>Leaderless fire→claim→wake→dispatch; retry 5× with backoff+jitter</td><td><span class="st defer">Phase 4</span></td></tr>
+<tr><td>IM channel binding / channel-connector</td><td><code>channel_binding</code> table + <code>BindingService</code> exist, Feishu-shaped; greenfield, no Phase-1 writer, unused in alpha</td><td>IM fan-out (Feishu)</td><td><span class="st defer">Phase 4</span></td></tr>
+<tr><td>state-reader (wake-free transcript reads)</td><td>Read transcripts while the pod is at 0 replicas</td><td>Embeddable RO-JSONL router; standalone in prod for mount isolation</td><td><span class="st defer">Phase 5</span></td></tr>
+</tbody>
+</table></div>
+</section>
+
+<!-- ================= §6 API & Extensibility ================= -->
+<section id="api">
+<h2><span class="no">§6</span>API &amp; Extensibility Surface</h2>
+<p class="lead">The runtime's contract is itself a product feature: a stable set of HTTP/WS endpoints per pod, a stable gRPC contract for state, and three code-shaped extension points.</p>
+
+<h3 id="runtime-api">6.1 agent-runner runtime API</h3>
+<p>All under <code>/api/sandbox</code> on <code>:8091</code>; auth is the signed <code>X-Priva-Runner-Token</code>.</p>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:18%">Group</th><th>Endpoints</th></tr></thead>
+<tbody>
+<tr><td><code>/agent</code></td><td><code>POST /run</code> · <code>POST /run/stream</code> (SSE) · <code>WS /ws/run</code> · <code>GET /sessions</code> · <code>GET /sessions/running</code> · <code>GET /sessions/{id}/messages</code> · <code>DELETE /sessions/{id}</code> · <code>PATCH /sessions/{id}</code> · <code>PUT /sessions/{id}/{tag,add_dirs,pin,archive}</code> · <code>POST /permission/respond</code> · <code>POST /rewind</code> · <code>POST /fork</code> · <code>GET /workflow-agent/{id}</code> · <code>GET /workflow-state/{run_id}</code></td></tr>
+<tr><td><code>/credentials</code></td><td><code>GET</code> · <code>PUT</code> · <code>GET /status</code> · <code>GET /models</code></td></tr>
+<tr><td><code>/resource/mcp</code></td><td><code>GET /</code> · <code>GET|PUT|DELETE /{level}/{name}</code> · <code>GET /{level}/{name}/capabilities</code> · <code>POST /validate</code> · <code>POST /validate/tool</code></td></tr>
+<tr><td><code>/resource/skills</code></td><td><code>GET /</code> · <code>GET|PUT /config</code> · <code>GET /detail</code> · <code>GET /file</code> · <code>GET /download</code> · <code>POST /upload</code> · <code>DELETE /item</code> · <code>/resource/skill-hub</code></td></tr>
+<tr><td><code>/hooks</code></td><td><code>GET /catalog</code> · <code>POST /catalog/{id}/{enable,disable}</code> · <code>GET|PUT /config</code> · <code>POST /test</code> · <code>POST /test/builtin</code> · <code>GET /logs</code></td></tr>
+<tr><td><code>/subagents</code></td><td><code>GET /catalog</code> · <code>GET /list</code> · <code>GET|POST|PUT|DELETE /{name}</code> · <code>POST /{name}/test/stream</code></td></tr>
+<tr><td><code>/pty</code> · <code>/files</code> · <code>/user</code></td><td><code>WS /pty/ws</code>, <code>GET|PUT /pty/{feature,config}</code> · <code>/files/{list,download,preview,upload}</code> · <code>/user/{overview,stats,audit,analytics}</code></td></tr>
+</tbody>
+</table></div>
+
+<h3 id="control-api">6.2 control-panel API &amp; data-spine contract</h3>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:22%">Surface</th><th>Highlights</th></tr></thead>
+<tbody>
+<tr><td>control-panel <code>/api/auth</code></td><td><code>setup</code> · <code>register</code> · <code>login</code> · <code>refresh</code> · <code>me</code> · <code>audit</code> · <code>me/apikey</code> (CRUD) · <code>me/password</code></td></tr>
+<tr><td>control-panel <code>/api/admin</code></td><td>runner-defaults · runner-images · users CRUD · pending-registrations + approve/reject · fleet · accounts restart/shutdown · gateway-metrics · resource-usage · system-health · audit · config knobs · admin-files</td></tr>
+<tr><td>control-panel special lanes</td><td><code>WS /api/admin/console/ws</code> (K8s-exec bridge) · <code>GET /api/cp-proxy/{path}</code> (large-read lane) · <code>:9000</code> gRPC <code>ExternalProcessor/Process</code> (ext_proc, TLS)</td></tr>
+<tr><td>data-spine gRPC <span class="dim">(7 served)</span></td><td><strong>Account</strong> · <strong>Binding</strong> · <strong>Quota</strong> · <strong>Admin</strong> (Healthz/Readyz/Stats) · <strong>ResourceSpec</strong> · <strong>RunnerDefaults</strong> · <strong>Registration</strong>. <strong>SchedulerService</strong> is defined but not yet served (Phase 4). Tables: 8.</td></tr>
+</tbody>
+</table></div>
+
+<h3 id="extensibility">6.3 Extensibility model</h3>
+<div class="cards">
+  <div class="card"><div class="ct">Skills</div><p>Markdown + assets in <code>.claude/skills</code>. Per-user denylist governs the allowlist; a hub/marketplace surfaces shared skills. Read natively by the <code>claude</code> CLI.</p></div>
+  <div class="card"><div class="ct">MCP servers</div><p>Standard <code>.mcp.json</code> config, plus a built-in in-process <code>priva_File</code> server for the Canvas. Admin-governed so agents reach internal systems under policy.</p></div>
+  <div class="card"><div class="ct">Hooks</div><p>In-process Python <code>PreToolUse</code>/<code>PostToolUse</code> callbacks — admin-enforced (incl. PII masking) plus user hooks. The governance seam of the runtime.</p></div>
+</div>
+</section>
+
+<!-- ================= §7 Non-Functional Requirements ================= -->
+<section id="nfr">
+<h2><span class="no">§7</span>Non-Functional Requirements</h2>
+<div class="facts">
+  <div class="fact"><div class="fl">Cold start 0→1</div><div class="fv">≈ 4 s <small>warm = instant</small></div></div>
+  <div class="fact"><div class="fl">Wake-hold → 503</div><div class="fv">5 s dev <small>prod overlay 120 s</small></div></div>
+  <div class="fact"><div class="fl">Idle sweep</div><div class="fv">10 s timer <small>grace 1800 s dev / 600 s prod</small></div></div>
+  <div class="fact"><div class="fl">Runner default</div><div class="fv">1 core · 2048 MB <small>Guaranteed QoS</small></div></div>
+  <div class="fact"><div class="fl">Concurrency</div><div class="fv">3 sessions <small>min(mem, quota)</small></div></div>
+  <div class="fact"><div class="fl">Scale target</div><div class="fv">Hundreds <small>escape hatch &gt;800 CRs</small></div></div>
+</div>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:26%">Concern</th><th>Behavior</th></tr></thead>
+<tbody>
+<tr><td>Cold-start UX</td><td><code>fetchWithWake()</code> detects an early 503 at <code>WAKE_SLOW_MS=900ms</code>, toasts "waking…", retries ≤6× with backoff <code>[1,2,4,8,16]</code> s.</td></tr>
+<tr><td>Idle economics</td><td>operator 10 s timer: idle sweep + podIP self-heal (flips not-routable before teardown to shrink the EPP race) + quota reconcile. <code>persistent</code> runners are exempt; pin-on-approval parks a pod at ~zero spend through the approval window.</td></tr>
+<tr><td>Storage quota</td><td>Dev: per-account fixed-size ext4 loop image — the filesystem size <em>is</em> the hard quota (1 Gi ≈ 974 MiB usable). Grow is online; live shrink → <code>409 "shrink not supported on the dev loop backend"</code>.</td></tr>
+<tr><td>Availability shape</td><td>control-panel: N stateless replicas. data-spine: 1 replica, <code>Recreate</code> (single-writer) — the availability floor of the control plane and the durable-state SPOF to address before any HA claim.</td></tr>
+<tr><td>Resource limits (PTY)</td><td><code>rlimit_cpu_seconds=600</code>; <code>rlimit_as_bytes=0</code> (disabled — the bun/JSC <code>claude</code> binary SIGTRAPs under AS caps ≤3 GiB); ≤3 PTY sessions/user.</td></tr>
+</tbody>
+</table></div>
+</section>
+
+<!-- ================= §8 Operations & Deployment ================= -->
+<section id="operations">
+<h2><span class="no">§8</span>Operations &amp; Deployment</h2>
+
+<h3 id="environments">8.1 Environments</h3>
+<p><strong>Dev (minikube):</strong> <code>./deploy/minikube/build.sh</code> builds/loads 5 images (<code>priva/{data-spine,control-panel,operator,agent-runner,nfs-xfs}:dev</code>, Python 3.12-slim, uv; agent-runner bakes the native <code>claude</code> CLI); <code>up.sh</code> runs an idempotent 9-step bring-up (CSI hostpath with <code>allowVolumeExpansion</code> patched on → namespace → dev NFS+quota → Gateway API v1.5 + GIE v1.5 CRDs → agentgateway 1.3.0 via Helm OCI → CRD/RBAC → shared secret → control plane → edge). Access via <code>port-forward svc/priva-gateway 8080:80</code>.</p>
+<p><strong>Prod (Helm + values-prod overlay):</strong> the chart mirrors the raw manifests one-for-one; <code>values-prod.yaml</code> swaps to a real registry with pinned tags, disables dev storage, sets <code>storageBackend=cephfs</code> (external CephFS/NFS CSI — no privileged storage pod), a durable 5 Gi data-spine PVC, explicit control-plane requests/limits, and pinnable JWT/HMAC secrets. Gateway API, GIE, and agentgateway are prerequisites, not in the chart.</p>
+
+<h3 id="change-workflow">8.2 Change workflow</h3>
+<div class="co info"><span class="cot">Frontend hotload</span><p>SPAs build on the host and are served from disk by control-panel via <code>StaticFiles</code>, so a frontend change needs no image rebuild: <code>tar | kubectl exec</code> the fresh <code>dist/</code> into the running pod and it serves live. Hotloaded files are lost on reschedule; the image rebuild is what persists them. <strong>Backend changes always require an image rebuild.</strong></p></div>
+
+<h3 id="observability">8.3 Observability (ADR 0002)</h3>
+<p>Raw <code>prometheus-client</code>, no framework. HTTP count/latency recorded inside the existing <code>AccessLogMiddleware</code> (labels: route-template <code>handler</code>, <code>method</code>, <code>status</code>; <code>user_name</code> is deliberately never a label — unbounded cardinality). Domain counters: <code>agent_runs_started_total</code>, <code>agent_runs_finished_total{outcome}</code>. The multiprocess dir is owned by the launcher (wiped + recreated each start so stale per-process files can't inflate counters forever). <code>/metrics</code> is deliberately unauthenticated (network-controlled; optional future <code>METRICS_TOKEN</code>).</p>
+
+<h3 id="migration-status">8.4 Migration status (strangler)</h3>
+<p>Phases 0–3 are complete, merged 2026-06-21, validated end-to-end on minikube. The legacy monolith (<code>priva/</code>) still boots as a behavioral reference and is removed at Phase 4. See §10 for the full phase plan.</p>
+</section>
+
+<!-- ================= §9 Competitive Landscape ================= -->
+<section id="competitive">
+<h2><span class="no">§9</span>Competitive Landscape &amp; Build-vs-Adopt</h2>
+
+<p class="lead">Verified against vendor docs, licenses, and news as of July 2026. The comparison centers on the <strong>Manus-class autonomous-agent category</strong> — give a goal, the agent plans and executes it end-to-end in its own sandbox and returns deliverables — alongside the open-source personal agents, Anthropic's first-party options, and the K8s substrate Priva composes with. Every one fails Priva's requirement set — <em>full Claude-SDK surface × per-user isolation × fully on-prem × BYOK</em> — on at least one disqualifying axis.</p>
+
+<h3 id="categories">9.1 The four categories</h3>
+<div class="tabs" id="comp-tabs">
+  <button class="on" data-pane="pane-manus">Autonomous agents (SaaS)</button>
+  <button data-pane="pane-oss">Open-source personal agents</button>
+  <button data-pane="pane-anthropic">Anthropic first-party</button>
+  <button data-pane="pane-eco">Ecosystem &amp; substrate</button>
+</div>
+
+<div class="tabpane on" id="pane-manus">
+  <p><strong>Manus · Genspark · Devin · Flowith.</strong> The category the redirect points at: hosted products where a goal goes in and a finished artifact comes out, executed autonomously in the vendor's cloud. Best-in-class autonomy — and, with one partial exception, no way to run on your own network.</p>
+  <div class="tw"><table class="plain wrapflag">
+  <thead><tr><th>Product</th><th>Execution model</th><th>Hosting / sovereignty</th><th>Read vs Priva</th></tr></thead>
+  <tbody>
+  <tr><td><strong>Manus</strong> <span class="dim">Butterfly Effect</span></td><td>Isolated cloud VM per <em>task</em> ("Manus Sandbox", built on E2B Firecracker microVMs); parallel task fleet; Claude-based reasoning (confirmed Claude 3.5 Sonnet at launch) behind a closed proprietary harness</td><td><strong>SaaS only</strong> — no self-host / on-prem; credits pricing (Plus $39 / Pro $199/mo)</td><td>The category leader for polished autonomy — but zero data-residency control, no BYOK, opaque model routing. Vendor-continuity risk is now concrete: Meta's ~$2B acquisition was <strong>blocked and ordered unwound by China's NDRC (Apr 2026)</strong>.</td></tr>
+  <tr><td><strong>Genspark</strong> <span class="dim">Super Agent</span></td><td>Mixture-of-agents (8–9 LLMs + 80+ tools) with a per-user "Cloud Computer"; autonomous incl. real phone calls; also resells an OpenClaw-style "Genspark Claw"</td><td>SaaS only; Plus $24.99 / Pro $249.99 / Team $30-seat</td><td>Broad autonomy and tool breadth — but no self-host, no BYOK, and reviewers flag thin security documentation. Non-option under an on-prem mandate.</td></tr>
+  <tr><td><strong>Devin</strong> <span class="dim">Cognition</span></td><td>Autonomous <em>software-engineering</em> agent in a cloud VM (shell/editor/browser); ACU consumption pricing; own model stack</td><td><strong>The one real perimeter story:</strong> "Customer Dedicated" single-tenant VPC (PrivateLink/IPSec, "code never leaves your cloud boundary") + SAML/OIDC SSO</td><td>The closest commercial option on sovereignty — but a vendor-run VPC is not bare-metal on-prem, it is coding-only, and there is no BYOK or Claude-SDK surface.</td></tr>
+  <tr><td><strong>Flowith</strong></td><td>Canvas agentic workspace; "Agent Neo" pitched as a 24/7 infinite-context cloud agent; 40+ models</td><td>SaaS, shared cloud; Pro $19.90 / Ultimate $49.90</td><td>Consumer/creator focus; negligible enterprise or sovereignty story. Not built for governed internal fleets.</td></tr>
+  </tbody></table></div>
+  <div class="co gap"><span class="cot">Category verdict</span><p>Polished autonomy with zero ops — and, for an on-prem mandate, non-options: SaaS-only with no BYOK, Devin's single-tenant VPC the sole partial exception (still vendor-run, coding-only). Manus's NDRC-unwound Meta deal is a live reminder that even the leader carries vendor-continuity and geopolitical risk you cannot hedge from the outside.</p></div>
+</div>
+
+<div class="tabpane" id="pane-oss">
+  <p><strong>OpenClaw · Hermes Agent · OpenManus · OpenHands.</strong> Self-hostable and BYOK — the ethos Priva shares — but built as single-user daemons or frameworks, none Claude-SDK-native, none with a K8s multi-tenant runtime or central governance.</p>
+  <div class="tw"><table class="plain wrapflag">
+  <thead><tr><th>Product</th><th>What it is</th><th>Isolation / multi-tenancy</th><th>Read vs Priva</th></tr></thead>
+  <tbody>
+  <tr><td><strong>OpenClaw</strong> <span class="dim">MIT · ~247k ★</span></td><td>Local-first personal agent daemon reachable over your messaging channels (lineage Warelay→Clawdbot→Moltbot→OpenClaw after an Anthropic trademark complaint); BYOK, Claude-friendly, own harness</td><td><strong>Single-user; main-session tools run on the host with full access</strong> by default (opt-in sandbox for side sessions)</td><td>Identical BYOK ethos and huge momentum — but the antithesis of per-user pod isolation. Its record is the cautionary tale: tens of thousands of exposed instances, the "ClawJacked" hijack, prompt-injection as the #1 practical risk. Anthropic even <em>blocked its subscription OAuth</em> (Apr 2026), then reinstated metered API-rate use.</td></tr>
+  <tr><td><strong>Hermes Agent</strong> <span class="dim">Nous Research · MIT</span></td><td>Self-hosted <em>self-improving</em> personal agent (persistent memory + a loop that writes reusable skill docs); model-agnostic BYOK incl. Anthropic; pluggable Docker/SSH/Modal/Daytona backends. Released Feb 2026</td><td>Single-instance, single-user; no SSO, quotas, audit, or per-user isolation</td><td>A genuinely novel memory/skill loop Priva doesn't have, free and model-agnostic — but single-user, not K8s-multi-tenant, and its own harness (no sessions/fork/rewind/hooks parity).</td></tr>
+  <tr><td><strong>OpenManus</strong> <span class="dim">MetaGPT · MIT</span></td><td>Open-source Manus clone shipped days after the original; a Python planning/tool-use framework, configurable LLM providers</td><td>DIY — no multi-tenant runtime, no console</td><td>Fully self-hostable and free, but a <em>framework</em>, not a product: research-grade stability, and everything above the agent loop is yours to build.</td></tr>
+  <tr><td><strong>OpenHands</strong> <span class="dim">All Hands AI · MIT</span></td><td>Open-source autonomous <em>coding</em> agent; container per session; K8s remote runtime exists; model-agnostic incl. Claude</td><td>Real per-session isolation; multi-user SSO/RBAC/K8s behind a paid enterprise license</td><td>The closest OSS analog to Priva's runtime layer — but SWE-scoped, multi-user is effectively commercial, and it is not Claude-SDK-native.</td></tr>
+  </tbody></table></div>
+  <div class="co gap"><span class="cot">Category verdict</span><p>All on-prem and BYOK — and all single-user daemons or DIY frameworks. Nobody ships a K8s-native, scale-to-zero, pod-per-user runtime with central governance and the Claude Agent SDK as its native surface. OpenClaw's exposed-instance record is a live demonstration of what "hundreds of semi-trusted internal users" would do to a host-privileged single-user design — precisely the failure mode Priva's per-user pod boundary exists to prevent.</p></div>
+</div>
+
+<div class="tabpane" id="pane-anthropic">
+  <p><strong>Claude Code on the web · Claude Managed Agents · Claude Team/Enterprise.</strong> The "why not just buy Anthropic's hosted version" question — perfect Claude compatibility by definition, and a shared answer: sovereignty and BYOK.</p>
+  <div class="tw"><table class="plain wrapflag">
+  <thead><tr><th>Offering</th><th>What you get</th><th>What disqualifies it</th></tr></thead>
+  <tbody>
+  <tr><td><strong>Claude Code on the web</strong></td><td>Anthropic-managed cloud sessions of the real Claude Code; hardened per-session sandbox (filesystem + network isolation), environment configs, GitHub integration; bundled with Pro/Max/Team/Enterprise seats</td><td>Code and agent state live on Anthropic's cloud; no BYOK / base-URL redirection (bound to seats and Anthropic billing); repo-shaped, not a workspace over internal systems; no admin-governed MCP topology into your network.</td></tr>
+  <tr><td><strong>Managed Agents (API, beta 2026-04)</strong></td><td>Hosted agent runtime — <code>POST /v1/agents</code> + sessions, container per session, tools/MCP/skills/vaults/memory; verified pricing: token rates + $0.08/session-hour; a <code>self_hosted</code> mode runs <em>tool execution</em> in your VPC via polling workers</td><td>The loop and agent state stay on Anthropic infra even in self-hosted mode — only tool side-effects come home. No BYOK. No end-user product: console, identity, terminal, file explorer for hundreds of employees remain unbuilt. Beta-header churn.</td></tr>
+  <tr><td><strong>Team / Enterprise seats</strong></td><td>The claude.ai surface — chat, projects, connectors, Claude Code — with SSO/audit on Enterprise (~$20/seat/mo + usage)</td><td>The "do nothing" baseline: fastest to adopt, fully SaaS. No sovereignty, no per-user compute on your network, no platform-team control of the tool topology.</td></tr>
+  </tbody></table></div>
+  <div class="co warn"><span class="cot">The sharpest adopt-side threat</span><p>Managed Agents is Anthropic explicitly productizing the layer Priva builds — sandbox, state, secrets, orchestration at $0.08/user-hour, churn absorbed by versioned agent configs. The build case must therefore rest on <strong>sovereignty, BYOK, and the product surface</strong> — not on cost, where renting wins.</p></div>
+</div>
+
+<div class="tabpane" id="pane-eco">
+  <p><strong>E2B / Firecracker · agentgateway · Gateway API Inference Extension · kagent · Agent Sandbox (kubernetes-sigs).</strong> Not competitors — the substrate Priva composes with (or can adopt), and the strongest evidence its architecture is the emerging standard.</p>
+  <ul>
+    <li><strong>E2B Firecracker microVMs</strong> are what Manus's sandbox runs <em>on</em> — the hardware-grade isolation tier above Priva's shared-kernel pod. Priva can reach the same tier without a second orchestrator by flipping <code>runtimeClassName</code> to gVisor/Kata; the boundary is a config change, not a redesign.</li>
+    <li><strong>agentgateway</strong> (Linux Foundation, v1.0.0, CNCF Agentic-AI radar "Trial") is now implemented in beta by both kgateway and Istio — Priva's edge is a mainstream-track bet, not an exotic one.</li>
+    <li><strong>Gateway API Inference Extension</strong> reached v1.0.0 with conformant implementations; Priva's <code>InferencePool</code> + EPP wiring sits on a stabilized upstream API.</li>
+    <li><strong>kagent</strong> (CNCF Sandbox) defines agents as CRDs but targets platform/DevOps automation, not multi-tenant personal assistants.</li>
+    <li><strong>Agent Sandbox</strong> (kubernetes-sigs, announced 2026-03) — <code>Sandbox</code> / <code>SandboxWarmPool</code> / <code>SandboxClaim</code> CRDs for singleton stateful agent workloads with suspend/resume, warm pools, and gVisor/Kata runtimes, explicitly citing "agents like Claude Code." Still pre-release — but it is the upstream standardization of exactly Priva's per-user scale-to-zero pod, and a candidate future substrate for the runtime layer.</li>
+  </ul>
+  <div class="co info"><span class="cot">Strategic read</span><p>The plumbing is converging on Priva's shape. None of it ships a console, session persistence, or Claude SDK feature mapping — the product layer stays differentiating even if the pod-runtime layer commoditizes. Design that layer to be swappable (§11).</p></div>
+</div>
+
+<h3 id="matrix">9.2 Comparison matrix</h3>
+<div class="tw"><table class="matrix">
+<thead><tr><th>Product</th><th>Self-host</th><th>On-prem sovereignty</th><th>Per-user isolation</th><th>Autonomous agent</th><th>Claude-SDK-native</th><th>BYOK</th><th>License</th></tr></thead>
+<tbody>
+<tr><td><strong>Priva Cloud</strong></td><td class="y">✓ K8s</td><td class="y">✓ full</td><td class="y">✓ pod/user 0↔1</td><td class="y">✓ full SDK</td><td class="y">✓</td><td class="y">✓</td><td>Internal</td></tr>
+<tr><td>Manus</td><td class="n">✗</td><td class="n">✗ SaaS</td><td class="y">✓ VM/task (cloud)</td><td class="y">✓ best-in-class</td><td class="n">✗ Claude inside</td><td class="n">✗</td><td>Proprietary</td></tr>
+<tr><td>Genspark</td><td class="n">✗</td><td class="n">✗ SaaS</td><td class="p">△ cloud computer</td><td class="y">✓</td><td class="n">✗</td><td class="n">✗</td><td>Proprietary</td></tr>
+<tr><td>Devin</td><td class="p">△ VPC</td><td class="p">△ single-tenant VPC</td><td class="y">✓ VM/session</td><td class="y">✓ SWE only</td><td class="n">✗</td><td class="n">✗</td><td>Proprietary</td></tr>
+<tr><td>Flowith</td><td class="n">✗</td><td class="n">✗ SaaS</td><td class="n">✗ shared cloud</td><td class="y">✓</td><td class="n">✗</td><td class="n">✗</td><td>Proprietary</td></tr>
+<tr><td>OpenClaw</td><td class="y">✓</td><td class="y">✓</td><td class="n">✗ single-user host</td><td class="p">△ personal</td><td class="n">✗ own harness</td><td class="y">✓</td><td>MIT</td></tr>
+<tr><td>Hermes Agent</td><td class="y">✓</td><td class="y">✓</td><td class="n">✗ single-user</td><td class="p">△ personal</td><td class="n">✗ own harness</td><td class="y">✓</td><td>MIT</td></tr>
+<tr><td>OpenManus</td><td class="y">✓</td><td class="y">✓</td><td class="n">✗ DIY framework</td><td class="p">△ rough</td><td class="n">✗</td><td class="y">✓</td><td>MIT</td></tr>
+<tr><td>OpenHands</td><td class="p">△ multi-user paid</td><td class="y">✓</td><td class="y">✓ ctr/session</td><td class="y">✓ SWE</td><td class="n">✗ own SDK</td><td class="y">✓</td><td>MIT + Polyform</td></tr>
+<tr><td>Claude Code on web</td><td class="n">✗</td><td class="n">✗</td><td class="y">✓ Anthropic sandbox</td><td class="y">✓</td><td class="y">✓ first-party</td><td class="n">✗</td><td>Proprietary SaaS</td></tr>
+<tr><td>Managed Agents</td><td class="p">△ tool-exec only</td><td class="n">✗ state on cloud</td><td class="y">✓ ctr/session</td><td class="y">✓</td><td class="y">✓ first-party</td><td class="n">✗</td><td>Proprietary API</td></tr>
+</tbody></table></div>
+<div class="co info"><span class="cot">Key read</span><p>Only Priva's row is green across self-host, sovereignty, per-user isolation, autonomy, SDK-nativeness, and BYOK. The categories fail in different places: the <strong>commercial autonomous products</strong> (Manus, Genspark, Flowith, Devin) fail sovereignty and BYOK; the <strong>open-source personal agents</strong> (OpenClaw, Hermes, OpenManus) fail multi-tenant isolation and SDK-nativeness; <strong>Anthropic first-party</strong> fails sovereignty and BYOK. No existing product occupies Priva's cell.</p></div>
+
+<h3 id="build-vs-adopt">9.3 Build-vs-adopt: the case and its honest costs</h3>
+<div class="cards">
+  <div class="card"><div class="ct" style="color:var(--ok)">Why self-build</div>
+    <p><strong>1 · The intersection is empty.</strong> Full Claude-SDK surface × per-user isolation × on-prem × BYOK is satisfied by zero products in any category — the commercial agents miss sovereignty/BYOK, the open-source agents miss multi-tenancy/SDK-nativeness.<br>
+    <strong>2 · Sovereignty disqualifies the commercial column.</strong> Manus, Genspark, and Flowith are SaaS-only with no residency control; Devin's single-tenant VPC is the sole partial exception, still vendor-run and coding-only. Manus's NDRC-unwound Meta deal shows even the leader carries vendor-continuity risk.<br>
+    <strong>3 · BYOK exists nowhere commercial.</strong> Manus credits, Genspark credits, Devin ACUs all meter through the vendor. The OpenClaw OAuth ban proved BYO-subscription hacks get shut off; only a clean API-key BYOK model is durable.<br>
+    <strong>4 · Per-user isolation is the open-source gap.</strong> OpenClaw and Hermes are single-user host daemons — OpenClaw's exposed-instance record is what that architecture does at scale. Nobody ships K8s pod-per-user scale-to-zero with governance.<br>
+    <strong>5 · SDK-nativeness compounds.</strong> None of the ten expose sessions, fork/rewind, hooks, subagents, permission modes as first-class; each OSS agent rebuilt its own harness. Priva inherits Anthropic's upgrade path.</p></div>
+  <div class="card"><div class="ct" style="color:var(--warn)">What it costs (honest)</div>
+    <p><strong>1 · Autonomy polish is real work.</strong> Manus and Genspark deliver a tuned goal→deliverable loop (planning, browser control, artifact generation, parallel VM fleets) with zero ops. Priva's raw SDK sessions + chat/PTY/file console are not automatically that product; reaching "give it a goal, get slides back" parity is ongoing agent-UX engineering.<br>
+    <strong>2 · Sandbox hardening shifts to you.</strong> Manus outsources isolation to E2B Firecracker professionals; Priva must harden pod escape, egress, and secrets itself — and the open web-terminal finding (§4.4) proves the point.<br>
+    <strong>3 · The OSS agents iterate faster.</strong> Hermes ~175k ★ in four months, OpenClaw ~247k ★; their skills/memory/channel ecosystems compound weekly. Plan to interoperate (import skills, MCP servers), not to out-feature.<br>
+    <strong>4 · For pure SWE, cheaper options exist.</strong> Devin-in-VPC or self-hosted OpenHands already cover much of the coding ground; Priva's differentiation must rest on general-purpose agents, BYOK, and true on-prem — not on coding autonomy alone.<br>
+    <strong>5 · Anthropic is productizing the layer.</strong> Managed Agents rents the runtime at $0.08/session-hour with churn absorbed; the build case rests on sovereignty/BYOK/product, never on cost.</p></div>
+</div>
+</section>
+
+<!-- ================= §10 Roadmap ================= -->
+<section id="roadmap">
+<h2><span class="no">§10</span>Roadmap</h2>
+<p class="lead">A phased "strangler" migration out of a working single-machine monolith. Every phase lands independently shippable and end-to-end verified on minikube. Click a phase to see its scope.</p>
+
+<div class="phases" id="roadmap-phases">
+  <button class="phase done sel" data-k="p03"><span class="pn">Ph 0–3</span><span class="pt">Split &amp; runtime</span></button>
+  <button class="phase next" data-k="p4"><span class="pn">Ph 4</span><span class="pt">Scheduler &amp; IM</span></button>
+  <button class="phase later" data-k="p5"><span class="pn">Ph 5</span><span class="pt">state-reader</span></button>
+  <button class="phase later" data-k="p6"><span class="pn">Ph 6</span><span class="pt">Prod hardening</span></button>
+</div>
+<div class="ixd" id="roadmap-detail" style="border-top:1px solid var(--line);margin-top:0;border-radius:0 0 8px 8px;border:1px solid var(--line);border-top:none;padding:16px 18px"></div>
+
+<div class="co gap"><span class="cot">Status as of 2026-07-10</span><p>Phases 0–3 merged to <code>main</code> (2026-06-21). At rest, control-panel, operator, data-spine and the edge run <code>1/1 Ready</code>; agent-runner pods scale <code>0→1</code> on demand (≈4 s cold start, real LLM run + WebSocket chat verified) and sit at zero when idle. Phases 4–6 are deferred.</p></div>
+</section>
+
+<!-- ================= §11 Risks & Open Issues ================= -->
+<section id="risks">
+<h2><span class="no">§11</span>Risks &amp; Open Issues</h2>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:22%">Risk</th><th>Detail &amp; disposition</th><th>Sev</th></tr></thead>
+<tbody>
+<tr><td><strong>Web-terminal secret exposure</strong></td><td>Shared signing secret readable from any tenant PTY + no NetworkPolicy → cross-tenant token forgery and pod access (§4.4). Tier-0 fix scoped (~1 day), <strong>not yet applied</strong>; a launch blocker for the tenant-facing terminal.</td><td><span class="st open">Open · High</span></td></tr>
+<tr><td><strong>Plaintext in-cluster transport</strong></td><td>All in-cluster hops except the ext_proc EPP are plaintext HTTP/gRPC in alpha. Edge TLS + pod mTLS/JWKS deferred to Phase 6.</td><td><span class="st defer">Deferred</span></td></tr>
+<tr><td><strong>Pod-boundary isolation</strong></td><td>Shared-kernel runc boundary is weaker than Firecracker/gVisor for semi-trusted users holding a PTY; a container escape compromises the node. Mitigation path: <code>runtimeClassName</code> → gVisor/Kata (config flip), tracking kubernetes-sigs Agent Sandbox.</td><td><span class="st defer">Known</span></td></tr>
+<tr><td><strong>data-spine SPOF</strong></td><td>Single SQLite writer, 1 replica <code>Recreate</code> — the control plane's availability floor. Postgres backend is an interface-only stub today.</td><td><span class="st defer">Known</span></td></tr>
+<tr><td><strong>SDK / CLI upstream churn</strong></td><td>Tight coupling to a fast-moving <code>claude-agent-sdk</code> / CLI (breaking changes, beta headers, permission-model revisions). Absorbed release-by-release; the cost of SDK-nativeness.</td><td><span class="st defer">Ongoing</span></td></tr>
+<tr><td><strong>Doc-vs-code drift</strong></td><td>Some repo docs still describe the superseded data-spine Fernet→Secret BYOK flow and a 9th <code>secret</code> table; as-built (since 2026-07-01) uses pod-local <code>settings.json</code> and 8 tables / 7 served services. This spec reflects as-built.</td><td><span class="st stub">Minor</span></td></tr>
+<tr><td><strong>Ecosystem convergence</strong></td><td>If Agent Sandbox CRDs + Managed Agents' self-hosted workers + agentgateway converge into an off-the-shelf "Claude agents on your cluster" story, part of the pod-runtime layer commoditizes. Mitigation: keep differentiation in the tenant/console/BYOK layer; design the runtime layer swappable.</td><td><span class="st defer">Strategic</span></td></tr>
+</tbody>
+</table></div>
+</section>
+
+<!-- ================= §12 Glossary ================= -->
+<section id="glossary">
+<h2><span class="no">§12</span>Glossary</h2>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:20%">Term</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><strong>EPP</strong></td><td>Endpoint Picker — the per-request routing brain run by control-panel; the edge consults it for every runtime request to resolve the tenant and steer to the right pod.</td></tr>
+<tr><td><strong>ext_proc</strong></td><td>Envoy's External Processing gRPC API (<code>envoy.service.ext_proc.v3</code>). The edge calls the EPP over ext_proc to mutate/steer requests before forwarding.</td></tr>
+<tr><td><strong>GIE</strong></td><td>Gateway-API-Inference-Extension — supplies the <code>InferencePool</code> CRD that wires the edge to the EPP.</td></tr>
+<tr><td><strong>InferencePool</strong></td><td>GIE resource selecting <code>app=agent-runner</code> pods on port <code>8091</code>, with <code>endpointPickerRef</code> → control-panel EPP.</td></tr>
+<tr><td><strong>AgentTenant CR</strong></td><td>The per-account custom resource (<code>priva.io/v1alpha1</code>) the operator reconciles into a Deployment/Service/PVC. One per user; wake is a CR patch.</td></tr>
+<tr><td><strong>scale-to-zero</strong></td><td>A tenant pod runs 0 replicas when idle; the operator wakes it 0→1 on demand and sweeps it back to 0 after an idle grace.</td></tr>
+<tr><td><strong>BYOK</strong></td><td>Bring-Your-Own-Key — each user supplies their own model-gateway credentials (<code>ANTHROPIC_BASE_URL</code>/<code>ANTHROPIC_AUTH_TOKEN</code>); no virtual keys, no metering proxy.</td></tr>
+<tr><td><strong>Fork vs Rewind</strong></td><td>Two distinct SDK mechanisms — <em>rewind</em> restores workspace files via file checkpointing; <em>fork</em> branches the conversation into a new child session. See §5.</td></tr>
+<tr><td><strong>RWO / RWX</strong></td><td>Kubernetes volume access modes: <code>ReadWriteOnce</code> (data-spine's SQLite PVC) and <code>ReadWriteMany</code> (the shared <code>priva-export</code> workspace volume).</td></tr>
+<tr><td><strong>Managed Agents</strong></td><td>Anthropic's first-party hosted agent runtime (API beta 2026-04) — the closest "adopt instead of build" alternative; see §9.</td></tr>
+</tbody>
+</table></div>
+</section>
+
+</main>
+</div>
+
+<footer>
+  <p>Priva Cloud · Agent Runtime — Product Specification v1.0 · 2026-07-10. Sources: repository <code>README.md</code>, <code>docs/architecture/*</code>, <code>docs/adr/*</code>, <code>web/design-spec.md</code>; competitive claims verified July 2026 against vendor documentation, licenses, and news (Manus, Genspark, Devin, Flowith, OpenClaw, Hermes Agent / Nous Research, OpenManus, OpenHands, Anthropic pricing docs, CNCF / kubernetes-sigs announcements).</p>
+</footer>
+
+<script>
+// copy buttons on code blocks
+document.querySelectorAll('pre').forEach(pre=>{
+  const host=pre.parentElement;
+  if(!host.classList.contains('code')){
+    const w=document.createElement('div');w.className='code';
+    pre.replaceWith(w);w.appendChild(pre);
+  }
+  const box=pre.parentElement;
+  const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+  b.addEventListener('click',()=>{
+    navigator.clipboard.writeText(pre.innerText).then(()=>{b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1500)});
+  });
+  box.appendChild(b);
+});
+// TOC scrollspy
+const links=[...document.querySelectorAll('nav.toc a')];
+const map={};links.forEach(l=>map[l.getAttribute('href').slice(1)]=l);
+const obs=new IntersectionObserver(es=>{
+  es.forEach(e=>{
+    if(e.isIntersecting){
+      links.forEach(l=>l.classList.remove('on'));
+      const l=map[e.target.id];if(l)l.classList.add('on');
+    }
+  });
+},{rootMargin:'-8% 0px -78% 0px'});
+document.querySelectorAll('section[id]').forEach(s=>obs.observe(s));
+
+// §9 tabs
+(function(){
+  const tabs=document.getElementById('comp-tabs');if(!tabs)return;
+  const btns=[...tabs.querySelectorAll('button')];
+  btns.forEach(b=>b.addEventListener('click',()=>{
+    btns.forEach(x=>x.classList.remove('on'));
+    document.querySelectorAll('.tabpane').forEach(p=>p.classList.remove('on'));
+    b.classList.add('on');
+    document.getElementById(b.dataset.pane).classList.add('on');
+  }));
+})();
+
+// §3 byte-path: clickable node detail + step-through walkthrough
+(function(){
+  const ix=document.getElementById('byte-path-ix');if(!ix)return;
+  const detail=ix.querySelector('.ixd');
+  const nodes=[...ix.querySelectorAll('.node')];
+  const D={
+    edge:'<strong>agentgateway (edge, :80)</strong> — external Rust L7 proxy provisioned via Gateway API + Inference Extension. Terminates client transport (HTTP/2, WS, SSE), relays bytes, and consults the EPP for steering. It <em>relays</em>; it never decides. Not Priva code.',
+    cp:'<strong>control-panel · EPP</strong> — the brain. HTTP :8080 serves SPAs, auth, admin and the cp-proxy read lane; gRPC :9000 is the Envoy <code>ext_proc</code> EPP (TLS) that verifies the JWT, resolves the account, coalesces concurrent wakes, and mints steering headers. Stateless, N replicas.',
+    op:'<strong>operator</strong> — kopf controller and the <em>sole</em> scaler (0↔1). Reconciles the <code>AgentTenant</code> CR into Deployment/Service/PVC; a 10 s timer runs idle sweep + podIP self-heal + quota reconcile. It never serves traffic.',
+    ar:'<strong>agent-runner (:8091)</strong> — the per-tenant pod that wraps claude-agent-sdk and spawns the native <code>claude</code> CLI. Holds all runtime data (sessions, files) on its own volumes. Scales to zero when idle; accepts only a runner token pinned to its own <code>ACCOUNT_ID</code>.',
+    ds:'<strong>data-spine (:50051)</strong> — single-writer durable state on SQLite (WAL) behind the <code>priva.dataplane.v1</code> gRPC contract. Authoritative for accounts, quotas, specs, registrations. Never on the runtime byte path — control-plane state only.'
+  };
+  const STEPS=[
+    {t:'<strong>Idle.</strong> Click a component for its role, or step through a cold request. The tenant pod is at <code>0</code> replicas; nothing is running for this user.',n:[],e:[]},
+    {t:'<strong>① Client → edge.</strong> A browser/IM client hits agentgateway :80. HTTPRoute sends <code>/</code> to control-panel and <code>/api/sandbox/*</code> to the InferencePool.',n:['edge'],e:['bp-e1']},
+    {t:'<strong>② Per-request ext_proc.</strong> For every <code>/api/sandbox/*</code> request the edge calls the control-panel EPP over gRPC ext_proc (TLS). The EPP verifies the JWT and resolves the account.',n:['cp'],e:['bp-e2']},
+    {t:'<strong>③ Wake.</strong> The EPP patches <code>AgentTenant.spec.wake.requestedAt</code>; the operator scales the tenant Deployment 0→1 (≈4 s cold), returning 503 if not Ready within the wake-hold window.',n:['op'],e:['bp-e3','bp-e3b']},
+    {t:'<strong>④ Stream to the pod.</strong> The EPP returns steering headers (<code>x-gateway-destination-endpoint</code>, <code>x-priva-runner-token</code>); the edge streams the request to the woken agent-runner, which accepts the token only if its <code>account_id</code> matches the pod.',n:['ar'],e:['bp-e4']},
+    {t:'<strong>⑤ Model call.</strong> agent-runner runs the SDK turn against the user\'s own model gateway (BYOK base URL + token) and streams events back over SSE/WebSocket.',n:['ar'],e:['bp-e5']}
+  ];
+  const bar=ix.querySelector('.ixbar'), stp=bar&&bar.querySelector('.stp');
+  const prev=bar&&bar.querySelector('.prev'), next=bar&&bar.querySelector('.next');
+  let s=0;
+  function paint(){
+    const st=STEPS[s];
+    nodes.forEach(n=>{n.classList.remove('hot','done','sel')});
+    ix.querySelectorAll('.edge').forEach(e=>e.classList.remove('hot','flow'));
+    st.n.forEach(k=>{const n=nodes.find(x=>x.dataset.k===k);if(n)n.classList.add('hot')});
+    st.e.forEach(id=>{const e=document.getElementById(id);if(e){e.classList.add('hot','flow')}});
+    detail.innerHTML=st.t;
+    if(stp)stp.textContent='step '+s+' / 5';
+    if(prev)prev.disabled=(s===0);if(next)next.disabled=(s===5);
+  }
+  nodes.forEach(n=>{
+    const act=()=>{s=0;nodes.forEach(m=>m.classList.remove('hot','done'));
+      ix.querySelectorAll('.edge').forEach(e=>e.classList.remove('hot','flow'));
+      nodes.forEach(m=>m.classList.remove('sel'));n.classList.add('sel');
+      detail.innerHTML=D[n.dataset.k];if(stp)stp.textContent='step 0 / 5';
+      if(prev)prev.disabled=true;if(next)next.disabled=false;};
+    n.addEventListener('click',act);
+    n.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();act()}});
+  });
+  if(prev)prev.addEventListener('click',()=>{s=Math.max(0,s-1);paint()});
+  if(next)next.addEventListener('click',()=>{s=Math.min(5,s+1);paint()});
+  paint();
+})();
+
+// §4 trust chain: step-through only
+(function(){
+  const ix=document.getElementById('trust-ix');if(!ix)return;
+  const detail=ix.querySelector('.ixd');
+  const nodes=[...ix.querySelectorAll('.node')];
+  const edges=[...ix.querySelectorAll('.edge')];
+  const CAP=[
+    '<strong>1 · Client JWT.</strong> The request carries an HS256 JWT (from login) or a per-user <code>sk-*</code> API key. Nothing downstream trusts the client directly — only what the EPP asserts about it.',
+    '<strong>2 · EPP verify.</strong> The control-panel EPP verifies the JWT and resolves it to a single account. This is the one authoritative authentication point; the edge only relays.',
+    '<strong>3 · Wake + reconcile.</strong> The EPP patches the <code>AgentTenant</code> CR; the operator scales the tenant pod 0→1. Concurrent wakes for the same account are coalesced.',
+    '<strong>4 · Steering headers.</strong> The EPP mints an <code>x-priva-runner-token</code> (HS256, <code>{account_id, username, exp}</code>) and returns it with the destination endpoint. This signed token is the only credential the runner will honor.',
+    '<strong>5 · Pod pin check.</strong> agent-runner accepts the request only if the token\'s <code>account_id</code> equals its own <code>ACCOUNT_ID</code> env. A runner cannot serve another tenant even if reached directly — the guard is per-pod identity, not network position.'
+  ];
+  const bar=ix.querySelector('.ixbar'), stp=bar&&bar.querySelector('.stp');
+  const prev=bar&&bar.querySelector('.prev'), next=bar&&bar.querySelector('.next');
+  let s=1;
+  function go(n){
+    s=Math.min(5,Math.max(1,n));
+    nodes.forEach(el=>{const k=+el.dataset.step;el.classList.toggle('hot',k===s);el.classList.toggle('done',k<s)});
+    edges.forEach((el,i)=>el.classList.toggle('hot',i<s-1));
+    detail.innerHTML=CAP[s-1];
+    if(stp)stp.textContent='step '+s+' / 5';
+    if(prev)prev.disabled=(s===1);if(next)next.disabled=(s===5);
+  }
+  if(prev)prev.addEventListener('click',()=>go(s-1));
+  if(next)next.addEventListener('click',()=>go(s+1));
+  nodes.forEach(el=>{
+    const act=()=>go(+el.dataset.step);
+    el.addEventListener('click',act);
+    el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();act()}});
+  });
+  go(1);
+})();
+
+// §10 roadmap phase selector
+(function(){
+  const wrap=document.getElementById('roadmap-phases');if(!wrap)return;
+  const detail=document.getElementById('roadmap-detail');
+  const btns=[...wrap.querySelectorAll('.phase')];
+  const D={
+    p03:'<strong>Phases 0–3 · Split &amp; runtime</strong> <span class="st ship">Complete · merged 2026-06-21</span><br>Carved the platform out of the monolith into control-panel, agent-runner, data-spine and operator; stood up the agentgateway + GIE edge and the per-request EPP; delivered scale-to-zero tenant pods, the full Claude Agent SDK surface (sessions, skills, MCP, hooks, subagents, fork/rewind, permissions), the user + admin SPAs, PTY terminal, file explorer, self-registration, and BYOK. Validated end-to-end on minikube.',
+    p4:'<strong>Phase 4 · Scheduler &amp; IM + monolith removal</strong> <span class="st defer">Next</span><br>Register <code>SchedulerService</code> on gRPC and ship cron / scheduled agent jobs (leaderless fire→claim→wake→dispatch, retry with backoff+jitter); build the channel-connector for IM fan-out (Feishu-shaped bindings already in schema); remove the legacy monolith (<code>priva/</code>) now that it is no longer a behavioral reference.',
+    p5:'<strong>Phase 5 · state-reader</strong> <span class="st defer">Deferred</span><br>Wake-free transcript reads while a tenant pod is at 0 replicas — an embeddable read-only JSONL router, promoted to a standalone service in prod for mount isolation. Removes the "wake just to read history" cost.',
+    p6:'<strong>Phase 6 · Production hardening</strong> <span class="st defer">Deferred</span><br>NetworkPolicies (default-deny + narrow egress), mTLS / JWKS pod trust to replace the shared HS256 secret, per-account KMS/DEK envelope encryption, edge TLS termination, Redis-based wake/idle coordination, and offboard→retain→purge chaos tests. Closes the §4.3 / §4.4 gaps — including the open web-terminal risk.'
+  };
+  btns.forEach(b=>{
+    const act=()=>{btns.forEach(x=>x.classList.remove('sel'));b.classList.add('sel');detail.innerHTML=D[b.dataset.k]};
+    b.addEventListener('click',act);
+  });
+  detail.innerHTML=D.p03;
+})();
+</script>
+</body>
+</html>
