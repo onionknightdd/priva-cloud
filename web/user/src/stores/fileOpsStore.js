@@ -1,6 +1,8 @@
-import { create } from 'zustand'
+import { createStore } from 'zustand/vanilla'
+import { makeFacade, registerSliceFactory } from './runtime/registry'
 
-const useFileOpsStore = create((set, get) => ({
+// One file-ops slice per session runtime — see runtime/registry.js.
+export const createFileOpsStore = () => createStore((set, get) => ({
   fileOps: [],
   selectedFileOpId: null,
   roundCounter: 0,
@@ -23,5 +25,9 @@ const useFileOpsStore = create((set, get) => ({
 
   reset: () => set({ fileOps: [], selectedFileOpId: null, roundCounter: 0 }),
 }))
+
+registerSliceFactory('fileOps', createFileOpsStore)
+
+const useFileOpsStore = makeFacade('fileOps')
 
 export default useFileOpsStore

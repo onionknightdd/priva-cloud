@@ -10,24 +10,36 @@ const BASE_URL = '/api/sandbox'
 const RECONNECT_BACKOFF = [1, 2, 4, 8, 16] // seconds — max 5 attempts
 const PROTOCOL_AUTH_CLOSE_CODES = new Set([1000, 1001, 4000, 4001])
 
-/**
- * WebSocket-based streaming client.
- * Returns { abort, sendPermission, sendQueue, sendQueueCancel } — call abort() to cancel the stream.
- *
- * On unexpected close (non-clean, non-auth), auto-reconnects with backoff
- * [1, 2, 4, 8, 16] seconds for up to 5 attempts. Reconnects re-init with
- * the same session_id so the backend can pick up where it left off.
- */
-export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, trace, enableFileCheckpointing = false, cwd = null, addDirs = null) {
+// Shared WS engine for both entry modes:
+//   init   — start a new agent run (sends the init frame with the message)
+//   attach — join a run already executing on the backend (replay + follow)
+//
+// Reconnects prefer an `attach` frame with the last seen event seq (lossless
+// resume against the run registry); when the backend predates the registry
+// (no seq on events), init-mode falls back to the legacy re-init.
+//
+// `surfaceConnUi` gates the global connection banner: only the stream whose
+// session is on screen paints reconnecting/disconnected state — background
+// sessions reconnect silently.
+function openAgentWS({ mode, message, sessionId, runId, sinceSeq = 0, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, trace, enableFileCheckpointing = false, cwd = null, addDirs = null, surfaceConnUi = null }) {
   let ws = null
   let userAborted = false
   let completed = false
   let reconnectAttempt = 0
   let reconnectTimer = null
   let activeSessionId = sessionId
+  let activeRunId = runId || null
+  let lastSeq = mode === 'attach' ? (sinceSeq || 0) : null // null = legacy backend (no seq seen)
+
+  const connUi = () => (surfaceConnUi ? surfaceConnUi() : true)
+  const marks = {
+    connected: () => { if (connUi()) useConnectionStore.getState().markConnected() },
+    reconnecting: (info) => { if (connUi()) useConnectionStore.getState().markReconnecting(info) },
+    disconnected: (info) => { if (connUi()) useConnectionStore.getState().markDisconnected(info) },
+  }
 
   // Single outgoing-frame choke point so debug logging (Settings → Advanced →
-  // Developer Mode) covers every WS send: init, queue, queue_cancel,
+  // Developer Mode) covers every WS send: init, attach, queue, queue_cancel,
   // permission_response, abort.
   const wsSend = (frame) => {
     debugLog('send', `WS ▶ ${frame.type}`, frame)
@@ -56,6 +68,16 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
     wsSend(init)
   }
 
+  const sendAttach = () => {
+    const token = getToken()
+    const frame = { type: 'attach', since_seq: lastSeq || 0 }
+    if (token) frame.token = token
+    if (activeSessionId) frame.session_id = activeSessionId
+    if (activeRunId) frame.run_id = activeRunId
+    if (trace?.tabId) frame.client_tab_id = trace.tabId
+    wsSend(frame)
+  }
+
   const finalize = () => {
     if (completed) return
     completed = true
@@ -68,14 +90,14 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
 
   const scheduleReconnect = (closeCode) => {
     if (reconnectAttempt >= RECONNECT_BACKOFF.length) {
-      useConnectionStore.getState().markDisconnected({ code: closeCode })
+      marks.disconnected({ code: closeCode })
       onEvent('error', { message: 'Connection lost — please refresh the page.' })
       finalize()
       return
     }
     reconnectAttempt += 1
     const delay = RECONNECT_BACKOFF[reconnectAttempt - 1]
-    useConnectionStore.getState().markReconnecting({
+    marks.reconnecting({
       attempt: reconnectAttempt,
       maxAttempts: RECONNECT_BACKOFF.length,
       delaySeconds: delay,
@@ -86,6 +108,7 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
 
   const connect = () => {
     reconnectTimer = null
+    const isReconnect = reconnectAttempt > 0
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     // The edge (agentgateway ext_proc EPP) authenticates the WS on the UPGRADE
     // request, which carries no body — so the token rides the
@@ -96,19 +119,35 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
     ws.onopen = () => {
       // Mark connected on every successful (re)open. The first open transitions
       // out of `disconnected`/`reconnecting` cleanly.
-      useConnectionStore.getState().markConnected()
+      marks.connected()
       reconnectAttempt = 0
-      sendInit()
+      if (mode === 'attach') {
+        sendAttach()
+      } else if (isReconnect && lastSeq !== null) {
+        // Registry backend: rejoin the SAME run losslessly instead of
+        // re-initing (which would double-resume the session).
+        sendAttach()
+      } else {
+        sendInit()
+      }
     }
 
     ws.onmessage = (evt) => {
       try {
-        const { event, data } = JSON.parse(evt.data)
+        const { event, data, seq } = JSON.parse(evt.data)
+        if (typeof seq === 'number' && seq > (lastSeq || 0)) lastSeq = seq
         if (event === 'keepalive') return
         debugLog('recv', `WS ◀ ${event}`, data)
-        // Track the latest session_id so a reconnect resumes the same conversation.
+        // Track run/session identity so a reconnect can re-attach to the run.
         if (event === 'result' && data?.session_id) activeSessionId = data.session_id
-        if (event === 'stream_init' && data?.stream_id) activeSessionId = data.stream_id
+        if (event === 'system' && data?.subtype === 'init' && data?.data?.session_id) {
+          activeSessionId = data.data.session_id
+        }
+        if (event === 'stream_init' && data?.stream_id) activeRunId = data.stream_id
+        if (event === 'attach_ok') {
+          if (data?.session_id) activeSessionId = data.session_id
+          if (data?.run_id) activeRunId = data.run_id
+        }
         onEvent(event, data)
       } catch {
         // skip malformed JSON
@@ -127,13 +166,13 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
       }
       // Clean / protocol / auth closes — terminate.
       if (PROTOCOL_AUTH_CLOSE_CODES.has(evt.code)) {
-        useConnectionStore.getState().markConnected()
+        marks.connected()
         finalize()
         return
       }
       // Server-error close (4500): surface as fatal and don't reconnect.
       if (evt.code === 4500) {
-        useConnectionStore.getState().markDisconnected({ code: evt.code })
+        marks.disconnected({ code: evt.code })
         onEvent('stream_error', {
           code: 'ServerError',
           message: 'Server error — please try again.',
@@ -206,6 +245,34 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
   connect()
 
   return { abort, sendPermission, sendQueue, sendQueueCancel }
+}
+
+/**
+ * WebSocket-based streaming client.
+ * Returns { abort, sendPermission, sendQueue, sendQueueCancel } — call abort() to cancel the stream.
+ *
+ * On unexpected close (non-clean, non-auth), auto-reconnects with backoff
+ * [1, 2, 4, 8, 16] seconds for up to 5 attempts. Reconnects re-attach to
+ * the same run (registry backend) or re-init with the same session_id.
+ */
+export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, trace, enableFileCheckpointing = false, cwd = null, addDirs = null, surfaceConnUi = null) {
+  return openAgentWS({
+    mode: 'init',
+    message, sessionId, onEvent, permissionMode, onComplete, model, attachments,
+    mcpServers, images, trace, enableFileCheckpointing, cwd, addDirs, surfaceConnUi,
+  })
+}
+
+/**
+ * Attach to a run already executing on the backend (page refresh / another
+ * device). The server replays buffered events from `sinceSeq`, then follows
+ * live. Same return surface as streamAgentRunWS — abort() cancels the RUN.
+ */
+export function attachAgentRunWS(sessionId, sinceSeq, onEvent, onComplete, trace, surfaceConnUi = null) {
+  return openAgentWS({
+    mode: 'attach',
+    sessionId, sinceSeq, onEvent, onComplete, trace, surfaceConnUi,
+  })
 }
 
 /**

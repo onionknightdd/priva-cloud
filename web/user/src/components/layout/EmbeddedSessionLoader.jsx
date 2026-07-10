@@ -9,7 +9,7 @@ import useWorkflowStore from '../../stores/workflowStore'
 import useUiStore from '@shared/stores/uiStore'
 import { getSplitParams } from '../../utils/splitMode'
 import { applySessionSnapshot, sessionSnapshot, subscribeSessionSnapshot } from '../../utils/sessionSnapshot'
-import { stopActiveStream } from '../../hooks/useSSE'
+import { stopSessionStream } from '../../hooks/useSSE'
 
 function hydrateCanvas(parsed, fileOps, fileBrowserTabs, tasks, { embedded = false } = {}) {
   const fileOpsStore = useFileOpsStore.getState()
@@ -107,7 +107,9 @@ export default function EmbeddedSessionLoader() {
         return
       }
       if (event.data.type === 'stop-request') {
-        stopActiveStream({ broadcast: false })
+        // The iframe realm hosts exactly this session; resolve by session id
+        // (falls back to the loader's draft-keyed runtime).
+        stopSessionStream(sessionId, { broadcast: false })
         publish()
         return
       }

@@ -1,4 +1,5 @@
-import { create } from 'zustand'
+import { createStore } from 'zustand/vanilla'
+import { makeFacade, registerSliceFactory } from './runtime/registry'
 import { parseWorkflowMeta } from '../utils/workflowScript'
 
 // Drop keys whose value is `undefined` so a sparse delta never wipes a field
@@ -156,7 +157,8 @@ function seedFromScript(wf) {
   return changed ? next : wf
 }
 
-const useWorkflowStore = create((set, get) => ({
+// One workflow slice per session runtime — see runtime/registry.js.
+export const createWorkflowStore = () => createStore((set, get) => ({
   workflows: {},        // toolUseId -> Workflow
   workflowOrder: [],    // toolUseId[]
   taskIdIndex: {},      // taskId -> toolUseId  (task_updated has no tool_use_id)
@@ -444,5 +446,9 @@ const useWorkflowStore = create((set, get) => ({
     inspectorFocusTarget: null, inspectorFocusRevision: 0,
   }),
 }))
+
+registerSliceFactory('workflow', createWorkflowStore)
+
+const useWorkflowStore = makeFacade('workflow')
 
 export default useWorkflowStore

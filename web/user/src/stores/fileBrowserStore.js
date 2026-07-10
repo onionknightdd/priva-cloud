@@ -1,4 +1,5 @@
-import { create } from 'zustand'
+import { createStore } from 'zustand/vanilla'
+import { makeFacade, registerSliceFactory } from './runtime/registry'
 
 function fileName(filePath) {
   if (!filePath) return '(untitled)'
@@ -24,7 +25,8 @@ function buildTab(file) {
   }
 }
 
-const useFileBrowserStore = create((set, get) => ({
+// One file-browser slice per session runtime — see runtime/registry.js.
+export const createFileBrowserStore = () => createStore((set, get) => ({
   tabs: [],
   activeTabId: null,
 
@@ -100,5 +102,9 @@ const useFileBrowserStore = create((set, get) => ({
   clear: () => set({ tabs: [], activeTabId: null }),
   reset: () => set({ tabs: [], activeTabId: null }),
 }))
+
+registerSliceFactory('fileBrowser', createFileBrowserStore)
+
+const useFileBrowserStore = makeFacade('fileBrowser')
 
 export default useFileBrowserStore

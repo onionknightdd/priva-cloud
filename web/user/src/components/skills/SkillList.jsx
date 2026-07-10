@@ -13,11 +13,9 @@ import useSkillsStore, { skillKey } from '../../stores/skillsStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import useUiStore from '@shared/stores/uiStore'
 import useAuthStore from '@shared/stores/authStore'
-import useChatStore from '../../stores/chatStore'
-import useTaskStore from '../../stores/taskStore'
 import useSkillHubStore from '../../stores/skillHubStore'
 import useSkillSyncStore from '../../stores/skillSyncStore'
-import { stopActiveStream } from '../../hooks/useSSE'
+import { newDraftSession } from '../../session/openSession'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 import CreateSkillDialog from './CreateSkillDialog'
 
@@ -390,19 +388,17 @@ export default function SkillList({ headerStart = null }) {
   }
 
   const seedCreateSession = (target) => {
-    stopActiveStream()
-    const chat = useChatStore.getState()
-    chat.clearMessages()
-    useTaskStore.getState().clearTasks?.()
-    useUiStore.getState().hideCanvas?.()
     const sessionCwd = target.scope === 'workdir' ? target.cwd : (activeCwd || null)
     const promptPath = target.scope === 'workdir' ? target.cwd : '~/.claude/skills'
-    if (sessionCwd) chat.setCwdDraft(sessionCwd)
-    // Activate the skill-creator skill as a chip + prefill the starter prompt so
-    // the user can refine it before sending (handleSend prepends "/skill-creator ").
-    chat.setPendingComposerSend({
-      skill: { name: 'skill-creator', level: 'project' },
-      text: t('skills.createPrompt', { path: promptPath }),
+    // Fresh draft runtime — a running conversation keeps streaming in the
+    // background. Activate the skill-creator skill as a chip + prefill the
+    // starter prompt (handleSend prepends "/skill-creator ").
+    newDraftSession({
+      cwd: sessionCwd,
+      pendingComposerSend: {
+        skill: { name: 'skill-creator', level: 'project' },
+        text: t('skills.createPrompt', { path: promptPath }),
+      },
     })
     setActiveNavTab('priva')
   }

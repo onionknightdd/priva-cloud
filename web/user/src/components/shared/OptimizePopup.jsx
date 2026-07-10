@@ -3,9 +3,7 @@ import { X, Send, GripHorizontal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
 import useUiStore from '@shared/stores/uiStore'
-import useTaskStore from '../../stores/taskStore'
-import useFileOpsStore from '../../stores/fileOpsStore'
-import useFileBrowserStore from '../../stores/fileBrowserStore'
+import { newDraftSession } from '../../session/openSession'
 
 function buildTemplate(lang, data, comments) {
   const { source, skillName, filePath, startLine, endLine, selectedText, language, noLineNumbers } = data
@@ -169,13 +167,8 @@ export default function OptimizePopup({ data, onClose }) {
       onClose()
 
       if (!data.keepSession) {
-        // Clear current chat and reset to a fresh session
-        useChatStore.getState().clearMessages()
-        useTaskStore.getState().clearTasks()
-        useFileOpsStore.getState().clearFileOps()
-        useFileBrowserStore.getState().clear()
-        useUiStore.getState().clearPlanContent()
-        useUiStore.getState().hideCanvas()
+        // Fresh draft runtime — a running session keeps streaming in the background.
+        newDraftSession()
         useChatStore.getState().setPermissionMode('plan')
       }
 
@@ -205,13 +198,8 @@ export default function OptimizePopup({ data, onClose }) {
       const template = buildTemplate(language, data, comments)
       onClose()
 
-      useChatStore.getState().clearMessages()
-      useTaskStore.getState().clearTasks()
-      useFileOpsStore.getState().clearFileOps()
-      useFileBrowserStore.getState().clear()
-      useUiStore.getState().clearPlanContent()
-      useUiStore.getState().hideCanvas()
-
+      // Fresh draft runtime — a running session keeps streaming in the background.
+      newDraftSession()
       useChatStore.getState().setPermissionMode('plan')
       useChatStore.getState().setInputText(template)
       useChatStore.getState().setPendingOptimize({ autoSend: true })

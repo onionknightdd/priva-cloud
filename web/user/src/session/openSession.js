@@ -1,0 +1,167 @@
+import { fetchSessionMessages } from '../api/sessions'
+import { hasCanvasInspectorItems, transformSessionMessages } from '../utils/sessionTransform'
+import {
+  ensureRuntime,
+  evictIfNeeded,
+  getActiveKey,
+  getRuntime,
+  getSlice,
+  hasRuntime,
+  newDraftRuntime,
+  setActiveKey,
+} from '../stores/runtime/registry'
+import useSessionStatusStore from '../stores/sessionStatusStore'
+import useSidebarStore from '../stores/sidebarStore'
+import useUiStore from '@shared/stores/uiStore'
+import useToastStore from '@shared/stores/toastStore'
+import { UnauthorizedError } from '@shared/api/client'
+import i18n from '@shared/i18n'
+
+// The single open/switch path for sessions. Replaces the four duplicated
+// "stop → clear stores → fetch → transform → load → repopulate → canvas"
+// ladders (Sidebar / RecentActivities / fork / OptimizePopup). Switching
+// never stops a stream any more: a live session keeps producing into its own
+// runtime while another renders.
+
+export const DEFAULT_UI_SNAPSHOT = {
+  canvasVisible: false,
+  canvasMinimized: false,
+  activeCanvasTab: 'tasks',
+  planContent: null,
+  planFilePath: null,
+}
+
+export function pickUiSnapshot() {
+  const s = useUiStore.getState()
+  return {
+    canvasVisible: s.canvasVisible,
+    canvasMinimized: s.canvasMinimized,
+    activeCanvasTab: s.activeCanvasTab,
+    planContent: s.planContent,
+    planFilePath: s.planFilePath,
+  }
+}
+
+// Park the on-screen canvas/plan state on the runtime being switched away
+// from, so switching back restores its canvas exactly.
+function snapshotActiveUi() {
+  const rt = getRuntime(getActiveKey())
+  if (rt) rt.meta.ui = pickUiSnapshot()
+}
+
+function applyUiSnapshot(ui) {
+  useUiStore.setState({ ...DEFAULT_UI_SNAPSHOT, ...(ui || {}) })
+}
+
+function canvasTabFor({ fileBrowserTabs, fileOps, messages }) {
+  if (fileBrowserTabs.length > 0) return 'file-browser'
+  if (fileOps.length > 0) return 'changes'
+  if (hasCanvasInspectorItems(messages)) return 'tasks'
+  return null
+}
+
+// Rapid re-selects: only the LAST cold open wins; earlier fetches no-op.
+let selectToken = 0
+
+/**
+ * Open a session (sidebar row object or bare session id) as the active one.
+ *
+ * - already active → mark its dot seen, sync the sidebar highlight.
+ * - runtime retained (live stream or recently viewed) → instant swap, restore
+ *   its parked canvas/plan UI. No fetch, no flicker, stream untouched.
+ * - cold → hydrate a background runtime FIRST (fetch + transform + load),
+ *   swap only when ready — the previous session (possibly live) stays on
+ *   screen until then.
+ */
+export async function openSession(sessionOrId, opts = {}) {
+  const row = sessionOrId && typeof sessionOrId === 'object' ? sessionOrId : null
+  const sessionId = row ? (row.sessionId || row.id) : sessionOrId
+  if (!sessionId) return false
+  const rowId = row ? row.id : sessionId
+  const { forkParentId = null, navigate = true } = opts
+
+  const statusStore = useSessionStatusStore.getState()
+  if (navigate) useUiStore.getState().setActiveNavTab('priva')
+
+  if (sessionId === getActiveKey()) {
+    useSidebarStore.getState().setActiveSessionId(rowId)
+    statusStore.markSeen(sessionId)
+    return true
+  }
+
+  if (hasRuntime(sessionId)) {
+    snapshotActiveUi()
+    const rt = getRuntime(sessionId)
+    rt.meta.sidebarRowId = rowId
+    setActiveKey(sessionId)
+    applyUiSnapshot(rt.meta.ui)
+    useSidebarStore.getState().setActiveSessionId(rowId)
+    statusStore.markSeen(sessionId)
+    return true
+  }
+
+  const token = ++selectToken
+  try {
+    const data = await fetchSessionMessages(sessionId)
+    if (token !== selectToken) return false
+    const { messages, fileOps, fileBrowserTabs, tasks, subagentContent } =
+      transformSessionMessages(data.messages || [])
+
+    const rt = ensureRuntime(sessionId)
+    rt.meta.sidebarRowId = rowId
+    const chat = getSlice(sessionId, 'chat')
+    const taskSlice = getSlice(sessionId, 'tasks')
+    const fileOpsSlice = getSlice(sessionId, 'fileOps')
+    const fileBrowserSlice = getSlice(sessionId, 'fileBrowser')
+
+    // Idempotent re-hydration (a previously evicted runtime re-opens clean).
+    taskSlice.getState().clearTasks()
+    fileOpsSlice.getState().clearFileOps()
+    chat.getState().loadSession(sessionId, messages, forkParentId, subagentContent, data.add_dirs || [])
+    for (const op of fileOps) fileOpsSlice.getState().addFileOp(op)
+    fileBrowserSlice.getState().setTabs(fileBrowserTabs)
+    for (const task of tasks) taskSlice.getState().addTask(task)
+
+    if (token !== selectToken) return false
+    snapshotActiveUi()
+    setActiveKey(sessionId)
+    const tab = canvasTabFor({ fileBrowserTabs, fileOps, messages })
+    applyUiSnapshot(tab ? { canvasVisible: true, activeCanvasTab: tab } : null)
+    useSidebarStore.getState().setActiveSessionId(rowId)
+    statusStore.markSeen(sessionId)
+    evictIfNeeded()
+    return true
+  } catch (err) {
+    if (err instanceof UnauthorizedError) return false
+    console.error('Failed to load session messages:', err)
+    // Keep the previous view instead of loading an empty session — an empty
+    // chat looks like data loss. Offer a retry via toast.
+    useToastStore.getState().pushToast({
+      level: 'error',
+      title: i18n.t('sidebar.loadFailedTitle'),
+      body: String(err?.message || err),
+      action: {
+        label: i18n.t('sidebar.loadFailedRetry'),
+        onClick: () => openSession(sessionOrId, opts),
+      },
+    })
+    return false
+  }
+}
+
+/**
+ * Start a fresh conversation in a new draft runtime. The previous session's
+ * runtime (and any live stream on it) is left untouched in the background.
+ */
+export function newDraftSession(opts = {}) {
+  const { cwd = null, pendingComposerSend = null } = opts
+  snapshotActiveUi()
+  const key = newDraftRuntime()
+  applyUiSnapshot(null)
+  useSidebarStore.getState().setActiveSessionId(null)
+  const chat = getSlice(key, 'chat')
+  if (cwd) chat.getState().setCwdDraft(cwd)
+  if (pendingComposerSend) chat.getState().setPendingComposerSend(pendingComposerSend)
+  evictIfNeeded()
+  return key
+}

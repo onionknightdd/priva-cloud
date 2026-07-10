@@ -302,8 +302,20 @@ class WsQueueCancelFrame(BaseModel):
     id: str
 
 
+class WsAttachFrame(BaseModel):
+    """Attach to a run already executing in the RunRegistry (page refresh /
+    reconnect). The server replays buffered events with seq > since_seq, then
+    follows live. Identified by session_id and/or run_id."""
+    type: Literal["attach"]
+    token: str | None = None
+    session_id: str | None = None
+    run_id: str | None = None
+    since_seq: int = 0
+    client_tab_id: str | None = None
+
+
 WsClientFrame = Annotated[
-    WsInitFrame | WsPermissionFrame | WsAbortFrame | WsQueueFrame | WsQueueCancelFrame,
+    WsInitFrame | WsAttachFrame | WsPermissionFrame | WsAbortFrame | WsQueueFrame | WsQueueCancelFrame,
     Field(discriminator="type"),
 ]
 

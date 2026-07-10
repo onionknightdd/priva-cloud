@@ -5,15 +5,12 @@ import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
 import useUiStore from '@shared/stores/uiStore'
 import useSidebarStore from '../../stores/sidebarStore'
-import useTaskStore from '../../stores/taskStore'
-import useFileOpsStore from '../../stores/fileOpsStore'
-import useFileBrowserStore from '../../stores/fileBrowserStore'
 import MessageBubble from './MessageBubble'
 import CompactBoundary from './CompactBoundary'
 import JumpToLatest from './JumpToLatest'
 import { useSSE } from '../../hooks/useSSE'
-import { rewindFiles, forkSession, fetchSessionMessages } from '../../api/sessions'
-import { hasCanvasInspectorItems, transformSessionMessages } from '../../utils/sessionTransform'
+import { rewindFiles, forkSession } from '../../api/sessions'
+import { openSession } from '../../session/openSession'
 
 // The centered reading column, replicated per virtual row so layout matches the
 // pre-virtualization single-column wrapper exactly.
@@ -25,14 +22,11 @@ export default function MessageList() {
   const sessionId = useChatStore((s) => s.sessionId)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const enableFileCheckpointing = useChatStore((s) => s.enableFileCheckpointing)
-  const loadSession = useChatStore((s) => s.loadSession)
   const findCheckpointForAssistant = useChatStore((s) => s.findCheckpointForAssistant)
   const rewindMarker = useChatStore((s) => s.rewindMarker)
   const setRewindMarker = useChatStore((s) => s.setRewindMarker)
   const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
   const refreshSessions = useSidebarStore((s) => s.fetchSessions)
-  const setActiveSessionId = useSidebarStore((s) => s.setActiveSessionId)
-  const clearTasks = useTaskStore((s) => s.clearTasks)
   const { sendAnswer } = useSSE()
   const bottomRef = useRef(null)
   const containerRef = useRef(null)
@@ -121,34 +115,10 @@ export default function MessageList() {
       onConfirm: async () => {
         try {
           const { new_session_id } = await forkSession(sessionId, targetUuid)
-          const { messages: forkedMsgs } = await fetchSessionMessages(new_session_id)
-          const { messages: parsed, fileOps, fileBrowserTabs, tasks, subagentContent } = transformSessionMessages(forkedMsgs || [])
-          clearTasks()
-          useFileOpsStore.getState().clearFileOps()
-          useFileBrowserStore.getState().clear()
-          useUiStore.getState().clearPlanContent()
-          loadSession(new_session_id, parsed, sessionId, subagentContent)
-          setActiveSessionId(new_session_id)
-          const fileOpsStore = useFileOpsStore.getState()
-          for (const op of fileOps) fileOpsStore.addFileOp(op)
-          useFileBrowserStore.getState().setTabs(fileBrowserTabs)
-          const taskStore = useTaskStore.getState()
-          for (const task of tasks) taskStore.addTask(task)
-          const hasInspectorItems = hasCanvasInspectorItems(parsed)
-          const canvasTab = fileBrowserTabs.length > 0
-            ? 'file-browser'
-            : fileOps.length > 0
-              ? 'changes'
-              : hasInspectorItems
-                ? 'tasks'
-                : null
-          if (canvasTab) {
-            const ui = useUiStore.getState()
-            ui.showCanvas()
-            ui.setActiveCanvasTab(canvasTab)
-          } else {
-            useUiStore.getState().hideCanvas()
-          }
+          // The fork is a NEW session — openSession hydrates it into its own
+          // runtime and swaps to it; the original stays retained (and keeps
+          // streaming if it was live).
+          await openSession(new_session_id, { forkParentId: sessionId })
           refreshSessions()
           setTimeout(() => document.querySelector('.chat-textarea')?.focus(), 0)
         } catch (e) {
@@ -160,7 +130,7 @@ export default function MessageList() {
         }
       },
     })
-  }, [sessionId, messages, findCheckpointForAssistant, loadSession, clearTasks, refreshSessions, setActiveSessionId, showConfirmDialog])
+  }, [sessionId, messages, findCheckpointForAssistant, refreshSessions, showConfirmDialog, t])
 
   const revertedIdSet = useMemo(
     () => new Set(rewindMarker?.revertedToolUseIds || []),

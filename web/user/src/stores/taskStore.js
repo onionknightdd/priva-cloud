@@ -1,7 +1,8 @@
-import { create } from 'zustand'
-import useWorkflowStore from './workflowStore'
+import { createStore } from 'zustand/vanilla'
+import { makeFacade, registerSliceFactory } from './runtime/registry'
 
-const useTaskStore = create((set) => ({
+// One task slice per session runtime — see runtime/registry.js.
+export const createTaskStore = (getSibling) => createStore((set) => ({
   // Background-shell and OpenClaw task tracking. Kept for live BashOutput
   // append paths; no longer rendered as a flat TASKS panel.
   tasks: {},
@@ -63,7 +64,7 @@ const useTaskStore = create((set) => ({
   clearTasks: () => {
     // Workflows are part of the same per-session transient run state — clear
     // them at every session boundary (new chat / session switch / load).
-    useWorkflowStore.getState().clear()
+    getSibling('workflow').getState().clear()
     set({
       tasks: {}, taskOrder: [], todos: [], todoWriteInfo: null,
       activeTaskId: null, activeTodoId: null, activeSubagentId: null,
@@ -91,5 +92,9 @@ const useTaskStore = create((set) => ({
     inspectorFocusTarget: null, inspectorFocusRevision: 0,
   }),
 }))
+
+registerSliceFactory('tasks', createTaskStore)
+
+const useTaskStore = makeFacade('tasks')
 
 export default useTaskStore

@@ -49,6 +49,7 @@ from priva_common.models.agent import (
     TagRequest,
     WorkdirArchiveRequest,
     WorkdirPinRequest,
+    WsAttachFrame,
     WsClientFrame,
     WsInitFrame,
     WsPermissionFrame,
@@ -68,6 +69,7 @@ from priva_common.audit_log import AuditEntry, get_audit_logger
 from ..deps import account_from_ws, get_current_user, get_user_workspace, negotiated_subprotocol
 from ..services.claude_sdk.client import agent_run, agent_run_events, agent_run_stream
 from ..services.claude_sdk.permission_coordinator import registry
+from ..services.claude_sdk.run_registry import RUN_END_EVENT, RunRecord, run_registry
 from priva_common.user_store import UserRecord
 from priva_common.metrics import AGENT_RUNS_FINISHED, AGENT_RUNS_STARTED
 
@@ -700,6 +702,17 @@ async def list_agent_sessions(
     return GroupedSessionListResponse(groups=groups, active_cwd=active_cwd)
 
 
+@router.get("/sessions/running")
+async def list_running_sessions(user: UserRecord | None = Depends(get_current_user)):
+    """Runs still executing in the in-process RunRegistry.
+
+    Backs the SPA's boot restore: for each entry the client hydrates the
+    session snapshot (cut at ``first_user_uuid``), then attaches over the WS
+    with a full replay — running/attention dots survive a page refresh.
+    """
+    return {"running": run_registry.list_active()}
+
+
 @router.get("/sessions/{session_id}/messages", response_model=SessionMessagesResponse)
 async def get_agent_session_messages(
     session_id: str,
@@ -740,6 +753,10 @@ async def get_agent_session_messages(
 @router.delete("/sessions/{session_id}")
 async def delete_agent_session(session_id: str, user: UserRecord | None = Depends(get_current_user)):
     """Delete a session's transcript (any cwd in this account)."""
+    # A still-running detached run must not keep appending to a deleted file.
+    live = run_registry.live_for_session(session_id)
+    if live is not None:
+        live.cancelled.set()
     cwd = _find_session_cwd(session_id)
     if not cwd:
         raise HTTPException(404, "Session not found")
@@ -770,6 +787,11 @@ async def respond_permission(
     user: UserRecord | None = Depends(get_current_user),
 ):
     coordinator = registry.get(request.session_id)
+    if not coordinator:
+        # WS-path runs park their coordinator on the RunRegistry record
+        # (client may address it by stream/run id OR session id).
+        record = run_registry.get(session_id=request.session_id, run_id=request.session_id)
+        coordinator = record.coordinator_out[0] if record else None
     if not coordinator:
         raise HTTPException(404, "No active session for this stream")
     owner = coordinator.owner_username
@@ -803,7 +825,7 @@ async def rewind_session(
         raise HTTPException(404, "Session not found")
     username = user.username if user else None
     auth_method = getattr(http_request.state, "auth_method", "jwt")
-    if registry.get(req.session_id):
+    if registry.get(req.session_id) or run_registry.live_for_session(req.session_id):
         raise HTTPException(409, "Finish the current run before rewinding")
     opts = await build_agent_options(
         session_id=req.session_id,
@@ -1007,28 +1029,37 @@ async def archive_workdir(
 
 @router.websocket("/ws/run")
 async def ws_run(websocket: WebSocket):
+    """Agent-run WebSocket: start a new run (`init`) or join a live one (`attach`).
+
+    Runs are owned by the RunRegistry, not by this socket — the socket dying
+    merely detaches a follower while the run keeps executing. Only an explicit
+    `abort` frame (or run completion) ends a run.
+    """
     import uuid as _uuid
     ws_id = str(_uuid.uuid4())[:8]  # short connection tag
-    logger.info("[WS:%s] Connection accepted", ws_id)
+    logger.info("[WS:{}] Connection accepted", ws_id)
     # Echo the SPA's `priva.ws.v1` subprotocol (the token rode a sibling
     # `priva.token.<jwt>` offer) so the browser handshake completes.
     await websocket.accept(subprotocol=negotiated_subprotocol(websocket))
 
-    # --- Read first message: init frame with auth ---
+    # --- Read first message: init or attach frame with auth ---
     try:
         raw_text = await websocket.receive_text()
         raw = json.loads(raw_text)
         client_tab_id = str(raw.get("client_tab_id") or "")[:32]
         prompt_preview = " ".join(str(raw.get("message") or "").split())[:160]
-        logger.info("[WS:%s] INIT client_tab_id=%s prompt=%s", ws_id, client_tab_id, prompt_preview)
+        logger.info(
+            "[WS:{}] FIRST-FRAME type={} client_tab_id={} prompt={}",
+            ws_id, raw.get("type"), client_tab_id, prompt_preview,
+        )
         frame = _ws_frame_adapter.validate_python(raw)
     except (json.JSONDecodeError, ValidationError) as exc:
         await websocket.send_json({"event": "error", "data": {"message": f"Invalid init frame: {exc}"}})
         await websocket.close(code=4000)
         return
 
-    if not isinstance(frame, WsInitFrame):
-        await websocket.send_json({"event": "error", "data": {"message": "First message must be type 'init'"}})
+    if not isinstance(frame, (WsInitFrame, WsAttachFrame)):
+        await websocket.send_json({"event": "error", "data": {"message": "First message must be type 'init' or 'attach'"}})
         await websocket.close(code=4000)
         return
 
@@ -1039,7 +1070,40 @@ async def ws_run(websocket: WebSocket):
         await websocket.send_json({"event": "error", "data": {"message": "Authentication failed"}})
         await websocket.close(code=4001)
         return
+    username = user.username if user else None
 
+    # --- Attach: join a run already executing in the registry ---
+    if isinstance(frame, WsAttachFrame):
+        record = run_registry.get(session_id=frame.session_id, run_id=frame.run_id)
+        if record is None:
+            logger.info(
+                "[WS:{}] ATTACH no run session_id={} run_id={}",
+                ws_id, frame.session_id, frame.run_id,
+            )
+            await websocket.send_json({"event": "attach_error", "data": {
+                "code": "no_run",
+                "session_id": frame.session_id,
+            }})
+            try:
+                await websocket.close(code=1000)
+            except Exception:
+                pass
+            return
+        logger.info(
+            "[WS:{}] ATTACH run_id={} session_id={} since_seq={} status={}",
+            ws_id, record.run_id[:8], record.session_id, frame.since_seq, record.status,
+        )
+        queue_cwd = (_find_session_cwd(record.session_id) if record.session_id else None) or get_user_workspace(user)
+        await _ws_follow(
+            websocket, record,
+            since_seq=max(0, frame.since_seq or 0),
+            send_attach_ok=True,
+            cwd_for_queue=queue_cwd,
+            ws_id=ws_id,
+        )
+        return
+
+    # --- Init: validate and start a new run ---
     try:
         cwd = _resolve_run_cwd(frame.cwd, frame.session_id, user)
         add_dirs = _resolve_run_add_dirs(frame.add_dirs, cwd, frame.session_id)
@@ -1047,20 +1111,10 @@ async def ws_run(websocket: WebSocket):
         await websocket.send_json({"event": "error", "data": {"message": f"Validation failed: {exc.detail}"}})
         await websocket.close(code=4000)
         return
-    username = user.username if user else None
-
-    # The browser is always JWT-authenticated at the control-panel before the
-    # proxy opens this socket, so masking follows the jwt (login-session) path.
-    auth_method = "jwt"
-    mask_output = auth_method == "api_key"
 
     logger.info(
-        "[WS:%s] Authenticated user=%s session_id=%s client_tab_id=%s prompt=%s",
-        ws_id,
-        username,
-        frame.session_id,
-        client_tab_id,
-        prompt_preview,
+        "[WS:{}] Authenticated user={} session_id={} client_tab_id={} prompt={}",
+        ws_id, username, frame.session_id, client_tab_id, prompt_preview,
     )
 
     # Validate attachments and images if provided. This happens before the
@@ -1073,116 +1127,71 @@ async def ws_run(websocket: WebSocket):
         await websocket.close(code=4000)
         return
 
-    # --- Set up agent run ---
-    cancelled = asyncio.Event()
-    coordinator_out: list = [None]
-    queue_out: list = [None]
+    # A session hosts at most one live run (a second concurrent resume would
+    # corrupt the session JSONL). The client should attach instead.
+    if frame.session_id:
+        live = run_registry.live_for_session(frame.session_id)
+        if live is not None:
+            logger.warning(
+                "[WS:{}] REFUSED double-run session_id={} (live run_id={})",
+                ws_id, frame.session_id, live.run_id[:8],
+            )
+            await websocket.send_json({"event": "stream_error", "data": {
+                "code": "RunAlreadyActive",
+                "message": "This session already has a run in progress — attach to it or stop it first.",
+                "fatal": True,
+            }})
+            await websocket.close(code=4000)
+            return
 
-    # Load masking patterns once.
-    # Only applies when admin has explicitly saved patterns.
-    _ws_mask_patterns: list[dict] = []
-    if mask_output:
-        try:
-            from priva_common.user_store import get_user_store as _get_store
-            runtime = _get_store().get_runtime_config()
-            pii_cfg = runtime.get("pii_masking") or {}
-            _ws_mask_patterns = list(pii_cfg.get("patterns") or [])
-        except Exception:
-            pass
+    record = run_registry.create(session_id=frame.session_id)
+    record.task = asyncio.create_task(
+        _execute_run(record, frame, cwd, add_dirs, username, attachments, images),
+        name=f"agent-run-{record.run_id[:8]}",
+    )
+    await _ws_follow(
+        websocket, record,
+        since_seq=0,
+        send_attach_ok=False,
+        cwd_for_queue=cwd,
+        ws_id=ws_id,
+    )
+
+
+async def _execute_run(
+    record: RunRecord,
+    frame: WsInitFrame,
+    cwd: str,
+    add_dirs: list[str],
+    username: str | None,
+    attachments: list | None,
+    images: list | None,
+) -> None:
+    """Registry-owned run task: pump agent_run_events into the record.
+
+    Lives independently of any socket. Sockets subscribe to the record;
+    ``record.cancelled`` (abort frame / session delete) stops the run.
+    """
 
     async def emit(event_type: str, data: dict) -> None:
         if event_type == "permission_request":
             logger.info(
-                "[WS:%s] EMIT permission_request request_id=%s tool=%s client_tab_id=%s prompt=%s",
-                ws_id,
-                data.get("request_id"),
-                data.get("tool_name"),
-                client_tab_id,
-                prompt_preview,
+                "[RUN:{}] EMIT permission_request request_id={} tool={}",
+                record.run_id[:8], data.get("request_id"), data.get("tool_name"),
             )
         if event_type == "stream_init":
-            logger.info("[WS:%s] EMIT stream_init stream_id=%s", ws_id, data.get("stream_id"))
-        out_data = data
-        if _ws_mask_patterns and event_type not in ("keepalive", "stream_init", "permission_request", "permission_timeout"):
-            from priva_common.sensitive_mask import mask_sensitive
-            out_data, _ = mask_sensitive(_ws_mask_patterns, data)
-        try:
-            await websocket.send_json({"event": event_type, "data": out_data})
-        except Exception:
-            cancelled.set()
-
-    # --- Reader task: handle permission responses and abort ---
-    async def reader() -> None:
-        try:
-            while True:
-                text = await websocket.receive_text()
-                try:
-                    raw_msg = json.loads(text)
-                    msg = _ws_frame_adapter.validate_python(raw_msg)
-                except (json.JSONDecodeError, ValidationError) as exc:
-                    await websocket.send_json({"event": "error", "data": {"message": f"Invalid frame: {exc}"}})
-                    continue
-
-                if isinstance(msg, WsPermissionFrame):
-                    coord = coordinator_out[0]
-                    if coord:
-                        try:
-                            coord.resolve(
-                                msg.request_id,
-                                msg.decision,
-                                msg.message or "",
-                                msg.updated_input,
-                            )
-                        except ValueError as exc:
-                            await websocket.send_json({"event": "error", "data": {"message": str(exc)}})
-                    else:
-                        await websocket.send_json({"event": "error", "data": {"message": "No permission coordinator active"}})
-                elif isinstance(msg, WsInitFrame):
-                    await websocket.send_json({"event": "error", "data": {"message": "Already initialized"}})
-                elif isinstance(msg, WsQueueFrame):
-                    q = queue_out[0]
-                    if q is None:
-                        await websocket.send_json({"event": "error", "data": {"message": "No active stream to queue into"}})
-                        continue
-                    try:
-                        q_attachments = _validate_attachments(msg.attachments, cwd) if msg.attachments else []
-                        q_images = _validate_images(msg.images) if msg.images else []
-                    except HTTPException as exc:
-                        await websocket.send_json({"event": "error", "data": {"message": f"Queue validation failed: {exc.detail}"}})
-                        continue
-                    await q.put((msg.id, msg.text, q_attachments or [], q_images or []))
-                    await websocket.send_json({"event": "queued", "data": {"id": msg.id}})
-                elif isinstance(msg, WsQueueCancelFrame):
-                    q = queue_out[0]
-                    if q is None:
-                        await websocket.send_json({"event": "error", "data": {"message": "No active stream to cancel from"}})
-                        continue
-                    # asyncio.Queue has no random-access delete: drain + rebuild
-                    remaining: list[tuple[str, str, list, list]] = []
-                    removed = False
-                    while not q.empty():
-                        try:
-                            entry = q.get_nowait()
-                        except asyncio.QueueEmpty:
-                            break
-                        if entry[0] == msg.id and not removed:
-                            removed = True
-                            continue
-                        remaining.append(entry)
-                    for entry in remaining:
-                        q.put_nowait(entry)
-                    if removed:
-                        await websocket.send_json({"event": "queue_cancelled", "data": {"id": msg.id}})
-                    else:
-                        await websocket.send_json({"event": "error", "data": {"message": f"Queued id not found: {msg.id}"}})
-                else:
-                    # WsAbortFrame
-                    cancelled.set()
-                    return
-        except WebSocketDisconnect:
-            cancelled.set()
-
-    reader_task = asyncio.create_task(reader())
+            logger.info("[RUN:{}] EMIT stream_init stream_id={}", record.run_id[:8], data.get("stream_id"))
+            if data.get("stream_id"):
+                run_registry.index_run_id(record, data["stream_id"])
+        # Track the CLI-assigned session id so attach-by-session-id works
+        # mid-run (system.init fires right at turn start).
+        if event_type == "system" and (data or {}).get("subtype") == "init":
+            inner = (data or {}).get("data") or {}
+            if isinstance(inner, dict) and inner.get("session_id"):
+                run_registry.index_session(record, inner["session_id"])
+        if event_type == "result" and (data or {}).get("session_id"):
+            run_registry.index_session(record, data["session_id"])
+        record.record_event(event_type, data)
 
     AGENT_RUNS_STARTED.inc()
     uncaught_exc: Exception | None = None
@@ -1194,12 +1203,12 @@ async def ws_run(websocket: WebSocket):
             cwd,
             username,
             frame.model,
-            auth_method=auth_method,
+            auth_method="jwt",
             add_dirs=add_dirs,
             emit=emit,
-            cancelled=cancelled,
-            coordinator_out=coordinator_out,
-            queue_out=queue_out,
+            cancelled=record.cancelled,
+            coordinator_out=record.coordinator_out,
+            queue_out=record.queue_out,
             attachments=attachments,
             images=images,
             mcp_servers=frame.mcp_servers,
@@ -1207,35 +1216,190 @@ async def ws_run(websocket: WebSocket):
             fork_session=frame.fork_session,
             enable_permission_feedback=frame.enable_permission_feedback,
         )
+    except asyncio.CancelledError:
+        # Process shutdown — finalize synchronously and let cancellation flow.
+        AGENT_RUNS_FINISHED.labels(outcome="cancelled").inc()
+        run_registry.finish(record, "aborted")
+        record.record_event(RUN_END_EVENT, {"status": record.status})
+        raise
     except Exception as exc:
         uncaught_exc = exc
-        logger.exception("WebSocket agent run error")
+        logger.exception("[RUN:{}] agent run error", record.run_id[:8])
         try:
-            await websocket.send_json({"event": "stream_error", "data": {
+            record.record_event("stream_error", {
                 "code": type(exc).__name__,
                 "message": str(exc) or repr(exc),
                 "fatal": True,
                 "api_error_status": getattr(exc, "api_error_status", None),
-            }})
+            })
         except Exception:
             pass
     finally:
-        if uncaught_exc is not None:
-            run_outcome = "error"
-        elif cancelled.is_set():
-            run_outcome = "cancelled"
-        else:
-            run_outcome = "success"
-        AGENT_RUNS_FINISHED.labels(outcome=run_outcome).inc()
+        if record.status == "running":
+            if uncaught_exc is not None:
+                outcome, status = "error", "error"
+            elif record.cancelled.is_set():
+                outcome, status = "cancelled", "aborted"
+            else:
+                outcome, status = "success", "completed"
+            AGENT_RUNS_FINISHED.labels(outcome=outcome).inc()
+            run_registry.finish(record, status)
+            record.record_event(RUN_END_EVENT, {"status": record.status})
 
+
+async def _ws_follow(
+    websocket: WebSocket,
+    record: RunRecord,
+    *,
+    since_seq: int,
+    send_attach_ok: bool,
+    cwd_for_queue: str,
+    ws_id: str,
+) -> None:
+    """Stream a record to one socket: optional replay, then live follow.
+
+    The socket dying only detaches this follower — the run keeps executing
+    in the registry and a later `attach` resumes from the last seen seq.
+    """
+
+    async def send_event(seq: int | None, event_type: str, data: dict) -> None:
+        payload = {"event": event_type, "data": data}
+        if seq is not None:
+            payload["seq"] = seq
+        await websocket.send_json(payload)
+
+    sub_id, q = record.subscribe()
+    reader_task = asyncio.create_task(_ws_reader(websocket, record, cwd_for_queue))
+    sent_through = since_seq
+    socket_alive = True
+    run_ended = False
+    try:
+        if send_attach_ok:
+            await send_event(None, "attach_ok", {
+                "session_id": record.session_id,
+                "run_id": record.run_id,
+                "status": record.status,
+                "started_at": record.started_at,
+                "first_user_uuid": record.first_user_uuid,
+                "replay_from": max(since_seq + 1, record.first_seq),
+                "queued": record.queued_entries(),
+            })
+        # Replay the buffer. permission_requests already resolved are filtered
+        # so a stale approval card can't reappear after a refresh.
+        outstanding = record.outstanding_permission_ids()
+        for seq, event_type, data in record.replay_since(since_seq):
+            sent_through = seq
+            if event_type == RUN_END_EVENT:
+                run_ended = True
+                break
+            if event_type == "permission_request" and data.get("request_id") not in outstanding:
+                continue
+            await send_event(seq, event_type, data)
+        # Live follow.
+        while not run_ended:
+            try:
+                item = await asyncio.wait_for(q.get(), timeout=2.0)
+            except asyncio.TimeoutError:
+                await send_event(None, "keepalive", {})
+                continue
+            seq, event_type, data = item
+            if seq <= sent_through:
+                continue  # already covered by the replay snapshot
+            sent_through = seq
+            if event_type == RUN_END_EVENT:
+                run_ended = True
+                break
+            await send_event(seq, event_type, data)
+    except (WebSocketDisconnect, RuntimeError, ConnectionError):
+        # Socket died — detach silently; the run continues in the registry.
+        socket_alive = False
+        logger.info("[WS:{}] follower detached run_id={} (run {})", ws_id, record.run_id[:8], record.status)
+    except Exception:
+        socket_alive = False
+        logger.exception("[WS:{}] follower error run_id={}", ws_id, record.run_id[:8])
+    finally:
+        record.unsubscribe(sub_id)
         reader_task.cancel()
         try:
             await reader_task
         except asyncio.CancelledError:
             pass
+    if socket_alive and run_ended:
         try:
-            # 4500 = server error; distinct from 4000 (protocol) and 4001 (auth)
-            close_code = 4500 if uncaught_exc is not None else 1000
-            await websocket.close(code=close_code)
+            await websocket.close(code=1000)
         except Exception:
             pass
+
+
+async def _ws_reader(websocket: WebSocket, record: RunRecord, cwd: str) -> None:
+    """Incoming frames from one attached socket → the record's run."""
+    try:
+        while True:
+            text = await websocket.receive_text()
+            try:
+                raw_msg = json.loads(text)
+                msg = _ws_frame_adapter.validate_python(raw_msg)
+            except (json.JSONDecodeError, ValidationError) as exc:
+                await websocket.send_json({"event": "error", "data": {"message": f"Invalid frame: {exc}"}})
+                continue
+
+            if isinstance(msg, WsPermissionFrame):
+                coord = record.coordinator_out[0]
+                if coord:
+                    try:
+                        coord.resolve(
+                            msg.request_id,
+                            msg.decision,
+                            msg.message or "",
+                            msg.updated_input,
+                        )
+                    except ValueError as exc:
+                        await websocket.send_json({"event": "error", "data": {"message": str(exc)}})
+                else:
+                    await websocket.send_json({"event": "error", "data": {"message": "No permission coordinator active"}})
+            elif isinstance(msg, (WsInitFrame, WsAttachFrame)):
+                await websocket.send_json({"event": "error", "data": {"message": "Already initialized"}})
+            elif isinstance(msg, WsQueueFrame):
+                q = record.queue_out[0]
+                if q is None:
+                    await websocket.send_json({"event": "error", "data": {"message": "No active stream to queue into"}})
+                    continue
+                try:
+                    q_attachments = _validate_attachments(msg.attachments, cwd) if msg.attachments else []
+                    q_images = _validate_images(msg.images) if msg.images else []
+                except HTTPException as exc:
+                    await websocket.send_json({"event": "error", "data": {"message": f"Queue validation failed: {exc.detail}"}})
+                    continue
+                await q.put((msg.id, msg.text, q_attachments or [], q_images or []))
+                await websocket.send_json({"event": "queued", "data": {"id": msg.id}})
+            elif isinstance(msg, WsQueueCancelFrame):
+                q = record.queue_out[0]
+                if q is None:
+                    await websocket.send_json({"event": "error", "data": {"message": "No active stream to cancel from"}})
+                    continue
+                # asyncio.Queue has no random-access delete: drain + rebuild
+                remaining: list[tuple[str, str, list, list]] = []
+                removed = False
+                while not q.empty():
+                    try:
+                        entry = q.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    if entry[0] == msg.id and not removed:
+                        removed = True
+                        continue
+                    remaining.append(entry)
+                for entry in remaining:
+                    q.put_nowait(entry)
+                if removed:
+                    await websocket.send_json({"event": "queue_cancelled", "data": {"id": msg.id}})
+                else:
+                    await websocket.send_json({"event": "error", "data": {"message": f"Queued id not found: {msg.id}"}})
+            else:
+                # WsAbortFrame — cancel the RUN itself (stop button), not just
+                # this socket. The follower closes once RUN_END drains through.
+                logger.info("[RUN:{}] abort requested via socket", record.run_id[:8])
+                record.cancelled.set()
+                return
+    except WebSocketDisconnect:
+        return

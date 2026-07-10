@@ -1,16 +1,19 @@
-import { create } from 'zustand'
+import { createStore } from 'zustand/vanilla'
 import safeStorage from '@shared/utils/safeStorage'
-import useWorkflowStore from './workflowStore'
+import { makeFacade, registerSliceFactory } from './runtime/registry'
 
 const CKPT_STORAGE_PREFIX = 'priva-ckpt:'
 const REWIND_STORAGE_PREFIX = 'priva-rewind:'
 
 // Monotonic counter for `_cid` — stable React list keys for live messages.
 // 'c-' prefix keeps these distinct from sessionTransform's 's-' load-path ids.
+// Module-scoped (shared across all session runtimes) so keys stay unique.
 let cidCounter = 0
 const withCid = (message) => (message && !message._cid ? { ...message, _cid: `c-${++cidCounter}` } : message)
 
-const useChatStore = create((set, get) => ({
+// One chat slice per session runtime. `getSibling(name)` resolves another
+// slice of the SAME runtime (never the active one) — see runtime/registry.js.
+export const createChatStore = (getSibling) => createStore((set, get) => ({
   messages: [],
   // Subagent content: parent_tool_use_id -> flat array of content blocks
   // (text, thinking, tool_use with status/result). Streamed in via useSSE,
@@ -411,12 +414,12 @@ const useChatStore = create((set, get) => ({
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.revertedToolUseIds)) {
       rewindMarker = parsed
     }
-    // Reset the workflow store atomically with the message swap. handleSelectSession
-    // clears it earlier, but old WorkflowCards still mounted during the async
-    // fetch re-seed themselves on that clear — this final clear (batched with the
-    // new messages) wipes those stragglers so a prior session's workflow can't
-    // leak into the recovered one. The freshly-mounted cards re-seed cleanly.
-    useWorkflowStore.getState().clear()
+    // Reset THIS runtime's workflow slice atomically with the message swap.
+    // Old WorkflowCards still mounted during the async fetch re-seed themselves
+    // on an early clear — this final clear (batched with the new messages)
+    // wipes those stragglers so a prior load's workflow can't leak into the
+    // recovered one. The freshly-mounted cards re-seed cleanly.
+    getSibling('workflow').getState().clear()
     set((s) => ({
       sessionId,
       messages,
@@ -435,5 +438,11 @@ const useChatStore = create((set, get) => ({
     }))
   },
 }))
+
+registerSliceFactory('chat', createChatStore)
+
+// Facade over the ACTIVE runtime's chat slice — same call patterns as the old
+// module-global store (hook + getState/setState/subscribe).
+const useChatStore = makeFacade('chat')
 
 export default useChatStore

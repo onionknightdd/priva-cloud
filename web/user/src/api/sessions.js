@@ -19,6 +19,13 @@ export async function fetchCwdSessions(cwd, limit = 20, offset = 0) {
   return sandboxRead(`/agent/sessions?${params}`)
 }
 
+// Runs still executing on the backend (RunRegistry). Returns
+// { running: [{ session_id, run_id, status, started_at, last_seq,
+//   first_user_uuid, pending_permission }] }.
+export async function fetchRunningSessions() {
+  return sandboxRead('/agent/sessions/running')
+}
+
 // Persist a session's additional directories (SDK --add-dir), saved server-side
 // so a resume on any device recovers them.
 export async function setSessionAddDirs(sessionId, addDirs) {

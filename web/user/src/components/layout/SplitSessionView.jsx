@@ -8,7 +8,7 @@ import useSplitStore from '../../stores/splitStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import useChatStore from '../../stores/chatStore'
 import { applySessionSnapshot, sessionSnapshot, subscribeSessionSnapshot } from '../../utils/sessionSnapshot'
-import { stopActiveStream } from '../../hooks/useSSE'
+import { stopSessionStream } from '../../hooks/useSSE'
 
 function parseDraggedSession(event) {
   const raw = event.dataTransfer.getData('application/priva-session') || event.dataTransfer.getData('text/plain')
@@ -526,7 +526,9 @@ function LocalPaneMirrorBridge({ paneId, sessionId }) {
         return
       }
       if (event.data.type === 'stop-request') {
-        stopActiveStream({ broadcast: false })
+        // Stop THIS pane's session specifically — with multiple live runtimes
+        // the active one is not necessarily the pane's session.
+        stopSessionStream(sessionId, { broadcast: false })
         publish()
         return
       }

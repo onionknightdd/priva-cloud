@@ -1,15 +1,9 @@
 import { useMemo, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { useStaggerEntrance } from '@shared/motion/useStaggerEntrance'
-import useChatStore from '../../stores/chatStore'
-import useFileBrowserStore from '../../stores/fileBrowserStore'
-import useFileOpsStore from '../../stores/fileOpsStore'
 import useSidebarStore from '../../stores/sidebarStore'
-import useTaskStore from '../../stores/taskStore'
 import useUserDataStore from '../../stores/userDataStore'
-import useUiStore from '@shared/stores/uiStore'
-import { fetchSessionMessages } from '../../api/sessions'
-import { hasCanvasInspectorItems, transformSessionMessages } from '../../utils/sessionTransform'
+import { openSession } from '../../session/openSession'
 
 function compactRelativeTime(value) {
   if (!value) return ''
@@ -79,9 +73,7 @@ function RecentActivitySkeleton() {
 export default function RecentActivities() {
   const recentActivities = useSidebarStore((s) => s.recentActivities)
   const sessions = useSidebarStore((s) => s.sessions)
-  const setActiveSessionId = useSidebarStore((s) => s.setActiveSessionId)
   const overviewLoading = useUserDataStore((s) => s.overviewLoading)
-  const loadSession = useChatStore((s) => s.loadSession)
   const [loadingSessionId, setLoadingSessionId] = useState(null)
   const entranceRef = useStaggerEntrance({ duration: 220, rise: 6, stepMs: 35 })
 
@@ -94,43 +86,7 @@ export default function RecentActivities() {
     if (!row.sessionId || loadingSessionId) return
     setLoadingSessionId(row.sessionId)
     try {
-      useUiStore.getState().setActiveNavTab('priva')
-      setActiveSessionId(row.sessionId)
-      useTaskStore.getState().clearTasks()
-      useFileOpsStore.getState().clearFileOps()
-      useFileBrowserStore.getState().clear()
-      const data = await fetchSessionMessages(row.sessionId)
-      const {
-        messages,
-        fileOps,
-        fileBrowserTabs,
-        tasks,
-        subagentContent,
-      } = transformSessionMessages(data.messages || [])
-      loadSession(row.sessionId, messages, null, subagentContent, data.add_dirs || [])
-
-      const fileOpsStore = useFileOpsStore.getState()
-      for (const op of fileOps) fileOpsStore.addFileOp(op)
-      useFileBrowserStore.getState().setTabs(fileBrowserTabs)
-
-      const taskStore = useTaskStore.getState()
-      for (const task of tasks) taskStore.addTask(task)
-
-      const hasInspectorItems = hasCanvasInspectorItems(messages)
-      const canvasTab = fileBrowserTabs.length > 0
-        ? 'file-browser'
-        : fileOps.length > 0
-          ? 'changes'
-          : hasInspectorItems
-            ? 'tasks'
-            : null
-      const ui = useUiStore.getState()
-      if (canvasTab) {
-        ui.showCanvas()
-        ui.setActiveCanvasTab(canvasTab)
-      } else {
-        ui.hideCanvas()
-      }
+      await openSession(row.sessionId)
     } catch (err) {
       console.error('Failed to load recent activity:', err)
     } finally {

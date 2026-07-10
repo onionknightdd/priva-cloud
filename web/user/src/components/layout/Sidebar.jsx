@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import {
-  MessageSquare, Trash2, ChevronDown, ChevronRight, FolderBookmark, MoreHorizontal,
+  Trash2, ChevronDown, ChevronRight, FolderBookmark, MoreHorizontal,
   RefreshCw, Settings, Search, X, Pencil, Flag, GitBranch, Pin, Archive, SlidersVertical, SquarePen,
   Bot, PanelLeftClose, Plus, CalendarClock, PackageSearch, ChartColumnBig,
   Maximize2, Minimize2, FolderOpenDot, FolderGit2, LogOut,
@@ -10,24 +10,20 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSidebarStore from '../../stores/sidebarStore'
-import useChatStore from '../../stores/chatStore'
-import useTaskStore from '../../stores/taskStore'
 import useUiStore from '@shared/stores/uiStore'
 import useSplitStore from '../../stores/splitStore'
 import useAuthStore from '@shared/stores/authStore'
 import useUserDataStore from '../../stores/userDataStore'
-import useFileOpsStore from '../../stores/fileOpsStore'
-import useFileBrowserStore from '../../stores/fileBrowserStore'
-import useToastStore from '@shared/stores/toastStore'
+import useSessionStatusStore from '../../stores/sessionStatusStore'
 import {
-  fetchSessionMessages,
   deleteSession as apiDeleteSession,
   renameSession as apiRenameSession,
   tagSession as apiTagSession,
 } from '../../api/sessions'
-import { UnauthorizedError } from '@shared/api/client'
-import { hasCanvasInspectorItems, transformSessionMessages } from '../../utils/sessionTransform'
-import { stopActiveStream } from '../../hooks/useSSE'
+import { openSession, newDraftSession } from '../../session/openSession'
+import { stopSessionStream } from '../../hooks/useSSE'
+import { getActiveKey, removeRuntime } from '../../stores/runtime/registry'
+import SessionStatusDot from '../shared/SessionStatusDot'
 import SidebarResizer from './SidebarResizer'
 import SettingsPopover from '../settings/SettingsPopover'
 import NavItem from '@shared/components/shared/NavItem'
@@ -77,14 +73,13 @@ const PLUGINS_SECTIONS = [
 ]
 
 const SUBMENU_ACTIVE_RAIL_OFFSET = 18
-const SESSION_ACTIVE_RAIL_OFFSET = 20
 
 function SessionItem({
   session, isActive, openMenuId, menuRef, onSelect, onMenuToggle,
   onDelete, onRenameStart, onTagStart, onPinToggle, onArchive, renameEditingId,
   onRenameCommit, onRenameCancel, onDragStartSession, onDragEndSession, t, indent = 0,
-  itemRef, showActiveRail = true,
 }) {
+  const dotStatus = useSessionStatusStore((s) => s.statuses[session.sessionId || session.id])
   const [renameValue, setRenameValue] = useState(session.name || '')
   useEffect(() => {
     if (renameEditingId === session.id) setRenameValue(session.name || '')
@@ -103,7 +98,6 @@ function SessionItem({
 
   return (
     <div
-      ref={itemRef}
       className="flex flex-col gap-1 px-3 group"
       draggable={!editing}
       style={{
@@ -152,21 +146,8 @@ function SessionItem({
       onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--bg-elevated)' }}
       onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
     >
-      {showActiveRail && isActive ? (
-        <span
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 2,
-            background: 'var(--blue)',
-            borderRadius: 1,
-          }}
-        />
-      ) : null}
       <div className="flex items-center gap-2 min-w-0">
-        <MessageSquare size={12} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--text-dim)' }} />
+        <SessionStatusDot status={dotStatus} />
         {editing ? (
           <input
             type="text"
@@ -520,16 +501,8 @@ export default function Sidebar() {
   const archiveSessionLocal = useSidebarStore((s) => s.archiveSessionLocal)
   const togglePinWorkdir = useSidebarStore((s) => s.togglePinWorkdir)
   const archiveWorkdirLocal = useSidebarStore((s) => s.archiveWorkdirLocal)
-  const clearMessages = useChatStore((s) => s.clearMessages)
-  const setCwdDraft = useChatStore((s) => s.setCwdDraft)
-  const loadSession = useChatStore((s) => s.loadSession)
-  const clearTasks = useTaskStore((s) => s.clearTasks)
-  const clearFileOps = useFileOpsStore((s) => s.clearFileOps)
-  const clearFileBrowser = useFileBrowserStore((s) => s.clear)
   const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
   const toggleSettingsPopover = useUiStore((s) => s.toggleSettingsPopover)
-  const clearPlanContent = useUiStore((s) => s.clearPlanContent)
-  const hideCanvas = useUiStore((s) => s.hideCanvas)
   const activeNavTab = useUiStore((s) => s.activeNavTab)
   const setActiveNavTab = useUiStore((s) => s.setActiveNavTab)
   const splitPanes = useSplitStore((s) => s.panes)
@@ -557,7 +530,6 @@ export default function Sidebar() {
   const searchInputRef = useRef(null)
   const pluginsSubmenuRef = useRef(null)
   const dataSubmenuRef = useRef(null)
-  const sessionListContentRef = useRef(null)
   const [renameEditingId, setRenameEditingId] = useState(null)
   const [tagPopoverSession, setTagPopoverSession] = useState(null)
   const [tagPopoverTop, setTagPopoverTop] = useState(120)
@@ -637,10 +609,6 @@ export default function Sidebar() {
   const dataSubmenuIndicator = useSlidingVerticalIndicator(
     activeNavTab === 'userdata' && dataMenuOpen ? activeSection : null,
     dataSubmenuRef
-  )
-  const sessionIndicator = useSlidingVerticalIndicator(
-    collapsed ? null : activeSessionId,
-    sessionListContentRef
   )
 
   useEffect(() => {
@@ -749,15 +717,10 @@ export default function Sidebar() {
 
   const effectiveWidth = collapsed ? 48 : width
 
-  // Clear all chat/canvas state for a fresh conversation.
+  // Fresh conversation in a NEW draft runtime — a running session keeps
+  // streaming in the background (its dot stays purple).
   const handleNewChat = () => {
-    stopActiveStream()
-    clearMessages()
-    clearTasks()
-    clearFileOps()
-    clearFileBrowser()
-    clearPlanContent()
-    hideCanvas()
+    newDraftSession()
   }
 
   // "New Session" — switch to the chat view and start fresh.
@@ -773,8 +736,7 @@ export default function Sidebar() {
     setOpenWorkdirMenu(null)
     resetSplit()
     setActiveNavTab('priva')
-    handleNewChat()
-    setCwdDraft(cwd)
+    newDraftSession({ cwd })
   }
 
   // Open a Data & Usage section in the content area.
@@ -834,65 +796,9 @@ export default function Sidebar() {
         return
       }
     }
-    // Kill any in-flight stream first so its late events can't bleed into
-    // the session we're about to load.
-    stopActiveStream()
-    setActiveSessionId(session.id)
-    clearTasks()
-    useFileOpsStore.getState().clearFileOps()
-    useFileBrowserStore.getState().clear()
-    clearPlanContent()
-    try {
-      const data = await fetchSessionMessages(session.sessionId || session.id)
-      const { messages, fileOps, fileBrowserTabs, tasks, subagentContent } = transformSessionMessages(data.messages || [])
-      loadSession(session.sessionId || session.id, messages, null, subagentContent, data.add_dirs || [])
-
-      // Populate file ops store
-      const fileOpsStore = useFileOpsStore.getState()
-      for (const op of fileOps) {
-        fileOpsStore.addFileOp(op)
-      }
-      useFileBrowserStore.getState().setTabs(fileBrowserTabs)
-
-      // Populate task store
-      const taskStore = useTaskStore.getState()
-      for (const task of tasks) {
-        taskStore.addTask(task)
-      }
-
-      // Show Canvas only when this session has artifacts that a Canvas tab
-      // can actually render. Plain Skill/Bash sessions should not inherit
-      // the previous session's visible Canvas state.
-      const hasInspectorItems = hasCanvasInspectorItems(messages)
-      const canvasTab = fileBrowserTabs.length > 0
-        ? 'file-browser'
-        : fileOps.length > 0
-          ? 'changes'
-          : hasInspectorItems
-            ? 'tasks'
-            : null
-      if (canvasTab) {
-        const ui = useUiStore.getState()
-        ui.showCanvas()
-        ui.setActiveCanvasTab(canvasTab)
-      } else {
-        useUiStore.getState().hideCanvas()
-      }
-    } catch (err) {
-      if (err instanceof UnauthorizedError) return
-      console.error('Failed to load session messages:', err)
-      // Keep the previous view instead of loading an empty session — an empty
-      // chat looks like data loss. Offer a retry via toast.
-      useToastStore.getState().pushToast({
-        level: 'error',
-        title: t('sidebar.loadFailedTitle'),
-        body: String(err?.message || err),
-        action: {
-          label: t('sidebar.loadFailedRetry'),
-          onClick: () => handleSelectSession(session),
-        },
-      })
-    }
+    // Swap to the session's runtime (live streams keep running in the
+    // background); cold sessions hydrate before the swap — see openSession.
+    await openSession(session)
   }
 
   const handleDeleteSession = (e, session) => {
@@ -903,22 +809,25 @@ export default function Sidebar() {
       confirmLabel: t('sidebar.deleteConfirm'),
       danger: true,
       onConfirm: async () => {
+        const sid = session.sessionId || session.id
         try {
-          await apiDeleteSession(session.sessionId || session.id)
+          await apiDeleteSession(sid)
         } catch (err) {
           console.error('Failed to delete session:', err)
         }
-        safeStorage.removeItem(`priva-rewind:${session.sessionId || session.id}`)
+        safeStorage.removeItem(`priva-rewind:${sid}`)
         useSidebarStore.setState((s) => ({
           sessions: s.sessions.filter((row) => row.id !== session.id),
           groups: s.groups.map((g) => (g.cwd === session.cwd ? { ...g, total: Math.max(0, g.total - 1) } : g)),
         }))
-        if (activeSessionId === session.id) {
-          clearMessages()
-          clearTasks()
-          useFileOpsStore.getState().clearFileOps()
-          useFileBrowserStore.getState().clear()
+        // Deleting a running session aborts its stream; deleting the active
+        // one swaps to a fresh draft before its runtime is dropped.
+        stopSessionStream(sid, { broadcast: true })
+        if (getActiveKey() === sid || activeSessionId === session.id) {
+          newDraftSession()
         }
+        removeRuntime(sid)
+        useSessionStatusStore.getState().clear(sid)
       },
     })
   }
@@ -1236,23 +1145,7 @@ export default function Sidebar() {
             ref={listRef}
             style={{ flex: projectAtBottom ? '0 1 auto' : '1 1 auto', minHeight: 0 }}
           >
-            <div ref={sessionListContentRef} style={{ position: 'relative', minHeight: '100%' }}>
-              <span
-                ref={sessionIndicator.indicatorRef}
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  left: SESSION_ACTIVE_RAIL_OFFSET,
-                  top: 0,
-                  width: 2,
-                  height: 0,
-                  opacity: 0,
-                  background: 'var(--blue)',
-                  pointerEvents: 'none',
-                  zIndex: 2,
-                }}
-              />
-
+            <div style={{ position: 'relative', minHeight: '100%' }}>
               {sessions.length === 0 && !sessionsLoading && (
                 <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 13 }}>
                   {t('sidebar.noSessions')}
@@ -1372,8 +1265,6 @@ export default function Sidebar() {
                         {group.sessions.map((session) => (
                           <SessionItem
                             key={session.id}
-                            itemRef={sessionIndicator.setItemRef(session.id)}
-                            showActiveRail={false}
                             session={session}
                             isActive={session.id === activeSessionId}
                             openMenuId={openMenuId}

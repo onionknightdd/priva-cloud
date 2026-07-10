@@ -13,6 +13,7 @@ import ConnectionBanner from './components/ui/ConnectionBanner'
 import { getPtyFeature } from '@shared/api/admin'
 import safeStorage from '@shared/utils/safeStorage'
 import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
+import { restoreRunningSessions } from './session/attachBoot'
 
 const IntroPanel = lazyWithChunkReload(() => import('./components/intro/IntroPanel'))
 const SetupWizardModal = lazyWithChunkReload(() => import('./components/chat/SetupWizardModal'))
@@ -100,6 +101,9 @@ export default function App() {
       getPtyFeature()
         .then((data) => setTerminalFeatureEnabled(!!data?.enabled))
         .catch(() => setTerminalFeatureEnabled(false))
+      // Re-attach to runs that survived a refresh in the backend RunRegistry
+      // (no-op on registry-less backends).
+      restoreRunningSessions()
     }
   }, [user, fetchEnvStatus, fetchEnv, fetchVisionModel, setTerminalFeatureEnabled])
 
