@@ -275,6 +275,29 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   // First session-id assignment of a brand-new conversation: rekey the draft
   // runtime, migrate its dot, and surface the new sidebar row mid-run.
   let announcedNewSession = Boolean(sessionIdAtSend)
+
+  // system.init fires BEFORE the CLI has flushed the new session's JSONL, so
+  // a single list fetch usually misses the row (it then only appeared at run
+  // end / manual refresh). Poll with a bounded backoff until the row exists.
+  const announceSessionRow = (sid) => {
+    let attempts = 0
+    const attempt = async () => {
+      attempts += 1
+      try {
+        await useSidebarStore.getState().fetchSessions()
+      } catch { /* transient — next attempt retries */ }
+      const rows = useSidebarStore.getState().sessions
+      const row = rows.find((x) => (x.sessionId || x.id) === rt.key || (x.sessionId || x.id) === sid)
+      if (row) {
+        rt.meta.sidebarRowId = row.id
+        if (isActive()) useSidebarStore.getState().setActiveSessionId(row.id)
+        return
+      }
+      if (attempts < 6) window.setTimeout(attempt, attempts * 1000) // ~15s window
+    }
+    attempt()
+  }
+
   const adoptSessionId = (sid) => {
     if (!sid) return
     setSessionId(sid)
@@ -286,8 +309,8 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     rt.meta.sidebarRowId = rt.meta.sidebarRowId || sid
     if (!announcedNewSession) {
       announcedNewSession = true
-      useSidebarStore.getState().fetchSessions()
       if (isActive()) useSidebarStore.getState().setActiveSessionId(sid)
+      announceSessionRow(sid)
     }
   }
 
