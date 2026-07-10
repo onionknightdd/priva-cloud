@@ -225,16 +225,29 @@ footer a{color:var(--muted)}
   <a href="#security">4 · Tenancy &amp; Security</a>
   <a class="sub2" href="#trust-chain">4.1 Trust Chain</a>
   <a class="sub2" href="#isolation">4.2 Isolation Inventory</a>
+  <a class="sub2" href="#egress">4.5 Egress Control</a>
   <a href="#features">5 · Core Feature Spec</a>
   <a href="#api">6 · API &amp; Extensibility</a>
   <a href="#nfr">7 · Non-Functional Reqs</a>
+  <a class="sub2" href="#monitoring">7.2 Monitoring &amp; Metrics</a>
+  <a class="sub2" href="#auditing">7.3 Auditing</a>
+  <a class="sub2" href="#tracing">7.4 Tracing</a>
+  <a class="sub2" href="#warm-pools">7.7 Warm Pools</a>
+  <a class="sub2" href="#failure-modes">7.8 Failure Modes</a>
   <a href="#operations">8 · Operations &amp; Deploy</a>
+  <a class="sub2" href="#data-lifecycle">8.5 Data Lifecycle &amp; DR</a>
+  <a class="sub2" href="#upgrades">8.6 Upgrade Lifecycle</a>
   <a href="#competitive">9 · Competitive Landscape</a>
   <a class="sub2" href="#matrix">9.2 Comparison Matrix</a>
   <a class="sub2" href="#build-vs-adopt">9.3 Build vs Adopt</a>
   <a href="#roadmap">10 · Roadmap</a>
-  <a href="#risks">11 · Risks &amp; Open Issues</a>
-  <a href="#glossary">12 · Glossary</a>
+  <a href="#evolution">11 · Design Evolution</a>
+  <a class="sub2" href="#a2a">11.1 Agent-to-Agent</a>
+  <a class="sub2" href="#hitl">11.2 Async HITL Inbox</a>
+  <a class="sub2" href="#publishable">11.3 Publishable Agents</a>
+  <a class="sub2" href="#unified-auth">11.4 Unified MCP Auth</a>
+  <a href="#risks">12 · Risks &amp; Open Issues</a>
+  <a href="#glossary">13 · Glossary</a>
 </nav>
 
 <main>
@@ -485,6 +498,17 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <div class="co danger"><span class="cot">Launch blocker — review 2026-07-07, unremediated</span>
 <p>The tenant-facing PTY is a live cross-tenant compromise chain. A shell (<code>bash -l</code>) inherits <code>os.environ</code>, which via <code>envFrom</code> contains the <strong>shared</strong> <code>priva-shared-secret</code> — the JWT and HMAC signing secrets, <em>identical in every tenant pod</em>. A single tenant can therefore forge a valid runner token for <strong>any</strong> account or admin. And with <strong>no NetworkPolicy</strong>, that shell can already reach every other <code>ar-*</code> pod, data-spine, redis, and control-panel directly by TCP — so the forged token opens a shell in another tenant's pod, whose only guard checks the token's <code>account_id</code> against the <em>target</em> pod. The BYOK model rests on two assumptions — "the pod is unreachable except via the edge" and "the signing secret is secret" — both currently false.</p>
 <p><strong>Tier-0 remediation (~1 day, not yet applied):</strong> env allowlist via <code>execvpe</code> (~10 lines) · default-deny NetworkPolicy + narrow egress · <code>automountServiceAccountToken: false</code>. Full write-up: <code>docs/webterminal-blind-spot.md</code>.</p></div>
+
+<h3 id="egress">4.5 Egress &amp; data-exfiltration control</h3>
+<p>§4.1–4.4 answer "can tenant A reach tenant B?" They do not answer "can data leave the platform?" — which, for a product sold on sovereignty, is the load-bearing question. Two <em>authorized</em> channels move data out regardless of any pod-to-pod policy:</p>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:22%">Channel</th><th>The exposure</th><th>Safeguard (not built)</th></tr></thead>
+<tbody>
+<tr><td>Model endpoint (BYOK)</td><td><code>ANTHROPIC_BASE_URL</code> can point at any host. Every turn ships the agent's context — files it read, tool outputs, secrets in scope — to that endpoint. A wrong or hostile base URL is a fully-authorized exfiltration pipe that no pod NetworkPolicy inspects.</td><td>An admin <strong>endpoint allowlist</strong> (only approved model gateways / internal proxies), enforced at the pod's egress <em>and</em> validated when BYOK credentials are saved. Block direct-to-internet model calls unless whitelisted.</td></tr>
+<tr><td>Agent tool egress</td><td>An autonomous agent that browses the web or calls APIs can POST data outward, or SSRF <em>into</em> internal services it was never meant to reach.</td><td><strong>Default-deny egress NetworkPolicy</strong> + a per-tenant allowlist of reachable hosts; a mandatory <strong>egress proxy with DLP inspection</strong> as the only outbound path; the PII-masking hook extended to outbound payloads, not just tool inputs.</td></tr>
+</tbody>
+</table></div>
+<div class="co danger"><span class="cot">Why this outranks the tenant-isolation work</span><p>On-prem keeps data off the vendor's cloud; it does <em>not</em>, by itself, stop the agent from mailing the data out. This is the same class of risk as the web-terminal finding but wider — it applies to <strong>every</strong> agent, not only terminal users, and it directly contradicts the sovereignty guarantee that is Priva's headline differentiator (§9). Recommendation: route both channels through one chokepoint — a mandatory egress proxy that also enforces the model-endpoint allowlist — so exfiltration has a single control point and a single audit log. Pairs with brokered credentials (§11.4) and the inbound-trust profile (§11.5).</p></div>
 </section>
 
 <!-- ================= §5 Core Feature Spec ================= -->
@@ -589,6 +613,9 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <!-- ================= §7 Non-Functional Requirements ================= -->
 <section id="nfr">
 <h2><span class="no">§7</span>Non-Functional Requirements</h2>
+<p class="lead">Performance and scale first, then the observability stack — how the platform is monitored, audited, traced, and logged, and where those surfaces are still thin.</p>
+
+<h3 id="perf-envelope">7.1 Performance &amp; scale envelope</h3>
 <div class="facts">
   <div class="fact"><div class="fl">Cold start 0→1</div><div class="fv">≈ 4 s <small>warm = instant</small></div></div>
   <div class="fact"><div class="fl">Wake-hold → 503</div><div class="fv">5 s dev <small>prod overlay 120 s</small></div></div>
@@ -607,6 +634,77 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <tr><td>Resource limits (PTY)</td><td><code>rlimit_cpu_seconds=600</code>; <code>rlimit_as_bytes=0</code> (disabled — the bun/JSC <code>claude</code> binary SIGTRAPs under AS caps ≤3 GiB); ≤3 PTY sessions/user.</td></tr>
 </tbody>
 </table></div>
+
+<h3 id="monitoring">7.2 Monitoring &amp; metrics</h3>
+<p>Metrics use raw <code>prometheus-client</code>, no framework (ADR 0002). Two altitudes: per-service application metrics on each pod's <code>/metrics</code>, and fleet-level rollups surfaced by control-panel to the admin console.</p>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:26%">Surface</th><th>What it exposes</th></tr></thead>
+<tbody>
+<tr><td>HTTP metrics</td><td>Count + latency recorded inside the existing <code>AccessLogMiddleware</code>, labelled by route-template <code>handler</code> / <code>method</code> / <code>status</code> (unmatched routes collapse to <code>__unmatched__</code>). <code>user_name</code> is deliberately <em>never</em> a label — it would make cardinality unbounded across a large fleet.</td></tr>
+<tr><td>Domain counters</td><td><code>agent_runs_started_total</code> and <code>agent_runs_finished_total{outcome}</code> — the platform's core throughput/success signal.</td></tr>
+<tr><td>Multiprocess correctness</td><td><code>PROMETHEUS_MULTIPROC_DIR</code> is owned by the launcher and wiped + recreated on every start (stale per-process <code>.db</code> files would otherwise inflate counters forever); a fresh <code>CollectorRegistry</code> + <code>MultiProcessCollector</code> is built per scrape.</td></tr>
+<tr><td>Fleet rollups</td><td>Admin console reads <code>GET /api/admin/resource-usage</code> (per-pod CPU/mem/volume via metrics-server), <code>GET /api/admin/gateway-metrics</code> (the agentgateway Prometheus endpoint), and <code>GET /api/admin/system-health</code> — the <strong>System Map</strong>, whose live byte-path edges animate a particle flow while a hop is healthy and freeze with an ✕ when it is unreachable.</td></tr>
+</tbody>
+</table></div>
+<div class="co warn"><span class="cot">Note</span><p><code>/metrics</code> is deliberately <strong>unauthenticated</strong> — it assumes a network-controlled scrape path. An optional <code>METRICS_TOKEN</code> is the planned hardening. Alert rules and dashboards are the operator's to define; the platform ships the signals, not the SLO policy.</p></div>
+
+<h3 id="auditing">7.3 Auditing</h3>
+<p>Auditing runs on two planes, both via <code>priva_common.audit_log</code> — <strong>daily-partitioned JSON-Lines with cursor pagination</strong>:</p>
+<ul>
+  <li><strong>Per-account (data plane)</strong> — written by agent-runner to the per-account audit volume <code>/audit/&lt;account_id&gt;</code>: tool and skill invocations, run completions, session operations, and permission decisions. Surfaced to the user through the <strong>Data &amp; Usage</strong> view (<code>/user/{overview,stats,audit,analytics}</code> — a 183-day usage heatmap, audit log, and analytics timeline).</li>
+  <li><strong>Control plane</strong> — written by control-panel for admin actions: user CRUD, registration approvals, config changes, and the <strong>audited K8s-exec console</strong> (<code>WS /api/admin/console/ws</code>). Retention is governed by the admin <code>history-retention</code> knob.</li>
+</ul>
+<div class="co gap"><span class="cot">Known gap</span><p>control-panel's audit is per-pod local JSONL today — it must move into data-spine <em>before</em> scaling control-panel beyond one replica, or replicas fork the audit history. Tracked in §12.</p></div>
+
+<h3 id="tracing">7.4 Distributed tracing</h3>
+<div class="co warn"><span class="cot">Current state — not yet implemented</span><p>There is <strong>no end-to-end distributed tracing today</strong>. A single runtime request already crosses four hops — edge → EPP (ext_proc) → operator (CR patch) → agent-runner → model gateway — and correlating them currently means stitching per-service logs and audit rows by hand.</p></div>
+<p>The hard segment is structural: the wake path is <em>asynchronous and eventually-consistent</em> — the EPP patches the <code>AgentTenant</code> CR and the operator reconciles it into a running pod; there is no synchronous call to hang a child span on. A real tracing story would need W3C <code>traceparent</code> propagation injected at the edge, carried across the ext_proc metadata into the EPP and onward into the runner and the SDK turn, with the CR carrying a correlation id so the operator's reconcile can emit a linked span, all exported to an OpenTelemetry collector. This is a forward item, not a config flip.</p>
+
+<h3 id="logging">7.5 Logging</h3>
+<p>Services log through a shared <code>loguru</code>-based logger (<code>get_app_logger</code>) to stdout for cluster-level aggregation. Because it is <code>loguru</code>, messages use brace <code>{}</code> placeholders — a <code>printf</code>-style <code>%s</code> prints literally — a small but real footgun captured in the platform's own notes. Structured fields (account, session, run id) travel in the log record so downstream aggregation can pivot on them; the same identifiers key the audit rows in §7.3.</p>
+
+<h3 id="obs-gaps">7.6 Observability gaps (honest)</h3>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:30%">Gap</th><th>State</th></tr></thead>
+<tbody>
+<tr><td>End-to-end tracing</td><td>None — no OTel / traceparent propagation across the async wake path (§7.4).</td></tr>
+<tr><td><code>/metrics</code> auth</td><td>Unauthenticated; network-controlled only. <code>METRICS_TOKEN</code> is a future.</td></tr>
+<tr><td>Centralized audit</td><td>control-panel audit is per-pod local — blocks replica scaling until moved to data-spine.</td></tr>
+<tr><td>SLO alerting / dashboards</td><td>Signals exist; alert rules and dashboards are not shipped — operator-defined.</td></tr>
+<tr><td>Token / cost observability</td><td>Pod-self-reported under BYOK (no metering proxy) — good for visibility, not for billing enforcement. See §11.5.</td></tr>
+</tbody>
+</table></div>
+
+<h3 id="warm-pools">7.7 Fairness, wake-stampede &amp; warm pools</h3>
+<p><strong>Current state (honest).</strong> Every wake is a cold start (≈4 s); there is <em>no</em> warm pool. Because idle tenants sit at 0 replicas, a synchronized burst — a 9am login wave, or a scheduled-job fan-out — is N simultaneous cold starts hitting the scheduler, image cache, and node capacity at once. The designed global wake-concurrency limiter (~20 in-flight) bounds the stampede but converts it into a queue; per-account concurrency caps (default 3 sessions) bound a single noisy tenant. There is no cluster-level fair-share across accounts today.</p>
+<h4>Setting up a warm pool (proposed)</h4>
+<p>Three tiers, cheapest first — each independently deployable:</p>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:22%">Tier</th><th>Mechanism</th><th>Trade-off</th></tr></thead>
+<tbody>
+<tr><td>1 · Warm nodes / pre-pulled images</td><td>Keep the <code>agent-runner</code> image pre-pulled on a dedicated node pool (a tiny image-holder DaemonSet or node image-cache policy). Removes image-pull latency from every cold start.</td><td>Cheapest, no app change; shaves seconds but the pod is still created from scratch.</td></tr>
+<tr><td>2 · Warm generic-pod pool</td><td>Maintain K spare agent-runner pods started from the image but <strong>unbound</strong> (no <code>ACCOUNT_ID</code>, only a scratch <code>emptyDir</code>). On wake the operator <em>claims</em> a warm pod and binds it to the account instead of creating a Deployment from cold.</td><td>The binding is the catch (below). Near-instant when it works.</td></tr>
+<tr><td>3 · Predictive / scheduled pre-warm</td><td>Pre-wake likely-active accounts ahead of known peaks, driven by the 183-day usage signal already collected or by a schedule; scheduled jobs (Phase 4) pre-warm the pods a batch will need just before it fires. The existing <code>persistent</code> runner type is the manual version.</td><td>Needs a demand model; wastes capacity if predictions miss.</td></tr>
+</tbody>
+</table></div>
+<div class="co warn"><span class="cot">The binding constraint (tier 2)</span><p>Kubernetes cannot hot-attach the per-account <code>subPath</code> volume to an already-running pod, so a claimed warm pod resolves one of two ways: <strong>(a) app-scoped bind</strong> — the warm pod mounts the shared RWX <code>priva-export</code> root and the runtime scopes to <code>/&lt;account_id&gt;</code> on claim (fastest, no restart, but isolation becomes app-enforced until the pod is recycled — acceptable only with the §4.5 egress controls and a hard recycle-after-session policy); or <strong>(b) warm-then-recreate</strong> — the warm pod proves node + image + process readiness, then a fast <code>Recreate</code> attaches the real per-account volume (preserves the kernel-mount boundary, still far quicker than cold because node and image are hot). <strong>Sizing:</strong> pool ≈ expected concurrent cold starts at P95 peak; a fair-share wake queue (round-robin across accounts, not FIFO) stops one account's fan-out from starving others.</p></div>
+<div class="co info"><span class="cot">Upstream path</span><p>kubernetes-sigs <strong>Agent Sandbox</strong> ships a <code>SandboxWarmPool</code> CRD for exactly this (warm pools + suspend/resume), explicitly citing Claude-Code-like agents (§9). Adopting it later swaps Priva's bespoke pool for a standard one — consistent with keeping the runtime layer swappable (§12).</p></div>
+
+<h3 id="failure-modes">7.8 Failure modes &amp; degraded operation</h3>
+<p>What still works when a component is down — the blast-radius table an SRE asks for first. Derived from the architecture; to be proven under the chaos tests scheduled for Phase 6 (§10).</p>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:20%">Component down</th><th>Running pods</th><th>New requests</th><th>Blast radius</th></tr></thead>
+<tbody>
+<tr><td>agentgateway (edge)</td><td>in-flight streams drop</td><td>total outage — no entry point</td><td><strong>Full.</strong> Single front door → run HA edge replicas.</td></tr>
+<tr><td>control-panel / EPP</td><td>already-steered requests finish</td><td>can't steer new <code>/api/sandbox/*</code>; SPA + admin also down (same process)</td><td><strong>Full for new traffic.</strong> Stateless → N replicas already the design; a single replica loss is survivable, total EPP loss is an outage.</td></tr>
+<tr><td>operator</td><td>keep serving</td><td>warm accounts work; <strong>cold accounts can't wake</strong> (503); no idle sweep, no scaling</td><td><strong>Degraded, not down.</strong> Warm users unaffected; idle users locked out; un-swept pods cost money, not correctness. Restart recovers from CR state.</td></tr>
+<tr><td>data-spine</td><td>mid-session pods keep running (session state is on the PVC, not data-spine)</td><td>login, provisioning, quota + config reads fail → control plane blind</td><td><strong>High.</strong> Single SQLite writer, <code>Recreate</code> — the durable-state SPOF. Needs backup/restore (§8.5); the Postgres HA path is a stub.</td></tr>
+<tr><td>storage backend</td><td>pods lose workspace I/O → sessions fail</td><td>new pods can't mount</td><td><strong>High</strong> in dev (single <code>nfs-xfs</code>); prod uses external CephFS/NFS CSI with its own HA.</td></tr>
+<tr><td>one tenant pod</td><td>only that tenant</td><td>that tenant waits for restart</td><td><strong>Isolated by design</strong> — the point of pod-per-tenant.</td></tr>
+<tr><td>model gateway (user BYOK)</td><td>that user's turns fail</td><td>—</td><td><strong>Isolated per user</strong> (BYOK); not a platform event.</td></tr>
+</tbody>
+</table></div>
+<div class="co gap"><span class="cot">Where HA pays off first</span><p>The two full-outage components (edge, EPP) and the one true SPOF (data-spine) are the ranked HA investment; everything else is either degraded-but-serving or isolated by design. This matrix is derived, not yet proven — component-kill and offboard→purge chaos tests are a Phase 6 deliverable.</p></div>
 </section>
 
 <!-- ================= §8 Operations & Deployment ================= -->
@@ -625,6 +723,39 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 
 <h3 id="migration-status">8.4 Migration status (strangler)</h3>
 <p>Phases 0–3 are complete, merged 2026-06-21, validated end-to-end on minikube. The legacy monolith (<code>priva/</code>) still boots as a behavioral reference and is removed at Phase 4. See §10 for the full phase plan.</p>
+
+<h3 id="data-lifecycle">8.5 Data lifecycle, retention &amp; DR</h3>
+<p>Where a user's data lives, how long, how it provably goes away, and how it survives a failure. The design has the hooks (the CRD <code>desiredState</code>, the <code>history-retention</code> knob) but not yet the full lifecycle or any backup story.</p>
+<h4>Where user data lives</h4>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:26%">Data</th><th>Location</th></tr></thead>
+<tbody>
+<tr><td>Workspace + sessions</td><td>Per-account <code>subPath</code> of the RWX <code>priva-export</code> volume; <code>~/.claude/projects</code> JSONL <em>is</em> the session of record, plus the venv.</td></tr>
+<tr><td>Audit</td><td>Per-account <code>/audit/&lt;account_id&gt;</code> volume (daily-partitioned JSONL).</td></tr>
+<tr><td>Control metadata</td><td>data-spine — account, quota, specs, registrations. No transcript content, ever.</td></tr>
+<tr><td>Credentials</td><td>BYOK in the pod's own <code>/workspace/.claude/settings.json</code>; user API keys Fernet-encrypted in data-spine.</td></tr>
+</tbody>
+</table></div>
+<h4>Lifecycle &amp; right-to-erasure</h4>
+<p>The CRD already models states: <code>active</code> → <code>offboarding</code> (pod scaled to 0, data retained, access revoked) → <code>purge</code> (data destroyed). Recommended additions, none built: a configurable <strong>retention window</strong> (grace before purge), <strong>legal hold</strong> (block purge for named accounts), and <strong>export-my-data</strong> (a workspace + audit bundle) before purge.</p>
+<div class="co warn"><span class="cot">Erasure and backup are one problem</span><p>A defensible right-to-erasure must destroy <em>every</em> copy — the workspace subPath, the audit volume, the data-spine rows, the API-key ciphertext, <strong>and any backups/snapshots</strong> — then emit a tamper-evident purge record (the one artifact kept). You cannot prove erasure without an inventory of every backup that holds a copy, which is why the two are inseparable.</p></div>
+<h4>Backup &amp; DR (currently absent — recommendation)</h4>
+<ul>
+  <li><strong>data-spine:</strong> a single SQLite file → scheduled online backup (WAL copy) to off-node storage, with a documented RPO (e.g. ≤ 24 h) / RTO; the Postgres HA path (stub today) is the real fix.</li>
+  <li><strong>Workspaces:</strong> per-account CSI <code>VolumeSnapshot</code> on the prod CephFS/NFS backend on a schedule. The session JSONL is the record and has <em>no other redundancy today</em> — a lost volume is lost agent memory.</li>
+  <li><strong>Restore drills:</strong> an untested backup is not a backup — rehearse restore periodically, alongside the offboard→purge chaos tests (Phase 6).</li>
+</ul>
+<div class="co gap"><span class="cot">Honest status</span><p>The CRD lifecycle states exist; the retention window, legal hold, export, erasure-proof, and the entire backup/DR layer are recommendations, not code. Set RPO/RTO targets before any HA or compliance claim. Tracked in §12.</p></div>
+
+<h3 id="upgrades">8.6 Upgrade &amp; rollout lifecycle</h3>
+<p>How the fleet moves forward when the agent-runner image, the baked-in <code>claude</code> CLI, or the SDK changes — the operational counterpart to the "SDK churn" risk (§12).</p>
+<ul>
+  <li><strong>Control plane:</strong> stateless services roll normally. Two catches: control-panel binds the in-process EPP on <code>:9000</code>, so scale/roll by <strong>replica count</strong>, never <code>uvicorn --workers</code>; and its per-pod local audit must move to data-spine (§7.3) before running &gt;1 replica, or a rolling upgrade forks audit history.</li>
+  <li><strong>Tenant pods:</strong> the CRD carries a per-tenant <code>image</code>, so the fleet can hold deliberate <strong>version skew</strong> — but nothing governs rollout today. Recommended: a canary cohort (a few accounts pinned to the new image) gated on an eval pass, then staged promotion of the default image. Parked pods pick up the new image on their <em>next wake</em> — scale-to-zero doubles as a free rolling upgrade for idle users, with zero coordinated downtime. Running pods drain-and-recreate at session end or on admin-forced restart.</li>
+  <li><strong>Session compatibility:</strong> session healing (orphan tool-use repair on resume) absorbs minor drift; a breaking <code>claude</code>/SDK change needs a session-format compatibility check and, worst case, a read-only fallback for old transcripts (ties to the deferred state-reader, §5). Pin the CLI version per image so skew is explicit.</li>
+  <li><strong>Rollback:</strong> because wake pulls the current default image, rollback = repoint the default and force-restart; parked pods self-heal on next wake.</li>
+</ul>
+<div class="co info"><span class="cot">Scale-to-zero makes upgrades cheap</span><p>Most pods are off, so most users upgrade on next login with no coordinated downtime — an underappreciated benefit of the tenancy model. The real work is the canary/eval gate and the session-format compatibility check, not the mechanics.</p></div>
 </section>
 
 <!-- ================= §9 Competitive Landscape ================= -->
@@ -688,7 +819,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
     <li><strong>kagent</strong> (CNCF Sandbox) defines agents as CRDs but targets platform/DevOps automation, not multi-tenant personal assistants.</li>
     <li><strong>Agent Sandbox</strong> (kubernetes-sigs, announced 2026-03) — <code>Sandbox</code> / <code>SandboxWarmPool</code> / <code>SandboxClaim</code> CRDs for singleton stateful agent workloads with suspend/resume, warm pools, and gVisor/Kata runtimes, explicitly citing "agents like Claude Code." Still pre-release — but it is the upstream standardization of exactly Priva's per-user scale-to-zero pod, and a candidate future substrate for the runtime layer.</li>
   </ul>
-  <div class="co info"><span class="cot">Strategic read</span><p>The plumbing is converging on Priva's shape. None of it ships a console, session persistence, or Claude SDK feature mapping — the product layer stays differentiating even if the pod-runtime layer commoditizes. Design that layer to be swappable (§11).</p></div>
+  <div class="co info"><span class="cot">Strategic read</span><p>The plumbing is converging on Priva's shape. None of it ships a console, session persistence, or Claude SDK feature mapping — the product layer stays differentiating even if the pod-runtime layer commoditizes. Design that layer to be swappable (§12).</p></div>
 </div>
 
 <h3 id="matrix">9.2 Comparison matrix</h3>
@@ -742,16 +873,67 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <div class="co gap"><span class="cot">Status as of 2026-07-10</span><p>Phases 0–3 merged to <code>main</code> (2026-06-21). At rest, control-panel, operator, data-spine and the edge run <code>1/1 Ready</code>; agent-runner pods scale <code>0→1</code> on demand (≈4 s cold start, real LLM run + WebSocket chat verified) and sit at zero when idle. Phases 4–6 are deferred.</p></div>
 </section>
 
-<!-- ================= §11 Risks & Open Issues ================= -->
+<!-- ================= §11 Design Evolution ================= -->
+<section id="evolution">
+<h2><span class="no">§11</span>Design Evolution &amp; Extension Paths</h2>
+<p class="lead">The current architecture was built for one user driving one agent from a browser. The capabilities below stretch that to <strong>agents driving agents</strong>, <strong>humans approving out-of-band</strong>, and <strong>agents shared across users</strong>. For each, the design already supplies most of the substrate; the value is in seeing exactly where it holds and where it must change. These are design directions, not committed roadmap (§10).</p>
+
+<div class="co info"><span class="cot">The through-line</span><p>Pod-per-tenant + EPP steering + permission/hook governance turns out to be a strong substrate for all four expansions: <em>a published agent is just a tenant, an A2A call is just a wake, an out-of-band approval is just a durable <code>permission_request</code>, and brokered MCP auth is just control-panel doing for tools what it already does for runner tokens.</em> What each demands in return is mostly the hardening already on the Phase 6 list (NetworkPolicy, mTLS/JWKS, KMS/DEK) plus durability for the permission coordinator. The expansions don't fight the architecture — they cash in its deferred security cheques.</p></div>
+
+<h3 id="a2a">11.1 Agent-to-agent (A2A) interoperability</h3>
+<p><strong>Current substrate.</strong> agent-runner already <em>consumes</em> tools over MCP (agent→tool) and runs in-pod subagents; the agentgateway edge is an AI-native L7 proxy; and the EPP already provides per-agent identity, wake-on-demand, and per-request steering. The multi-agent workflow inspector already models and persists multi-agent runs.</p>
+<p><strong>What A2A adds.</strong> Each tenant agent becomes both a caller of and a callable endpoint for other platforms' agents (e.g. the emerging Agent2Agent protocol and agent cards). An external agent addresses "user X's agent"; the EPP wakes that pod exactly as it does for a browser request — the wake-on-demand + runner-token model maps onto A2A almost unchanged.</p>
+<div class="co warn"><span class="cot">Safeguards this demands</span><p>An inbound A2A call is an untrusted external party driving a privileged pod — the classic confused-deputy problem. It needs: <strong>agent-level ACLs</strong> (who may invoke whom), a <strong>constrained inbound permission profile</strong> (never <code>bypassPermissions</code>, an expanded disallowed-tool set, mandatory hooks), <strong>loop/recursion limits</strong> (A→B→A), rate limiting, and full audit of every cross-agent call. BYOK cost attribution also breaks — whose key pays when B drives A? (see §11.5).</p></div>
+
+<h3 id="hitl">11.2 Asynchronous HITL &amp; the Feishu approval inbox</h3>
+<p><strong>Current substrate.</strong> Synchronous, in-session human-in-the-loop already works: the permission coordinator emits a <code>permission_request</code>, parks an in-pod <code>asyncio.Future</code>, and resolves it on <code>POST …/permission/respond</code>. The deferred channel-connector (Phase 4) plus the <code>channel_binding</code> table (Feishu user ↔ account, already in the schema) supply the addressing.</p>
+<p><strong>What the inbox adds.</strong> When an agent hits an approval point while running <em>detached</em> — a scheduled job, an A2A-driven task, a long batch — with no browser open, route the request to the user's Feishu inbox; the human approves there; the agent resumes.</p>
+<div class="co danger"><span class="cot">The architectural catch</span><p>The in-pod <code>asyncio.Future</code> is <strong>ephemeral</strong>. If the pod scales to zero while awaiting a human who takes hours, the pending decision is lost. Async HITL therefore forces the current scale-to-zero + in-memory-coordinator design to gain durability: <strong>(1)</strong> persist pending approvals (data-spine or PVC), not a Future; <strong>(2)</strong> exempt pods with open approvals from the idle sweep, <em>or</em> make the decision re-hydratable on wake; <strong>(3)</strong> sign approval links with short expiry so a Feishu message can't be forged into an approval; <strong>(4)</strong> a timeout/escalation policy that defaults to <em>deny</em>; <strong>(5)</strong> audit of the approver's identity. The permission model is the right seam — what changes is persistence and delivery, which is exactly the Phase 4 scheduler + channel-connector work.</p></div>
+
+<h3 id="publishable">11.3 Shareable / publishable agents &amp; filesystem safeguards</h3>
+<p><strong>Current substrate.</strong> A subagent + its skills + MCP servers + system prompt + hooks already constitute a reusable "agent definition," and the Skills hub is a working publish/consume pattern. Two sharing models follow, with very different risk:</p>
+<ul>
+  <li><strong>(a) Publish the configuration</strong> — others instantiate the agent in <em>their own</em> isolated pod. Safe, and it fits the design today: isolation and BYOK stay per-instantiator.</li>
+  <li><strong>(b) Share a running agent</strong> — others send tasks to <em>your</em> instance. Dangerous: their inputs now drive an agent inside a pod that holds your workspace, your BYOK, and your MCP credentials.</li>
+</ul>
+<div class="co info"><span class="cot">The clean model</span><p>Treat a published agent as <strong>its own tenant</strong> — its own <code>AgentTenant</code> CR, its own pod, its own scoped volume and <em>service</em> credentials — invoked by others via A2A (§11.1) with per-caller auth and audit. This reuses scale-to-zero, pod isolation, and EPP steering wholesale: a publishable agent is simply a tenant whose "user" is a shared service identity.</p></div>
+<div class="co danger"><span class="cot">Filesystem safeguards (model b, or any inbound-shared session)</span><p>An untrusted consumer could ask a shared agent to read the author's files and return them — data exfil by confused deputy. Required guards: a <strong>jailed / ephemeral scratch workspace</strong> seeded only with what the agent needs, never the author's <code>~/.claude/projects</code>; <strong>read-only or per-invocation temp dirs</strong>; a <strong>locked-down permission profile + mandatory hooks</strong>; a <strong>default-deny egress NetworkPolicy</strong> so it can neither escalate tools nor exfiltrate; and <strong>credential decoupling</strong> — dedicated service creds or brokered MCP tokens (§11.4), never the author's personal BYOK. Sharing amplifies blast radius, which promotes the §4.4 web-terminal / NetworkPolicy hardening from "deferred" to "prerequisite."</p></div>
+
+<h3 id="unified-auth">11.4 Unified MCP / skill authentication</h3>
+<p><strong>Current substrate.</strong> MCP config comes from <code>.mcp.json</code> + <code>settings.json</code>; the built-in <code>priva_File</code> server is in-process and needs no auth. External MCP server credentials, though, live per-pod today (settings / secret mount) — effectively per-user manual configuration.</p>
+<p><strong>What unification adds.</strong> When many users' agents reach the same internal MCP servers (issue trackers, databases, internal APIs), no user should hold raw service credentials. Following the emerging MCP OAuth 2.1 / resource-indicator direction, a central broker issues <strong>per-user, per-server scoped tokens</strong>, flows the user's identity through so the MCP server enforces per-user access, and centralizes rotation and revocation.</p>
+<div class="co info"><span class="cot">Design fit</span><p>control-panel is the natural broker — it already mints runner tokens and owns identity. It would register each MCP server with its auth method (OAuth client / API key / mTLS), broker short-lived per-user access tokens at wake or on demand, inject them scoped into the pod's MCP config, audit MCP tool calls under the acting user, and rotate without touching pods. Skills that shell out to external services get credentials the same brokered way instead of embedding secrets.</p></div>
+<div class="co warn"><span class="cot">The tension to manage</span><p>This concentrates high-value secrets in the control plane — in tension with the "control plane never touches runtime data" principle. Resolve it by having the broker hold only long-lived refresh material and hand pods <strong>short-lived scoped access tokens</strong>, which reinforces the Phase 6 per-account KMS/DEK need rather than working against it.</p></div>
+
+<h3 id="cross-cutting">11.5 Cross-cutting implications</h3>
+<p>The four expansions above surface the same handful of platform-wide questions — the ones worth deciding once, centrally, rather than per-feature:</p>
+<div class="tw"><table class="plain wrapflag">
+<thead><tr><th style="width:24%">Concern</th><th>What it forces</th></tr></thead>
+<tbody>
+<tr><td>Cost attribution under BYOK</td><td>A2A and shared agents break "the user's own key pays." Needs per-invocation attribution and likely a hybrid: <em>service</em> agents carry a service key with usage charged back. A real tension with the no-metering-proxy non-goal — resolvable as an opt-in metering surface for shared/service agents only, leaving personal BYOK untouched.</td></tr>
+<tr><td>Identity federation</td><td>JWT/HS256 + API keys today. A2A and enterprise HITL need federated identity (OIDC/JWKS) so external platforms and Feishu identities map to Priva accounts. <code>channel_binding</code> is a start; the Phase 6 mTLS/JWKS work is the general layer.</td></tr>
+<tr><td>Inbound trust &amp; prompt injection</td><td>Every inbound A2A / HITL / shared drive is untrusted input into a privileged pod — the OpenClaw lesson (§9). A hardened "inbound profile" (constrained tools, mandatory hooks, egress DLP) becomes a first-class construct, not a per-agent afterthought.</td></tr>
+<tr><td>Versioning &amp; registry governance</td><td>A published agent is a shared dependency: consumers need pinned versions and safe rollout; a published-agent registry needs admin review, provenance, and signing (supply-chain posture) — mirroring Anthropic Managed Agents' versioned configs and the Skills hub.</td></tr>
+<tr><td>Agent mesh / cross-pod orchestration</td><td>In-pod subagents extend naturally to a supervisor spawning ephemeral worker pods (each its own <code>AgentTenant</code> CR). The workflow inspector + EPP + A2A are already the substrate.</td></tr>
+</tbody>
+</table></div>
+</section>
+
+<!-- ================= §12 Risks & Open Issues ================= -->
 <section id="risks">
-<h2><span class="no">§11</span>Risks &amp; Open Issues</h2>
+<h2><span class="no">§12</span>Risks &amp; Open Issues</h2>
 <div class="tw"><table class="plain wrapflag">
 <thead><tr><th style="width:22%">Risk</th><th>Detail &amp; disposition</th><th>Sev</th></tr></thead>
 <tbody>
 <tr><td><strong>Web-terminal secret exposure</strong></td><td>Shared signing secret readable from any tenant PTY + no NetworkPolicy → cross-tenant token forgery and pod access (§4.4). Tier-0 fix scoped (~1 day), <strong>not yet applied</strong>; a launch blocker for the tenant-facing terminal.</td><td><span class="st open">Open · High</span></td></tr>
+<tr><td><strong>Egress / BYOK exfiltration</strong></td><td>An arbitrary <code>ANTHROPIC_BASE_URL</code> plus un-governed agent egress can ship data off-platform, defeating the sovereignty guarantee despite on-prem hosting (§4.5). Endpoint allowlist + mandatory egress proxy/DLP <strong>not built</strong>.</td><td><span class="st open">Open · High</span></td></tr>
+<tr><td><strong>Backup / DR absent</strong></td><td>The session JSONL (the record) and per-account workspaces have no backup; data-spine is a single-writer SPOF. RPO/RTO, volume snapshots, and restore drills are unbuilt (§8.5).</td><td><span class="st open">Open · High</span></td></tr>
 <tr><td><strong>Plaintext in-cluster transport</strong></td><td>All in-cluster hops except the ext_proc EPP are plaintext HTTP/gRPC in alpha. Edge TLS + pod mTLS/JWKS deferred to Phase 6.</td><td><span class="st defer">Deferred</span></td></tr>
 <tr><td><strong>Pod-boundary isolation</strong></td><td>Shared-kernel runc boundary is weaker than Firecracker/gVisor for semi-trusted users holding a PTY; a container escape compromises the node. Mitigation path: <code>runtimeClassName</code> → gVisor/Kata (config flip), tracking kubernetes-sigs Agent Sandbox.</td><td><span class="st defer">Known</span></td></tr>
 <tr><td><strong>data-spine SPOF</strong></td><td>Single SQLite writer, 1 replica <code>Recreate</code> — the control plane's availability floor. Postgres backend is an interface-only stub today.</td><td><span class="st defer">Known</span></td></tr>
+<tr><td><strong>Skill / MCP supply chain</strong></td><td>Shared skills and MCP servers run as code in privileged pods with no signing, review, or provenance. Mitigation: a signed registry + admin review (§11.3, §11.5).</td><td><span class="st defer">Known</span></td></tr>
+<tr><td><strong>Spend runaway (BYOK)</strong></td><td>No token metering → no circuit breaker on a looping autonomous agent burning the user's key. Mitigation: per-user spend caps + runaway detection (§11.5).</td><td><span class="st defer">Known</span></td></tr>
+<tr><td><strong>Fleet upgrade / version skew</strong></td><td>Per-tenant image skew with no governed rollout; a breaking SDK change can strand sessions. Mitigation: canary + eval gate + session-format compatibility check (§8.6).</td><td><span class="st defer">Known</span></td></tr>
 <tr><td><strong>SDK / CLI upstream churn</strong></td><td>Tight coupling to a fast-moving <code>claude-agent-sdk</code> / CLI (breaking changes, beta headers, permission-model revisions). Absorbed release-by-release; the cost of SDK-nativeness.</td><td><span class="st defer">Ongoing</span></td></tr>
 <tr><td><strong>Doc-vs-code drift</strong></td><td>Some repo docs still describe the superseded data-spine Fernet→Secret BYOK flow and a 9th <code>secret</code> table; as-built (since 2026-07-01) uses pod-local <code>settings.json</code> and 8 tables / 7 served services. This spec reflects as-built.</td><td><span class="st stub">Minor</span></td></tr>
 <tr><td><strong>Ecosystem convergence</strong></td><td>If Agent Sandbox CRDs + Managed Agents' self-hosted workers + agentgateway converge into an off-the-shelf "Claude agents on your cluster" story, part of the pod-runtime layer commoditizes. Mitigation: keep differentiation in the tenant/console/BYOK layer; design the runtime layer swappable.</td><td><span class="st defer">Strategic</span></td></tr>
@@ -759,9 +941,9 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 </table></div>
 </section>
 
-<!-- ================= §12 Glossary ================= -->
+<!-- ================= §13 Glossary ================= -->
 <section id="glossary">
-<h2><span class="no">§12</span>Glossary</h2>
+<h2><span class="no">§13</span>Glossary</h2>
 <div class="tw"><table class="plain wrapflag">
 <thead><tr><th style="width:20%">Term</th><th>Meaning</th></tr></thead>
 <tbody>
