@@ -15,6 +15,7 @@ import {
   hasRuntime,
   listRuntimes,
   rekeyRuntime,
+  resolveKey,
 } from '../stores/runtime/registry'
 import { DEFAULT_UI_SNAPSHOT } from '../session/openSession'
 import i18n from '@shared/i18n'
@@ -47,12 +48,13 @@ function broadcastSplitStop(sessionId) {
   window.setTimeout(() => channel.close(), 0)
 }
 
-// Resolve a session id (or runtime key) to the runtime that hosts it. Covers
-// draft-keyed runtimes that already learned their session id but haven't been
-// rekeyed yet.
+// Resolve a session id (or runtime key) to the runtime that hosts it —
+// through rotated-id aliases first, then by scanning chat.sessionId (covers
+// draft-keyed runtimes that learned their id but weren't rekeyed yet).
 function resolveRuntimeKey(sessionIdOrKey) {
   if (!sessionIdOrKey) return null
-  if (hasRuntime(sessionIdOrKey)) return sessionIdOrKey
+  const canonical = resolveKey(sessionIdOrKey)
+  if (hasRuntime(canonical)) return canonical
   for (const rt of listRuntimes()) {
     if (rt.slices.chat?.getState?.().sessionId === sessionIdOrKey) return rt.key
   }
@@ -138,6 +140,16 @@ export function stopActiveStream(options = {}) {
 function startStream({ key, message, permissionMode, attachments, attachmentsMeta, images, attach = null }) {
   const tabId = window.__PRIVA_TAB_ID || (window.__PRIVA_TAB_ID = Math.random().toString(36).slice(2, 8))
   const rt = ensureRuntime(key)
+
+  // A runtime hosts one stream at a time — starting a second would clobber
+  // the live abort/permission handles (and the backend refuses double-runs).
+  {
+    const chat = getSlice(rt.key, 'chat').getState()
+    if (!attach && chat.isStreaming && chat.streamAbort) {
+      console.warn('[SSE] startStream ignored: runtime %s already streaming', rt.key)
+      return
+    }
+  }
 
   // Runtime-bound accessors. rt.key is live across a draft→sessionId rekey,
   // so these always resolve to THIS conversation's slices.

@@ -18,6 +18,13 @@ import { create, useStore } from 'zustand'
 const sliceFactories = {}
 const runtimes = new Map() // key -> runtime; key = sessionId or 'draft-<n>'
 
+// Former keys → canonical key. The CLI mints a NEW session id on every
+// resume spawn (see agent-runner service.py: current_resume_id), so a
+// conversation's id rotates per turn while sidebar rows / status entries /
+// split channels may still hold an older id. Every lookup resolves through
+// this map so a stale id always finds the live runtime.
+const keyAliases = new Map()
+
 // Monotonic — never reset, so a logout/reset always mints a fresh draft key
 // and every facade subscription/hook sees an activeKey change to rebind on.
 let draftCounter = 0
@@ -48,12 +55,24 @@ export function registerSliceFactory(name, factory) {
   sliceFactories[name] = factory
 }
 
+// Follow rotated-id aliases to the canonical runtime key. Returns the input
+// unchanged when no alias exists (so it is safe to call on anything).
+export function resolveKey(key) {
+  let current = key
+  for (let hops = 0; hops < 8; hops++) {
+    const next = keyAliases.get(current)
+    if (next === undefined || next === current) return current
+    current = next
+  }
+  return current
+}
+
 export function hasRuntime(key) {
-  return runtimes.has(key)
+  return runtimes.has(resolveKey(key))
 }
 
 export function getRuntime(key) {
-  return runtimes.get(key) || null
+  return runtimes.get(resolveKey(key)) || null
 }
 
 export function listRuntimes() {
@@ -61,10 +80,11 @@ export function listRuntimes() {
 }
 
 export function ensureRuntime(key) {
-  let rt = runtimes.get(key)
+  const canonical = resolveKey(key)
+  let rt = runtimes.get(canonical)
   if (!rt) {
-    rt = createRuntimeObject(key)
-    runtimes.set(key, rt)
+    rt = createRuntimeObject(canonical)
+    runtimes.set(canonical, rt)
   }
   return rt
 }
@@ -95,7 +115,7 @@ export function useActiveKey() {
 export function setActiveKey(key) {
   const rt = ensureRuntime(key)
   rt.meta.lastActiveAt = Date.now()
-  useRegistry.setState({ activeKey: key })
+  useRegistry.setState({ activeKey: rt.key })
 }
 
 export function newDraftRuntime() {
@@ -106,18 +126,27 @@ export function newDraftRuntime() {
 }
 
 // Draft got its real session id (system.init / result), or a resume rotated
-// the id. Moves the runtime under the new key; activeKey follows if needed.
+// the id (the CLI mints a new one per spawn). Moves the runtime under the
+// new key and leaves an alias behind so sidebar rows / status entries still
+// holding the former id keep resolving to this live runtime.
 export function rekeyRuntime(oldKey, sessionId) {
-  const rt = runtimes.get(oldKey)
-  if (!rt || !sessionId || oldKey === sessionId) return rt || null
+  const rt = runtimes.get(resolveKey(oldKey))
+  if (!rt || !sessionId || rt.key === sessionId) return rt || null
+  const fromKey = rt.key
   // A stale retained runtime already parked under the target id (old
   // snapshot of the same session) is replaced by the live one.
   runtimes.delete(sessionId)
-  runtimes.delete(oldKey)
+  runtimes.delete(fromKey)
   rt.key = sessionId
   rt.sessionId = sessionId
   runtimes.set(sessionId, rt)
-  if (useRegistry.getState().activeKey === oldKey) {
+  // Re-point every alias chain ending at the former key, then alias it.
+  for (const [alias, target] of keyAliases) {
+    if (target === fromKey) keyAliases.set(alias, sessionId)
+  }
+  keyAliases.set(fromKey, sessionId)
+  keyAliases.delete(sessionId) // the canonical key must never alias away
+  if (useRegistry.getState().activeKey === fromKey) {
     useRegistry.setState({ activeKey: sessionId })
   }
   return rt
@@ -126,9 +155,13 @@ export function rekeyRuntime(oldKey, sessionId) {
 // Remove a runtime (delete-session flow). Removing the active one activates
 // a fresh draft so the facades always have a live slice to resolve to.
 export function removeRuntime(key) {
-  if (!runtimes.has(key)) return
-  runtimes.delete(key)
-  if (useRegistry.getState().activeKey === key) {
+  const canonical = resolveKey(key)
+  if (!runtimes.has(canonical)) return
+  runtimes.delete(canonical)
+  for (const [alias, target] of keyAliases) {
+    if (target === canonical) keyAliases.delete(alias)
+  }
+  if (useRegistry.getState().activeKey === canonical) {
     newDraftRuntime()
   }
 }
@@ -154,6 +187,9 @@ export function evictIfNeeded(cap = RETAINED_RUNTIME_CAP) {
   for (const rt of candidates) {
     if (runtimes.size <= cap) break
     runtimes.delete(rt.key)
+    for (const [alias, target] of keyAliases) {
+      if (target === rt.key) keyAliases.delete(alias)
+    }
   }
 }
 
@@ -165,6 +201,7 @@ export function resetAllRuntimes() {
     } catch { /* socket already gone */ }
   }
   runtimes.clear()
+  keyAliases.clear()
   newDraftRuntime()
 }
 

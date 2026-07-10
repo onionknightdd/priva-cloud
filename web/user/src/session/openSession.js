@@ -8,6 +8,7 @@ import {
   getSlice,
   hasRuntime,
   newDraftRuntime,
+  resolveKey,
   setActiveKey,
 } from '../stores/runtime/registry'
 import useSessionStatusStore from '../stores/sessionStatusStore'
@@ -75,9 +76,14 @@ let selectToken = 0
  */
 export async function openSession(sessionOrId, opts = {}) {
   const row = sessionOrId && typeof sessionOrId === 'object' ? sessionOrId : null
-  const sessionId = row ? (row.sessionId || row.id) : sessionOrId
-  if (!sessionId) return false
-  const rowId = row ? row.id : sessionId
+  const rawSessionId = row ? (row.sessionId || row.id) : sessionOrId
+  if (!rawSessionId) return false
+  // Resume rotates session ids per turn — a sidebar row may still hold a
+  // former id. Resolve to the live runtime's canonical key so switching back
+  // to a running (e.g. mid-workflow) session finds it instead of cold-loading
+  // a stale snapshot.
+  const sessionId = resolveKey(rawSessionId)
+  const rowId = row ? row.id : rawSessionId
   const { forkParentId = null, navigate = true } = opts
 
   const statusStore = useSessionStatusStore.getState()

@@ -22,7 +22,7 @@ import {
 } from '../../api/sessions'
 import { openSession, newDraftSession } from '../../session/openSession'
 import { stopSessionStream } from '../../hooks/useSSE'
-import { getActiveKey, removeRuntime } from '../../stores/runtime/registry'
+import { getActiveKey, removeRuntime, resolveKey } from '../../stores/runtime/registry'
 import SessionStatusDot from '../shared/SessionStatusDot'
 import SidebarResizer from './SidebarResizer'
 import SettingsPopover from '../settings/SettingsPopover'
@@ -79,7 +79,9 @@ function SessionItem({
   onDelete, onRenameStart, onTagStart, onPinToggle, onArchive, renameEditingId,
   onRenameCommit, onRenameCancel, onDragStartSession, onDragEndSession, t, indent = 0,
 }) {
-  const dotStatus = useSessionStatusStore((s) => s.statuses[session.sessionId || session.id])
+  // Resolve rotated session ids (resume mints a new id per turn) so the dot
+  // follows the live runtime even while the row still holds a former id.
+  const dotStatus = useSessionStatusStore((s) => s.statuses[resolveKey(session.sessionId || session.id)])
   const [renameValue, setRenameValue] = useState(session.name || '')
   useEffect(() => {
     if (renameEditingId === session.id) setRenameValue(session.name || '')
@@ -821,12 +823,15 @@ export default function Sidebar() {
           groups: s.groups.map((g) => (g.cwd === session.cwd ? { ...g, total: Math.max(0, g.total - 1) } : g)),
         }))
         // Deleting a running session aborts its stream; deleting the active
-        // one swaps to a fresh draft before its runtime is dropped.
-        stopSessionStream(sid, { broadcast: true })
-        if (getActiveKey() === sid || activeSessionId === session.id) {
+        // one swaps to a fresh draft before its runtime is dropped. Resolve
+        // rotated ids so a resumed session's live runtime is the one removed.
+        const canonical = resolveKey(sid)
+        stopSessionStream(canonical, { broadcast: true })
+        if (getActiveKey() === canonical || activeSessionId === session.id) {
           newDraftSession()
         }
-        removeRuntime(sid)
+        removeRuntime(canonical)
+        useSessionStatusStore.getState().clear(canonical)
         useSessionStatusStore.getState().clear(sid)
       },
     })
