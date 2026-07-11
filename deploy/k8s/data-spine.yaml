@@ -37,6 +37,14 @@ spec:
             - {name: DATA_SPINE_HOST, value: "0.0.0.0"}
             - {name: DATA_SPINE_PORT, value: "50051"}
             - {name: PRIVA_DATASPINE__SQLITE_PATH, value: "/data/priva.dataspine.db"}
+            # Postgres backend (cut over 2026-07-11; deploy/k8s/postgres.yaml).
+            # Keep the sqlite path/PVC — it was the migrate-to-pg source and is
+            # the rollback target (re-comment these two lines + apply to roll
+            # back). These two env vars belong on THIS deployment only: the DSN
+            # carries DB credentials.
+            - {name: PRIVA_DATASPINE__BACKEND, value: "postgres"}
+            - name: PRIVA_DATASPINE__POSTGRES_DSN
+              valueFrom: {secretKeyRef: {name: postgres-secret, key: DATA_SPINE_PG_DSN}}
             - {name: PRIVA_LOG_DIR, value: "/tmp/logs"}
             - {name: PRIVA_SERVER__WORK_DIR, value: "/data"}
           envFrom:

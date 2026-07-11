@@ -54,14 +54,19 @@ def create_app() -> FastAPI:
     async def lifespan(_: FastAPI):
         configure_logging(settings)
 
-        # Compose the in-process data-plane (shared SQLite with control-panel).
-        from priva_data_spine import compose
-        compose()
+        # In-process transport only: compose the data-plane repo (dev mode's
+        # shared SQLite with control-panel). gRPC transport: this pod is a
+        # data-plane *client* — never build a repo (backend/postgres_dsn stay
+        # with the data-spine pod; a DSN here would hand DB credentials to
+        # every tenant pod, readable from the web terminal).
+        if settings.dataspine.transport == "in_process":
+            from priva_data_spine import compose
+            compose()
         logger.info(
-            "data-plane composed: transport={}, backend={}, sqlite={}",
+            "data-plane transport={}, backend={}, dsn={}",
             settings.dataspine.transport,
             settings.dataspine.backend,
-            settings.dataspine.sqlite_path,
+            settings.dataspine.grpc_dsn,
         )
 
         # Eager audit logger (PRIVA_HOME is already pinned by entry.py).

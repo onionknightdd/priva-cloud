@@ -1,7 +1,8 @@
 # data-spine — example bootstrap config (single-writer state + secret store pod).
 #
-# Runs the gRPC server (`data-spine serve`) on :50051 backed by SQLite on a RWO PVC.
-# Env form: PRIVA_DATASPINE__SQLITE_PATH, PRIVA_SERVER__PORT, …
+# Runs the gRPC server (`data-spine serve`) on :50051 backed by Postgres (the
+# default), or by the legacy SQLite file (backend: "sqlite").
+# Env form: PRIVA_DATASPINE__POSTGRES_DSN, PRIVA_DATASPINE__SQLITE_PATH, …
 
 app_name: "Priva data-spine"
 
@@ -12,8 +13,11 @@ server:
 
 dataspine:
   transport: "in_process"          # the server itself owns the DB in-process
-  backend: "sqlite"
-  sqlite_path: "/data/priva.dataspine.db"   # on the RWO PVC mount
+  backend: "postgres"              # default; "sqlite" = legacy opt-in (rollback)
+  # libpq DSN (required for postgres). Carries DB credentials — set it via
+  # Secret/env on the data-spine pod ONLY, never in a shared ConfigMap.
+  postgres_dsn: "postgresql://priva:CHANGE-ME@postgres.priva-cloud.svc.cluster.local:5432/priva"
+  sqlite_path: "/data/priva.dataspine.db"   # legacy file; migrate-to-pg source + rollback target
   api_key_hmac_secret: null        # shared signing secret; override via Secret/env
 
 # logging.* defaults are fine.

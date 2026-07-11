@@ -688,8 +688,12 @@ def _atomic_write(path: Path, content: str) -> None:
 
 async def main() -> None:
     # Separate process: compose the in-process data-plane before any store access.
-    from priva_data_spine import compose
-    compose()
+    # gRPC transport: this process is a data-plane *client* — never build a repo.
+    from priva_common.config import get_settings
+
+    if get_settings().dataspine.transport == "in_process":
+        from priva_data_spine import compose
+        compose()
     daemon = SchedulerDaemon()
     await daemon.start()
 

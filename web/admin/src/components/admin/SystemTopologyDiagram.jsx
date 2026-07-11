@@ -130,8 +130,7 @@ function metricLine(node, t) {
   switch (node.id) {
     case 'agentgateway':
       return node.status === 'up' ? t('admin.metricConnections', { count: fmt(m.connections) }) : null
-    case 'operator':
-      return t('admin.metricReady', { ready: fmt(m.ready), desired: fmt(m.desired) })
+    // operator: ready/desired moved to the replica chip (node.replicas)
     case 'data-spine': {
       const parts = []
       if ('accounts' in m) parts.push(t('admin.metricAccounts', { count: fmt(m.accounts) }))
@@ -223,6 +222,28 @@ function NodeView({ node, reducedMotion, t }) {
           {node.plane === 'edge' ? t('admin.planeEdge') : t('admin.planeData')}
         </text>
       )}
+      {/* Replica chip — ready/desired of the backing Deployment, top-right of the
+          title row (left of the plane tag on wide bars). Absent (null) on nodes
+          with no single Deployment: browser, agent-runner fleet, planned modules. */}
+      {node.replicas && !disabled && (() => {
+        const { ready, desired } = node.replicas
+        const repColor = desired === 0 ? 'var(--text-dim)'
+          : ready === desired ? 'var(--green)'
+            : ready === 0 ? 'var(--red)' : 'var(--yellow)'
+        const label = `${fmt(ready)}/${fmt(desired)}`
+        const w = label.length * 6.2 + 14
+        const rightX = wide ? box.x + box.w - 76 : box.x + box.w - 12
+        return (
+          <g>
+            <rect x={rightX - w} y={titleY - 12} width={w} height={16} rx={2}
+              fill="var(--bg-elevated)" stroke="var(--border-subtle)" strokeWidth={1} />
+            <text x={rightX - w / 2} y={titleY} fontSize={10} textAnchor="middle"
+              fill={repColor} style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+              {label}
+            </text>
+          </g>
+        )
+      })()}
 
       {isCP ? (
         <>

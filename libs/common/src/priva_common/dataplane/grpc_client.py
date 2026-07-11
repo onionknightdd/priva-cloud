@@ -194,7 +194,7 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
 
         def stats(self):
             r = self._s.Stats(common_pb2.Empty())
-            return {"accounts": r.accounts, "jobs": r.jobs, "runs": r.runs}
+            return {"accounts": r.accounts, "jobs": r.jobs, "runs": r.runs, "backend": r.backend}
 
     class _ResourceSpecs:
         def __init__(self):

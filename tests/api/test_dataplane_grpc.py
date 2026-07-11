@@ -1,23 +1,53 @@
 """gRPC data-plane transport round-trip: the server (wrapping the in-process
-services over SQLite) ↔ the build_grpc_client stores. Covers accounts (incl. the
-UNSET api_key semantics), the new secret store, quota, bindings, and admin.
-scheduler is deferred over gRPC (Phase 4) and not exercised here.
+services over the repo) ↔ the build_grpc_client stores. Covers accounts (incl.
+the UNSET api_key semantics), quota, bindings, and admin. scheduler is deferred
+over gRPC (Phase 4) and not exercised here.
+
+Runs against SQLite always; parametrized to also run against Postgres when
+TEST_POSTGRES_DSN is set (e.g. postgresql://postgres:test@127.0.0.1:5433/priva).
 """
 
 from __future__ import annotations
+
+import os
 
 import pytest
 
 from priva_common.config import Settings
 from priva_common.dataplane.grpc_client import _cache, build_grpc_client
 from priva_data_spine.server import build_server
+from priva_data_spine.service import build_repo
+
+PG_DSN = os.environ.get("TEST_POSTGRES_DSN")
+_pg_param = pytest.param(
+    "postgres", marks=pytest.mark.skipif(not PG_DSN, reason="TEST_POSTGRES_DSN not set"))
+
+
+def wipe_pg(dsn: str) -> None:
+    """Fresh public schema so each test starts empty (PgRepo re-creates tables)."""
+    import psycopg
+
+    with psycopg.connect(dsn) as conn:
+        conn.execute("DROP SCHEMA public CASCADE")
+        conn.execute("CREATE SCHEMA public")
+
+
+@pytest.fixture(params=["sqlite", _pg_param])
+def backend(request):
+    return request.param
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(backend, tmp_path):
     s = Settings()
-    s.dataspine.sqlite_path = str(tmp_path / "ds.db")
-    server = build_server(s)
+    s.dataspine.backend = backend
+    if backend == "postgres":
+        wipe_pg(PG_DSN)
+        s.dataspine.postgres_dsn = PG_DSN
+    else:
+        s.dataspine.sqlite_path = str(tmp_path / "ds.db")
+    repo = build_repo(s)
+    server = build_server(s, repo=repo)
     port = server.add_insecure_port("127.0.0.1:0")  # 0 -> OS picks a free port, returned
     server.start()
     s.dataspine.grpc_dsn = f"127.0.0.1:{port}"
@@ -25,6 +55,7 @@ def client(tmp_path):
         yield build_grpc_client(s)
     finally:
         server.stop(None)
+        repo.close()
         _cache.clear()
 
 
@@ -81,9 +112,11 @@ def test_bindings_and_first_run_cas(client):
     assert client.bindings.claim_first_run_im(b.binding_id) is False
 
 
-def test_admin_health_and_stats(client):
+def test_admin_health_and_stats(client, backend):
     client.accounts.create("frank", "pw")
     assert client.admin.healthz() == "ok"
     ready, _ = client.admin.readyz()
     assert ready is True
-    assert client.admin.stats()["accounts"] >= 1
+    stats = client.admin.stats()
+    assert stats["accounts"] >= 1
+    assert stats["backend"] == backend  # self-reported truthfully (System Map label)

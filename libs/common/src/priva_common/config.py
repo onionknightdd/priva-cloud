@@ -133,16 +133,21 @@ class AgentSettings(BaseModel):
 
 
 class DataspineSettings(BaseModel):
-    """data-spine (durable-state layer) seams. Phase-1 default = in-process + file SQLite.
+    """data-spine (durable-state layer) seams. Default = in-process + Postgres.
 
-    transport / backend are config flips; only the in_process + sqlite paths are
-    implemented in Phase 1 (grpc + postgres are structured-but-deferred).
+    Postgres is the product default (requires postgres_dsn); sqlite remains an
+    explicit legacy opt-in (backend="sqlite") kept as the migrate-to-pg source
+    and rollback target. The DB is only ever opened by the data-spine process
+    itself (in_process transport) — everything else is a grpc client and MUST
+    NOT be given backend/postgres_dsn (the DSN carries DB credentials).
     """
 
     transport: Literal["in_process", "grpc"] = "in_process"
-    backend: Literal["sqlite", "postgres"] = "sqlite"
+    backend: Literal["sqlite", "postgres"] = "postgres"
     sqlite_path: str = "~/priva_workspace/.priva.dataspine.db"
     grpc_dsn: str | None = None  # gRPC target (host:port) when transport == "grpc"
+    # libpq DSN when backend == "postgres", e.g. postgresql://priva:pw@postgres:5432/priva
+    postgres_dsn: str | None = None
     # HMAC key for the api_key_lookup index. Falls back to auth.jwt_secret when unset.
     api_key_hmac_secret: str | None = None
 

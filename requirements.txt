@@ -43,6 +43,9 @@ wecom-aibot-python-sdk
 grpcio>=1.60
 grpcio-tools>=1.60
 protobuf
+# data-spine Postgres backend (backend="postgres"): sync driver + pool.
+psycopg[binary]>=3.2
+psycopg-pool>=3.2
 # K8s control plane (Phase 3+): operator (kopf), control-panel/operator kube client,
 # and the Envoy ext_proc stubs the control-panel EPP implements for agentgateway.
 kopf>=1.37

@@ -46,6 +46,17 @@ spec:
             - {name: DATA_SPINE_HOST, value: "0.0.0.0"}
             - {name: DATA_SPINE_PORT, value: "50051"}
             - {name: PRIVA_DATASPINE__SQLITE_PATH, value: "/data/priva.dataspine.db"}
+            {{- if eq .Values.dataSpine.backend "postgres" }}
+            # Postgres backend. The sqlite path above stays valid — it is the
+            # migrate-to-pg source and the rollback target.
+            - {name: PRIVA_DATASPINE__BACKEND, value: "postgres"}
+            - name: PRIVA_DATASPINE__POSTGRES_DSN
+              {{- if .Values.dataSpine.postgresDsn }}
+              value: {{ .Values.dataSpine.postgresDsn | quote }}
+              {{- else }}
+              valueFrom: {secretKeyRef: {name: postgres-secret, key: DATA_SPINE_PG_DSN}}
+              {{- end }}
+            {{- end }}
             - {name: PRIVA_LOG_DIR, value: "/tmp/logs"}
             - {name: PRIVA_SERVER__WORK_DIR, value: "/data"}
           envFrom:

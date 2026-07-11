@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from priva_common.dataplane.v1 import common_pb2 as priva__common_dot_dataplane_dot_v1_dot_common__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n%priva_common/dataplane/v1/admin.proto\x12\x12priva.dataplane.v1\x1a&priva_common/dataplane/v1/common.proto\"\x18\n\x06Health\x12\x0e\n\x06status\x18\x01 \x01(\t\"&\n\x05Ready\x12\r\n\x05ready\x18\x01 \x01(\x08\x12\x0e\n\x06\x64\x65tail\x18\x02 \x01(\t\"=\n\rStatsResponse\x12\x10\n\x08\x61\x63\x63ounts\x18\x01 \x01(\x03\x12\x0c\n\x04jobs\x18\x02 \x01(\x03\x12\x0c\n\x04runs\x18\x03 \x01(\x03\x32\xd7\x01\n\x0c\x41\x64minService\x12@\n\x07Healthz\x12\x19.priva.dataplane.v1.Empty\x1a\x1a.priva.dataplane.v1.Health\x12>\n\x06Readyz\x12\x19.priva.dataplane.v1.Empty\x1a\x19.priva.dataplane.v1.Ready\x12\x45\n\x05Stats\x12\x19.priva.dataplane.v1.Empty\x1a!.priva.dataplane.v1.StatsResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n%priva_common/dataplane/v1/admin.proto\x12\x12priva.dataplane.v1\x1a&priva_common/dataplane/v1/common.proto\"\x18\n\x06Health\x12\x0e\n\x06status\x18\x01 \x01(\t\"&\n\x05Ready\x12\r\n\x05ready\x18\x01 \x01(\x08\x12\x0e\n\x06\x64\x65tail\x18\x02 \x01(\t\"N\n\rStatsResponse\x12\x10\n\x08\x61\x63\x63ounts\x18\x01 \x01(\x03\x12\x0c\n\x04jobs\x18\x02 \x01(\x03\x12\x0c\n\x04runs\x18\x03 \x01(\x03\x12\x0f\n\x07\x62\x61\x63kend\x18\x04 \x01(\t2\xd7\x01\n\x0c\x41\x64minService\x12@\n\x07Healthz\x12\x19.priva.dataplane.v1.Empty\x1a\x1a.priva.dataplane.v1.Health\x12>\n\x06Readyz\x12\x19.priva.dataplane.v1.Empty\x1a\x19.priva.dataplane.v1.Ready\x12\x45\n\x05Stats\x12\x19.priva.dataplane.v1.Empty\x1a!.priva.dataplane.v1.StatsResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -37,7 +37,7 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_READY']._serialized_start=127
   _globals['_READY']._serialized_end=165
   _globals['_STATSRESPONSE']._serialized_start=167
-  _globals['_STATSRESPONSE']._serialized_end=228
-  _globals['_ADMINSERVICE']._serialized_start=231
-  _globals['_ADMINSERVICE']._serialized_end=446
+  _globals['_STATSRESPONSE']._serialized_end=245
+  _globals['_ADMINSERVICE']._serialized_start=248
+  _globals['_ADMINSERVICE']._serialized_end=463
 # @@protoc_insertion_point(module_scope)

@@ -418,8 +418,10 @@ class SchedulerService:
 # --- Admin -----------------------------------------------------------------
 
 class AdminService:
-    def __init__(self, repo: Repository):
+    def __init__(self, repo: Repository, settings=None):
         self.repo = repo
+        # Self-reported storage backend (surfaces in Stats → the admin System Map).
+        self.backend = settings.dataspine.backend if settings else "sqlite"
 
     def healthz(self):
         return "ok"
@@ -436,6 +438,7 @@ class AdminService:
             "accounts": self.repo.table_count("account"),
             "jobs": self.repo.table_count("scheduled_job"),
             "runs": self.repo.table_count("job_run_record"),
+            "backend": self.backend,
         }
 
 
@@ -602,8 +605,31 @@ class RegistrationService:
 def build_repo(settings) -> Repository:
     ds = settings.dataspine
     if ds.backend == "postgres":
-        return PgRepo(ds.grpc_dsn or "")  # raises NotImplementedError
+        if not ds.postgres_dsn:
+            raise ValueError(
+                "dataspine.backend='postgres' (the default) requires dataspine.postgres_dsn "
+                "(env PRIVA_DATASPINE__POSTGRES_DSN), e.g. postgresql://priva:pw@127.0.0.1:5432/priva. "
+                "Local dev server: docker run -d --name priva-pg -p 5432:5432 -e POSTGRES_USER=priva "
+                "-e POSTGRES_PASSWORD=pw -e POSTGRES_DB=priva postgres:16-alpine. "
+                "Legacy sqlite backend: set PRIVA_DATASPINE__BACKEND=sqlite."
+            )
+        return PgRepo(ds.postgres_dsn)
     return SqliteRepo(ds.sqlite_path)
+
+
+def mask_dsn(dsn: str) -> str:
+    """postgresql://user:password@host/db → postgresql://user:***@host/db (log-safe)."""
+    import re
+
+    return re.sub(r"(//[^:/@]+):[^@]+@", r"\1:***@", dsn)
+
+
+def describe_store(settings) -> str:
+    """Log-safe one-liner of where the repo lives (never leaks the DSN password)."""
+    ds = settings.dataspine
+    if ds.backend == "postgres":
+        return f"postgres={mask_dsn(ds.postgres_dsn or '<unset>')}"
+    return f"sqlite={ds.sqlite_path}"
 
 
 def build_inprocess_client(repo: Repository, settings) -> DataplaneClient:
@@ -612,7 +638,7 @@ def build_inprocess_client(repo: Repository, settings) -> DataplaneClient:
         bindings=BindingService(repo),
         quota=QuotaService(repo),
         scheduler=SchedulerService(repo),
-        admin=AdminService(repo),
+        admin=AdminService(repo, settings),
         resource_specs=ResourceSpecService(repo),
         runner_defaults=RunnerDefaultsService(repo, settings),
         registrations=RegistrationService(repo),

@@ -20,11 +20,13 @@ class Ready(_message.Message):
     def __init__(self, ready: _Optional[bool] = ..., detail: _Optional[str] = ...) -> None: ...
 
 class StatsResponse(_message.Message):
-    __slots__ = ("accounts", "jobs", "runs")
+    __slots__ = ("accounts", "jobs", "runs", "backend")
     ACCOUNTS_FIELD_NUMBER: _ClassVar[int]
     JOBS_FIELD_NUMBER: _ClassVar[int]
     RUNS_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_FIELD_NUMBER: _ClassVar[int]
     accounts: int
     jobs: int
     runs: int
-    def __init__(self, accounts: _Optional[int] = ..., jobs: _Optional[int] = ..., runs: _Optional[int] = ...) -> None: ...
+    backend: str
+    def __init__(self, accounts: _Optional[int] = ..., jobs: _Optional[int] = ..., runs: _Optional[int] = ..., backend: _Optional[str] = ...) -> None: ...

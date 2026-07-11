@@ -1,12 +1,14 @@
 [project]
 name = "priva-data-spine"
 version = "0.0.0"
-description = "Priva Cloud data-spine: durable-state RPC impl (Accounts/Binding/Quota/Scheduler) over SQLite, behind the priva_common.dataplane contract."
+description = "Priva Cloud data-spine: durable-state RPC impl (Accounts/Binding/Quota/Scheduler) over SQLite or Postgres, behind the priva_common.dataplane contract."
 requires-python = ">=3.11"
 dependencies = [
     "priva-common",
-    "bcrypt",        # password hashing (account service)
-    "pyyaml",        # migrate: read monolith YAML
+    "bcrypt",                # password hashing (account service)
+    "pyyaml",                # migrate: read monolith YAML
+    "psycopg[binary]>=3.2",  # postgres backend (PgRepo)
+    "psycopg-pool>=3.2",     # thread-safe connection pool (sync grpc server)
 ]
 
 [project.entry-points."priva_cloud.services"]

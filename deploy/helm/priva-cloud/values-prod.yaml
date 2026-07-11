@@ -29,13 +29,24 @@ config:
 devStorage:
   enabled: false
 
-# data-spine's SQLite PVC on a durable, backed-up StorageClass.
+# data-spine — Postgres backend (base default). The dataSpine PVC now only holds
+# the legacy sqlite file (migration source / rollback).
 dataSpine:
   storage: 5Gi
   storageClassName: ""        # <-- EDIT to a real StorageClass (e.g. ceph-rbd / gp3)
   resources:
     requests: {cpu: "100m", memory: "256Mi"}
     limits:   {cpu: "500m", memory: "1Gi"}
+
+# In-cluster Postgres (the data-spine store) — give its PVC a durable, BACKED-UP
+# StorageClass. Prod alternative: a managed PG (enabled: false + dataSpine.postgresDsn
+# from your secret manager). Either way schedule pg_dump/snapshots before go-live.
+postgres:
+  storage: 10Gi
+  storageClassName: ""        # <-- EDIT to a real StorageClass (e.g. ceph-rbd / gp3)
+  resources:
+    requests: {cpu: "250m", memory: "512Mi"}
+    limits:   {cpu: "1",    memory: "2Gi"}
 
 # Edge wiring on (Gateway API + GIE CRDs + agentgateway must be installed in-cluster).
 gateway:

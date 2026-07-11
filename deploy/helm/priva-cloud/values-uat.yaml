@@ -33,13 +33,23 @@ config:
 devStorage:
   enabled: false
 
-# data-spine's SQLite PVC on a durable RWO StorageClass (e.g. ceph-rbd).
+# data-spine — Postgres backend (base default). The dataSpine PVC now only holds
+# the legacy sqlite file (migration source / rollback).
 dataSpine:
   storage: 5Gi
   storageClassName: ""                 # <-- EDIT to an RWO SC (ceph-rbd etc.); "" = default
   resources:
     requests: {cpu: "100m", memory: "256Mi"}
     limits:   {cpu: "500m", memory: "1Gi"}
+
+# In-cluster Postgres (the data-spine store). Give its PVC a durable RWO SC.
+# For a managed/external PG instead: enabled: false + set dataSpine.postgresDsn.
+postgres:
+  storage: 10Gi
+  storageClassName: ""                 # <-- EDIT to an RWO SC (ceph-rbd etc.); "" = default
+  resources:
+    requests: {cpu: "100m", memory: "256Mi"}
+    limits:   {cpu: "1",    memory: "1Gi"}
 
 # Edge on (Gateway API + GIE CRDs + agentgateway controller are install prerequisites —
 # see deploy/uat/README.md; the Gateway listens on :80, so terminate TLS in front of it

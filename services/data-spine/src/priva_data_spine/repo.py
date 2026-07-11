@@ -1,9 +1,12 @@
-"""Storage seam: Repository (ABC) + SqliteRepo (built) + PgRepo (interface-only).
+"""Storage seam: Repository (ABC) + SqliteRepo + PgRepo.
 
 The repo speaks rows (dicts) and SQL only — no crypto, no DTOs, no UUID minting
 (that's the service layer). SqliteRepo serializes all access behind one lock over
-a single WAL connection (a simple, correct single-writer model for the alpha; a
-read-only connection pool is a later optimization). foreign_keys are enforced.
+a single WAL connection (a simple, correct single-writer model for the alpha).
+PgRepo runs the same SQL (PG dialect) over a thread-safe psycopg connection pool
+— Postgres handles concurrency natively, so no lock. Both return identically
+shaped rows (TEXT ISO timestamps, 0/1 int booleans) so the service layer is
+backend-blind.
 """
 
 from __future__ import annotations
@@ -486,17 +489,352 @@ class SqliteRepo(Repository):
         return self._one(f"SELECT COUNT(*) AS n FROM {table}")["n"]
 
 
-# --- Postgres (deferred) ---------------------------------------------------
+# --- Postgres implementation -------------------------------------------------
 
-class PgRepo:
-    """Structured but not implemented in Phase 1 (backend='postgres').
+class PgRepo(Repository):
+    """Method-for-method PG port of SqliteRepo over a psycopg3 connection pool.
 
-    Deliberately NOT subclassing Repository so the ABC's abstractmethod check
-    doesn't mask this clear error at construction time.
+    Dialect deltas only: %s placeholders, ON CONFLICT DO NOTHING for OR IGNORE,
+    to_char(now()) for the strftime updated_at stamps, DELETE..RETURNING for
+    run_delete_before. The pool (not an RLock) provides thread-safety — the sync
+    gRPC server calls in from a 16-thread executor.
     """
 
-    def __init__(self, dsn: str):
-        raise NotImplementedError(
-            "data-spine Postgres backend is structured but not implemented in Phase 1; "
-            "set dataspine.backend='sqlite'"
+    def __init__(self, dsn: str, *, min_size: int = 1, max_size: int = 8):
+        # Lazy import: sqlite-only deployments never need psycopg installed.
+        from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool
+
+        from . import schema_pg
+
+        self._pool = ConnectionPool(
+            dsn,
+            min_size=min_size,
+            max_size=max_size,
+            timeout=5,                                  # fail readyz fast on a dead DSN
+            check=ConnectionPool.check_connection,      # drop stale conns (PG restart)
+            open=True,
+            kwargs={"row_factory": dict_row},
         )
+        with self._pool.connection() as conn:
+            schema_pg.create_all(conn)
+
+    def close(self) -> None:
+        self._pool.close()
+
+    # low-level (each call = one pooled connection = one committed transaction)
+    def _one(self, sql: str, params: tuple = ()) -> dict | None:
+        with self._pool.connection() as conn:
+            row = conn.execute(sql, params).fetchone()
+            return dict(row) if row else None
+
+    def _all(self, sql: str, params: tuple = ()) -> list[dict]:
+        with self._pool.connection() as conn:
+            return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+    def _write(self, sql: str, params: tuple = ()) -> int:
+        with self._pool.connection() as conn:
+            return conn.execute(sql, params).rowcount
+
+    # SQL expr stamping updated_at server-side (mirror of the strftime literal)
+    _NOW = "to_char((now() AT TIME ZONE 'utc'), 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')"
+
+    # account ---------------------------------------------------------------
+    def account_get(self, account_id):
+        return self._one("SELECT * FROM account WHERE account_id = %s", (account_id,))
+
+    def account_get_by_username(self, username):
+        return self._one("SELECT * FROM account WHERE username = %s", (username,))
+
+    def account_find_by_api_key_lookup(self, lookup):
+        return self._one("SELECT * FROM account WHERE api_key_lookup = %s", (lookup,))
+
+    def account_find_by_feishu(self, feishu_user_id):
+        return self._one("SELECT * FROM account WHERE feishu_user_id = %s", (feishu_user_id,))
+
+    def account_list(self):
+        return self._all("SELECT * FROM account ORDER BY created_at ASC")
+
+    def account_count_admins(self):
+        return self._one("SELECT COUNT(*) AS n FROM account WHERE role = 'admin'")["n"]
+
+    def account_insert(self, row):
+        cols = [c for c in _ACCOUNT_COLS if c in row]
+        ph = ", ".join("%s" for _ in cols)
+        self._write(
+            f"INSERT INTO account ({', '.join(cols)}) VALUES ({ph})",
+            tuple(row[c] for c in cols),
+        )
+
+    def account_update(self, account_id, fields):
+        fields = {k: v for k, v in fields.items() if k != "updated_at"}
+        # updated_at is always stamped server-side (a SQL expr, not a bound value);
+        # works even when `fields` is empty.
+        set_parts = [f"{k} = %s" for k in fields]
+        set_parts.append(f"updated_at = {self._NOW}")
+        params = list(fields.values()) + [account_id]
+        self._write(f"UPDATE account SET {', '.join(set_parts)} WHERE account_id = %s", tuple(params))
+
+    def account_delete(self, account_id):
+        self._write("DELETE FROM account WHERE account_id = %s", (account_id,))
+
+    # binding ---------------------------------------------------------------
+    def binding_insert(self, row):
+        self._write(
+            "INSERT INTO channel_binding (binding_id, account_id, session_uuid, first_run_done, feishu_chat_id) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (row["binding_id"], row["account_id"], row["session_uuid"],
+             int(row.get("first_run_done", 0)), row.get("feishu_chat_id")),
+        )
+
+    def binding_get(self, binding_id):
+        return self._one("SELECT * FROM channel_binding WHERE binding_id = %s", (binding_id,))
+
+    def binding_get_by_account(self, account_id):
+        return self._one("SELECT * FROM channel_binding WHERE account_id = %s", (account_id,))
+
+    def binding_list_by_account(self, account_id):
+        return self._all("SELECT * FROM channel_binding WHERE account_id = %s", (account_id,))
+
+    def binding_claim_first_run(self, binding_id):
+        # atomic CAS 0→1
+        return self._write(
+            "UPDATE channel_binding SET first_run_done = 1 WHERE binding_id = %s AND first_run_done = 0",
+            (binding_id,),
+        ) == 1
+
+    def binding_rebind(self, account_id, session_uuid, feishu_chat_id, rebound_at):
+        self._write(
+            "UPDATE channel_binding SET session_uuid = %s, first_run_done = 0, feishu_chat_id = %s, rebound_at = %s "
+            "WHERE account_id = %s",
+            (session_uuid, feishu_chat_id, rebound_at, account_id),
+        )
+
+    # quota -----------------------------------------------------------------
+    def quota_get(self, account_id):
+        return self._one("SELECT * FROM quota WHERE account_id = %s", (account_id,))
+
+    def quota_insert(self, row):
+        self._write(
+            "INSERT INTO quota (account_id, tier, max_concurrent_sessions, idle_grace_seconds) "
+            "VALUES (%s, %s, %s, %s) ON CONFLICT (account_id) DO NOTHING",
+            (row["account_id"], row.get("tier", "default"),
+             int(row.get("max_concurrent_sessions", 3)), int(row.get("idle_grace_seconds", 1800))),
+        )
+
+    def quota_update(self, account_id, fields):
+        if not fields:
+            return
+        clause, params = _set_clause_pg(fields)
+        self._write(
+            f"UPDATE quota SET {clause}, updated_at = {self._NOW} WHERE account_id = %s",
+            tuple(params) + (account_id,),
+        )
+
+    # jobs ------------------------------------------------------------------
+    _JOB_COLS = SqliteRepo._JOB_COLS
+
+    def job_insert(self, row):
+        cols = [c for c in self._JOB_COLS if c in row]
+        ph = ", ".join("%s" for _ in cols)
+        self._write(
+            f"INSERT INTO scheduled_job ({', '.join(cols)}) VALUES ({ph})",
+            tuple(row[c] for c in cols),
+        )
+
+    def job_get(self, job_id):
+        return self._one("SELECT * FROM scheduled_job WHERE job_id = %s", (job_id,))
+
+    def job_update(self, job_id, fields):
+        if not fields:
+            return
+        sets, params = _set_clause_pg(fields)
+        self._write(
+            f"UPDATE scheduled_job SET {sets}, updated_at = {self._NOW} WHERE job_id = %s",
+            tuple(params) + (job_id,),
+        )
+
+    def job_delete(self, job_id):
+        return self._write("DELETE FROM scheduled_job WHERE job_id = %s", (job_id,)) > 0
+
+    def job_list_by_account(self, account_id):
+        return self._all("SELECT * FROM scheduled_job WHERE account_id = %s ORDER BY created_at ASC", (account_id,))
+
+    def job_list_active(self):
+        return self._all("SELECT * FROM scheduled_job WHERE status = 'active' ORDER BY account_id, created_at ASC")
+
+    # runs ------------------------------------------------------------------
+    _RUN_COLS = SqliteRepo._RUN_COLS
+
+    def run_insert(self, row):
+        cols = [c for c in self._RUN_COLS if c in row]
+        ph = ", ".join("%s" for _ in cols)
+        self._write(
+            f"INSERT INTO job_run_record ({', '.join(cols)}) VALUES ({ph})",
+            tuple(row[c] for c in cols),
+        )
+
+    def run_upsert(self, row):
+        # Each append writes the full current snapshot of the run; upsert on run_id
+        # so birth (running) + outcome (+ skip-without-birth) all converge.
+        cols = [c for c in self._RUN_COLS if c in row]
+        ph = ", ".join("%s" for _ in cols)
+        updates = ", ".join(f"{c}=excluded.{c}" for c in cols if c != "run_id")
+        self._write(
+            f"INSERT INTO job_run_record ({', '.join(cols)}) VALUES ({ph}) "
+            f"ON CONFLICT (run_id) DO UPDATE SET {updates}",
+            tuple(row[c] for c in cols),
+        )
+
+    def run_get_latest(self, account_id, job_id):
+        return self._one(
+            "SELECT * FROM job_run_record WHERE account_id = %s AND job_id = %s "
+            "ORDER BY started_at DESC, run_id DESC LIMIT 1",
+            (account_id, job_id),
+        )
+
+    def run_update(self, run_id, fields):
+        if not fields:
+            return
+        clause, params = _set_clause_pg(fields)
+        self._write(f"UPDATE job_run_record SET {clause} WHERE run_id = %s", tuple(params) + (run_id,))
+
+    def run_get(self, run_id):
+        return self._one("SELECT * FROM job_run_record WHERE run_id = %s", (run_id,))
+
+    def run_list(self, account_id, *, limit, before, after, job_id, status):
+        # newest-first keyset on (started_at, run_id) — identical to SqliteRepo;
+        # TEXT ISO timestamps keep lexicographic == chronological.
+        where = ["account_id = %s"]
+        params: list = [account_id]
+        if job_id:
+            where.append("job_id = %s")
+            params.append(job_id)
+        if status:
+            where.append("status = %s")
+            params.append(status)
+        order_desc = True
+        if before:
+            where.append("(started_at < %s OR (started_at = %s AND run_id < %s))")
+            params += [before[0], before[0], before[1]]
+        elif after:
+            where.append("(started_at > %s OR (started_at = %s AND run_id > %s))")
+            params += [after[0], after[0], after[1]]
+            order_desc = False
+        order = "DESC" if order_desc else "ASC"
+        sql = (
+            f"SELECT * FROM job_run_record WHERE {' AND '.join(where)} "
+            f"ORDER BY started_at {order}, run_id {order} LIMIT %s"
+        )
+        rows = self._all(sql, tuple(params) + (limit + 1,))
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        if not order_desc:
+            rows = list(reversed(rows))  # always return newest-first
+        return rows, has_more
+
+    def run_count(self, account_id):
+        return self._one("SELECT COUNT(*) AS n FROM job_run_record WHERE account_id = %s", (account_id,))["n"]
+
+    def run_delete_before(self, account_id, cutoff_date):
+        # Returns the deleted run_ids (so callers can delete their PVC transcripts).
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                "DELETE FROM job_run_record WHERE account_id = %s AND started_at < %s RETURNING run_id",
+                (account_id, cutoff_date),
+            )
+            return [r["run_id"] for r in cur.fetchall()]
+
+    # resource_spec ----------------------------------------------------------
+    _RSPEC_COLS = SqliteRepo._RSPEC_COLS
+
+    def resource_spec_get(self, account_id):
+        return self._one("SELECT * FROM account_resource_spec WHERE account_id = %s", (account_id,))
+
+    def resource_spec_upsert(self, account_id, fields):
+        # Only the named columns are written; unset ones keep their default / prior value.
+        cols = [c for c in self._RSPEC_COLS if c in fields]
+        insert_cols = ["account_id"] + cols
+        ph = ", ".join("%s" for _ in insert_cols)
+        updates = ", ".join(f"{c}=excluded.{c}" for c in cols)
+        updates = (updates + ", " if updates else "") + f"updated_at = {self._NOW}"
+        self._write(
+            f"INSERT INTO account_resource_spec ({', '.join(insert_cols)}) VALUES ({ph}) "
+            f"ON CONFLICT (account_id) DO UPDATE SET {updates}",
+            tuple([account_id] + [fields[c] for c in cols]),
+        )
+        return self.resource_spec_get(account_id)
+
+    def resource_spec_list(self):
+        return self._all("SELECT * FROM account_resource_spec ORDER BY account_id")
+
+    # runner_defaults (single row id=1) --------------------------------------
+    _RDEFAULTS_COLS = SqliteRepo._RDEFAULTS_COLS
+
+    def runner_defaults_get(self):
+        return self._one("SELECT * FROM runner_defaults WHERE id = 1")
+
+    def runner_defaults_seed(self, values):
+        # Insert the single row from the supplied seed iff it doesn't exist yet.
+        cols = list(self._RDEFAULTS_COLS)
+        ph = ", ".join("%s" for _ in cols)
+        self._write(
+            f"INSERT INTO runner_defaults (id, {', '.join(cols)}) "
+            f"VALUES (1, {ph}) ON CONFLICT (id) DO NOTHING",
+            tuple(values[c] for c in cols),
+        )
+        return self.runner_defaults_get()
+
+    def runner_defaults_upsert(self, fields):
+        # Update only the named columns of the seeded row (callers seed first).
+        cols = [c for c in self._RDEFAULTS_COLS if c in fields]
+        if not cols:
+            return self.runner_defaults_get()
+        sets = ", ".join(f"{c} = %s" for c in cols)
+        self._write(
+            f"UPDATE runner_defaults SET {sets}, updated_at = {self._NOW} WHERE id = 1",
+            tuple(fields[c] for c in cols),
+        )
+        return self.runner_defaults_get()
+
+    # pending_registration ---------------------------------------------------
+    _PENDING_COLS = SqliteRepo._PENDING_COLS
+
+    def pending_insert(self, row):
+        cols = [c for c in self._PENDING_COLS if c in row]
+        ph = ", ".join("%s" for _ in cols)
+        self._write(
+            f"INSERT INTO pending_registration ({', '.join(cols)}) VALUES ({ph})",
+            tuple(row[c] for c in cols),
+        )
+
+    def pending_get(self, request_id):
+        return self._one("SELECT * FROM pending_registration WHERE request_id = %s", (request_id,))
+
+    def pending_get_open_by_username(self, username):
+        return self._one(
+            "SELECT * FROM pending_registration WHERE username = %s AND status = 'pending'", (username,))
+
+    def pending_list_by_status(self, status):
+        if status:
+            return self._all(
+                "SELECT * FROM pending_registration WHERE status = %s ORDER BY created_at DESC", (status,))
+        return self._all("SELECT * FROM pending_registration ORDER BY created_at DESC")
+
+    def pending_set_status(self, request_id, status):
+        self._write(
+            f"UPDATE pending_registration SET status = %s, updated_at = {self._NOW} WHERE request_id = %s",
+            (status, request_id),
+        )
+        return self.pending_get(request_id)
+
+    # admin -----------------------------------------------------------------
+    def table_count(self, table):
+        if table not in schema.TABLES:
+            raise ValueError(f"unknown table: {table}")
+        return self._one(f"SELECT COUNT(*) AS n FROM {table}")["n"]
+
+
+def _set_clause_pg(fields: dict) -> tuple[str, list]:
+    keys = list(fields.keys())
+    return ", ".join(f"{k} = %s" for k in keys), [fields[k] for k in keys]

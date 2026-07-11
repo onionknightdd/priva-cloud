@@ -33,6 +33,7 @@ from priva_common.models.admin import (
     SensitivePatternEntry,
     SensitivePatternsResponse,
     SensitivePatternsUpdate,
+    ReplicaCount,
     SystemEdge,
     SystemHealthResponse,
     SystemNode,
@@ -770,13 +771,22 @@ async def get_system_health():
     from ..provisioner import dataspine_health, deployment_ready
 
     # --- Fan out the independent probes concurrently. ---
-    fleet_snap, gateway, ds_health, operator_dep, dataspine_dep = await asyncio.gather(
+    fleet_snap, gateway, ds_health, operator_dep, dataspine_dep, cp_dep, gw_dep = await asyncio.gather(
         _fleet_snapshot(),
         _gateway_snapshot(),
         dataspine_health(),
         asyncio.to_thread(deployment_ready, "operator"),
         asyncio.to_thread(deployment_ready, "data-spine"),
+        asyncio.to_thread(deployment_ready, "control-panel"),
+        # The agentgateway controller names its Deployment after the Gateway CR
+        # (deploy/gateway/gateway.yaml / helm gateway.name). Fail-open: an
+        # unknown name just means no replica chip on that node.
+        asyncio.to_thread(deployment_ready, "priva-gateway"),
     )
+
+    def _reps(dep: dict | None) -> ReplicaCount | None:
+        # None (probe failed / no kube) => the node renders without a chip.
+        return None if dep is None else ReplicaCount(ready=dep["ready"], desired=dep["desired"])
 
     # --- data-spine node: Deployment readiness for up/down, enriched by readyz/stats. ---
     ds_ready_ok = bool(ds_health and ds_health.get("ready"))
@@ -790,6 +800,11 @@ async def get_system_health():
         ds_status = "down"
     ds_stats = (ds_health or {}).get("stats") or {}
     ds_metrics = {k: float(v) for k, v in ds_stats.items() if isinstance(v, (int, float))}
+    # Storage backend self-reported by the data-spine (Stats.backend) — never
+    # hardcoded here, so the map stays truthful across sqlite/postgres cutovers.
+    # Unknown (older data-spine image, or down) → omit the storage suffix.
+    ds_backend = {"sqlite": "SQLite", "postgres": "Postgres"}.get(str(ds_stats.get("backend") or ""))
+    ds_sub = f":50051 gRPC · {ds_backend}" if ds_backend else ":50051 gRPC"
 
     # --- operator node: Deployment readiness. ---
     if operator_dep is None:
@@ -832,23 +847,24 @@ async def get_system_health():
         SystemNode(id="agentgateway", label="agentgateway", sub=":80 · Gateway API (Rust)",
                    plane="edge", status="up" if gw_up else "down",
                    detail="edge — transports runtime bytes, makes no decisions",
-                   metrics=gw_metrics),
+                   metrics=gw_metrics, replicas=_reps(gw_dep)),
         SystemNode(id="control-panel", label="control-panel", sub=":8080 HTTP · :9000 EPP",
                    plane="control", status="up",
                    detail="auth · admin · config · EndPoint Picker",
                    deps=[HealthDep(name="data-spine", ok=ds_ready_ok,
-                                   detail=(ds_health or {}).get("detail"))]),
+                                   detail=(ds_health or {}).get("detail"))],
+                   replicas=_reps(cp_dep)),
+        # operator: the replica chip carries ready/desired (was the "1/1 ready"
+        # metric line); detail stays None so the 180px box doesn't overflow
+        # (role text: reconciles AgentTenant CRD · injects Secret · idle reaping).
         SystemNode(id="operator", label="operator", sub="kopf · sole scaler 0 ↔ 1",
-                   plane="control", status=op_status,
-                   detail="reconciles AgentTenant CRD · injects Secret · idle reaping",
-                   metrics={"ready": float((operator_dep or {}).get("ready", 0)),
-                            "desired": float((operator_dep or {}).get("desired", 0))}),
+                   plane="control", status=op_status, replicas=_reps(operator_dep)),
         SystemNode(id="scheduler", label="scheduler", sub="trigger → claim → wake",
                    plane="control", status="disabled", detail="planned · phase 4"),
-        SystemNode(id="data-spine", label="data-spine", sub=":50051 gRPC · SQLite",
+        SystemNode(id="data-spine", label="data-spine", sub=ds_sub,
                    plane="data", status=ds_status,
                    detail=(ds_health or {}).get("detail") or "source of truth",
-                   metrics=ds_metrics),
+                   metrics=ds_metrics, replicas=_reps(dataspine_dep)),
         SystemNode(id="redis", label="redis", sub="coordination bulletin board",
                    plane="data", status="disabled", detail="planned · phase 4"),
         SystemNode(id="agent-runner", label="agent-runner", sub="ar-<account> · :8091 · 0 ↔ 1",

@@ -95,7 +95,31 @@ controlPanel:
   resources: {}
 
 dataSpine:
-  storage: 1Gi                  # RWO PVC for the SQLite db
+  storage: 1Gi                  # RWO PVC for the legacy sqlite file (migration source / rollback)
+  storageClassName: ""          # "" => cluster default StorageClass
+  resources: {}
+  # Storage backend. "postgres" (default) needs either postgres.enabled=true
+  # below (in-cluster pod; DSN read from postgres-secret) or an explicit
+  # external DSN here. "sqlite" is the legacy opt-in; its PVC stays mounted
+  # either way — it is the migrate-to-pg source and the rollback target.
+  backend: postgres
+  postgresDsn: ""               # external DSN override (bypasses postgres-secret)
+
+# ---------------------------------------------------------------------------
+# In-cluster Postgres for the data-spine (the default store). Single instance
+# on a RWO PVC (cluster-default/local SC — NEVER the NFS export). Password
+# generated on first install and preserved across upgrades; the DSN lands in
+# postgres-secret and is mounted by the data-spine pod ONLY. Disable only when
+# pointing dataSpine.postgresDsn at an external server (or reverting to the
+# legacy sqlite backend).
+# ---------------------------------------------------------------------------
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  database: priva
+  username: priva
+  password: ""                  # "" => generate/keep a random one
+  storage: 2Gi
   storageClassName: ""          # "" => cluster default StorageClass
   resources: {}
 

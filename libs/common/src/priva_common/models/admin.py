@@ -69,6 +69,13 @@ class HealthDep(BaseModel):
     detail: str | None = None
 
 
+class ReplicaCount(BaseModel):
+    """ready/desired replicas of a module's backing k8s Deployment — rendered as
+    the corner chip on the System Map (green full, yellow partial, red none)."""
+    ready: int = 0
+    desired: int = 0
+
+
 class SystemNode(BaseModel):
     """One module on the System Map topology (browser / agentgateway / …)."""
     id: str                          # "agentgateway","control-panel",...
@@ -79,6 +86,7 @@ class SystemNode(BaseModel):
     detail: str | None = None
     metrics: dict[str, float] = Field(default_factory=dict)
     deps: list[HealthDep] = Field(default_factory=list)
+    replicas: ReplicaCount | None = None  # None => no chip (browser / fleet / planned)
 
 
 class SystemEdge(BaseModel):

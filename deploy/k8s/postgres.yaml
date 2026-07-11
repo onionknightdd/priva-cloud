@@ -1,0 +1,100 @@
+# postgres — the data-spine Postgres backend (dataspine.backend="postgres").
+# Single instance (replicas:1, Recreate), RWO PVC on the cluster-default
+# (local/block) StorageClass — NEVER the NFS export: PG data files over NFS
+# mean locking/corruption pain, and the dev NFS server is a loopback image.
+#
+# Cutover order (see also deploy/k8s/data-spine.yaml's commented env):
+#   1. kubectl apply -f deploy/k8s/postgres.yaml
+#   2. in the data-spine pod: `python -m priva_data_spine migrate-to-pg` (with
+#      PRIVA_DATASPINE__POSTGRES_DSN set; writer idle during the copy)
+#   3. uncomment the backend/DSN env in data-spine.yaml, apply, wait for rollout
+#   Rollback = re-comment the env and apply (SQLite PVC stays as the fallback).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: priva-cloud
+type: Opaque
+stringData:
+  # Dev-slice defaults — set real values before using on any shared cluster.
+  POSTGRES_PASSWORD: "priva-dev-pg"
+  # Full libpq DSN; data-spine reads it as PRIVA_DATASPINE__POSTGRES_DSN.
+  DATA_SPINE_PG_DSN: "postgresql://priva:priva-dev-pg@postgres.priva-cloud.svc.cluster.local:5432/priva"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: priva-cloud
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: priva-cloud
+  labels: {app: postgres}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # never two pods co-mounting the RWO PVC
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports: [{containerPort: 5432, name: pg}]
+          env:
+            - {name: POSTGRES_DB, value: "priva"}
+            - {name: POSTGRES_USER, value: "priva"}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-secret, key: POSTGRES_PASSWORD}}
+            # Subdir of the mount: initdb refuses a datadir with lost+found in it.
+            - {name: PGDATA, value: "/var/lib/postgresql/data/pgdata"}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "priva", "-d", "priva"]
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: postgres-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: priva-cloud
+spec:
+  selector: {app: postgres}
+  ports: [{port: 5432, targetPort: 5432, name: pg}]
+---
+# Only the data-spine pod may reach Postgres. The DSN carries DB credentials and
+# tenant runner pods share this namespace (and expose env via the web terminal),
+# so the DB must not be dial-able from them even if a DSN ever leaks.
+# NOTE: enforcement requires a NetworkPolicy-capable CNI — minikube's default
+# kindnet does NOT enforce; this is declared for parity with enforcing clusters.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-only-data-spine
+  namespace: priva-cloud
+spec:
+  podSelector:
+    matchLabels: {app: postgres}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: data-spine}
+      ports:
+        - {port: 5432, protocol: TCP}

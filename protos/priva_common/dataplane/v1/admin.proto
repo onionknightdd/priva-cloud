@@ -6,7 +6,12 @@ import "priva_common/dataplane/v1/common.proto";
 
 message Health { string status = 1; }            // "ok"
 message Ready { bool ready = 1; string detail = 2; }
-message StatsResponse { int64 accounts = 1; int64 jobs = 2; int64 runs = 3; }
+message StatsResponse {
+  int64 accounts = 1;
+  int64 jobs = 2;
+  int64 runs = 3;
+  string backend = 4;  // self-reported storage backend: "sqlite" | "postgres"
+}
 
 service AdminService {
   rpc Healthz(Empty) returns (Health);

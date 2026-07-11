@@ -2,8 +2,9 @@
 
 When CP / agent-runner / operator run as separate pods (no shared filesystem),
 they reach durable state through this single-writer server instead of composing
-SQLite in-process. Sync grpc server over a thread pool: the SqliteRepo already
-serializes writes behind one lock, so a thread pool is correct and simple.
+the repo in-process. Sync grpc server over a thread pool: SqliteRepo serializes
+writes behind one lock and PgRepo is connection-pool-backed, so a thread pool is
+correct and simple for both backends.
 
 Builds proto messages FROM the boundary records (the mirror of dataplane.converters).
 scheduler is not served this phase (deferred); its stubs return UNIMPLEMENTED.
@@ -35,7 +36,7 @@ from priva_common.dataplane.v1 import (
 )
 from priva_common.logging import get_app_logger
 
-from .service import build_inprocess_client, build_repo
+from .service import build_inprocess_client, build_repo, describe_store
 
 logger = get_app_logger(__name__)
 
@@ -251,7 +252,8 @@ class _AdminServicer(admin_pb2_grpc.AdminServiceServicer):
 
     def Stats(self, request, context):
         s = self.svc.stats()
-        return admin_pb2.StatsResponse(accounts=s.get("accounts", 0), jobs=s.get("jobs", 0), runs=s.get("runs", 0))
+        return admin_pb2.StatsResponse(accounts=s.get("accounts", 0), jobs=s.get("jobs", 0),
+                                       runs=s.get("runs", 0), backend=s.get("backend", ""))
 
 
 class _ResourceSpecServicer(resource_spec_pb2_grpc.ResourceSpecServiceServicer):
@@ -329,8 +331,10 @@ class _RegistrationServicer(registration_pb2_grpc.RegistrationServiceServicer):
         return _pending_pb(self.svc.set_status(request.request_id, request.status))
 
 
-def build_server(settings, max_workers: int = 16) -> grpc.Server:
-    client = build_inprocess_client(build_repo(settings), settings)
+def build_server(settings, max_workers: int = 16, repo=None) -> grpc.Server:
+    # repo injection is for tests (lets the caller close the pool/file); prod
+    # callers pass settings only.
+    client = build_inprocess_client(repo if repo is not None else build_repo(settings), settings)
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers))
     account_pb2_grpc.add_AccountServiceServicer_to_server(_AccountServicer(client.accounts), server)
     binding_pb2_grpc.add_BindingServiceServicer_to_server(_BindingServicer(client.bindings), server)
@@ -353,6 +357,6 @@ def serve(settings=None, host: str = "0.0.0.0", port: int = 50051) -> int:
     addr = f"{host}:{port}"
     server.add_insecure_port(addr)
     server.start()
-    logger.info("data-spine gRPC serving on {} (sqlite={})", addr, s.dataspine.sqlite_path)
+    logger.info("data-spine gRPC serving on {} ({})", addr, describe_store(s))
     server.wait_for_termination()
     return 0

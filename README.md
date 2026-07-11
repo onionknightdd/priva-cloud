@@ -45,7 +45,7 @@ Transport in this alpha is plaintext HTTP/gRPC in-cluster, **except** the ext_pr
 | **AgentTenant CR** | The per-account custom resource (`priva.io/v1alpha1`) the operator reconciles into a Deployment/Service/PVC/Secret. |
 | **scale-to-zero** | A tenant pod runs `0` replicas when idle; the operator wakes it `0→1` on demand and sweeps it back to `0` after an idle grace. |
 | **BYOK** | Bring-Your-Own-Key — each user supplies their own model-gateway credentials (`ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`); there are no virtual keys and no metering proxy. |
-| **RWO / RWX** | Kubernetes volume access modes: `ReadWriteOnce` (data-spine's SQLite PVC) and `ReadWriteMany` (the shared `priva-export` workspace volume). |
+| **RWO / RWX** | Kubernetes volume access modes: `ReadWriteOnce` (the postgres data PVC + data-spine's legacy sqlite PVC) and `ReadWriteMany` (the shared `priva-export` workspace volume). |
 
 ---
 
@@ -89,7 +89,7 @@ Every runtime request is steered per-request by the control-panel EPP, which the
                                                   │  model gateway (Anthropic API)    │
                                                   └───────────────────────────────────┘
 
-   All control-plane services ── gRPC :50051 ──►  data-spine  (SQLite RWO PVC · Fernet secrets)
+   All control-plane services ── gRPC :50051 ──►  data-spine  ──►  postgres (RWO PVC · Fernet secrets)
 ```
 
 **Walkthrough:**
@@ -106,7 +106,7 @@ Every runtime request is steered per-request by the control-panel EPP, which the
 |---|---|---|---|
 | **control-panel** | `priva/control-panel:dev` | `8080` HTTP · `9000` ext_proc (TLS) | The brain: Envoy `ext_proc` endpoint picker (EPP), auth/admin/resource HTTP APIs, SPA host, `AgentTenant` provisioner. N stateless replicas. |
 | **agent-runner** | `priva/agent-runner:dev` | `8091` | Per-tenant runtime that wraps the Claude Agent SDK and serves `/api/sandbox/*`. One pod per tenant, scale-to-zero (0↔1). Spawned by the operator, not Helm. |
-| **data-spine** | `priva/data-spine:dev` | `50051` gRPC | Single-writer durable-state and Fernet-encrypted secret store on SQLite (WAL, RWO PVC). Authoritative for accounts, quotas, jobs, runs, secrets, registrations. 1 replica (`Recreate`). |
+| **data-spine** | `priva/data-spine:dev` | `50051` gRPC | Durable-state and Fernet-encrypted secret store on **Postgres** (default; in-cluster `postgres:16` pod, or an external DSN). Authoritative for accounts, quotas, jobs, runs, secrets, registrations. Legacy sqlite backend retained as the migration source / rollback (`PRIVA_DATASPINE__BACKEND=sqlite`). 1 replica (`Recreate`). |
 | **operator** | `priva/operator:dev` | — | kopf controller reconciling the `AgentTenant` CRD into Deployment/Service/PVC/Secret; the **sole scaler** (0↔1), idle sweep, credential provisioning, storage quotas. |
 | **agentgateway** (edge) | external, v1.3.0 | `80` | Rust L7 proxy (agentgateway.dev) provisioned via Gateway API. Terminates client transport, consults the EPP, streams to the runner. Not Priva code. |
 | **nfs-xfs** (dev only) | `priva/nfs-xfs:dev` | `2049` NFSv4 · `8099` quota | In-cluster NFSv4 server backing **per-account fixed-size ext4 loop images** (the filesystem size *is* the hard quota) plus a FastAPI quota-manager. (The image is named `nfs-xfs` for historical reasons; the dev kernel lacks XFS project-quota support, so ext4 loop images are used instead.) Replaced by external CephFS/NFS CSI in prod. |
@@ -131,7 +131,7 @@ priva-cloud/
 ├── services/
 │   ├── control-panel/      # brain + EPP + auth/admin API + SPA host + provisioner
 │   ├── agent-runner/       # per-tenant Claude Agent SDK runtime
-│   ├── data-spine/         # single-writer gRPC state + secret store (SQLite)
+│   ├── data-spine/         # gRPC state + secret store (Postgres; legacy sqlite)
 │   └── operator/           # kopf AgentTenant controller (sole scaler)
 ├── libs/
 │   └── common/             # priva_common — shared contract layer (no service imports)
@@ -187,15 +187,15 @@ Model access uses the user's `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` (BYOK
 
 ### data-spine — durable state & secrets
 
-The authoritative storage layer behind a stable gRPC contract (`priva.dataplane.v1`). A single SQLite WAL connection (foreign keys on, `STRICT` tables, thread-locked single writer) backs **9 tables** — `account`, `channel_binding`, `quota`, `scheduled_job`, `job_run_record`, `secret`, `account_resource_spec`, `pending_registration`, `runner_defaults`. The DB lives at `/data/priva.dataspine.db` on the RWO PVC in-cluster (local default `~/.priva_workspace/.priva.dataspine.db`).
+The authoritative storage layer behind a stable gRPC contract (`priva.dataplane.v1`). The default backend is **Postgres** (psycopg3 over a thread-safe connection pool; in-cluster `postgres:16` pod or an external `PRIVA_DATASPINE__POSTGRES_DSN`) backing **8 tables** — `account`, `channel_binding`, `quota`, `scheduled_job`, `job_run_record`, `account_resource_spec`, `pending_registration`, `runner_defaults`. The legacy **sqlite** backend (`PRIVA_DATASPINE__BACKEND=sqlite`; WAL file at `/data/priva.dataspine.db` on the RWO PVC) is retained as the `migrate-to-pg` source and instant rollback target. Both backends sit behind the same `Repository` seam with identical row shapes (TEXT ISO-8601 timestamps, 0/1 int booleans), so callers are backend-blind.
 
-Services exposed over gRPC (`:50051`): **Account**, **Binding**, **Quota**, **Admin**, **Secret**, **ResourceSpec**, **RunnerDefaults**, **Registration**.
+Services exposed over gRPC (`:50051`): **Account**, **Binding**, **Quota**, **Admin**, **ResourceSpec**, **RunnerDefaults**, **Registration**.
 
 - **Scheduler** is defined in proto and service code but **not yet served over gRPC** — deferred to Phase 4 (the in-process client works).
 - **Binding** is Feishu-shaped (`channel_id`/`session_uuid` ↔ `account_id`, with a `feishu_user_id` unique index). It is **greenfield with no Phase-1 writer — unused in alpha**; it backs the deferred IM channel-connector.
-- Passwords are bcrypt; API keys are Fernet-encrypted with an HMAC-SHA256 lookup column; secret bundles are Fernet-encrypted at rest with a monotonic generation counter (the operator fetches and materializes them as K8s Secrets at wake).
-- Transport is selectable: **in_process** (Phase 1 / single pod) or **grpc** (multi-pod). The **Postgres** backend is an interface-only stub.
-- CLI: `python -m priva_data_spine {init|stats|migrate [--dry-run]|serve}`. The migration path imports monolith YAML/JSONL into SQLite idempotently.
+- Passwords are bcrypt; API keys are Fernet-encrypted with an HMAC-SHA256 lookup column (the operator fetches credential bundles and materializes them as K8s Secrets at wake).
+- Transport is selectable: **in_process** (single process owns the DB) or **grpc** (multi-pod). Only the data-spine pod ever holds the Postgres DSN — every other service is a pure gRPC client.
+- CLI: `python -m priva_data_spine {init|stats|migrate [--dry-run]|migrate-to-pg [--dry-run]|serve}`. `migrate` imports monolith YAML/JSONL; `migrate-to-pg` copies the legacy sqlite tables into Postgres idempotently.
 
 ### operator — the AgentTenant controller
 
