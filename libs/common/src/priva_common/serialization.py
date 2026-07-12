@@ -84,6 +84,7 @@ def serialize_rate_limit_event(event: RateLimitEvent) -> dict[str, Any]:
 def serialize_result_message(message: ResultMessage) -> dict[str, Any]:
     return {
         "type": "result",
+        "subtype": getattr(message, "subtype", None),  # success | error_max_turns | …
         "session_id": message.session_id,
         "is_error": message.is_error,
         "num_turns": message.num_turns,

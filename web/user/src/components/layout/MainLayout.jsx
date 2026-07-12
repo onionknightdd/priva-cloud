@@ -14,6 +14,7 @@ import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 const CanvasPanel = lazyWithChunkReload(() => import('./CanvasPanel'))
 const DataUsageView = lazyWithChunkReload(() => import('../userdata/DataUsageView'))
 const PluginsView = lazyWithChunkReload(() => import('../plugins/PluginsView'))
+const SchedulerView = lazyWithChunkReload(() => import('../scheduler/SchedulerView'))
 const WebTerminalDrawer = lazyWithChunkReload(() => import('../terminal/WebTerminalDrawer'))
 
 // Plugin sections whose panel draws its own back-button + title header
@@ -34,7 +35,7 @@ function ContentOverlay({ title, onBack, showHeader = true, children }) {
     <div
       className="absolute inset-0 flex flex-col"
       style={{
-        zIndex: 40,
+        zIndex: 70,
         background: 'var(--bg-base)',
         minWidth: 0,
         minHeight: 0,
@@ -112,6 +113,7 @@ export default function MainLayout() {
   // area swaps between the chat view, Data & Usage, and Plugins/Customize.
   const isData = activeNavTab === 'userdata'
   const isPlugins = activeNavTab === 'plugins'
+  const isScheduler = activeNavTab === 'scheduler'
   const selfHeaderedPlugin = isPlugins && SELF_HEADERED_PLUGIN_SECTIONS.has(activePluginSection)
   const splitActive = panes.length > 0
   const backToSessionsTitle = t('split.backToSessions', { defaultValue: '返回 session view' })
@@ -202,12 +204,21 @@ export default function MainLayout() {
             <LazyPanel><PluginsView backTitle={backToSessionsTitle} onBack={backToSessions} /></LazyPanel>
           </ContentOverlay>
         )}
+        {isScheduler && (
+          <ContentOverlay
+            title={backToSessionsTitle}
+            onBack={backToSessions}
+            showHeader={false}
+          >
+            <LazyPanel><SchedulerView backTitle={backToSessionsTitle} onBack={backToSessions} /></LazyPanel>
+          </ContentOverlay>
+        )}
       </div>
       {/* Same sticky latch as the canvas: stays mounted after first open so
           the drawer's exit motion can play (it renders null once exited). The
           view-mode gate still swaps it out instantly — that's a layout
           change, not a dismissal. */}
-      {terminalEverOpenRef.current && (!isData && !isPlugins || splitActive) && (
+      {terminalEverOpenRef.current && (!isData && !isPlugins && !isScheduler || splitActive) && (
         <Suspense fallback={null}>
           <WebTerminalDrawer />
         </Suspense>

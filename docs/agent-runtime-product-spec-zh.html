@@ -571,7 +571,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <div class="tw"><table class="wrapflag">
 <thead><tr><th>功能</th><th>当前状态</th><th>计划</th><th>状态</th></tr></thead>
 <tbody>
-<tr><td>调度器（cron / 定时 agent 作业）</td><td>表 + 完整的 <code>SchedulerService</code> proto 与服务代码已存在，但它<em>未在</em> gRPC 服务器上注册（进程内客户端可用）</td><td>无主 fire→claim→wake→dispatch；带退避+抖动重试 5 次</td><td><span class="st defer">Phase 4</span></td></tr>
+<tr><td>调度器（cron / 定时 agent 作业）</td><td>已交付（Phase 4a，2026-07-13）：<code>services/scheduler</code> 独立部署 — 无主 fire→claim（<code>job_fire</code> Postgres insert-wins）→wake（AgentTenant CR）→dispatch（202 准入，按 run_id 幂等）；由每账号 pod 执行（<code>agent_run</code>/<code>http_call</code>/<code>user_script</code>）并自行写回结果；用户端 Scheduler 页面（master-detail）+ 管理端总览 + 7 个 pod 内 MCP 工具；minikube E2E 门禁通过（从零唤醒 → 成功记录）</td><td>无主 fire→claim→wake→dispatch；带退避+抖动重试 5 次</td><td><span class="st ship">已交付</span></td></tr>
 <tr><td>IM 渠道绑定 / channel-connector</td><td><code>channel_binding</code> 表 + <code>BindingService</code> 已存在，Feishu 形态；全新构建，无 Phase-1 写者，alpha 中未使用</td><td>IM 扇出（Feishu）</td><td><span class="st defer">Phase 4</span></td></tr>
 <tr><td>state-reader（免唤醒 transcript 读取）</td><td>在 pod 处于 0 副本时读取 transcript</td><td>可嵌入的 RO-JSONL 路由器；prod 中为挂载隔离而独立部署</td><td><span class="st defer">Phase 5</span></td></tr>
 </tbody>
@@ -605,7 +605,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <tr><td>control-panel <code>/api/auth</code></td><td><code>setup</code> · <code>register</code> · <code>login</code> · <code>refresh</code> · <code>me</code> · <code>audit</code> · <code>me/apikey</code>（CRUD）· <code>me/password</code></td></tr>
 <tr><td>control-panel <code>/api/admin</code></td><td>runner-defaults · runner-images · <code>hook-policy</code>（列表/新建/更新/删除 + <code>/validate</code> + <code>/{id}/seed</code>）· users CRUD · pending-registrations + approve/reject · fleet · accounts restart/shutdown · gateway-metrics · resource-usage · system-health · audit · 配置开关 · admin-files</td></tr>
 <tr><td>control-panel 专用通道</td><td><code>WS /api/admin/console/ws</code>（K8s-exec 桥）· <code>GET /api/cp-proxy/{path}</code>（大读取通道）· <code>:9000</code> gRPC <code>ExternalProcessor/Process</code>（ext_proc，TLS）</td></tr>
-<tr><td>data-spine gRPC <span class="dim">（已服务 8 个）</span></td><td><strong>Account</strong> · <strong>Binding</strong> · <strong>Quota</strong> · <strong>Admin</strong>（Healthz/Readyz/Stats）· <strong>ResourceSpec</strong> · <strong>RunnerDefaults</strong> · <strong>Registration</strong> · <strong>HookPolicy</strong>（List/Get/Upsert/Delete；预定义行在启动时播种）。<strong>SchedulerService</strong> 已定义但尚未服务（Phase 4）。表：9。</td></tr>
+<tr><td>data-spine gRPC <span class="dim">（已服务 9 个）</span></td><td><strong>Account</strong> · <strong>Binding</strong> · <strong>Quota</strong> · <strong>Admin</strong>（Healthz/Readyz/Stats）· <strong>ResourceSpec</strong> · <strong>RunnerDefaults</strong> · <strong>Registration</strong> · <strong>HookPolicy</strong>（List/Get/Upsert/Delete；预定义行在启动时播种）· <strong>SchedulerService</strong>（15 个 RPC，含精确一次认领 <code>ClaimJobFire</code>）。表：10（新增 <code>job_fire</code>）。</td></tr>
 </tbody>
 </table></div>
 
@@ -1178,7 +1178,7 @@ document.querySelectorAll('section[id]').forEach(s=>obs.observe(s));
   const btns=[...wrap.querySelectorAll('.phase')];
   const D={
     p03:'<strong>Phase 0–3 · 拆分与运行时</strong> <span class="st ship">完成 · 合入 2026-06-21</span><br>把平台从 monolith 中剥离为 control-panel、agent-runner、data-spine 与 operator；搭起 agentgateway + GIE edge 与逐请求 EPP；交付 scale-to-zero 租户 pod、完整的 Claude Agent SDK 面（sessions、skills、MCP、hooks、subagents、fork/rewind、权限）、用户 + 管理端 SPA、PTY 终端、文件浏览器、自助注册与 BYOK。在 minikube 上端到端验证。',
-    p4:'<strong>Phase 4 · 调度器与 IM + 移除 monolith</strong> <span class="st defer">下一步</span><br>在 gRPC 上注册 <code>SchedulerService</code> 并交付 cron / 定时 agent 作业（无主 fire→claim→wake→dispatch，带退避+抖动重试）；构建用于 IM 扇出的 channel-connector（Feishu 形态的绑定已在 schema 中）；移除遗留的 monolith（<code>priva/</code>），因它已不再是行为参照。',
+    p4:'<strong>Phase 4 · 调度器与 IM + 移除 monolith</strong> <span class="st ship">4a 已交付</span><br>调度器完成（4a，2026-07-13）：<code>SchedulerService</code> 已在 gRPC 服务；<code>services/scheduler</code> 无主触发 cron/interval 作业（fire→claim→wake→dispatch，带退避+抖动重试），由每账号 pod 执行；monolith 调度守护已退役。剩余（4b）：用于 IM 扇出的 channel-connector（Feishu 形态的绑定已在 schema 中）；之后移除遗留 monolith（<code>priva/</code>）。',
     p5:'<strong>Phase 5 · state-reader</strong> <span class="st defer">推迟</span><br>在租户 pod 处于 0 副本时进行免唤醒 transcript 读取 —— 一个可嵌入的只读 JSONL 路由器，在 prod 中为挂载隔离而提升为独立服务。消除「仅为读历史而唤醒」的成本。',
     p6:'<strong>Phase 6 · 生产加固</strong> <span class="st defer">推迟</span><br>NetworkPolicies（默认拒绝 + 收窄出站）、以 mTLS / JWKS pod 信任取代共享 HS256 密钥、每账号 KMS/DEK 信封加密、edge TLS 终结、基于 Redis 的唤醒/空闲协调，以及 offboard→retain→purge 混沌测试。闭合 §4.3 / §4.4 的缺口 —— 包括未决的 Web 终端风险。'
   };

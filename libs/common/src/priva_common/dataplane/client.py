@@ -218,6 +218,11 @@ class SchedulerClient(Protocol):
         status: str | None = None,
     ) -> RunPage: ...
     def delete_runs_before(self, account_id: str, cutoff_date: str) -> list[str]: ...  # returns deleted run_ids
+    # The exactly-once fire claim: INSERT-wins on job_fire(job_id, fire_epoch).
+    # fire_epoch = the trigger's SCHEDULED instant (epoch s). False = another
+    # replica won, or the job no longer exists.
+    def claim_fire(self, job_id: str, fire_epoch: int, claimed_by: str) -> bool: ...
+    def prune_fires_before(self, cutoff: str) -> int: ...  # reconcile-sweep hygiene
 
 
 class AdminClient(Protocol):

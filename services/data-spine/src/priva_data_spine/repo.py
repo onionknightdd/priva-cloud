@@ -106,6 +106,11 @@ class Repository(ABC):
     def run_count(self, account_id: str) -> int: ...
     @abstractmethod
     def run_delete_before(self, account_id: str, cutoff_date: str) -> list[str]: ...
+    # fires (the exactly-once claim)
+    @abstractmethod
+    def fire_claim(self, job_id: str, fire_epoch: int, claimed_by: str) -> bool: ...
+    @abstractmethod
+    def fire_prune_before(self, cutoff: str) -> int: ...
     # resource_spec
     @abstractmethod
     def resource_spec_get(self, account_id: str) -> dict | None: ...
@@ -405,6 +410,22 @@ class SqliteRepo(Repository):
             )
             self._conn.commit()
             return ids
+
+    # fires -------------------------------------------------------------------
+    def fire_claim(self, job_id, fire_epoch, claimed_by):
+        # INSERT-wins on the composite PK. OR IGNORE swallows the PK conflict
+        # (another replica won) but NOT an FK violation (job deleted mid-flight)
+        # — treat that as "no claim" too, not an error.
+        try:
+            return self._write(
+                "INSERT OR IGNORE INTO job_fire (job_id, fire_epoch, claimed_by) VALUES (?, ?, ?)",
+                (job_id, int(fire_epoch), claimed_by),
+            ) == 1
+        except sqlite3.IntegrityError:
+            return False
+
+    def fire_prune_before(self, cutoff):
+        return self._write("DELETE FROM job_fire WHERE claimed_at < ?", (cutoff,))
 
     # resource_spec ----------------------------------------------------------
     _RSPEC_COLS = ("cpu_cores", "memory_mb", "volume_gb")
@@ -792,6 +813,25 @@ class PgRepo(Repository):
                 (account_id, cutoff_date),
             )
             return [r["run_id"] for r in cur.fetchall()]
+
+    # fires -------------------------------------------------------------------
+    def fire_claim(self, job_id, fire_epoch, claimed_by):
+        # Concurrent-safe by construction: ON CONFLICT DO NOTHING on the composite
+        # PK admits exactly one winner. An FK violation (job deleted mid-flight)
+        # is likewise "no claim", not an error.
+        import psycopg
+
+        try:
+            return self._write(
+                "INSERT INTO job_fire (job_id, fire_epoch, claimed_by) VALUES (%s, %s, %s) "
+                "ON CONFLICT (job_id, fire_epoch) DO NOTHING",
+                (job_id, int(fire_epoch), claimed_by),
+            ) == 1
+        except psycopg.errors.ForeignKeyViolation:
+            return False
+
+    def fire_prune_before(self, cutoff):
+        return self._write("DELETE FROM job_fire WHERE claimed_at < %s", (cutoff,))
 
     # resource_spec ----------------------------------------------------------
     _RSPEC_COLS = SqliteRepo._RSPEC_COLS

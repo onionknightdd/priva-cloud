@@ -181,7 +181,17 @@ function SessionItem({
             }}
           />
         ) : (
-          <span className="flex-1 truncate" style={{ minWidth: 0, fontSize: 12, lineHeight: 1.2 }}>{session.name}</span>
+          <>
+            {session.origin === 'scheduler' && (
+              <CalendarClock
+                size={12}
+                strokeWidth={1.5}
+                style={{ color: 'var(--text-dim)', flexShrink: 0 }}
+                title={session.schedulerJobName ? `${t('sidebar.scheduled', { defaultValue: 'scheduled' })} · ${session.schedulerJobName}` : t('sidebar.scheduled', { defaultValue: 'scheduled' })}
+              />
+            )}
+            <span className="flex-1 truncate" style={{ minWidth: 0, fontSize: 12, lineHeight: 1.2 }}>{session.name}</span>
+          </>
         )}
         {session.forkCount > 0 && !editing && (
           <span
@@ -902,7 +912,7 @@ export default function Sidebar() {
         /* Collapsed icon rail */
         <div className="flex flex-col items-center flex-1 overflow-hidden" style={{ padding: '8px 0', gap: 2 }}>
           <NavItem collapsed icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
-          <NavItem collapsed icon={CalendarClock} label={t('sidebar.scheduler')} disabled />
+          <NavItem collapsed icon={CalendarClock} label={t('sidebar.scheduler')} active={activeNavTab === 'scheduler'} onClick={() => setActiveNavTab('scheduler')} />
           <NavItem collapsed icon={PackageSearch} label={t('sidebar.plugins')} title={t('sidebar.plugins')} active={activeNavTab === 'plugins'} onClick={() => openPluginSection(activePluginSection || 'skills')} />
           <NavItem collapsed icon={ChartColumnBig} label={t('sidebar.dataUsage')} active={activeNavTab === 'userdata'} onClick={() => openDataSection(activeSection || 'usage')} />
           <div style={{ height: 1, width: 24, background: 'var(--border-subtle)', margin: '4px 0' }} />
@@ -919,7 +929,7 @@ export default function Sidebar() {
           {/* Primary navigation — full-width rows so the active 2px bar sits flush at the left edge (like sessions) */}
           <div style={{ padding: '6px 16px 4px', flexShrink: 0 }}>
             <NavItem scale="lg" icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
-            <NavItem scale="lg" icon={CalendarClock} label={t('sidebar.scheduler')} disabled />
+            <NavItem scale="lg" icon={CalendarClock} label={t('sidebar.scheduler')} active={activeNavTab === 'scheduler'} onClick={() => setActiveNavTab('scheduler')} />
             <NavItem
               scale="lg"
               activeRailLayoutId="sidebar-nav-parent-active-rail"

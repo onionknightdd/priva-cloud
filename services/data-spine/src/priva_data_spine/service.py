@@ -384,7 +384,7 @@ class SchedulerService:
         return self._to_run(row) if row else None
 
     def finish_run(self, record: JobRunRecord):
-        self.repo.run_update(record.run_id, {
+        fields = {
             "finished_at": _iso(record.finished_at),
             "status": record.status,
             "duration_ms": record.duration_ms,
@@ -392,7 +392,12 @@ class SchedulerService:
             "error_message": record.error_message,
             "num_turns": record.num_turns,
             "result_summary": record.result_summary,
-        })
+        }
+        # The pod learns the CLI session id only after dispatch (StartRun has
+        # none), so the outcome write carries it — conditional, never clobbers.
+        if record.session_id:
+            fields["session_id"] = record.session_id
+        self.repo.run_update(record.run_id, fields)
         return self._to_run(self.repo.run_get(record.run_id))
 
     def list_runs(self, account_id, *, limit=50, before=None, after=None, job_id=None, status=None):
@@ -415,6 +420,15 @@ class SchedulerService:
 
     def delete_runs_before(self, account_id, cutoff_date):
         return self.repo.run_delete_before(account_id, cutoff_date)
+
+    def claim_fire(self, job_id, fire_epoch, claimed_by):
+        # The leaderless exactly-once claim (scheduler-implementation-design D5):
+        # INSERT-wins on job_fire's composite PK; losers (and fires of deleted
+        # jobs) get False.
+        return self.repo.fire_claim(job_id, int(fire_epoch), claimed_by)
+
+    def prune_fires_before(self, cutoff):
+        return self.repo.fire_prune_before(cutoff)
 
 
 # --- Admin -----------------------------------------------------------------

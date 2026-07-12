@@ -102,6 +102,26 @@ class SchedulerSettings(BaseModel):
     shutdown_timeout: int = 60
     command_poll_interval: float = 1.0
     heartbeat_interval: float = 5.0
+    # D15: pod boot prunes scheduler-origin session transcripts older than this
+    # (run records persist forever in data-spine). 0 disables the prune.
+    history_retention_days: int = 7
+
+    # --- services/scheduler engine (Phase 4a, design §6) ---
+    relist_seconds: int = 30              # D6: every replica re-lists ListActiveJobs
+    sweep_seconds: int = 60               # reconcile cadence (stale runs + fire prune)
+    # Stale-'running' age-out ceiling — above the D14 caps so the runner
+    # always kills first; only pod-vanished runs reach dispatch_lost.
+    running_ceiling_seconds: int = 7200
+    misfire_grace_seconds: int = 60       # US-8: fire late-once within grace, else skip
+    wake_retry_attempts: int = 5          # connection-level dispatch retries …
+    wake_retry_base_seconds: float = 2.0  # … backing off base→max (+ jitter)
+    wake_retry_max_seconds: float = 60.0
+    jitter_window_seconds: float = 5.0    # per-fire wake jitter (spread the 09:00 storm)
+    admission_retry_window_seconds: int = 120  # D16: re-admit on 429 up to this long
+    fire_prune_hours: int = 24            # job_fire rows older than this are swept
+    api_port: int = 8082                  # internal API (/internal/trigger, /healthz)
+    # Where the runner reaches the scheduler's internal API (run-now proxy).
+    internal_url: str = "http://scheduler:8082"
 
 
 class ChannelsSettings(BaseModel):

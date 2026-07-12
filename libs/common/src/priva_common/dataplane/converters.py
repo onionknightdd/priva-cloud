@@ -8,6 +8,8 @@ return. A "not found" result rides as a message with an empty key field
 
 from __future__ import annotations
 
+import json
+
 from priva_common.dataplane.client import (
     BindingRecord,
     HookPolicyRecord,
@@ -17,6 +19,7 @@ from priva_common.dataplane.client import (
     RunnerDefaultsRecord,
 )
 from priva_common.models.auth import UserRecord
+from priva_common.models.scheduler import JobRunRecord, ScheduledJobDefinition
 
 
 def user_from_pb(m) -> UserRecord | None:
@@ -116,6 +119,43 @@ def hook_policy_from_pb(m) -> HookPolicyRecord | None:
         updated_at=m.updated_at or None,
         updated_by=m.updated_by,
         enforced_events=list(m.enforced_events),
+    )
+
+
+def job_from_pb(m) -> ScheduledJobDefinition | None:
+    if not m.job_id:
+        return None
+    return ScheduledJobDefinition.model_validate({
+        "id": m.job_id,
+        "name": m.name,
+        "prompt": m.prompt,
+        "trigger": json.loads(m.trigger),
+        "timezone": m.timezone,
+        "status": m.status or "active",
+        "model": m.model or None,
+        "job_config": json.loads(m.job_config) if m.job_config else None,
+        "created_at": m.created_at,
+        "updated_at": m.updated_at,
+    })
+
+
+def run_from_pb(m) -> JobRunRecord | None:
+    if not m.run_id:
+        return None
+    return JobRunRecord(
+        run_id=m.run_id,
+        job_id=m.job_id or "",
+        job_name=m.job_name,
+        username="",  # wire carries account_id, not username (in-process parity)
+        started_at=m.started_at,
+        finished_at=m.finished_at or None,
+        status=m.status,
+        duration_ms=m.duration_ms if m.duration_ms else None,
+        is_error=m.is_error,
+        error_message=m.error_message or None,
+        num_turns=m.num_turns if m.num_turns else None,
+        result_summary=m.result_summary or None,
+        session_id=m.session_id or None,
     )
 
 

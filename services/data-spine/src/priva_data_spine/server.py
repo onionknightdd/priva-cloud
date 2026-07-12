@@ -7,12 +7,13 @@ writes behind one lock and PgRepo is connection-pool-backed, so a thread pool is
 correct and simple for both backends.
 
 Builds proto messages FROM the boundary records (the mirror of dataplane.converters).
-scheduler is not served this phase (deferred); its stubs return UNIMPLEMENTED.
+All nine domains are served, scheduler included (Phase 4a).
 """
 
 from __future__ import annotations
 
 import json
+import uuid
 from concurrent import futures
 
 import grpc
@@ -36,8 +37,11 @@ from priva_common.dataplane.v1 import (
     resource_spec_pb2_grpc,
     runner_defaults_pb2,
     runner_defaults_pb2_grpc,
+    scheduler_pb2,
+    scheduler_pb2_grpc,
 )
 from priva_common.logging import get_app_logger
+from priva_common.models.scheduler import JobRunRecord, ScheduledJobDefinition
 
 from .service import build_inprocess_client, build_repo, describe_store
 
@@ -370,6 +374,163 @@ class _HookPolicyServicer(hook_policy_pb2_grpc.HookPolicyServiceServicer):
         return common_pb2.Empty()
 
 
+def _job_pb(d, account_id: str = "") -> scheduler_pb2.Job:
+    if d is None:
+        return scheduler_pb2.Job()  # empty job_id => not found
+    return scheduler_pb2.Job(
+        job_id=d.id,
+        account_id=account_id,
+        name=d.name,
+        prompt=d.prompt or "",
+        trigger=d.trigger.model_dump_json(),
+        job_type=(d.job_config.job_type if d.job_config else "agent_run"),
+        job_config=json.dumps(d.job_config.model_dump(mode="json")) if d.job_config else "",
+        timezone=d.timezone,
+        model=d.model or "",
+        status=d.status,
+        created_at=_s(d.created_at),
+        updated_at=_s(d.updated_at),
+    )
+
+
+def _run_pb(r) -> scheduler_pb2.Run:
+    if r is None:
+        return scheduler_pb2.Run()  # empty run_id => not found
+    return scheduler_pb2.Run(
+        run_id=r.run_id,
+        job_id=r.job_id or "",
+        job_name=r.job_name,
+        session_id=r.session_id or "",
+        started_at=_s(r.started_at),
+        finished_at=_s(r.finished_at),
+        status=r.status,
+        duration_ms=r.duration_ms or 0,
+        is_error=r.is_error,
+        error_message=r.error_message or "",
+        num_turns=r.num_turns or 0,
+        result_summary=r.result_summary or "",
+    )
+
+
+def _defn_from_req(request, job_id: str) -> ScheduledJobDefinition:
+    return ScheduledJobDefinition.model_validate({
+        "id": job_id,
+        "name": request.name,
+        "prompt": request.prompt,
+        "trigger": json.loads(request.trigger),
+        "timezone": request.timezone,
+        "status": request.status or "active",
+        "model": request.model or None,
+        "job_config": json.loads(request.job_config) if request.job_config else None,
+    })
+
+
+class _SchedulerServicer(scheduler_pb2_grpc.SchedulerServiceServicer):
+    def __init__(self, svc):
+        self.svc = svc
+
+    # jobs
+    def CreateJob(self, request, context):
+        defn = _defn_from_req(request, request.job_id or uuid.uuid4().hex)
+        return _job_pb(self.svc.create_job(request.account_id, defn), request.account_id)
+
+    def GetJob(self, request, context):
+        return _job_pb(self.svc.get_job(request.job_id))
+
+    def UpdateJob(self, request, context):
+        # Full-definition overwrite (parity with the in-process update_job);
+        # update_mask is reserved.
+        if self.svc.get_job(request.job_id) is None:
+            return scheduler_pb2.Job()
+        return _job_pb(self.svc.update_job(request.job_id, _defn_from_req(request, request.job_id)))
+
+    def DeleteJob(self, request, context):
+        return common_pb2.BoolValue(value=self.svc.delete_job(request.job_id))
+
+    def ListJobs(self, request, context):
+        return scheduler_pb2.JobList(
+            jobs=[_job_pb(d, request.account_id) for d in self.svc.list_jobs(request.account_id)])
+
+    def ListActiveJobs(self, request, context):
+        return scheduler_pb2.JobList(
+            jobs=[_job_pb(d, acct) for acct, d in self.svc.list_active_jobs()])
+
+    def SetJobStatus(self, request, context):
+        return _job_pb(self.svc.set_job_status(request.job_id, request.status))
+
+    # runs
+    def StartRun(self, request, context):
+        kw = dict(
+            run_id=request.run_id,
+            job_id=request.job_id,
+            job_name=request.job_name,
+            username="",
+            status=request.status or "running",
+            session_id=request.session_id or None,
+            error_message=request.error_message or None,
+        )
+        if request.started_at:
+            kw["started_at"] = request.started_at
+        return _run_pb(self.svc.start_run(request.account_id, JobRunRecord(**kw)))
+
+    def FinishRun(self, request, context):
+        rec = JobRunRecord(
+            run_id=request.run_id,
+            job_id="",
+            job_name="",
+            username="",
+            finished_at=request.finished_at or None,
+            status=request.status,
+            duration_ms=request.duration_ms or None,
+            is_error=request.is_error,
+            error_message=request.error_message or None,
+            num_turns=request.num_turns or None,
+            result_summary=request.result_summary or None,
+            session_id=request.session_id or None,
+        )
+        return _run_pb(self.svc.finish_run(rec))
+
+    def RecordRun(self, request, context):
+        rec = cv.run_from_pb(request)
+        if rec is None:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "run_id is required")
+        return _run_pb(self.svc.record_run(request.account_id, rec))
+
+    def GetRun(self, request, context):
+        return _run_pb(self.svc.get_run(request.account_id, request.run_id))
+
+    def GetLatestRun(self, request, context):
+        return _run_pb(self.svc.get_latest_run(request.account_id, request.job_id))
+
+    def ListRuns(self, request, context):
+        page = self.svc.list_runs(
+            request.account_id,
+            limit=request.limit or 50,
+            before=request.before or None,
+            after=request.after or None,
+            job_id=request.job_id or None,
+            status=request.status or None,
+        )
+        return scheduler_pb2.RunPage(
+            runs=[_run_pb(r) for r in page.runs],
+            next_cursor=page.next_cursor or "",
+            prev_cursor=page.prev_cursor or "",
+            total=-1 if page.total is None else page.total,
+        )
+
+    def DeleteRunsBefore(self, request, context):
+        return scheduler_pb2.RunIdList(
+            run_ids=self.svc.delete_runs_before(request.account_id, request.cutoff_date))
+
+    # fires
+    def ClaimJobFire(self, request, context):
+        return scheduler_pb2.ClaimFireResponse(
+            claimed=self.svc.claim_fire(request.job_id, request.fire_epoch, request.claimed_by))
+
+    def PruneFiresBefore(self, request, context):
+        return common_pb2.CountValue(value=self.svc.prune_fires_before(request.cutoff))
+
+
 class _RegistrationServicer(registration_pb2_grpc.RegistrationServiceServicer):
     def __init__(self, svc):
         self.svc = svc
@@ -415,6 +576,8 @@ def build_server(settings, max_workers: int = 16, repo=None) -> grpc.Server:
         _RegistrationServicer(client.registrations), server)
     hook_policy_pb2_grpc.add_HookPolicyServiceServicer_to_server(
         _HookPolicyServicer(client.hook_policies), server)
+    scheduler_pb2_grpc.add_SchedulerServiceServicer_to_server(
+        _SchedulerServicer(client.scheduler), server)
     return server
 
 

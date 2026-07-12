@@ -1,0 +1,35 @@
+# RBAC for the scheduler: a WAKER, never a scaler and never an executor
+# (design §11 / drill SR2). It may patch AgentTenant spec.wake and read the CR
+# status the operator heals — nothing else: no pods, no exec, no deployments.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: priva-scheduler
+  namespace: priva-cloud
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: priva-scheduler
+  namespace: priva-cloud
+rules:
+  - apiGroups: ["priva.io"]
+    resources: ["agenttenants"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["priva.io"]
+    resources: ["agenttenants/status"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: priva-scheduler
+  namespace: priva-cloud
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: priva-scheduler
+subjects:
+  - kind: ServiceAccount
+    name: priva-scheduler
+    namespace: priva-cloud

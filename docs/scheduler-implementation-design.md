@@ -352,36 +352,69 @@ internal API) · `GET /runs?job_id=&status=` (keyset, `ListRuns`) — plus the 7
 
 ---
 
-## §9 UI
+## §9 UI (LOCKED with the user, 2026-07-12 — master-detail; presets+custom-cron trigger editor;
+## inline error expand; always-visible row actions)
 
-### §9.1 User — Scheduler page (sidebar item goes live)
+### §9.1 User — Scheduler page (sidebar item goes live) — **master-detail**
 
 ```
- ┌ Scheduler ─────────────────────────────────────────────────[+ New job]──────────┐
- │ ┌ jobs ───────────────────────────────────────────────────────────────────────┐ │
- │ │▌Daily briefing    AGENT · cron 0 9 * * 1-5 · Asia/Shanghai   NEXT Mon 09:00 │ │
- │ │  ACTIVE · last ✓ today 09:02                  [Run now] [Pause]  [Edit]     │ │
- │ │ Nightly backup    SCRIPT · interval 24h                      NEXT 02:00     │ │
- │ │  PAUSED · last ✗ 6d ago                       [Run now] [Resume] [Edit]     │ │
- │ └──────────────────────────────────────────────────────────────────────────────┘ │
- │ ┌ runs ───────────────────────────────────────────────────────────────────────┐ │
- │ │ ▌r-311  Daily briefing  ✓ success  2m41s  today 09:00        → open session │ │
- │ │ ▌r-309  Nightly backup  ✗ error    0m12s  Fri 02:00          error detail   │ │
- │ │ ▌r-308  Daily briefing  ⊘ skipped · already_running  Thu     —              │ │
- │ └──────────────────────────────────────────────────────────────────────────────┘ │
- └──────────────────────────────────────────────────────────────────────────────────┘
+ ┌ Scheduler ──────────────────────────────────────────────────────[+ New job]──────────┐
+ │ ┌ JOBS ─ 2 active · 1 paused ─┐  ┌ Daily briefing   AGENT ───────────────────────┐   │
+ │ │▌ Daily briefing        ◀sel │  │ 0 9 * * 1-5 · Asia/Shanghai  (≈ weekdays 9am) │   │
+ │ │   next Mon 09:00            │  │ NEXT RUN Mon 09:00 · created 2026-07-01       │   │
+ │ │▌ Weekly review              │  │ [Run now] [Pause] [Edit]                      │   │
+ │ │   ● running 0:41            │  │                                               │   │
+ │ │▌ Nightly backup   PAUSED    │  │ RUNS ────────────────────────  [All status ▾] │   │
+ │ │   next —                    │  │ ▌ ✓  2m41s   today 09:00       → open session │   │
+ │ │                             │  │ ▌ ⊘  —       Thu 09:00       already_running  │   │
+ │ │ ── ALL RUNS ──              │  │ ▌ ✗  12s     Wed 09:00              error ▾   │   │
+ │ └─────────────────────────────┘  │ ▌ ✓  2m12s   Tue 09:00         → open session │   │
+ │                                  │               [ Load more ]                   │   │
+ │                                  └───────────────────────────────────────────────┘   │
+ └───────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- Create/edit in the standard 480 px right drawer; **type variants**: agent_run = prompt textarea + model
-  Dropdown (+ advanced: timeout/max_turns, D14); http_call = method/url/headers rows/timeout;
-  user_script = language Dropdown + mono editor + timeout. Trigger editor = cron expr input
-  (server-validated) or interval fields; timezone Dropdown defaults to browser TZ.
-- Status via 2 px left borders (`running`=purple, `success`=green, `error`=red, `skipped`=yellow,
-  paused=idle). Delete = typed-name confirm. Skeleton shimmer matches the two-list layout. Shared
-  `Dropdown` everywhere; locale keys en+zh. **Layout to be re-confirmed via ASCII AskUserQuestion before
-  the component is built** (house rule).
+- **Left pane (~300 px fixed, `flex-shrink-0`):** job rows — 2 px **status** left border, name (600),
+  second line = next run / live state (mono). **Selection = background only** (`--bg-elevated`), never a
+  border (the border already encodes status — same rule as the hooks Runtime UI). Auto-select the first
+  job on load. Footer pseudo-entry **`ALL RUNS`** → right pane becomes the cross-job run list (adds a
+  job Dropdown filter next to status) — this is also the only reachable home of **deleted jobs' runs**
+  (`job_id` FK `SET NULL`).
+- **Right pane (`flex-1 min-w-0`):** detail header — name (lg/700) + type chip + `PAUSED` chip when
+  paused; trigger line = mono cron/interval + dim human paraphrase; `NEXT RUN` + created meta; action
+  row **always visible** (`Run now / Pause|Resume / Edit`; while running: `Stop` instead of Run now).
+  Below: this job's runs (keyset `[Load more]`, status filter).
+- **Run rows:** 2 px status border + glyph (✓ ✗ ⊘), duration (mono), fired time, right affordance:
+  agent runs → `→ open session`; errors → **`error ▾` inline expand** — the row opens a mono, copyable
+  `error_message` block (copy-on-hover, Check-icon feedback) + reason/duration/run-id meta line; skips
+  show the reason inline (no expand needed).
+- **Status-border semantics (jobs list):** running=`--purple` · active+last ✓=`--green` ·
+  active+last ✗=`--red` · paused=`--border`. Run rows: success/error/skipped/running → green/red/yellow/purple.
+- **States:** skeleton = 3 left job-row bars + right header bar + 4 run bars (shimmer, shapes match);
+  empty = centered `CalendarClock` + "No scheduled jobs yet" + `[+ New job]` + dim hint
+  "…or ask your agent in chat". Zero horizontal scroll; both panes `overflow-y-auto` independently.
+
+### §9.2 Create/edit drawer (480 px right, 220 ms slide)
+
+- **Type** Dropdown (Agent / HTTP call / Script) — **immutable on edit**. Name input.
+- **Trigger editor = presets + custom-cron escape.** `Repeat` Dropdown → mapping:
+  `Every day at…` → cron `M H * * *` · `Weekdays at…` → `M H * * 1-5` · `Every week on…` (+day Dropdown)
+  → `M H * * d` · `Every N hours` / `Every N minutes` → **IntervalTriggerConfig** · `Custom cron` →
+  raw mono input, server-validated on blur (invalid = red border + message). Always-live preview line:
+  `≈ Mon–Fri at 09:00 · next Mon 09:00`. Edit mode reverse-maps a matching cron back to its preset,
+  else shows Custom. Timezone Dropdown (searchable) defaults to browser TZ.
+- **Type sections:** agent = prompt textarea + model Dropdown + collapsed `▸ Advanced` (D14
+  timeout/max_turns); http = method Dropdown + URL + header key/value rows + body + timeout;
+  script = language Dropdown + inline/file source toggle + mono editor + timeout.
+- Edit mode only: `[Delete job]` → typed-name confirm (danger rule). Footer `[Cancel] [Create/Done]`.
+
+### §9.3 Sidebar & admin
+
 - **Sidebar:** enable the `CalendarClock` nav item (`Sidebar.jsx:904`); session rows with
-  `origin=scheduler` render a ⏰ marker (D3); runs pruned by D15 lose only their "open session" link.
+  `origin=scheduler` get a 12 px `CalendarClock` (text-dim) before the title + "scheduled" in the meta
+  line (D3); runs pruned by D15 lose only their "open session" link.
+- **Admin (account detail › Scheduler tab):** same job rows read-only + pause, `[Pause all]` (confirm),
+  same run list read-only (D12).
 
 ### §9.2 Admin — Scheduler section (per-account drill-down)
 

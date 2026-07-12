@@ -669,6 +669,7 @@ async def agent_run_events(
     extra_allowed_tools: list[str] | None = None,
     inject_openclaw_tools: bool = False,
     enable_permission_feedback: bool = False,
+    max_turns: int | None = None,
 ) -> None:
     """Run agent and push events to emit callback.
 
@@ -744,6 +745,7 @@ async def agent_run_events(
         extra_allowed_tools=extra_allowed_tools,
         inject_openclaw_tools=inject_openclaw_tools,
         enable_permission_feedback=enable_permission_feedback,
+        max_turns=max_turns,
     )
 
     if coordinator:

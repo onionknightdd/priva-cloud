@@ -124,6 +124,16 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logger.warning("sandbox venv bootstrap skipped: {}", exc)
 
+        # D15: prune scheduler-origin session transcripts past retention.
+        # Detached task — a large backlog must never delay pod readiness
+        # (this boot IS the wake path a scheduled fire is waiting on).
+        try:
+            import asyncio
+            from .services.scheduled_runs.retention import prune_scheduler_transcripts
+            asyncio.get_running_loop().create_task(prune_scheduler_transcripts())
+        except Exception as exc:
+            logger.warning("scheduler transcript prune skipped: {}", exc)
+
         import os
         logger.info(
             "agent-runner ready: account={}, user={}, workspace={}",
@@ -243,6 +253,8 @@ def create_app() -> FastAPI:
         }
 
     from .routers.agent import router as agent_router
+    from .routers.scheduled_runs import router as scheduled_runs_router
+    from .routers.scheduler_jobs import router as scheduler_jobs_router
     from .routers.pty import router as pty_router
     from .routers.files import router as files_router
     from .routers.user_files import router as user_files_router
@@ -258,7 +270,8 @@ def create_app() -> FastAPI:
     from .routers.credentials import router as credentials_router
 
     for r in (
-        agent_router, pty_router, files_router, user_files_router,
+        agent_router, scheduled_runs_router, scheduler_jobs_router,
+        pty_router, files_router, user_files_router,
         hooks_router, mcp_router, skills_router, skill_hub_router, subagents_router,
         commands_router, memory_router,
         user_config_router, user_data_router, credentials_router,

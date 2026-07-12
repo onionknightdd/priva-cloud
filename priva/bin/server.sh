@@ -727,12 +727,11 @@ do_start() {
         log_info "App log: ${APP_LOG}"
         log_info "Access log: ${ACCESS_LOG}"
 
-        # Start scheduler daemon
-        if start_scheduler; then
-            log_info "Scheduler log: ${SCHEDULER_LOG}"
-        else
-            log_warn "Scheduler daemon failed to start (server continues without scheduler)"
-        fi
+        # Scheduler daemon RETIRED (Phase 4a, 2026-07-13): scheduling moved to the
+        # services/scheduler deployable (claim -> wake -> dispatch; the per-account
+        # pod executes). The in-process daemon must not double-fire against it.
+        # E2E gate passed on minikube before this launch was severed.
+        log_info "Scheduler daemon retired (Phase 4a) — served by services/scheduler"
 
         # Start channels daemon
         if start_channels; then

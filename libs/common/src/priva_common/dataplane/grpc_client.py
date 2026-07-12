@@ -5,16 +5,16 @@ wraps a stub on one shared insecure channel (alpha: plaintext in-cluster; mTLS
 deferred) and converts proto ↔ DTO so callers see the same Protocols as the
 in-process transport. The client is cached per-DSN so get_client() is cheap.
 
-scheduler is intentionally NOT served over gRPC this phase (deferred to Phase 4);
-its store raises NotImplementedError. accounts/quota/admin/bindings are full.
+All nine domains are full, scheduler included (Phase 4a).
 """
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from priva_common.dataplane import converters as cv
-from priva_common.dataplane.client import UNSET, DataplaneClient
+from priva_common.dataplane.client import UNSET, DataplaneClient, RunPage
 
 if TYPE_CHECKING:
     from priva_common.config import Settings
@@ -47,6 +47,8 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         resource_spec_pb2_grpc,
         runner_defaults_pb2,
         runner_defaults_pb2_grpc,
+        scheduler_pb2,
+        scheduler_pb2_grpc,
     )
 
     channel = grpc.insecure_channel(dsn)
@@ -331,19 +333,118 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
                     raise PermissionError(exc.details()) from exc
                 raise
 
-    class _SchedulerDeferred:
-        """scheduler is not served over gRPC this phase (Phase 4)."""
+    def _dt(v) -> str:
+        # datetime | ISO str | None → wire string
+        if v is None:
+            return ""
+        return v if isinstance(v, str) else v.isoformat()
 
-        def __getattr__(self, name):
-            def _unsupported(*_a, **_k):
-                raise NotImplementedError(f"scheduler.{name} over gRPC is deferred to Phase 4")
-            return _unsupported
+    class _Scheduler:
+        def __init__(self):
+            self._s = scheduler_pb2_grpc.SchedulerServiceStub(channel)
+
+        # jobs -----------------------------------------------------------
+        @staticmethod
+        def _defn_fields(defn) -> dict:
+            return dict(
+                name=defn.name,
+                prompt=defn.prompt or "",
+                trigger=defn.trigger.model_dump_json(),
+                job_type=(defn.job_config.job_type if defn.job_config else "agent_run"),
+                job_config=json.dumps(defn.job_config.model_dump(mode="json")) if defn.job_config else "",
+                timezone=defn.timezone,
+                model=defn.model or "",
+                status=defn.status,
+            )
+
+        def create_job(self, account_id, defn):
+            return cv.job_from_pb(self._s.CreateJob(scheduler_pb2.CreateJobRequest(
+                account_id=account_id, job_id=defn.id, **self._defn_fields(defn))))
+
+        def get_job(self, job_id):
+            return cv.job_from_pb(self._s.GetJob(scheduler_pb2.JobRef(job_id=job_id)))
+
+        def update_job(self, job_id, defn):
+            return cv.job_from_pb(self._s.UpdateJob(scheduler_pb2.UpdateJobRequest(
+                job_id=job_id, **self._defn_fields(defn))))
+
+        def delete_job(self, job_id):
+            return self._s.DeleteJob(scheduler_pb2.JobRef(job_id=job_id)).value
+
+        def list_jobs(self, account_id):
+            return [cv.job_from_pb(j) for j in
+                    self._s.ListJobs(common_pb2.AccountRef(account_id=account_id)).jobs]
+
+        def list_active_jobs(self):
+            return [(j.account_id, cv.job_from_pb(j)) for j in
+                    self._s.ListActiveJobs(common_pb2.Empty()).jobs]
+
+        def set_job_status(self, job_id, status):
+            return cv.job_from_pb(self._s.SetJobStatus(
+                scheduler_pb2.SetJobStatusRequest(job_id=job_id, status=status)))
+
+        # runs -----------------------------------------------------------
+        def start_run(self, account_id, record):
+            return cv.run_from_pb(self._s.StartRun(scheduler_pb2.StartRunRequest(
+                run_id=record.run_id, job_id=record.job_id or "", job_name=record.job_name,
+                account_id=account_id, session_id=record.session_id or "",
+                started_at=_dt(record.started_at), status=record.status or "running",
+                error_message=record.error_message or "")))
+
+        def finish_run(self, record):
+            return cv.run_from_pb(self._s.FinishRun(scheduler_pb2.FinishRunRequest(
+                run_id=record.run_id, finished_at=_dt(record.finished_at),
+                status=record.status, duration_ms=record.duration_ms or 0,
+                is_error=record.is_error, error_message=record.error_message or "",
+                num_turns=record.num_turns or 0, result_summary=record.result_summary or "",
+                session_id=record.session_id or "")))
+
+        def record_run(self, account_id, record):
+            return cv.run_from_pb(self._s.RecordRun(scheduler_pb2.Run(
+                run_id=record.run_id, job_id=record.job_id or "", job_name=record.job_name,
+                account_id=account_id, session_id=record.session_id or "",
+                started_at=_dt(record.started_at), finished_at=_dt(record.finished_at),
+                status=record.status, duration_ms=record.duration_ms or 0,
+                is_error=record.is_error, error_message=record.error_message or "",
+                num_turns=record.num_turns or 0, result_summary=record.result_summary or "")))
+
+        def get_run(self, account_id, run_id):
+            return cv.run_from_pb(self._s.GetRun(
+                scheduler_pb2.RunRef(account_id=account_id, run_id=run_id)))
+
+        def get_latest_run(self, account_id, job_id):
+            return cv.run_from_pb(self._s.GetLatestRun(
+                scheduler_pb2.LatestRunRef(account_id=account_id, job_id=job_id)))
+
+        def list_runs(self, account_id, *, limit=50, before=None, after=None,
+                      job_id=None, status=None):
+            resp = self._s.ListRuns(scheduler_pb2.ListRunsRequest(
+                account_id=account_id, limit=limit, before=before or "",
+                after=after or "", job_id=job_id or "", status=status or ""))
+            return RunPage(
+                runs=[cv.run_from_pb(r) for r in resp.runs],
+                next_cursor=resp.next_cursor or None,
+                prev_cursor=resp.prev_cursor or None,
+                total=None if resp.total < 0 else resp.total,
+            )
+
+        def delete_runs_before(self, account_id, cutoff_date):
+            return list(self._s.DeleteRunsBefore(scheduler_pb2.DeleteRunsBeforeRequest(
+                account_id=account_id, cutoff_date=cutoff_date)).run_ids)
+
+        # fires ----------------------------------------------------------
+        def claim_fire(self, job_id, fire_epoch, claimed_by):
+            return self._s.ClaimJobFire(scheduler_pb2.ClaimFireRequest(
+                job_id=job_id, fire_epoch=int(fire_epoch), claimed_by=claimed_by)).claimed
+
+        def prune_fires_before(self, cutoff):
+            return self._s.PruneFiresBefore(scheduler_pb2.PruneFiresRequest(cutoff=cutoff)).value
 
     client = DataplaneClient(
         accounts=_Accounts(),
         bindings=_Bindings(),
         quota=_Quota(),
-        scheduler=_SchedulerDeferred(),
+        scheduler=_Scheduler(),
         admin=_Admin(),
         resource_specs=_ResourceSpecs(),
         runner_defaults=_RunnerDefaults(),

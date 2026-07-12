@@ -22,6 +22,7 @@ _TABLES: tuple[tuple[str, str], ...] = (
     ("channel_binding", "binding_id"),
     ("scheduled_job", "job_id"),
     ("job_run_record", "run_id"),
+    ("job_fire", "job_id, fire_epoch"),
     ("account_resource_spec", "account_id"),
     ("pending_registration", "request_id"),
     ("runner_defaults", "id"),

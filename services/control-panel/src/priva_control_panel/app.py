@@ -276,6 +276,7 @@ def create_app() -> FastAPI:
     from .routers.auth import router as auth_router
     from .routers.admin import router as admin_router
     from .routers.admin_files import router as admin_files_router
+    from .routers.admin_scheduler import router as admin_scheduler_router
     from .routers.hook_policy import router as hook_policy_router
     from .routers.metrics import router as metrics_router
     from .routers.console import router as console_router
@@ -286,8 +287,8 @@ def create_app() -> FastAPI:
     # console_router: admin web terminal INTO control-plane pods (k8s exec bridge).
     # (The old /api/resource/models proxy is gone — the model-list connection test
     # is served pod-side at /api/sandbox/credentials/models, alongside the creds.)
-    for r in (auth_router, admin_router, admin_files_router, hook_policy_router,
-              metrics_router, console_router):
+    for r in (auth_router, admin_router, admin_files_router, admin_scheduler_router,
+              hook_policy_router, metrics_router, console_router):
         app.include_router(r)
 
     # Runtime routes (/api/agent, /api/files, /api/pty, ...) are NOT served by CP:

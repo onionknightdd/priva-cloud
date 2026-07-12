@@ -22,6 +22,7 @@ from prometheus_client import (
     REGISTRY,
     CollectorRegistry,
     Counter,
+    Gauge,
     Histogram,
     generate_latest,
 )
@@ -51,6 +52,40 @@ AGENT_RUNS_FINISHED = Counter(
     "agent_runs_finished_total",
     "Total agent runs finished, by terminal outcome.",
     ["outcome"],  # success | error | cancelled
+)
+
+SCHEDULED_RUNS = Counter(
+    "priva_scheduled_runs_total",
+    "Scheduler-dispatched runs executed on this pod, by job type and outcome.",
+    ["job_type", "status"],  # status: success | error | cancelled
+)
+
+# --- services/scheduler (the firing engine; design §11) ---
+
+SCHEDULER_FIRES = Counter(
+    "priva_scheduler_fires_total",
+    "Claimed fires by pipeline outcome.",
+    ["outcome"],  # dispatched | skipped_busy | skipped_inactive | skipped_cap | error
+)
+
+SCHEDULER_CLAIM_LOST = Counter(
+    "priva_scheduler_claim_lost_total",
+    "Fires this replica lost to another replica's claim (normal in N>1).",
+)
+
+SCHEDULER_DISPATCH_SECONDS = Histogram(
+    "priva_scheduler_dispatch_seconds",
+    "Wake+dial dispatch latency (claim win to runner admission verdict).",
+)
+
+SCHEDULER_ARMED_JOBS = Gauge(
+    "priva_scheduler_armed_jobs",
+    "Jobs currently armed on this replica's APScheduler clock.",
+)
+
+SCHEDULER_SWEEP_REAPED = Counter(
+    "priva_scheduler_sweep_reaped_total",
+    "Stale 'running' records aged out to error(dispatch_lost) by the sweep.",
 )
 
 # --- Hook executor (admin policy hooks + user hooks; the blast-radius alarm) ---

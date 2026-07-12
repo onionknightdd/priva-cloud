@@ -1,7 +1,7 @@
 """gRPC data-plane transport round-trip: the server (wrapping the in-process
 services over the repo) ↔ the build_grpc_client stores. Covers accounts (incl.
-the UNSET api_key semantics), quota, bindings, and admin. scheduler is deferred
-over gRPC (Phase 4) and not exercised here.
+the UNSET api_key semantics), quota, bindings, and admin. The scheduler domain
+is exercised in test_scheduler_dataplane.py.
 
 Runs against SQLite always; parametrized to also run against Postgres when
 TEST_POSTGRES_DSN is set (e.g. postgresql://postgres:test@127.0.0.1:5433/priva).

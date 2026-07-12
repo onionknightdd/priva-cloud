@@ -33,6 +33,7 @@ message CreateJobRequest {
   string timezone = 7;
   string model = 8;
   string status = 9;
+  string job_id = 10;       // caller-minted (parity with the in-process client); server mints if empty
 }
 
 message UpdateJobRequest {
@@ -78,7 +79,38 @@ message StartRunRequest {
   string session_id = 5;
   string started_at = 6;
   string status = 7;        // running | skipped
+  string error_message = 8; // skip reason when status=skipped (D11)
 }
+
+message RunRef {
+  string account_id = 1;    // ownership check — a run is only visible to its account
+  string run_id = 2;
+}
+
+message LatestRunRef {
+  string account_id = 1;
+  string job_id = 2;
+}
+
+message DeleteRunsBeforeRequest {
+  string account_id = 1;
+  string cutoff_date = 2;   // ISO date/datetime; lexicographic cutoff on started_at
+}
+
+message RunIdList { repeated string run_ids = 1; }
+
+// job_fire — the leaderless exactly-once claim: INSERT-wins on the composite
+// PK (job_id, fire_epoch). fire_epoch is the trigger's SCHEDULED instant so
+// every replica computes the same key for the same fire.
+message ClaimFireRequest {
+  string job_id = 1;
+  int64 fire_epoch = 2;
+  string claimed_by = 3;    // replica id (pod name)
+}
+
+message ClaimFireResponse { bool claimed = 1; }
+
+message PruneFiresRequest { string cutoff = 1; }  // ISO cutoff on claimed_at
 
 message FinishRunRequest {
   string run_id = 1;
@@ -89,6 +121,9 @@ message FinishRunRequest {
   string error_message = 6;
   int64 num_turns = 7;
   string result_summary = 8;
+  // The pod learns the CLI session id only after dispatch (StartRun carries
+  // none), so the outcome write delivers it. Empty = leave unchanged.
+  string session_id = 9;
 }
 
 message ListRunsRequest {
@@ -111,11 +146,17 @@ service SchedulerService {
   rpc CreateJob(CreateJobRequest) returns (Job);
   rpc GetJob(JobRef) returns (Job);
   rpc UpdateJob(UpdateJobRequest) returns (Job);
-  rpc DeleteJob(JobRef) returns (Empty);
+  rpc DeleteJob(JobRef) returns (BoolValue);
   rpc ListJobs(AccountRef) returns (JobList);
   rpc ListActiveJobs(Empty) returns (JobList);
   rpc SetJobStatus(SetJobStatusRequest) returns (Job);
   rpc StartRun(StartRunRequest) returns (Run);
   rpc FinishRun(FinishRunRequest) returns (Run);
+  rpc RecordRun(Run) returns (Run);
+  rpc GetRun(RunRef) returns (Run);
+  rpc GetLatestRun(LatestRunRef) returns (Run);
   rpc ListRuns(ListRunsRequest) returns (RunPage);
+  rpc DeleteRunsBefore(DeleteRunsBeforeRequest) returns (RunIdList);
+  rpc ClaimJobFire(ClaimFireRequest) returns (ClaimFireResponse);
+  rpc PruneFiresBefore(PruneFiresRequest) returns (CountValue);
 }

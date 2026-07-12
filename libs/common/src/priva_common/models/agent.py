@@ -175,6 +175,10 @@ class SessionInfoResponse(BaseModel):
     parent_session_id: str | None = None
     parent_message_uuid: str | None = None
     fork_count: int = 0
+    # Scheduler-origin sessions (D3): the sidebar marks these ⏰. Filled from
+    # the runner's session-meta scheduler index; None for interactive sessions.
+    origin: str | None = None
+    scheduler_job_name: str | None = None
 
 
 class SessionMessageResponse(BaseModel):

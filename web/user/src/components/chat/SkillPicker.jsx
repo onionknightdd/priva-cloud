@@ -19,6 +19,7 @@ export default function SkillPicker({ skills, query, onSelect, onClose, activeIn
 
   const projectSkills = filtered.filter((s) => s.level === 'project')
   const globalSkills = filtered.filter((s) => s.level === 'global')
+  const builtinCommands = filtered.filter((s) => s.level === 'builtin')
 
   // Scroll active item into view
   useEffect(() => {
@@ -35,8 +36,9 @@ export default function SkillPicker({ skills, query, onSelect, onClose, activeIn
     marginBottom: 4,
   }
 
-  // Build flat list for index mapping
-  const flatList = [...projectSkills, ...globalSkills]
+  // Build flat list for index mapping — must match the parent's
+  // getFilteredSkills order (project → global → builtin) for keyboard nav.
+  const flatList = [...projectSkills, ...globalSkills, ...builtinCommands]
 
   const headerEl = (
     <div
@@ -100,7 +102,11 @@ export default function SkillPicker({ skills, query, onSelect, onClose, activeIn
             fontWeight: 600,
           }}
         >
-          {skill.level === 'project' ? t('skillPicker.project') : t('skillPicker.global')}
+          {skill.level === 'project'
+            ? t('skillPicker.project')
+            : skill.level === 'builtin'
+              ? t('skillPicker.builtin')
+              : t('skillPicker.global')}
         </span>
       </div>
     )
@@ -198,6 +204,30 @@ export default function SkillPicker({ skills, query, onSelect, onClose, activeIn
             {t('skillPicker.global')}
           </div>
           {globalSkills.map((skill) => (
+            <div key={`${skill.level}-${skill.name}`}>
+              {renderItem(skill)}
+              {renderDescription(skill)}
+            </div>
+          ))}
+        </>
+      )}
+      {/* Builtins are static — keep them visible (and selectable) even while
+          the dynamic skill groups are still loading, so keyboard indexes stay
+          in sync with the parent's filtered list. */}
+      {(!body || loading) && builtinCommands.length > 0 && (
+        <>
+          <div
+            className="px-3 pt-2 pb-1 uppercase"
+            style={{
+              color: 'var(--text-dim)',
+              fontSize: 11,
+              letterSpacing: '0.06em',
+              fontWeight: 600,
+            }}
+          >
+            {t('skillPicker.builtin')}
+          </div>
+          {builtinCommands.map((skill) => (
             <div key={`${skill.level}-${skill.name}`}>
               {renderItem(skill)}
               {renderDescription(skill)}

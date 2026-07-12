@@ -129,8 +129,10 @@ class RunRegistry:
         self._by_run_id: dict[str, RunRecord] = {}
         self._by_session_id: dict[str, RunRecord] = {}
 
-    def create(self, session_id: str | None = None) -> RunRecord:
-        record = RunRecord(run_id=str(uuid.uuid4()), session_id=session_id)
+    def create(self, session_id: str | None = None, run_id: str | None = None) -> RunRecord:
+        """New registry-owned record. ``run_id`` lets a caller with an external
+        identity (the scheduler's minted run_id, D13) key the record by it."""
+        record = RunRecord(run_id=run_id or str(uuid.uuid4()), session_id=session_id)
         self._by_run_id[record.run_id] = record
         if session_id:
             self._by_session_id[session_id] = record

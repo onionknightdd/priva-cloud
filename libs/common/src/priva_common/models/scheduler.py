@@ -31,6 +31,10 @@ class AgentRunConfig(BaseModel):
     job_type: Literal["agent_run"] = "agent_run"
     prompt: str
     model: str | None = None
+    # D14 runaway guards for unattended runs — the runner kills the run at
+    # whichever cap trips first (error_message: 'timeout' | 'max_turns').
+    timeout_seconds: int = 1800
+    max_turns: int = 50
 
 
 class HttpCallConfig(BaseModel):
@@ -187,6 +191,45 @@ class JobRunHistoryResponse(BaseModel):
     prev_cursor: str | None = None
     total: int | None = None
     limit: int
+
+
+# --- Dispatch (scheduler → runner pod, design §7 / D13) ---
+
+class ScheduledRunRequest(BaseModel):
+    """Body of POST /api/sandbox/agent/scheduled-run.
+
+    The claim-winning scheduler replica sends this after StartRun; the pod
+    answers 202 (admitted, runs detached), 409 (job already live here) or
+    429 (account concurrency cap, D16). Idempotent by run_id.
+    """
+    run_id: str
+    job_id: str
+    job_name: str = ""
+    job_config: Annotated[
+        AgentRunConfig | HttpCallConfig | UserScriptConfig,
+        Field(discriminator="job_type"),
+    ]
+    model: str | None = None  # job-level override; falls back to job_config.model
+    permission_mode: Literal["bypassPermissions"] = "bypassPermissions"  # D2 (per-job override parked)
+
+
+class ScheduledRunAccepted(BaseModel):
+    status: Literal["accepted"] = "accepted"
+    run_id: str
+    duplicate: bool = False  # idempotent re-POST of an already-admitted run_id
+
+
+# --- Trigger validation (drawer live preview / custom-cron blur check) ---
+
+class TriggerValidationRequest(BaseModel):
+    trigger: TriggerConfig
+    timezone: str = "UTC"
+
+
+class TriggerValidationResponse(BaseModel):
+    valid: bool
+    next_run_time: str | None = None
+    error: str | None = None
 
 
 # --- Running tasks ---

@@ -142,6 +142,7 @@ def _resolve_run_add_dirs(
 
 def _session_info_to_response(s, meta: dict | None = None) -> SessionInfoResponse:
     flags = session_meta.get_session_flags(s.session_id, meta)
+    sched = session_meta.get_scheduler_info(s.session_id, meta)
     return SessionInfoResponse(
         session_id=s.session_id,
         summary=s.summary,
@@ -155,6 +156,8 @@ def _session_info_to_response(s, meta: dict | None = None) -> SessionInfoRespons
         tag=getattr(s, "tag", None),
         pinned=flags["pinned"],
         archived=flags["archived"],
+        origin="scheduler" if sched else None,
+        scheduler_job_name=(sched or {}).get("job_name") or None,
     )
 
 

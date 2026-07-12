@@ -48,7 +48,7 @@ class JobList(_message.Message):
     def __init__(self, jobs: _Optional[_Iterable[_Union[Job, _Mapping]]] = ...) -> None: ...
 
 class CreateJobRequest(_message.Message):
-    __slots__ = ("account_id", "name", "prompt", "trigger", "job_type", "job_config", "timezone", "model", "status")
+    __slots__ = ("account_id", "name", "prompt", "trigger", "job_type", "job_config", "timezone", "model", "status", "job_id")
     ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
@@ -58,6 +58,7 @@ class CreateJobRequest(_message.Message):
     TIMEZONE_FIELD_NUMBER: _ClassVar[int]
     MODEL_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
     account_id: str
     name: str
     prompt: str
@@ -67,7 +68,8 @@ class CreateJobRequest(_message.Message):
     timezone: str
     model: str
     status: str
-    def __init__(self, account_id: _Optional[str] = ..., name: _Optional[str] = ..., prompt: _Optional[str] = ..., trigger: _Optional[str] = ..., job_type: _Optional[str] = ..., job_config: _Optional[str] = ..., timezone: _Optional[str] = ..., model: _Optional[str] = ..., status: _Optional[str] = ...) -> None: ...
+    job_id: str
+    def __init__(self, account_id: _Optional[str] = ..., name: _Optional[str] = ..., prompt: _Optional[str] = ..., trigger: _Optional[str] = ..., job_type: _Optional[str] = ..., job_config: _Optional[str] = ..., timezone: _Optional[str] = ..., model: _Optional[str] = ..., status: _Optional[str] = ..., job_id: _Optional[str] = ...) -> None: ...
 
 class UpdateJobRequest(_message.Message):
     __slots__ = ("job_id", "name", "prompt", "trigger", "job_type", "job_config", "timezone", "model", "status", "update_mask")
@@ -132,7 +134,7 @@ class Run(_message.Message):
     def __init__(self, run_id: _Optional[str] = ..., job_id: _Optional[str] = ..., job_name: _Optional[str] = ..., account_id: _Optional[str] = ..., session_id: _Optional[str] = ..., started_at: _Optional[str] = ..., finished_at: _Optional[str] = ..., status: _Optional[str] = ..., duration_ms: _Optional[int] = ..., is_error: _Optional[bool] = ..., error_message: _Optional[str] = ..., num_turns: _Optional[int] = ..., result_summary: _Optional[str] = ...) -> None: ...
 
 class StartRunRequest(_message.Message):
-    __slots__ = ("run_id", "job_id", "job_name", "account_id", "session_id", "started_at", "status")
+    __slots__ = ("run_id", "job_id", "job_name", "account_id", "session_id", "started_at", "status", "error_message")
     RUN_ID_FIELD_NUMBER: _ClassVar[int]
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     JOB_NAME_FIELD_NUMBER: _ClassVar[int]
@@ -140,6 +142,7 @@ class StartRunRequest(_message.Message):
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     STARTED_AT_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     run_id: str
     job_id: str
     job_name: str
@@ -147,10 +150,63 @@ class StartRunRequest(_message.Message):
     session_id: str
     started_at: str
     status: str
-    def __init__(self, run_id: _Optional[str] = ..., job_id: _Optional[str] = ..., job_name: _Optional[str] = ..., account_id: _Optional[str] = ..., session_id: _Optional[str] = ..., started_at: _Optional[str] = ..., status: _Optional[str] = ...) -> None: ...
+    error_message: str
+    def __init__(self, run_id: _Optional[str] = ..., job_id: _Optional[str] = ..., job_name: _Optional[str] = ..., account_id: _Optional[str] = ..., session_id: _Optional[str] = ..., started_at: _Optional[str] = ..., status: _Optional[str] = ..., error_message: _Optional[str] = ...) -> None: ...
+
+class RunRef(_message.Message):
+    __slots__ = ("account_id", "run_id")
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    account_id: str
+    run_id: str
+    def __init__(self, account_id: _Optional[str] = ..., run_id: _Optional[str] = ...) -> None: ...
+
+class LatestRunRef(_message.Message):
+    __slots__ = ("account_id", "job_id")
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    account_id: str
+    job_id: str
+    def __init__(self, account_id: _Optional[str] = ..., job_id: _Optional[str] = ...) -> None: ...
+
+class DeleteRunsBeforeRequest(_message.Message):
+    __slots__ = ("account_id", "cutoff_date")
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    CUTOFF_DATE_FIELD_NUMBER: _ClassVar[int]
+    account_id: str
+    cutoff_date: str
+    def __init__(self, account_id: _Optional[str] = ..., cutoff_date: _Optional[str] = ...) -> None: ...
+
+class RunIdList(_message.Message):
+    __slots__ = ("run_ids",)
+    RUN_IDS_FIELD_NUMBER: _ClassVar[int]
+    run_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, run_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class ClaimFireRequest(_message.Message):
+    __slots__ = ("job_id", "fire_epoch", "claimed_by")
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    FIRE_EPOCH_FIELD_NUMBER: _ClassVar[int]
+    CLAIMED_BY_FIELD_NUMBER: _ClassVar[int]
+    job_id: str
+    fire_epoch: int
+    claimed_by: str
+    def __init__(self, job_id: _Optional[str] = ..., fire_epoch: _Optional[int] = ..., claimed_by: _Optional[str] = ...) -> None: ...
+
+class ClaimFireResponse(_message.Message):
+    __slots__ = ("claimed",)
+    CLAIMED_FIELD_NUMBER: _ClassVar[int]
+    claimed: bool
+    def __init__(self, claimed: _Optional[bool] = ...) -> None: ...
+
+class PruneFiresRequest(_message.Message):
+    __slots__ = ("cutoff",)
+    CUTOFF_FIELD_NUMBER: _ClassVar[int]
+    cutoff: str
+    def __init__(self, cutoff: _Optional[str] = ...) -> None: ...
 
 class FinishRunRequest(_message.Message):
-    __slots__ = ("run_id", "finished_at", "status", "duration_ms", "is_error", "error_message", "num_turns", "result_summary")
+    __slots__ = ("run_id", "finished_at", "status", "duration_ms", "is_error", "error_message", "num_turns", "result_summary", "session_id")
     RUN_ID_FIELD_NUMBER: _ClassVar[int]
     FINISHED_AT_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
@@ -159,6 +215,7 @@ class FinishRunRequest(_message.Message):
     ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     NUM_TURNS_FIELD_NUMBER: _ClassVar[int]
     RESULT_SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     run_id: str
     finished_at: str
     status: str
@@ -167,7 +224,8 @@ class FinishRunRequest(_message.Message):
     error_message: str
     num_turns: int
     result_summary: str
-    def __init__(self, run_id: _Optional[str] = ..., finished_at: _Optional[str] = ..., status: _Optional[str] = ..., duration_ms: _Optional[int] = ..., is_error: _Optional[bool] = ..., error_message: _Optional[str] = ..., num_turns: _Optional[int] = ..., result_summary: _Optional[str] = ...) -> None: ...
+    session_id: str
+    def __init__(self, run_id: _Optional[str] = ..., finished_at: _Optional[str] = ..., status: _Optional[str] = ..., duration_ms: _Optional[int] = ..., is_error: _Optional[bool] = ..., error_message: _Optional[str] = ..., num_turns: _Optional[int] = ..., result_summary: _Optional[str] = ..., session_id: _Optional[str] = ...) -> None: ...
 
 class ListRunsRequest(_message.Message):
     __slots__ = ("account_id", "limit", "before", "after", "job_id", "status")

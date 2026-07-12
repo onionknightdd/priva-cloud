@@ -6,6 +6,16 @@ Consumes: ./data-spine.md (the `scheduled_job`/`job_fire`/`job_run_record` schem
 
 # Priva Central Scheduler — Component Specification
 
+> **SHIPPED ADDENDUM (2026-07-13).** Phase 4a implemented this drill's decision framework —
+> the inversion, leaderless exactly-once, SKIP-not-queue, the run-record ownership split — with
+> the **transport idioms re-grounded** in the shipped platform: **Postgres-only claim**
+> (`job_fire` insert-wins; the Redis pre-filter/inbox/pub-sub of this drill are NOT deployed),
+> **wake+dial dispatch** behind a `Dispatcher` seam (202-admission fire-and-forget, idempotent by
+> run_id), and a 30 s `ListActiveJobs` re-list instead of pub/sub. The authoritative as-built
+> design is **`docs/scheduler-implementation-design.md`** (rev 2, D1–D16 + US-1..9); this file
+> remains the decision-history drill. Redis-era sections (§inbox, busy-mirror, claim pre-filter)
+> are parked upgrades, not shipped behavior.
+
 **Scope.** The **Central Scheduler** owns **100% of cron / interval / one-shot jobs** (blueprint decision 9 §85; §205). Unlike the operator, this is **not** a green-field component: there is a substantial, working single-machine scheduler today — **~3.5k LOC** across `priva/api/services/scheduler/*` (a standalone `AsyncIOScheduler` daemon `daemon.py:68`, a YAML job store `job_store.py`, daily-partitioned JSONL run history `run_history.py`, four job-type executors, an in-pod MCP tool server `mcp_tools.py`, and a file-command IPC bus `shared.py:46`) plus the `routers/scheduler.py` API and `models/scheduler.py`. So this drill is a **fork-strip-and-invert** of real code, grounded `file:line` in it (§1) and in every cross-doc promise (§0).
 
 **The one load-bearing inversion.** Today the scheduler **is the agent runner**: a `scheduled_agent` job calls `agent_run_events(...)` **in-process inside the daemon** (`daemon.py:298-315`), with `bypassPermissions`, reading the user's env (`daemon.py:247`), spawning the `claude` subprocess, writing the user's JSONL. That is impossible in the multi-tenant platform: the scheduler has **no pod, no PVC mount, no user secrets, and — under M6 — no LLM key** (the user's BYOK key lives in *their* pod). Therefore the multi-tenant scheduler **executes nothing**. It becomes a pure **fire → claim → wake → dispatch** service; **the pod executes the job** (agent-runner §0 `:61` "central scheduler wakes the pod to run a turn"). Everything below follows from that single move.

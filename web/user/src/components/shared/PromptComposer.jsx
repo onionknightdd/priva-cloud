@@ -1,9 +1,10 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { animate } from 'animejs'
-import { Plus, X, FileText, Upload, Loader, AlertTriangle, Maximize2, Ban, ScrollText } from 'lucide-react'
+import { Plus, X, FileText, Upload, Loader, AlertTriangle, Maximize2, Ban, ScrollText, Terminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSkillsStore, { flattenSkillsForPicker } from '../../stores/skillsStore'
+import { NATIVE_COMMANDS } from '../../constants/nativeCommands'
 import { uploadFile, deleteUploadedFile, listUploadedFiles } from '../../api/files'
 import { listDirectory } from '../../api/userFiles'
 import { processImage } from '../../utils/imageCompression'
@@ -128,6 +129,7 @@ function getCaretCoordinates(el, position) {
  *   plusMenuExtra   — optional ReactNode rendered inside the + dropdown after "Upload file"
  *   currentDirectory — directory whose files are available through @ references
  *   disabled       — disable the textarea
+ *   active         — false closes transient picker/menu UI while host page is hidden
  */
 // Shared upload dropdown for the compact toolbar and the modal footer.
 // Module-level (not nested in PromptComposer) so its identity is stable across
@@ -189,6 +191,7 @@ export default function PromptComposer({
   afterImages,
   currentDirectory,
   disabled,
+  active = true,
   onRegisterWarn,
 }) {
   const { t } = useTranslation()
@@ -216,9 +219,15 @@ export default function PromptComposer({
   const skillsLoaded = useSkillsStore((s) => s.skillsLoaded)
   const skillsLoading = useSkillsStore((s) => s.skillsLoading)
   const ensureSkillsLoaded = useSkillsStore((s) => s.ensureSkillsLoaded)
+  // Native slash commands ride along after the skill groups — order must stay
+  // project → global → builtin so the parent's filtered indexes line up with
+  // the SkillPicker's render order for keyboard navigation.
   const availableSkills = useMemo(
-    () => flattenSkillsForPicker(personalSkills, skillGroups),
-    [personalSkills, skillGroups]
+    () => [
+      ...flattenSkillsForPicker(personalSkills, skillGroups),
+      ...NATIVE_COMMANDS.map((c) => ({ ...c, description: t(c.descriptionKey) })),
+    ],
+    [personalSkills, skillGroups, t]
   )
 
   // File picker state
@@ -234,6 +243,7 @@ export default function PromptComposer({
   const [showCompactPlusMenu, setShowCompactPlusMenu] = useState(false)
   const [showModalPlusMenu, setShowModalPlusMenu] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const dragDepthRef = useRef(0)
   const { mounted: dragOverlayMounted, panelRef: dragOverlayRef } = useOverlayTransition({
     open: isDragging,
     variant: 'scale',
@@ -602,13 +612,28 @@ export default function PromptComposer({
 
   // Drag & drop handlers. A depth counter tracks nested dragenter/dragleave
   // pairs — child elements firing dragleave would otherwise flicker the overlay.
-  const dragDepthRef = useRef(0)
+  useEffect(() => {
+    if (active) return
+    setShowSkillPicker(false)
+    setSkillQuery('')
+    setShowFilePicker(false)
+    setFilePickerQuery('')
+    setShowCompactPlusMenu(false)
+    setShowModalPlusMenu(false)
+    setExpanded(false)
+    setIsDragging(false)
+    dragDepthRef.current = 0
+    textareaRef.current?.blur()
+    modalTextareaRef.current?.blur()
+  }, [active, textareaRef])
+
   const handleDragEnter = useCallback((e) => {
     e.preventDefault()
     e.stopPropagation()
+    if (!active) return
     dragDepthRef.current += 1
     setIsDragging(true)
-  }, [])
+  }, [active])
   const handleDragOver = useCallback((e) => {
     e.preventDefault()
     e.stopPropagation()
@@ -624,10 +649,11 @@ export default function PromptComposer({
     e.stopPropagation()
     dragDepthRef.current = 0
     setIsDragging(false)
+    if (!active) return
     if (e.dataTransfer.files?.length) {
       handleFiles(e.dataTransfer.files)
     }
-  }, [handleFiles])
+  }, [active, handleFiles])
 
   // Clipboard paste handler for images
   const handlePaste = useCallback((e) => {
@@ -691,6 +717,7 @@ export default function PromptComposer({
   }, [currentDirectory])
 
   const handleInputChange = (e) => {
+    if (!active) return
     const val = e.target.value
     onChange(val)
 
@@ -1082,15 +1109,23 @@ export default function PromptComposer({
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  <ScrollText size={12} strokeWidth={1.5} style={{ color: 'var(--purple)', flexShrink: 0 }} />
+                  {skillChip.level === 'builtin' ? (
+                    <Terminal size={12} strokeWidth={1.5} style={{ color: 'var(--purple)', flexShrink: 0 }} />
+                  ) : (
+                    <ScrollText size={12} strokeWidth={1.5} style={{ color: 'var(--purple)', flexShrink: 0 }} />
+                  )}
                   <span className="flex-shrink-0" style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: 13, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace" }}>
-                    skill:
+                    {skillChip.level === 'builtin' ? 'command:' : 'skill:'}
                   </span>
                   <span className="truncate" style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: 13, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace", minWidth: 0, maxWidth: 220 }}>
                     {skillChip.name}
                   </span>
                   <span className="uppercase flex-shrink-0" style={{ color: 'var(--text-dim)', fontSize: 11, letterSpacing: '0.06em', fontWeight: 600 }}>
-                    {skillChip.level === 'project' ? t('skillPicker.project') : t('skillPicker.global')}
+                    {skillChip.level === 'project'
+                      ? t('skillPicker.project')
+                      : skillChip.level === 'builtin'
+                        ? t('skillPicker.builtin')
+                        : t('skillPicker.global')}
                   </span>
                   <button
                     className="flex items-center justify-center"
@@ -1316,7 +1351,9 @@ export default function PromptComposer({
             paddingBottom: 2,
             paddingLeft: 16,
           }}
-          placeholder={skill ? t('skillPicker.instructionPlaceholder') : (placeholder || t('chat.placeholder'))}
+          placeholder={skill
+            ? (skill.level === 'builtin' ? t('skillPicker.commandPlaceholder') : t('skillPicker.instructionPlaceholder'))
+            : (placeholder || t('chat.placeholder'))}
           value={value}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}

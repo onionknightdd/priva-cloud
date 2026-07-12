@@ -13,7 +13,7 @@ dependencies = [
     "python-jose[cryptography]",
     "python-multipart",
     "pyyaml",
-    "claude-agent-sdk==0.2.110",
+    "claude-agent-sdk==0.2.116",
     "scalar-fastapi",
     "kubernetes>=29",
     "xds-protos",

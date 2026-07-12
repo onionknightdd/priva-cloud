@@ -96,6 +96,21 @@ DDL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_run_account_started ON job_run_record(account_id, started_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_run_job_started     ON job_run_record(job_id, started_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_run_status          ON job_run_record(status) WHERE status = 'running'",
+    # 5b ── job_fire ---------------------------------------------------------
+    # The leaderless exactly-once claim: INSERT-wins on the composite PK.
+    # fire_epoch = the trigger's SCHEDULED instant (epoch seconds), so every
+    # scheduler replica computes the same key for the same fire. Rows exist only
+    # to dedupe concurrent claims; the scheduler's reconcile sweep prunes them.
+    f"""
+    CREATE TABLE IF NOT EXISTS job_fire (
+      job_id     TEXT    NOT NULL REFERENCES scheduled_job(job_id) ON DELETE CASCADE,
+      fire_epoch INTEGER NOT NULL,
+      claimed_by TEXT    NOT NULL,
+      claimed_at TEXT    NOT NULL DEFAULT {NOW},
+      PRIMARY KEY (job_id, fire_epoch)
+    ) STRICT
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_fire_claimed_at ON job_fire(claimed_at)",
     # 6 ── account_resource_spec --------------------------------------------
     # Per-account agent-runner pod sizing. The operator reads these (via the CR
     # the control-panel stamps) to set container resources + PVC size. volume_gb
@@ -188,7 +203,7 @@ DDL: tuple[str, ...] = (
 )
 
 TABLES = (
-    "account", "channel_binding", "quota", "scheduled_job", "job_run_record",
+    "account", "channel_binding", "quota", "scheduled_job", "job_run_record", "job_fire",
     "account_resource_spec", "pending_registration", "runner_defaults", "hook_policy",
 )
 

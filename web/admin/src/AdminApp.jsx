@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { LogOut, Users, ScrollText, LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen, Server, Activity, Network, Gauge, SquareTerminal } from 'lucide-react'
+import { CalendarClock, LogOut, Users, ScrollText, LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen, Server, Activity, Network, Gauge, SquareTerminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useAuthStore from '@shared/stores/authStore'
 import { useResizable } from '@shared/hooks/useResizable'
@@ -10,6 +10,7 @@ import LoginPage from '@shared/components/auth/LoginPage'
 import UserManagement from './components/admin/UserManagement'
 import AuditLog from './components/admin/AuditLog'
 import FleetView from './components/admin/FleetView'
+import SchedulerOversight from './components/admin/SchedulerOversight'
 import ResourceQuotaView from './components/admin/ResourceQuotaView'
 import SystemMapView from './components/admin/SystemMapView'
 import ConsoleView from './components/admin/ConsoleView'
@@ -34,6 +35,7 @@ const NAV = {
     { id: 'system-map', labelKey: 'admin.navSystemTopology', icon: Network },
     { id: 'console', labelKey: 'admin.navConsole', icon: SquareTerminal },
     { id: 'users', labelKey: 'admin.users', icon: Users },
+    { id: 'scheduler', labelKey: 'admin.navScheduler', icon: CalendarClock },
     { id: 'audit', labelKey: 'admin.navAudit', icon: ScrollText },
   ],
   config: [
@@ -319,6 +321,7 @@ export default function AdminApp() {
         {activeTab === 'dashboard' && section === 'console' && <ConsoleView />}
         {activeTab === 'dashboard' && section === 'users' && <UserManagement />}
         {activeTab === 'dashboard' && section === 'audit' && <AuditLog />}
+        {activeTab === 'dashboard' && section === 'scheduler' && <SchedulerOversight />}
         {activeTab === 'config' && section === 'sandbox' && <AgentRunnerSandbox />}
         {activeTab === 'config' && section !== 'sandbox' && <ConfigPlaceholder />}
       </main>

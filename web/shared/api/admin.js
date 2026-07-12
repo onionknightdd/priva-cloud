@@ -71,3 +71,19 @@ export const getHookPolicySeed = (id) => getJSON(`/admin/hook-policy/${encodeURI
 export const getPtyConfig = () => sandboxGet('/pty/config')
 export const updatePtyConfig = (data) => sandboxPut('/pty/config', data)
 export const getPtyFeature = () => sandboxGet('/pty/feature')
+
+// --- Scheduler oversight (D12: per-account drill-down) ---
+export const getSchedulerJobs = (accountId) =>
+  getJSON(`/admin/scheduler/accounts/${encodeURIComponent(accountId)}/jobs`)
+export const getSchedulerRuns = (accountId, params = {}) => {
+  const q = new URLSearchParams()
+  if (params.jobId) q.set('job_id', params.jobId)
+  if (params.status) q.set('status', params.status)
+  if (params.before) q.set('before', params.before)
+  q.set('limit', String(params.limit || 30))
+  return getJSON(`/admin/scheduler/accounts/${encodeURIComponent(accountId)}/runs?${q}`)
+}
+export const pauseAllSchedulerJobs = (accountId) =>
+  postJSON(`/admin/scheduler/accounts/${encodeURIComponent(accountId)}/pause-all`)
+export const triggerSchedulerJob = (jobId) =>
+  postJSON(`/admin/scheduler/jobs/${encodeURIComponent(jobId)}/trigger`)

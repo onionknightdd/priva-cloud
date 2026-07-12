@@ -102,6 +102,20 @@ DDL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_run_account_started ON job_run_record(account_id, started_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_run_job_started     ON job_run_record(job_id, started_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_run_status          ON job_run_record(status) WHERE status = 'running'",
+    # 5b ── job_fire ---------------------------------------------------------
+    # The leaderless exactly-once claim (mirror of schema.py 5b): INSERT-wins on
+    # the composite PK; concurrent INSERT ... ON CONFLICT DO NOTHING is native
+    # here — no lock, no pre-filter needed.
+    f"""
+    CREATE TABLE IF NOT EXISTS job_fire (
+      job_id     TEXT   NOT NULL REFERENCES scheduled_job(job_id) ON DELETE CASCADE,
+      fire_epoch BIGINT NOT NULL,
+      claimed_by TEXT   NOT NULL,
+      claimed_at TEXT   NOT NULL DEFAULT {NOW},
+      PRIMARY KEY (job_id, fire_epoch)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_fire_claimed_at ON job_fire(claimed_at)",
     # 6 ── account_resource_spec --------------------------------------------
     # Per-account agent-runner pod sizing. The operator reads these (via the CR
     # the control-panel stamps) to set container resources + PVC size. volume_gb

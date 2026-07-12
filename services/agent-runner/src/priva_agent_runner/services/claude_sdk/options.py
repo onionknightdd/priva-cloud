@@ -140,6 +140,7 @@ async def build_agent_options(
     extra_allowed_tools: list[str] | None = None,
     inject_openclaw_tools: bool = False,
     enable_permission_feedback: bool = True,
+    max_turns: int | None = None,
 ) -> ClaudeAgentOptions:
     settings = get_settings()
 
@@ -227,6 +228,10 @@ async def build_agent_options(
         include_hook_events=True,
         skills=enabled_skill_names,
     )
+    if max_turns and max_turns > 0:
+        # D14 runaway guard for unattended runs: the CLI stops at the cap and
+        # the result message carries subtype=error_max_turns.
+        options.max_turns = max_turns
 
     if extra_allowed_tools:
         existing = list(options.allowed_tools or [])
@@ -324,9 +329,26 @@ async def build_agent_options(
         options.extra_args["strict-mcp-config"] = None
     # else "auto": native file discovery, no injection.
 
-    # --- Scheduler MCP tools: deferred (Phase 4). The scheduler subsystem is
-    # not part of the agent-runner this phase; the injection block is removed so
-    # the run path never imports ``services.scheduler``. ---
+    # --- Scheduler MCP tools (US-2): the agent's only sanctioned self-scheduling
+    # path, re-pointed at the dataplane (Phase 4a). JWT login sessions only —
+    # same gating as FileCanvas below. Fail-soft: a broken injection must not
+    # kill the run.
+    if username and auth_method == "jwt" and inject_scheduler_tools:
+        try:
+            from ..scheduled_runs.mcp_tools import build_scheduler_mcp_server
+
+            existing = options.mcp_servers or {}
+            if not isinstance(existing, dict):
+                existing = {}
+            existing["priva_scheduler"] = build_scheduler_mcp_server(username)
+            options.mcp_servers = existing
+
+            allowed = list(options.allowed_tools or [])
+            if not any("priva_scheduler" in t for t in allowed):
+                allowed.append("mcp__priva_scheduler__*")
+            options.allowed_tools = allowed
+        except Exception:
+            _get_logger().warning("Failed to inject scheduler MCP tools", exc_info=True)
 
     # --- Inject FileCanvas file-registration tool for JWT-backed login sessions only ---
     if username and auth_method == "jwt":

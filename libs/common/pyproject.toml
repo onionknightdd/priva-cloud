@@ -16,7 +16,7 @@ dependencies = [
     # Crypto (crypto.py)
     "cryptography",
     # Wire format (serialization.py) — shared pod↔connector
-    "claude-agent-sdk==0.2.110",
+    "claude-agent-sdk==0.2.116",
     # Redis catalog (redis_catalog.py)
     "redis>=5",
     # Data-plane gRPC contract (dataplane/) — generated stubs import grpc + protobuf.

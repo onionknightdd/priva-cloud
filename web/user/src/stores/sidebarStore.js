@@ -46,6 +46,9 @@ function mapSession(s) {
     parentSessionId: s.parent_session_id || null,
     parentMessageUuid: s.parent_message_uuid || null,
     forkCount: s.fork_count || 0,
+    // Scheduler-origin sessions (D3): the sidebar marks these ⏰.
+    origin: s.origin || null,
+    schedulerJobName: s.scheduler_job_name || null,
   }
 }
 

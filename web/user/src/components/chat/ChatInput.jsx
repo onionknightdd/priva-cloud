@@ -60,6 +60,8 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
   const setAddDirs = useChatStore((s) => s.setAddDirs)
   const [cwdPickerOpen, setCwdPickerOpen] = useState(false)
   const [dirsPickerOpen, setDirsPickerOpen] = useState(false)
+  const activeNavTab = useUiStore((s) => s.activeNavTab)
+  const composerActive = activeNavTab === 'priva'
   const mcpServers = useChatStore((s) => s.mcpServers)
   const setMcpServers = useChatStore((s) => s.setMcpServers)
   const mcpServerList = useMcpStore((s) => s.servers)
@@ -94,6 +96,13 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
   const { mounted: permissionMenuMounted, popRef: permissionMenuPopRef } = usePopoverTransition({ open: showPermissionMenu, placement: 'top' })
   // Composer-warning callback registered by PromptComposer.
   const composerWarnRef = useRef(null)
+
+  useEffect(() => {
+    if (composerActive) return
+    setCwdPickerOpen(false)
+    setDirsPickerOpen(false)
+    setShowPermissionMenu(false)
+  }, [composerActive])
 
   // Bridge chatStore attachments to PromptComposer's functional setter
   const setAttachments = useCallback((updater) => {
@@ -872,6 +881,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
             beforeTextarea={beforeTextareaContent}
             afterImages={visionHints}
             currentDirectory={displayCwd}
+            active={composerActive}
             onRegisterWarn={(fn) => { composerWarnRef.current = fn }}
           />
         )}

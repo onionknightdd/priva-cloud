@@ -53,7 +53,7 @@ class SchedulerServiceStub:
         self.DeleteJob = channel.unary_unary(
                 '/priva.dataplane.v1.SchedulerService/DeleteJob',
                 request_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.JobRef.SerializeToString,
-                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.Empty.FromString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.BoolValue.FromString,
                 _registered_method=True)
         self.ListJobs = channel.unary_unary(
                 '/priva.dataplane.v1.SchedulerService/ListJobs',
@@ -80,10 +80,40 @@ class SchedulerServiceStub:
                 request_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.FinishRunRequest.SerializeToString,
                 response_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.FromString,
                 _registered_method=True)
+        self.RecordRun = channel.unary_unary(
+                '/priva.dataplane.v1.SchedulerService/RecordRun',
+                request_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.SerializeToString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.FromString,
+                _registered_method=True)
+        self.GetRun = channel.unary_unary(
+                '/priva.dataplane.v1.SchedulerService/GetRun',
+                request_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.RunRef.SerializeToString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.FromString,
+                _registered_method=True)
+        self.GetLatestRun = channel.unary_unary(
+                '/priva.dataplane.v1.SchedulerService/GetLatestRun',
+                request_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.LatestRunRef.SerializeToString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.FromString,
+                _registered_method=True)
         self.ListRuns = channel.unary_unary(
                 '/priva.dataplane.v1.SchedulerService/ListRuns',
                 request_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.ListRunsRequest.SerializeToString,
                 response_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.RunPage.FromString,
+                _registered_method=True)
+        self.DeleteRunsBefore = channel.unary_unary(
+                '/priva.dataplane.v1.SchedulerService/DeleteRunsBefore',
+                request_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.DeleteRunsBeforeRequest.SerializeToString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.RunIdList.FromString,
+                _registered_method=True)
+        self.ClaimJobFire = channel.unary_unary(
+                '/priva.dataplane.v1.SchedulerService/ClaimJobFire',
+                request_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.ClaimFireRequest.SerializeToString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.ClaimFireResponse.FromString,
+                _registered_method=True)
+        self.PruneFiresBefore = channel.unary_unary(
+                '/priva.dataplane.v1.SchedulerService/PruneFiresBefore',
+                request_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.PruneFiresRequest.SerializeToString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.CountValue.FromString,
                 _registered_method=True)
 
 
@@ -144,7 +174,43 @@ class SchedulerServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RecordRun(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetRun(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetLatestRun(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListRuns(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteRunsBefore(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ClaimJobFire(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def PruneFiresBefore(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -171,7 +237,7 @@ def add_SchedulerServiceServicer_to_server(servicer, server):
             'DeleteJob': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteJob,
                     request_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.JobRef.FromString,
-                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.Empty.SerializeToString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.BoolValue.SerializeToString,
             ),
             'ListJobs': grpc.unary_unary_rpc_method_handler(
                     servicer.ListJobs,
@@ -198,10 +264,40 @@ def add_SchedulerServiceServicer_to_server(servicer, server):
                     request_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.FinishRunRequest.FromString,
                     response_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.SerializeToString,
             ),
+            'RecordRun': grpc.unary_unary_rpc_method_handler(
+                    servicer.RecordRun,
+                    request_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.FromString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.SerializeToString,
+            ),
+            'GetRun': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetRun,
+                    request_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.RunRef.FromString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.SerializeToString,
+            ),
+            'GetLatestRun': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetLatestRun,
+                    request_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.LatestRunRef.FromString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.SerializeToString,
+            ),
             'ListRuns': grpc.unary_unary_rpc_method_handler(
                     servicer.ListRuns,
                     request_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.ListRunsRequest.FromString,
                     response_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.RunPage.SerializeToString,
+            ),
+            'DeleteRunsBefore': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteRunsBefore,
+                    request_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.DeleteRunsBeforeRequest.FromString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.RunIdList.SerializeToString,
+            ),
+            'ClaimJobFire': grpc.unary_unary_rpc_method_handler(
+                    servicer.ClaimJobFire,
+                    request_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.ClaimFireRequest.FromString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.ClaimFireResponse.SerializeToString,
+            ),
+            'PruneFiresBefore': grpc.unary_unary_rpc_method_handler(
+                    servicer.PruneFiresBefore,
+                    request_deserializer=priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.PruneFiresRequest.FromString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.CountValue.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -311,7 +407,7 @@ class SchedulerService:
             target,
             '/priva.dataplane.v1.SchedulerService/DeleteJob',
             priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.JobRef.SerializeToString,
-            priva__common_dot_dataplane_dot_v1_dot_common__pb2.Empty.FromString,
+            priva__common_dot_dataplane_dot_v1_dot_common__pb2.BoolValue.FromString,
             options,
             channel_credentials,
             insecure,
@@ -458,6 +554,87 @@ class SchedulerService:
             _registered_method=True)
 
     @staticmethod
+    def RecordRun(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/priva.dataplane.v1.SchedulerService/RecordRun',
+            priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.SerializeToString,
+            priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetRun(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/priva.dataplane.v1.SchedulerService/GetRun',
+            priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.RunRef.SerializeToString,
+            priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetLatestRun(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/priva.dataplane.v1.SchedulerService/GetLatestRun',
+            priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.LatestRunRef.SerializeToString,
+            priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.Run.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def ListRuns(request,
             target,
             options=(),
@@ -474,6 +651,87 @@ class SchedulerService:
             '/priva.dataplane.v1.SchedulerService/ListRuns',
             priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.ListRunsRequest.SerializeToString,
             priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.RunPage.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteRunsBefore(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/priva.dataplane.v1.SchedulerService/DeleteRunsBefore',
+            priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.DeleteRunsBeforeRequest.SerializeToString,
+            priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.RunIdList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ClaimJobFire(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/priva.dataplane.v1.SchedulerService/ClaimJobFire',
+            priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.ClaimFireRequest.SerializeToString,
+            priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.ClaimFireResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PruneFiresBefore(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/priva.dataplane.v1.SchedulerService/PruneFiresBefore',
+            priva__common_dot_dataplane_dot_v1_dot_scheduler__pb2.PruneFiresRequest.SerializeToString,
+            priva__common_dot_dataplane_dot_v1_dot_common__pb2.CountValue.FromString,
             options,
             channel_credentials,
             insecure,
