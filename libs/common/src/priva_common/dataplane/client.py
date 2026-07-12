@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from priva_common.models.auth import UserRecord
 from priva_common.models.scheduler import JobRunRecord, ScheduledJobDefinition
@@ -28,6 +28,7 @@ __all__ = [
     "ResourceSpecRecord",
     "RunnerDefaultsRecord",
     "PendingRegistrationRecord",
+    "HookPolicyRecord",
     "AccountClient",
     "BindingClient",
     "QuotaClient",
@@ -36,6 +37,7 @@ __all__ = [
     "ResourceSpecClient",
     "RunnerDefaultsClient",
     "RegistrationClient",
+    "HookPolicyClient",
     "DataplaneClient",
 ]
 
@@ -87,6 +89,38 @@ class RunnerDefaultsRecord(BaseModel):
     storage_gb: int = 1
     runner_image: str = "priva/agent-runner:dev"
     updated_at: str | None = None
+
+
+class HookPolicyRecord(BaseModel):
+    """Admin-stored hook (the `hook_policy` table). hook_type uses Claude Code
+    native strings; command payload is script_body (content_hash server-derived);
+    predefined rows are the seeded legacy builtins (not deletable)."""
+    id: str
+    hook_type: str = "command"  # "command" | "http" | "mcp_tool"
+    name: str = ""
+    description: str = ""
+    events: list[str] = Field(default_factory=list)
+    matcher: str = ""
+    timeout_seconds: int = 30
+    interpreter: str = ""       # command: "bash" | "python3"
+    script_body: str = ""
+    content_hash: str = ""
+    url: str = ""
+    headers_json: str = ""
+    allowed_env_vars: list[str] = Field(default_factory=list)
+    mcp_server: str = ""
+    mcp_tool: str = ""
+    enabled: bool = False       # DERIVED: len(enforced_events) > 0
+    enforced: bool = False      # DERIVED: len(enforced_events) > 0
+    default_on: bool = False
+    predefined: bool = False
+    seed_version: int = 0
+    target: str = ""
+    updated_at: str | None = None
+    updated_by: str = ""
+    # Per-event activation — the subset of `events` the hook actually fires on
+    # (admin panel shield is per event group). Invariant: subset of events.
+    enforced_events: list[str] = Field(default_factory=list)
 
 
 class PendingRegistrationRecord(BaseModel):
@@ -219,6 +253,24 @@ class RunnerDefaultsClient(Protocol):
     ) -> RunnerDefaultsRecord: ...
 
 
+class HookPolicyClient(Protocol):
+    """Errors (mapped to gRPC codes by the server, back to these by the client):
+    upsert(expect="create") raises ValueError on id collision; upsert(expect=
+    "update") / delete raise LookupError on a missing row; delete raises
+    PermissionError on a predefined row."""
+
+    def list(self, enabled_only: bool = False) -> list[HookPolicyRecord]: ...
+    def get(self, policy_id: str) -> HookPolicyRecord | None: ...
+    def upsert(
+        self,
+        policy: HookPolicyRecord,
+        *,
+        update_mask: list[str] | None = None,  # None/[] = all writable fields
+        expect: str = "",  # "" | "create" | "update"
+    ) -> HookPolicyRecord: ...
+    def delete(self, policy_id: str) -> None: ...
+
+
 class RegistrationClient(Protocol):
     def create(
         self,
@@ -250,3 +302,4 @@ class DataplaneClient:
     resource_specs: ResourceSpecClient
     runner_defaults: RunnerDefaultsClient
     registrations: RegistrationClient
+    hook_policies: HookPolicyClient

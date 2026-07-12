@@ -40,6 +40,39 @@ export function fileTabFromToolUse(block, browserSource = FILE_SOURCE_CURRENT) {
   }
 }
 
+function resultPayloads(result, toolUseResult) {
+  const payloads = []
+  if (result && typeof result === 'object') payloads.push(result)
+  if (result?.tool_use_result && typeof result.tool_use_result === 'object') {
+    payloads.push(result.tool_use_result)
+  }
+  if (result?.toolUseResult && typeof result.toolUseResult === 'object') {
+    payloads.push(result.toolUseResult)
+  }
+  if (toolUseResult && typeof toolUseResult === 'object') payloads.push(toolUseResult)
+  return payloads
+}
+
+export function isErroredToolResult(result, toolUseResult = null) {
+  return resultPayloads(result, toolUseResult).some((payload) => {
+    const status = String(payload.status || payload.toolStatus || '').toLowerCase()
+    return (
+      payload.is_error === true ||
+      payload.isError === true ||
+      payload.error === true ||
+      (typeof payload.error === 'string' && payload.error.trim().length > 0) ||
+      status === 'error' ||
+      status === 'failed'
+    )
+  })
+}
+
+export function shouldOpenToolFileInBrowser(block, result, toolUseResult = null) {
+  if (!block || !FILE_TOOL_NAMES.has(block.name)) return false
+  if (block.name === 'Write' && isErroredToolResult(result, toolUseResult)) return false
+  return true
+}
+
 export function fileTabsFromGeneratedFiles(files, browserSource = FILE_SOURCE_CURRENT, toolUseId = null) {
   if (!Array.isArray(files)) return []
   return files

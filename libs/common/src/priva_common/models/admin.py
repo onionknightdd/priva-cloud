@@ -199,6 +199,143 @@ class RunnerImagesResponse(BaseModel):
     source: str = "nodes"
 
 
+# --- Hook Policy (admin "Runtime" panel) -------------------------------------
+# Admin-stored hooks in data-spine, delivered to every agent-runner at session
+# build. hook_type uses Claude Code native strings ("command"|"http"|"mcp_tool";
+# mcp_tool is schema-reserved and rejected in v1). script_body is included on
+# the ADMIN surface only — the user-facing catalog (agent-runner /catalog)
+# never exposes it.
+
+class HookPolicyItem(BaseModel):
+    id: str
+    hook_type: str = "command"
+    name: str = ""
+    description: str = ""  # zh content, shown verbatim to users
+    events: list[str] = Field(default_factory=list)
+    matcher: str = ""
+    timeout_seconds: int = 30
+    interpreter: str = ""
+    script_body: str = ""
+    content_hash: str = ""
+    url: str = ""
+    headers_json: str = ""
+    allowed_env_vars: list[str] = Field(default_factory=list)
+    mcp_server: str = ""
+    mcp_tool: str = ""
+    enabled: bool = False
+    enforced: bool = False       # derived: len(enforced_events) > 0
+    # Per-event activation: subset of `events` the hook actually fires on.
+    enforced_events: list[str] = Field(default_factory=list)
+    default_on: bool = False
+    predefined: bool = False
+    seed_version: int = 0
+    target: str = ""
+    updated_at: str | None = None
+    updated_by: str = ""
+    # Computed vs the shipped seeds: None (custom row) | "current" | "edited"
+    # (admin-modified, no newer seed) | "outdated" (admin-modified AND a newer
+    # seed shipped — the UI shows the diff banner).
+    seed_state: str | None = None
+    latest_seed_version: int | None = None
+
+
+class HookPolicyListResponse(BaseModel):
+    items: list[HookPolicyItem] = Field(default_factory=list)
+    supported_events: list[str] = Field(default_factory=list)
+
+
+class HookPolicyCreate(BaseModel):
+    id: str
+    hook_type: str = "command"
+    name: str
+    description: str
+    events: list[str]
+    matcher: str = ""
+    timeout_seconds: int | None = None  # default: command 30 · http 5
+    interpreter: str = ""
+    script_body: str = ""
+    url: str = ""
+    headers_json: str = ""
+    allowed_env_vars: list[str] = Field(default_factory=list)
+    mcp_server: str = ""
+    mcp_tool: str = ""
+    # NOTE: new rows always save enabled=false (arm explicitly) — an `enabled`
+    # field here would be ignored, so there isn't one.
+    enforced: bool = False
+    # Per-event activation (subset of events). Empty + enforced=true means
+    # "all events" (legacy-client behavior).
+    enforced_events: list[str] = Field(default_factory=list)
+    default_on: bool = False
+    target: str = ""
+
+
+class HookPolicyUpdate(BaseModel):
+    """Partial update — only provided fields are written (update_mask from
+    fields_set). Validation runs on the merged row."""
+    hook_type: str | None = None
+    name: str | None = None
+    description: str | None = None
+    events: list[str] | None = None
+    matcher: str | None = None
+    timeout_seconds: int | None = None
+    interpreter: str | None = None
+    script_body: str | None = None
+    url: str | None = None
+    headers_json: str | None = None
+    allowed_env_vars: list[str] | None = None
+    mcp_server: str | None = None
+    mcp_tool: str | None = None
+    enabled: bool | None = None
+    enforced: bool | None = None
+    # Per-event activation (subset of events); the server derives `enforced`
+    # from its non-emptiness.
+    enforced_events: list[str] | None = None
+    default_on: bool | None = None
+    target: str | None = None
+
+
+class HookPolicyValidationError(BaseModel):
+    field: str
+    message: str
+    line: int | None = None  # script syntax errors carry the line number
+
+
+class HookPolicyValidateRequest(BaseModel):
+    """Validate a draft without saving (the drawer's [Validate] button). Same
+    shape as create; id optional so unsaved drafts can validate too."""
+    id: str | None = None
+    hook_type: str = "command"
+    name: str = ""
+    description: str = ""
+    events: list[str] = Field(default_factory=list)
+    matcher: str = ""
+    timeout_seconds: int | None = None
+    interpreter: str = ""
+    script_body: str = ""
+    url: str = ""
+    headers_json: str = ""
+    allowed_env_vars: list[str] = Field(default_factory=list)
+
+
+class HookPolicyValidateResponse(BaseModel):
+    valid: bool
+    errors: list[HookPolicyValidationError] = Field(default_factory=list)
+
+
+class HookPolicySeedResponse(BaseModel):
+    """The shipped seed content for a predefined row (side-by-side diff view)."""
+    id: str
+    seed_version: int
+    name: str
+    description: str
+    events: list[str]
+    matcher: str
+    interpreter: str
+    script_body: str
+    timeout_seconds: int
+    default_on: bool
+
+
 class PresetPromptResponse(BaseModel):
     enable: bool = False
     content: str | None = None

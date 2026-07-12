@@ -21,6 +21,7 @@ import threading
 from pathlib import Path
 
 from .logging import get_app_logger
+from .paths import claude_config_dir
 
 logger = get_app_logger(__name__)
 
@@ -44,8 +45,7 @@ def settings_json_path() -> Path:
     the hooks builder writes. Falls back to ``~/.claude`` for local dev where the
     runner shares the host home.
     """
-    base = os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude"
-    return Path(base).expanduser() / "settings.json"
+    return claude_config_dir() / "settings.json"
 
 
 def _read_settings(path: Path) -> dict:
@@ -115,6 +115,54 @@ def write_settings_env(creds: dict, path: Path | None = None) -> None:
         os.chmod(path, 0o600)
     except OSError:
         pass
+
+
+# Platform-required settings.json defaults, written with setdefault semantics
+# (an explicit user value is never overridden).
+#
+# enableAllProjectMcpServers: project .mcp.json servers are managed through the
+# platform UI, but headless (-p / SDK) runs never show the interactive approval
+# prompt — verified live on CLI 2.1.191: unapproved project servers just sit
+# "Pending approval" forever. Auto-approving them is the product semantic:
+# whatever the MCP panel configured is what runs.
+SETTINGS_DEFAULTS: dict = {
+    "enableAllProjectMcpServers": True,
+}
+
+
+def ensure_claude_settings_defaults(path: Path | None = None) -> None:
+    """Seed missing SETTINGS_DEFAULTS keys into settings.json (locked RMW).
+
+    Same locking discipline as write_settings_env: flock(LOCK_EX) spans read
+    and write, all other keys preserved, file kept 0600. No-op (no write) when
+    every default is already present.
+    """
+    path = path or settings_json_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _lock:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "r+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                raw = f.read()
+                try:
+                    data = json.loads(raw) if raw.strip() else {}
+                except (ValueError, TypeError):
+                    data = {}
+                if not isinstance(data, dict):
+                    data = {}
+                changed = False
+                for key, value in SETTINGS_DEFAULTS.items():
+                    if key not in data:
+                        data[key] = value
+                        changed = True
+                if changed:
+                    f.seek(0)
+                    f.truncate()
+                    json.dump(data, f, indent=2)
+                    f.write("\n")
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def has_settings_env(path: Path | None = None) -> bool:

@@ -23,6 +23,7 @@ from priva_common.models.skills import (
     SkillSummary,
 )
 from priva_common.config import get_settings
+from priva_common.paths import claude_config_dir
 
 logger = get_app_logger(__name__)
 
@@ -76,8 +77,10 @@ EXTENSION_LANGUAGE_MAP = {
 
 def _get_skills_dir(level: SkillLevel, username: str | None = None) -> Path:
     if level == "global":
-        # Maps to SDK setting_sources=["user"] → ~/.claude/skills/
-        return Path.home() / ".claude" / "skills"
+        # Maps to SDK setting_sources=["user"] → $CLAUDE_CONFIG_DIR/skills/
+        # (~/.claude/skills only in local dev; on pods HOME ≠ CLAUDE_CONFIG_DIR
+        # and the CLI never reads ~/.claude).
+        return claude_config_dir() / "skills"
     settings = get_settings()
     base = os.path.expanduser(settings.server.work_dir)
     if username is None:
@@ -89,7 +92,8 @@ def _get_skills_dir(level: SkillLevel, username: str | None = None) -> Path:
 # ---------------------------------------------------------------------------
 # Per-workdir + personal discovery (the listing/CRUD API)
 #
-# ``personal`` skills live in ``~/.claude/skills`` (SDK setting_sources=["user"]).
+# ``personal`` skills live in ``$CLAUDE_CONFIG_DIR/skills`` (SDK
+# setting_sources=["user"]; ~/.claude/skills only in local dev).
 # ``workdir`` skills live in ``{cwd}/.claude/skills`` for each of the user's
 # project directories — enumerated the same way the sessions endpoint does
 # (``list_sessions(directory=None)`` distinct cwds ∪ the default workspace).
@@ -98,7 +102,7 @@ def _get_skills_dir(level: SkillLevel, username: str | None = None) -> Path:
 # ---------------------------------------------------------------------------
 
 def _personal_skills_dir() -> Path:
-    return Path.home() / ".claude" / "skills"
+    return claude_config_dir() / "skills"
 
 
 def _default_workspace(username: str) -> str:

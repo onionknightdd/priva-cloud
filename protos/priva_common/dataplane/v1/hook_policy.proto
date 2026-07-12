@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package priva.dataplane.v1;
+
+import "priva_common/dataplane/v1/common.proto";
+
+// hook_policy — admin-stored hooks delivered to every agent-runner (the admin
+// "Runtime" panel). Rows use Claude Code native hook types; the legacy in-process
+// builtin registry is replaced by predefined seeded rows (insert-if-absent on
+// data-spine startup, ids = legacy builtin slugs so user prefs carry over).
+// Runners fetch the enabled snapshot at session build (~30s TTL cache) and
+// materialize command script bodies to $PRIVA_HOME/admin-hooks/<id>/ on hash
+// change — data-spine is never on the hook fire hot path.
+message HookPolicy {
+  string id              = 1;   // slug (^[a-z0-9][a-z0-9-]*$)
+  string hook_type       = 2;   // "command" | "http" | "mcp_tool"
+  string name            = 3;
+  string description     = 4;   // required; shown verbatim to users (zh content)
+  repeated string events = 5;   // hook event names; expanded per event at injection
+  string matcher         = 6;   // "" = all tools
+  int32  timeout_seconds = 7;   // command default 30 · http default 5
+
+  // command
+  string interpreter     = 8;   // "bash" | "python3"
+  string script_body     = 9;   // <= 64 KiB — THE payload, stored in DB
+  string content_hash    = 10;  // server-computed sha256 of script_body
+
+  // http
+  string url             = 11;
+  string headers_json    = 12;  // JSON object; values may be env refs ("Bearer $TOKEN"), never literals
+  repeated string allowed_env_vars = 13;  // extra env passthrough beyond the base allowlist
+
+  // mcp_tool — schema-reserved, validation-rejected in v1
+  string mcp_server      = 14;
+  string mcp_tool        = 15;
+
+  bool   enabled         = 16;  // DERIVED: len(enforced_events) > 0 (kept for back-compat filters)
+  bool   enforced        = 17;  // DERIVED: len(enforced_events) > 0 (user cannot toggle)
+  bool   default_on      = 18;  // initial user state when not enforced
+  bool   predefined      = 19;  // seeded: editable, disable-able, NOT deletable
+  int32  seed_version    = 20;  // seed upgrade mechanism (unedited rows auto-update)
+  string target          = 21;  // reserved (canary/groups, v2)
+  string updated_at      = 22;
+  string updated_by      = 23;
+
+  // Per-event activation: the subset of `events` the hook actually fires on.
+  // The admin panel's per-event-group shield toggles membership here, so one
+  // hook spanning PreToolUse+PostToolUse can be enforced on just one of them.
+  // Server-side invariant: enforced_events is a subset of events; enabled and
+  // enforced are derived from non-emptiness on every write.
+  repeated string enforced_events = 24;
+}
+
+message HookPolicyList { repeated HookPolicy items = 1; }
+
+message ListHookPoliciesRequest { bool enabled_only = 1; }
+
+message HookPolicyRef { string id = 1; }
+
+// Upsert semantics: update_mask names the fields to write (id is the key, never
+// masked). Empty mask = write all writable fields (create path). `expect` maps
+// REST verbs onto the single RPC: "create" fails ALREADY_EXISTS on collision,
+// "update" fails NOT_FOUND on a missing row, "" is a true upsert.
+message UpsertHookPolicyRequest {
+  HookPolicy policy       = 1;
+  repeated string update_mask = 2;
+  string expect           = 3;  // "" | "create" | "update"
+}
+
+service HookPolicyService {
+  rpc List(ListHookPoliciesRequest) returns (HookPolicyList);
+  rpc Get(HookPolicyRef) returns (HookPolicy);      // empty id => not found
+  rpc Upsert(UpsertHookPolicyRequest) returns (HookPolicy);
+  rpc Delete(HookPolicyRef) returns (Empty);        // FAILED_PRECONDITION if predefined; NOT_FOUND if missing
+}

@@ -7,14 +7,17 @@ from pydantic import BaseModel, Field
 
 
 class HookHandler(BaseModel):
-    """A single hook handler definition, matching Claude Code's native format."""
+    """A single hook handler definition, matching Claude Code's native format.
 
-    type: Literal["command", "http", "prompt", "agent"]
+    Types follow the hook-policy model: command | http | mcp_tool (mcp_tool is
+    schema-reserved — no executor in v1). The legacy prompt/agent types were
+    never executed by the Priva engine and are gone.
+    """
+
+    type: Literal["command", "http", "mcp_tool"]
     command: str | None = None
     url: str | None = None
-    prompt: str | None = None
     timeout: int = 30
-    model: str | None = None
     headers: dict[str, str] | None = None
     allowedEnvVars: list[str] | None = None
 
@@ -32,19 +35,20 @@ class HookConfig(BaseModel):
     hooks: dict[str, list[HookEntry]]
 
 
-class BuiltInHookInfo(BaseModel):
-    """Metadata for a built-in hook exposed by the API."""
+class HookCatalogEntry(BaseModel):
+    """An admin hook policy as shown to USERS (no script body — the old
+    ``source_code`` exposure is gone deliberately)."""
 
     id: str
     name: str
-    description: str
-    supported_events: list[str]
-    default_matcher: str | None = None
-    can_block: bool = False
-    enabled_by_default: bool = False
-    enforced: bool = False  # admin has enforced this
-    enabled: bool = False  # user has enabled this
-    source_code: str | None = None  # Python function source
+    description: str  # zh content, shown verbatim
+    hook_type: str  # "command" | "http" | "mcp_tool"
+    events: list[str] = Field(default_factory=list)
+    matcher: str = ""
+    enforced: bool = False  # locked on — user cannot toggle
+    default_on: bool = False
+    enabled: bool = False  # effective state for THIS user
+    predefined: bool = False
 
 
 class HookTestRequest(BaseModel):
@@ -64,25 +68,6 @@ class HookTestResponse(BaseModel):
     duration_ms: int
 
 
-class HookTestByIdRequest(BaseModel):
-    """Test a built-in hook by its ID with sample input."""
-
-    hook_id: str
-    event_type: str
-    input_json: dict = Field(default_factory=dict)
-
-
-class BuiltInHookTestResponse(BaseModel):
-    """Result of testing a built-in hook."""
-
-    hook_id: str
-    decision: str | None = None  # "allow", "deny", "ask", or None
-    reason: str | None = None
-    output: dict = Field(default_factory=dict)  # full hook return value
-    duration_ms: int
-    error: str | None = None
-
-
 class HookLogEntry(BaseModel):
     """A single hook execution log record."""
 
@@ -91,6 +76,7 @@ class HookLogEntry(BaseModel):
     event_type: str
     matcher: str | None = None
     handler_type: str
+    hook_id: str | None = None  # policy id for admin hooks, "user" for user hooks
     exit_code: int
     duration_ms: int
     tool_name: str | None = None

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from priva_common.dataplane.client import (
     BindingRecord,
+    HookPolicyRecord,
     PendingRegistrationRecord,
     QuotaRecord,
     ResourceSpecRecord,
@@ -84,6 +85,37 @@ def runner_defaults_from_pb(m) -> RunnerDefaultsRecord:
         storage_gb=m.storage_gb,
         runner_image=m.runner_image,
         updated_at=m.updated_at or None,
+    )
+
+
+def hook_policy_from_pb(m) -> HookPolicyRecord | None:
+    if not m.id:
+        return None
+    return HookPolicyRecord(
+        id=m.id,
+        hook_type=m.hook_type or "command",
+        name=m.name,
+        description=m.description,
+        events=list(m.events),
+        matcher=m.matcher,
+        timeout_seconds=m.timeout_seconds,
+        interpreter=m.interpreter,
+        script_body=m.script_body,
+        content_hash=m.content_hash,
+        url=m.url,
+        headers_json=m.headers_json,
+        allowed_env_vars=list(m.allowed_env_vars),
+        mcp_server=m.mcp_server,
+        mcp_tool=m.mcp_tool,
+        enabled=m.enabled,
+        enforced=m.enforced,
+        default_on=m.default_on,
+        predefined=m.predefined,
+        seed_version=m.seed_version,
+        target=m.target,
+        updated_at=m.updated_at or None,
+        updated_by=m.updated_by,
+        enforced_events=list(m.enforced_events),
     )
 
 

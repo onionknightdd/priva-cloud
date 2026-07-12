@@ -53,6 +53,22 @@ AGENT_RUNS_FINISHED = Counter(
     ["outcome"],  # success | error | cancelled
 )
 
+# --- Hook executor (admin policy hooks + user hooks; the blast-radius alarm) ---
+# hook_id = policy id for admin hooks, "user" for user-configured hooks
+# (unbounded user commands must not explode label cardinality).
+
+HOOK_FIRES = Counter(
+    "priva_hook_fires_total",
+    "Hook executions, by hook and outcome.",
+    ["hook_id", "status"],  # ok | blocked | error | timeout
+)
+
+HOOK_DURATION = Histogram(
+    "priva_hook_duration_seconds",
+    "Hook execution latency in seconds.",
+    ["hook_id"],
+)
+
 
 def build_registry() -> CollectorRegistry:
     """Return the registry to scrape.

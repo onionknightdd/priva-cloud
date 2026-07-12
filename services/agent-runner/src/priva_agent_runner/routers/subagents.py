@@ -134,7 +134,7 @@ async def test_subagent_stream(
     get_agent(user.username, scope, cwd, name)
 
     # Run at the agent's project cwd so the CLI discovers project-scoped agents;
-    # user-scoped agents are found in ~/.claude/agents from any cwd.
+    # user-scoped agents are found in $CLAUDE_CONFIG_DIR/agents from any cwd.
     run_cwd = cwd if (scope == "project" and cwd) else get_user_workspace(user)
     wrapped_prompt = f"Use the {name} agent to: {request.prompt}"
 

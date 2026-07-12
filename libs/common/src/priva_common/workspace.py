@@ -23,3 +23,10 @@ def get_user_workspace(user: UserRecord | None) -> str:
         workspace = os.path.join(base, user.username)
     os.makedirs(workspace, exist_ok=True)
     return workspace
+
+
+def get_workspace_for_username(username: str | None) -> str:
+    """``get_user_workspace`` for callers holding only a bare username."""
+    if username is None:
+        return get_user_workspace(None)
+    return get_user_workspace(UserRecord(username=username, password_hash="", role="user"))

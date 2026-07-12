@@ -281,7 +281,7 @@ footer a{color:var(--muted)}
   <div class="card"><div class="ct">终端用户 —— 内部员工</div>
     <p>获得一个拥有真实、持久工作区的个人 AI 助手：带流式与 canvas 的聊天控制台、支持 fork/rewind 的会话历史、PTY Web 终端、文件浏览器、以及个人 skills / MCP 服务器 / subagents / hooks。自带模型凭证（<code>ANTHROPIC_BASE_URL</code> / <code>ANTHROPIC_AUTH_TOKEN</code>）。</p></div>
   <div class="card"><div class="ct">平台管理员 —— 集群的运维者</div>
-    <p>通过管理端 SPA 开通并治理用户：用户 CRUD 与自助注册审批、每租户资源规格与存储配额、runner 默认值、强制 hooks（含 PII 脱敏）、风险工具策略、集群快照、资源用量、系统健康图、gateway 指标，以及一个进入控制平面 pod 的受审计控制台。</p></div>
+    <p>通过管理端 SPA 开通并治理用户：用户 CRUD 与自助注册审批、每租户资源规格与存储配额、runner 默认值、一套<strong>钩子策略</strong>（管理员存储、经 data-spine 下发的 hooks，可强制或由用户自选）、风险工具策略、集群快照、资源用量、系统健康图、gateway 指标，以及一个进入控制平面 pod 的受审计控制台。PII 脱敏是由「敏感模式」开关驱动的独立进程内后置过滤器，并非目录中的 hook。</p></div>
   <div class="card"><div class="ct">平台工程师 —— 扩展运行时</div>
     <p>通过编写 MCP 服务器、skills 与 plugins 集成内部系统；消费运行时 API（<code>/api/sandbox/*</code>、SSE / WebSocket）以将 agent 会话嵌入其他内部工具。</p></div>
 </div>
@@ -428,7 +428,7 @@ footer a{color:var(--muted)}
 <tbody>
 <tr><td><strong>control-panel</strong></td><td><code>8080</code> HTTP · <code>9000</code> ext_proc (TLS)</td><td>大脑：EPP endpoint picker、auth/admin/resource API、SPA 宿主、<code>AgentTenant</code> 开通器、cp-proxy 读取通道。从不看到运行时数据。</td><td>N，无状态</td></tr>
 <tr><td><strong>agent-runner</strong></td><td><code>8091</code></td><td>每租户运行时，封装 claude-agent-sdk 0.1.81，后者拉起烘焙进镜像的原生 <code>claude</code> CLI。提供 <code>/api/sandbox/*</code>：runs、sessions、skills、MCP、hooks、subagents、PTY、files。</td><td>每租户 0↔1</td></tr>
-<tr><td><strong>data-spine</strong></td><td><code>50051</code> gRPC</td><td>基于 SQLite（WAL、STRICT、RWO PVC）的单写者持久化状态，位于稳定的 <code>priva.dataplane.v1</code> 契约之后 —— 8 张表、7 个已注册服务。177 个测试通过。</td><td>1，<code>Recreate</code></td></tr>
+<tr><td><strong>data-spine</strong></td><td><code>50051</code> gRPC</td><td>基于 SQLite（WAL、STRICT、RWO PVC）的单写者持久化状态，位于稳定的 <code>priva.dataplane.v1</code> 契约之后 —— 9 张表、8 个已注册服务。177 个测试通过。</td><td>1，<code>Recreate</code></td></tr>
 <tr><td><strong>operator</strong></td><td>—</td><td>kopf 控制器，将 <code>AgentTenant</code> CR 调谐为 Deployment/Service/PVC。<em>唯一</em>扩缩者；10 s 定时器用于空闲回收、podIP 自愈、配额调谐。存储后端驱动（dev NFS / prod CephFS）。</td><td>1</td></tr>
 <tr><td><strong>agentgateway</strong></td><td><code>80</code></td><td>外部 Rust L7 edge（agentgateway.dev v1.3.0），经由 Gateway API + Inference Extension 开通。终结客户端传输、咨询 EPP、向 runner 流式转发。非 Priva 代码。</td><td>托管</td></tr>
 <tr><td><strong>nfs-xfs</strong> <span class="dim">仅 dev</span></td><td><code>2049</code> NFSv4 · <code>8099</code> quota</td><td>集群内 NFS 服务器，为每账号固定大小的 ext4 loop 镜像（文件系统大小 = 硬配额）提供后端 + 一个 quota-manager API。在 prod 中由外部 CephFS/NFS CSI 取代。</td><td>1（dev）</td></tr>
@@ -493,7 +493,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <tr><td><strong>工作区作用域</strong></td><td>每账号工作区 = 共享 RWX <code>priva-export</code> 卷的 <code>subPath &lt;account_id&gt;</code>（venv 与 <code>~/.claude/projects</code> 就在其中）；每账号审计卷 <code>/audit/&lt;account_id&gt;</code>；SDK 运行时以只读挂载；每账号 Python venv 位于 <code>&lt;workspace&gt;/.venv</code>。</td></tr>
 <tr><td><strong>签名的 runner token</strong></td><td><code>x-priva-runner-token</code>（HS256，<code>{account_id, username, exp}</code>）仅当 <code>token.account_id ==</code> pod 自身的 <code>ACCOUNT_ID</code> 时才被接受 —— 即便被直接访问，一个 runner 也无法服务另一个租户。</td></tr>
 <tr><td><strong>工具策略</strong></td><td>权限模式 <code>default | acceptEdits | plan | bypassPermissions</code>；一份管理员配置的风险工具清单会强制审批，<em>即便在</em> <code>bypassPermissions</code> 之下亦然；内置禁用工具：<code>WebFetch</code>、<code>WebSearch</code>、<code>NotebookEdit</code>、cron/worktree/remote-trigger 类工具。</td></tr>
-<tr><td><strong>护栏 hooks</strong></td><td>管理员强制 + 用户的 hooks 作为进程内 Python <code>PreToolUse</code>/<code>PostToolUse</code> 回调运行，其中包括一个带管理员可编辑模式的 PII 脱敏 hook —— 运行时的治理接缝。</td></tr>
+<tr><td><strong>护栏 hooks</strong></td><td>管理员的 hooks 存于 data-spine，会话构建时下发到每个 runner，作为进程内 SDK 回调（command 子进程或 http）运行；优先级为<em>强制 &gt; 用户关闭 &gt; 默认开启</em>，管理员规则会遮蔽冲突的用户 hook —— 运行时的治理接缝。（PII 脱敏是独立的进程内后置过滤器，并非目录中的 hook。）</td></tr>
 <tr><td><strong>凭证（BYOK）</strong></td><td>自 2026-07-01 起的 as-built：每个账号的凭证存于其自己 PVC 上的 <code>/workspace/.claude/settings.json</code>，由 pod 自身写入与读取 —— 无需在唤醒时物化、也无需在休眠时 GC 的每 pod Secret。密码用 bcrypt；用户 API 密钥用 Fernet 加密，并带一个 HMAC-SHA256 查找列。</td></tr>
 </tbody></table></div>
 
@@ -542,7 +542,8 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <tbody>
 <tr><td>Skills</td><td>agent-runner + SPA</td><td>枚举全局 <code>~/.claude/skills</code> + 项目 <code>.claude/skills</code>；每用户 <code>skill_exclude</code> 拒绝清单 → <code>options.skills</code>；skills hub / 市场弹窗</td><td><span class="st ship">已交付</span></td></tr>
 <tr><td>MCP 服务器</td><td>agent-runner + SPA</td><td>读取项目 <code>.mcp.json</code> + 全局设置；内置的进程内 <code>priva_File</code> 服务器（FileCanvas）驱动 Canvas 面板；按 <code>{level}/{name}</code> 做 CRUD，能力 + 工具校验</td><td><span class="st ship">已交付</span></td></tr>
-<tr><td>Hooks + PII 脱敏</td><td>agent-runner</td><td>管理员强制 + 用户的 hooks 作为进程内 Python <code>PreToolUse</code>/<code>PostToolUse</code> 回调；带管理员可编辑模式的 PII 脱敏 hook</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>钩子策略（管理员 + 用户 hooks）</td><td>agent-runner + control-panel + data-spine</td><td>管理员 hooks 存于 data-spine <code>hook_policy</code>（原生 <code>command</code>/<code>http</code> 类型；旧内置 hook 以预定义行重新播种），会话构建时拉取，作为进程内 SDK 回调运行 —— 使用构造的、无密钥的环境、exit-2 阻断语义，以及每次触发的 Prometheus 指标；优先级 <em>强制 &gt; 用户关闭 &gt; 默认开启</em>，管理员规则遮蔽冲突的用户 hook。管理员经 <em>Runtime</em> 面板编辑，用户看到仅含描述的目录。<span class="dim">仅限 SDK 会话 —— 终端启动的 <code>claude</code> 不在范围内。</span></td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>PII 脱敏</td><td>agent-runner</td><td>由管理员「敏感模式」开关驱动的进程内 <code>PostToolUse</code> 过滤器（并非目录 hook）；在模型看到之前经 <code>updatedToolOutput</code> 改写工具输出</td><td><span class="st ship">已交付</span></td></tr>
 <tr><td>Subagents</td><td>agent-runner</td><td><code>/subagents</code> 目录 + 按名 CRUD + <code>POST /{name}/test/stream</code></td><td><span class="st ship">已交付</span></td></tr>
 <tr><td>PTY Web 终端</td><td>agent-runner + xterm.js</td><td><code>WS /pty/ws</code> 进入租户自己的 pod；用户 SPA 中的底部抽屉 <em>（见 §4.4 未决风险）</em></td><td><span class="st ship">已交付</span></td></tr>
 <tr><td>文件浏览器 / 文件操作</td><td>agent-runner + Canvas</td><td><code>/files/{list,download,preview,upload}</code> + agent-attachments；管理员经 control-panel 跨文件浏览</td><td><span class="st ship">已交付</span></td></tr>
@@ -591,7 +592,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <tr><td><code>/credentials</code></td><td><code>GET</code> · <code>PUT</code> · <code>GET /status</code> · <code>GET /models</code></td></tr>
 <tr><td><code>/resource/mcp</code></td><td><code>GET /</code> · <code>GET|PUT|DELETE /{level}/{name}</code> · <code>GET /{level}/{name}/capabilities</code> · <code>POST /validate</code> · <code>POST /validate/tool</code></td></tr>
 <tr><td><code>/resource/skills</code></td><td><code>GET /</code> · <code>GET|PUT /config</code> · <code>GET /detail</code> · <code>GET /file</code> · <code>GET /download</code> · <code>POST /upload</code> · <code>DELETE /item</code> · <code>/resource/skill-hub</code></td></tr>
-<tr><td><code>/hooks</code></td><td><code>GET /catalog</code> · <code>POST /catalog/{id}/{enable,disable}</code> · <code>GET|PUT /config</code> · <code>POST /test</code> · <code>POST /test/builtin</code> · <code>GET /logs</code></td></tr>
+<tr><td><code>/hooks</code></td><td><code>GET /catalog</code>（管理员钩子策略，仅含描述）· <code>POST /catalog/{id}/{enable,disable}</code>（若强制则 403）· <code>GET|PUT /config</code>（用户 hooks + <code>shadowed</code> 标记）· <code>POST /test</code> · <code>GET /logs</code></td></tr>
 <tr><td><code>/subagents</code></td><td><code>GET /catalog</code> · <code>GET /list</code> · <code>GET|POST|PUT|DELETE /{name}</code> · <code>POST /{name}/test/stream</code></td></tr>
 <tr><td><code>/pty</code> · <code>/files</code> · <code>/user</code></td><td><code>WS /pty/ws</code>, <code>GET|PUT /pty/{feature,config}</code> · <code>/files/{list,download,preview,upload}</code> · <code>/user/{overview,stats,audit,analytics}</code></td></tr>
 </tbody>
@@ -602,9 +603,9 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <thead><tr><th style="width:22%">面</th><th>要点</th></tr></thead>
 <tbody>
 <tr><td>control-panel <code>/api/auth</code></td><td><code>setup</code> · <code>register</code> · <code>login</code> · <code>refresh</code> · <code>me</code> · <code>audit</code> · <code>me/apikey</code>（CRUD）· <code>me/password</code></td></tr>
-<tr><td>control-panel <code>/api/admin</code></td><td>runner-defaults · runner-images · users CRUD · pending-registrations + approve/reject · fleet · accounts restart/shutdown · gateway-metrics · resource-usage · system-health · audit · 配置开关 · admin-files</td></tr>
+<tr><td>control-panel <code>/api/admin</code></td><td>runner-defaults · runner-images · <code>hook-policy</code>（列表/新建/更新/删除 + <code>/validate</code> + <code>/{id}/seed</code>）· users CRUD · pending-registrations + approve/reject · fleet · accounts restart/shutdown · gateway-metrics · resource-usage · system-health · audit · 配置开关 · admin-files</td></tr>
 <tr><td>control-panel 专用通道</td><td><code>WS /api/admin/console/ws</code>（K8s-exec 桥）· <code>GET /api/cp-proxy/{path}</code>（大读取通道）· <code>:9000</code> gRPC <code>ExternalProcessor/Process</code>（ext_proc，TLS）</td></tr>
-<tr><td>data-spine gRPC <span class="dim">（已服务 7 个）</span></td><td><strong>Account</strong> · <strong>Binding</strong> · <strong>Quota</strong> · <strong>Admin</strong>（Healthz/Readyz/Stats）· <strong>ResourceSpec</strong> · <strong>RunnerDefaults</strong> · <strong>Registration</strong>。<strong>SchedulerService</strong> 已定义但尚未服务（Phase 4）。表：8。</td></tr>
+<tr><td>data-spine gRPC <span class="dim">（已服务 8 个）</span></td><td><strong>Account</strong> · <strong>Binding</strong> · <strong>Quota</strong> · <strong>Admin</strong>（Healthz/Readyz/Stats）· <strong>ResourceSpec</strong> · <strong>RunnerDefaults</strong> · <strong>Registration</strong> · <strong>HookPolicy</strong>（List/Get/Upsert/Delete；预定义行在启动时播种）。<strong>SchedulerService</strong> 已定义但尚未服务（Phase 4）。表：9。</td></tr>
 </tbody>
 </table></div>
 
@@ -612,7 +613,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <div class="cards">
   <div class="card"><div class="ct">Skills</div><p><code>.claude/skills</code> 中的 Markdown + 资产。每用户拒绝清单治理允许清单；一个 hub/市场呈现共享的 skills。由 <code>claude</code> CLI 原生读取。</p></div>
   <div class="card"><div class="ct">MCP 服务器</div><p>标准 <code>.mcp.json</code> 配置，外加一个为 Canvas 内置的进程内 <code>priva_File</code> 服务器。由管理员治理，使 agent 在策略之下抵达内部系统。</p></div>
-  <div class="card"><div class="ct">Hooks</div><p>进程内 Python <code>PreToolUse</code>/<code>PostToolUse</code> 回调 —— 管理员强制（含 PII 脱敏）加用户 hooks。运行时的治理接缝。</p></div>
+  <div class="card"><div class="ct">Hooks</div><p>管理员钩子策略存于 data-spine，会话构建时下发到每个 runner，作为进程内 SDK 回调（command 子进程或 http）在构造的、无密钥的环境中运行；优先级 <em>强制 &gt; 用户关闭 &gt; 默认开启</em>，冲突时管理员遮蔽用户。运行时的治理接缝。<span class="dim">（PII 脱敏是独立的进程内过滤器，并非目录 hook。）</span></p></div>
 </div>
 </section>
 
@@ -955,7 +956,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <tr><td><strong>花费失控（BYOK）</strong></td><td>无 token 计量 → 对一个循环、正在烧用户密钥的自主 agent 没有熔断。缓解：每用户花费上限 + 失控检测（§11.5）。</td><td><span class="st defer">已知</span></td></tr>
 <tr><td><strong>集群升级 / 版本偏斜</strong></td><td>每租户镜像偏斜且无受治理的发布；一次破坏性 SDK 变更可能搁浅会话。缓解：金丝雀 + eval 闸门 + 会话格式兼容性检查（§8.6）。</td><td><span class="st defer">已知</span></td></tr>
 <tr><td><strong>SDK / CLI 上游变动</strong></td><td>与快速演进的 <code>claude-agent-sdk</code> / CLI 紧耦合（破坏性变更、beta 头部、权限模型修订）。逐版本吸收；这是 SDK 原生性的代价。</td><td><span class="st defer">持续</span></td></tr>
-<tr><td><strong>文档与代码漂移</strong></td><td>部分仓库文档仍描述已被取代的 data-spine Fernet→Secret BYOK 流程与第 9 张 <code>secret</code> 表；as-built（自 2026-07-01 起）使用 pod 本地 <code>settings.json</code> 与 8 张表 / 7 个已服务的服务。本规格反映 as-built。</td><td><span class="st stub">次要</span></td></tr>
+<tr><td><strong>文档与代码漂移</strong></td><td>部分仓库文档仍描述已被取代的 data-spine Fernet→Secret BYOK 流程与旧的 <code>secret</code> 表；as-built（自 2026-07-01 起）使用 pod 本地 <code>settings.json</code>，当前为 9 张表 / 8 个已服务的服务（含钩子策略）。本规格反映 as-built。</td><td><span class="st stub">次要</span></td></tr>
 <tr><td><strong>生态收敛</strong></td><td>若 Agent Sandbox CRD + Managed Agents 的自托管 worker + agentgateway 收敛为一个开箱即用的「你集群上的 Claude agent」方案，pod 运行时层的一部分会被商品化。缓解：把差异化保持在租户/控制台/BYOK 层；把运行时层设计得可替换。</td><td><span class="st defer">战略</span></td></tr>
 </tbody>
 </table></div>
@@ -1011,6 +1012,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
   <li>Skills 与 MCP 服务器是特权 pod 中未经审查的代码。有什么能阻止一个被投毒的共享 skill？<span class="dim">（§12 供应链；§11.3 —— 尚无签名/审查/溯源。）</span></li>
   <li>为持有 PTY、运行任意代码的半可信用户提供共享内核隔离 —— gVisor/Kata、NetworkPolicy、mTLS 在哪里？<span class="dim">（§4.3 —— 全在 Phase 6。）</span></li>
   <li>来自被抓取页面或文件的提示注入 → 外泄。实际的防御是什么，而非愿景？<span class="dim">（§11.5 入站信任画像；OpenClaw 的教训，§9。）</span></li>
+  <li>你宣称「集中强制的护栏」，但管理员→runner 的配置通道在 K8s 中悄然断开 —— monolith 写入 control-panel 自己本地的 <code>.priva.settings.yml</code>，而 runner 读取的是每账号的另一份副本，因此 <code>enforced_hook_ids</code> 从来没有写入方，强制 hook 从未抵达任何一个 pod。还有什么是「宣称却未接线」的？<span class="dim">（hooks 已修复：钩子策略现经 data-spine <code>hook_policy</code> → 会话构建时的 runner 快照下发，且位于账号挂载之外，抗篡改。该通道上的其它旧开关 —— preset-prompt、risky-tools、敏感模式/PII、cli-path、history-retention —— 仍走旧路，是下一步迁移，§5 配置开关。）</span></li>
 </ul>
 
 <h3 id="challenge-sre">14.4 SRE / 运维 —— 「凌晨 3 点会发生什么？」</h3>

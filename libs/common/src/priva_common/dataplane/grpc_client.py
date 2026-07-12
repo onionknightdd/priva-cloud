@@ -37,6 +37,8 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         binding_pb2,
         binding_pb2_grpc,
         common_pb2,
+        hook_policy_pb2,
+        hook_policy_pb2_grpc,
         quota_pb2,
         quota_pb2_grpc,
         registration_pb2,
@@ -282,6 +284,53 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
             return cv.pending_from_pb(self._s.SetStatus(
                 registration_pb2.SetStatusRequest(request_id=request_id, status=status)))
 
+    class _HookPolicies:
+        def __init__(self):
+            self._s = hook_policy_pb2_grpc.HookPolicyServiceStub(channel)
+
+        @staticmethod
+        def _to_pb(p):
+            return hook_policy_pb2.HookPolicy(
+                id=p.id, hook_type=p.hook_type, name=p.name, description=p.description,
+                events=list(p.events), matcher=p.matcher, timeout_seconds=p.timeout_seconds,
+                interpreter=p.interpreter, script_body=p.script_body,
+                content_hash=p.content_hash, url=p.url, headers_json=p.headers_json,
+                allowed_env_vars=list(p.allowed_env_vars), mcp_server=p.mcp_server,
+                mcp_tool=p.mcp_tool, enabled=p.enabled, enforced=p.enforced,
+                default_on=p.default_on, predefined=p.predefined,
+                seed_version=p.seed_version, target=p.target, updated_by=p.updated_by,
+                enforced_events=list(p.enforced_events),
+            )
+
+        def list(self, enabled_only=False):
+            resp = self._s.List(hook_policy_pb2.ListHookPoliciesRequest(enabled_only=enabled_only))
+            return [cv.hook_policy_from_pb(p) for p in resp.items]
+
+        def get(self, policy_id):
+            return cv.hook_policy_from_pb(self._s.Get(hook_policy_pb2.HookPolicyRef(id=policy_id)))
+
+        def upsert(self, policy, *, update_mask=None, expect=""):
+            req = hook_policy_pb2.UpsertHookPolicyRequest(
+                policy=self._to_pb(policy), update_mask=update_mask or [], expect=expect)
+            try:
+                return cv.hook_policy_from_pb(self._s.Upsert(req))
+            except grpc.RpcError as exc:
+                if exc.code() == grpc.StatusCode.ALREADY_EXISTS:
+                    raise ValueError(exc.details()) from exc
+                if exc.code() == grpc.StatusCode.NOT_FOUND:
+                    raise LookupError(exc.details()) from exc
+                raise
+
+        def delete(self, policy_id):
+            try:
+                self._s.Delete(hook_policy_pb2.HookPolicyRef(id=policy_id))
+            except grpc.RpcError as exc:
+                if exc.code() == grpc.StatusCode.NOT_FOUND:
+                    raise LookupError(exc.details()) from exc
+                if exc.code() == grpc.StatusCode.FAILED_PRECONDITION:
+                    raise PermissionError(exc.details()) from exc
+                raise
+
     class _SchedulerDeferred:
         """scheduler is not served over gRPC this phase (Phase 4)."""
 
@@ -299,6 +348,7 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         resource_specs=_ResourceSpecs(),
         runner_defaults=_RunnerDefaults(),
         registrations=_Registrations(),
+        hook_policies=_HookPolicies(),
     )
     _cache[dsn] = client
     return client

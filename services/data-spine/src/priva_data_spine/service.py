@@ -18,6 +18,7 @@ from priva_common.crypto import decrypt_value, encrypt_value
 from priva_common.dataplane import (
     BindingRecord,
     DataplaneClient,
+    HookPolicyRecord,
     PendingRegistrationRecord,
     QuotaRecord,
     ResourceSpecRecord,
@@ -26,6 +27,7 @@ from priva_common.dataplane import (
     UNSET,
     set_inprocess_handlers,
 )
+from priva_common.hook_seeds import HOOK_SEEDS, content_hash as hook_content_hash
 from priva_common._pagination import compute_cursors, decode_cursor, encode_cursor
 from priva_common.models.auth import UserRecord
 from priva_common.models.scheduler import JobRunRecord, ScheduledJobDefinition
@@ -540,6 +542,217 @@ class RunnerDefaultsService:
         return self._to_record(self.repo.runner_defaults_upsert(fields))
 
 
+# --- HookPolicy ---------------------------------------------------------------
+
+class HookPolicyService:
+    """Admin-stored hooks (the admin "Runtime" panel). Predefined rows are the
+    legacy builtin hooks, seeded insert-if-absent at construction (data-spine
+    startup); a seed_version bump auto-refreshes rows still carrying a known
+    (unedited) body hash and leaves admin-edited rows alone — the admin UI shows
+    a diff banner for those instead.
+
+    Error contract (server maps to gRPC codes): upsert(expect="create") raises
+    ValueError on id collision; expect="update" / delete raise LookupError when
+    the row is missing; delete raises PermissionError for predefined rows."""
+
+    # Fields the API may write. predefined / seed_version are seeder-owned;
+    # content_hash is always derived from script_body server-side.
+    _WRITABLE = ("hook_type", "name", "description", "events", "matcher",
+                 "timeout_seconds", "interpreter", "script_body", "url",
+                 "headers_json", "allowed_env_vars", "mcp_server", "mcp_tool",
+                 "enabled", "enforced", "enforced_events", "default_on", "target",
+                 "updated_by")
+
+    def __init__(self, repo: Repository):
+        self.repo = repo
+        self._seed()
+
+    @staticmethod
+    def _to_record(row: dict | None) -> HookPolicyRecord | None:
+        if row is None:
+            return None
+
+        def _json_list(raw) -> list[str]:
+            try:
+                v = json.loads(raw) if raw else []
+                return [str(x) for x in v] if isinstance(v, list) else []
+            except (ValueError, TypeError):
+                return []
+
+        return HookPolicyRecord(
+            id=row["id"],
+            hook_type=row["hook_type"],
+            name=row["name"],
+            description=row["description"],
+            events=_json_list(row["events"]),
+            matcher=row["matcher"],
+            timeout_seconds=int(row["timeout_seconds"]),
+            interpreter=row["interpreter"],
+            script_body=row["script_body"],
+            content_hash=row["content_hash"],
+            url=row["url"],
+            headers_json=row["headers_json"],
+            allowed_env_vars=_json_list(row["allowed_env_vars"]),
+            mcp_server=row["mcp_server"],
+            mcp_tool=row["mcp_tool"],
+            enabled=bool(row["enabled"]),
+            enforced=bool(row["enforced"]),
+            default_on=bool(row["default_on"]),
+            predefined=bool(row["predefined"]),
+            seed_version=int(row["seed_version"]),
+            target=row["target"],
+            updated_at=row.get("updated_at"),
+            updated_by=row.get("updated_by") or "",
+            enforced_events=_json_list(row.get("enforced_events")),
+        )
+
+    @staticmethod
+    def _fields_from(policy: HookPolicyRecord, names) -> dict:
+        fields: dict = {}
+        for n in names:
+            if n == "events":
+                fields[n] = json.dumps(list(policy.events))
+            elif n == "enforced_events":
+                fields[n] = json.dumps(list(policy.enforced_events))
+            elif n == "allowed_env_vars":
+                fields[n] = json.dumps(list(policy.allowed_env_vars))
+            elif n in ("enabled", "enforced", "default_on"):
+                fields[n] = int(getattr(policy, n))
+            elif n == "timeout_seconds":
+                fields[n] = int(policy.timeout_seconds)
+            else:
+                fields[n] = getattr(policy, n)
+        if "script_body" in fields:
+            fields["content_hash"] = hook_content_hash(policy.script_body)
+        return fields
+
+    def list(self, enabled_only: bool = False) -> list[HookPolicyRecord]:
+        return [self._to_record(r) for r in self.repo.hook_policy_list(enabled_only)]
+
+    def get(self, policy_id: str) -> HookPolicyRecord | None:
+        return self._to_record(self.repo.hook_policy_get(policy_id))
+
+    @staticmethod
+    def _normalize_activation(merged: HookPolicyRecord, mask: list[str]) -> list[str]:
+        """Per-event activation invariants, applied on every write.
+
+        ``enforced_events`` (⊆ events) is the source of truth for where the
+        hook fires; ``enforced`` is derived from its non-emptiness. Legacy
+        clients that only flip the booleans keep working: enforced=true →
+        all events, enforced=false (or enabled=false) → none. Returns the
+        write mask extended with the derived fields."""
+        if "enforced_events" in mask:
+            ee = list(merged.enforced_events)
+        elif "enforced" in mask:
+            ee = list(merged.events) if merged.enforced else []
+        elif "enabled" in mask and not merged.enabled:
+            ee = []
+        else:
+            ee = list(merged.enforced_events)
+        # Clamp to the (possibly just-edited) event set, preserving its order.
+        allowed = set(ee)
+        merged.enforced_events = [e for e in merged.events if e in allowed]
+        merged.enforced = bool(merged.enforced_events)
+        out = list(mask)
+        for extra in ("enforced_events", "enforced"):
+            if extra not in out:
+                out.append(extra)
+        if merged.enforced and not merged.enabled:
+            merged.enabled = True  # a firing hook is by definition armed
+            if "enabled" not in out:
+                out.append("enabled")
+        return out
+
+    def upsert(self, policy: HookPolicyRecord, *, update_mask=None, expect: str = "") -> HookPolicyRecord:
+        existing = self.repo.hook_policy_get(policy.id)
+        if expect == "create" and existing is not None:
+            raise ValueError(f"hook policy '{policy.id}' already exists")
+        if expect == "update" and existing is None:
+            raise LookupError(f"hook policy '{policy.id}' not found")
+        if existing is None:
+            create = policy.model_copy()
+            # Legacy create with enforced/enabled set but no per-event list
+            # means "all events" (mirrors the pre-per-event behavior).
+            if not create.enforced_events and (create.enforced or create.enabled):
+                create.enforced_events = list(create.events)
+            self._normalize_activation(create, list(self._WRITABLE))
+            fields = self._fields_from(create, self._WRITABLE)  # create is always the full row
+            fields["id"] = create.id
+            fields["predefined"] = 0
+            fields["seed_version"] = 0
+            self.repo.hook_policy_insert(fields)
+        else:
+            mask = [f for f in (update_mask or []) if f in self._WRITABLE] or list(self._WRITABLE)
+            # Normalization needs the merged row (a partial mask may touch
+            # events without enforced_events, or vice versa).
+            merged = self._to_record(existing).model_copy(
+                update={f: getattr(policy, f) for f in mask})
+            mask = self._normalize_activation(merged, mask)
+            self.repo.hook_policy_update(policy.id, self._fields_from(merged, mask))
+        return self.get(policy.id)
+
+    def delete(self, policy_id: str) -> None:
+        row = self.repo.hook_policy_get(policy_id)
+        if row is None:
+            raise LookupError(f"hook policy '{policy_id}' not found")
+        if row["predefined"]:
+            raise PermissionError(f"hook policy '{policy_id}' is predefined and cannot be deleted")
+        self.repo.hook_policy_delete(policy_id)
+
+    def _seed(self) -> None:
+        for seed in HOOK_SEEDS:
+            row = self.repo.hook_policy_get(seed.id)
+            if row is None:
+                try:
+                    self.repo.hook_policy_insert({
+                        "id": seed.id,
+                        "hook_type": "command",
+                        "name": seed.name,
+                        "description": seed.description,
+                        "events": json.dumps(list(seed.events)),
+                        "matcher": seed.matcher,
+                        "timeout_seconds": seed.timeout_seconds,
+                        "interpreter": seed.interpreter,
+                        "script_body": seed.script_body,
+                        "content_hash": seed.hash,
+                        "allowed_env_vars": "[]",
+                        "enabled": 1,
+                        "enforced": int(seed.enforced),
+                        "enforced_events": json.dumps(list(seed.events)) if seed.enforced else "[]",
+                        "default_on": int(seed.default_on),
+                        "predefined": 1,
+                        "seed_version": seed.seed_version,
+                        "updated_by": "seed",
+                    })
+                except Exception:  # lost an insert race with a sibling seeder — fine
+                    pass
+            elif (int(row["seed_version"] or 0) < seed.seed_version
+                  and row["content_hash"] in seed.known_hashes()):
+                # Unedited row from an older release → refresh to the shipped seed.
+                # Edited rows keep their content; the admin UI offers the diff.
+                # A version bump also adopts the seed's default enforcement flags
+                # (rev-5 flips block-dangerous-bash / audit-tool-use /
+                # require-permission-risky-tools to enforced) — safe here because
+                # the content is unedited, and an admin's later flag change (which
+                # leaves content_hash intact) is only re-synced on the NEXT bump.
+                self.repo.hook_policy_update(seed.id, {
+                    "name": seed.name,
+                    "description": seed.description,
+                    "events": json.dumps(list(seed.events)),
+                    "matcher": seed.matcher,
+                    "timeout_seconds": seed.timeout_seconds,
+                    "interpreter": seed.interpreter,
+                    "script_body": seed.script_body,
+                    "content_hash": seed.hash,
+                    "enabled": 1,
+                    "enforced": int(seed.enforced),
+                    "enforced_events": json.dumps(list(seed.events)) if seed.enforced else "[]",
+                    "default_on": int(seed.default_on),
+                    "seed_version": seed.seed_version,
+                    "updated_by": "seed-upgrade",
+                })
+
+
 # --- Registration ----------------------------------------------------------
 
 class RegistrationService:
@@ -642,6 +855,7 @@ def build_inprocess_client(repo: Repository, settings) -> DataplaneClient:
         resource_specs=ResourceSpecService(repo),
         runner_defaults=RunnerDefaultsService(repo, settings),
         registrations=RegistrationService(repo),
+        hook_policies=HookPolicyService(repo),
     )
 
 

@@ -62,10 +62,14 @@ export default function ScriptEditor({
   // Enter/exit envelope for the expanded modal (kept mounted while exiting).
   const { mounted: modalMounted, panelRef, backdropRef } = useOverlayTransition({ open: expanded, variant: 'scale' })
 
-  const langExtension = useMemo(
-    () => (language === 'shell' ? StreamLanguage.define(shell) : python()),
-    [language]
-  )
+  // 'shell' -> shell mode; 'python' -> python mode; 'markdown'/'text' -> no
+  // language extension (plain text; no markdown mode is bundled). Falls back to
+  // python for backward compatibility with existing callers.
+  const langExtension = useMemo(() => {
+    if (language === 'shell') return StreamLanguage.define(shell)
+    if (language === 'markdown' || language === 'text') return null
+    return python()
+  }, [language])
 
   // Build a map: line -> worst severity ('error' wins over 'warning')
   const diagKey = diagnostics.map((d) => `${d.line}:${d.severity}`).join(',')
@@ -96,7 +100,7 @@ export default function ScriptEditor({
     return () => document.removeEventListener('keydown', onKey)
   }, [expanded])
 
-  const extensions = [langExtension, diagGutter, ...privaTheme]
+  const extensions = [langExtension, diagGutter, ...privaTheme].filter(Boolean)
 
   return (
     <>

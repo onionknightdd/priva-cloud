@@ -8,9 +8,7 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | /api/hooks/catalog | 获取所有内置 Hook 列表 |
-| POST | /api/hooks/catalog/{hook_id}/enable | 启用内置 Hook |
-| POST | /api/hooks/catalog/{hook_id}/disable | 禁用内置 Hook |
+| GET | /api/hooks/catalog | 获取所有内置 Hook 列表（只读）|
 | GET | /api/hooks/config | 获取 Hook 配置 |
 | PUT | /api/hooks/config | 更新 Hook 配置 |
 | POST | /api/hooks/test | 测试自定义 Hook |
@@ -51,19 +49,11 @@ curl GET /api/hooks/catalog \
 
 ---
 
-## 启用 / 禁用内置 Hook
+## 内置 Hook 为只读
 
-```bash
-# 启用
-curl -X POST /api/hooks/catalog/pre-tool-use-security/enable \
-  -H "Authorization: Bearer <token>"
-
-# 禁用
-curl -X POST /api/hooks/catalog/pre-tool-use-security/disable \
-  -H "Authorization: Bearer <token>"
-```
-
-**注意**：管理员强制启用（enforced）的 Hook 无法禁用。
+内置（管理员）Hook 现在均为**强制启用**，并通过受管配置（managed ConfigMap）原生下发，
+在 SDK 运行和终端 `claude` 中一致生效。用户无法启用 / 禁用（不再有 enable / disable 端点）；
+目录 `GET /api/hooks/catalog` 仅供查看。用户自定义 Hook 请通过 `PUT /api/hooks/config` 管理。
 
 ---
 

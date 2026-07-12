@@ -314,11 +314,14 @@ function SplitDropOverlay({ paneCount, preview = DEFAULT_DROP_PREVIEW, onChoose,
         className="absolute flex items-center justify-center"
         style={{
           boxSizing: 'border-box',
-          background: 'color-mix(in srgb, var(--bg-surface) 58%, transparent)',
+          background: 'color-mix(in srgb, var(--bg-overlay) 78%, transparent)',
+          backdropFilter: 'blur(8px) saturate(105%)',
+          WebkitBackdropFilter: 'blur(8px) saturate(105%)',
           border: '2px solid var(--blue)',
           borderRadius: 4,
           color: 'var(--text-primary)',
           overflow: 'hidden',
+          isolation: 'isolate',
         }}
         onDragOver={(event) => {
           event.preventDefault()

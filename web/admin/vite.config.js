@@ -13,7 +13,10 @@ export default defineConfig({
   root: __dirname,
   publicDir: resolve(__dirname, '../shared/public'),
   resolve: {
-    alias: { '@shared': resolve(__dirname, '../shared') },
+    alias: {
+      '@shared': resolve(__dirname, '../shared'),
+      '@user': resolve(__dirname, '../user/src'),
+    },
   },
   // Per-SPA session token key — distinct from the user SPA so logins don't cross over.
   define: {
@@ -53,6 +56,15 @@ export default defineConfig({
             ['react-smooth', 'recharts-scale', 'decimal.js-light', 'eventemitter3', 'fast-equals', 'internmap', 'clsx', 'tiny-invariant', '@babel/runtime'].includes(pkg)
           ) {
             return 'vendor-charts'
+          }
+          if (
+            pkg?.startsWith('@codemirror/') ||
+            pkg === '@uiw/react-codemirror' ||
+            pkg === '@uiw/codemirror-extensions-basic-setup' ||
+            pkg?.startsWith('@lezer/') ||
+            ['@marijn/find-cluster-break', 'style-mod', 'w3c-keyname', 'crelt'].includes(pkg)
+          ) {
+            return 'vendor-editor'
           }
           if (pkg === 'animejs') return 'vendor-motion'
           return 'vendor-misc'

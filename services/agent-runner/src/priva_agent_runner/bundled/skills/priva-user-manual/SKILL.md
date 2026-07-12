@@ -271,9 +271,7 @@ JWT 令牌通过登录接口获取，API Key 在设置页面生成。公开端�
 | | POST | /api/scheduler/running/{id}/cancel | 取消运行 |
 | | GET | /api/scheduler/health | 获取调度器健康状态 |
 | | POST | /api/scheduler/lint-script | 脚本语法检查 |
-| **Hooks** | GET | /api/hooks/catalog | 获取内置 Hook 列表 |
-| | POST | /api/hooks/catalog/{id}/enable | 启用内置 Hook |
-| | POST | /api/hooks/catalog/{id}/disable | 禁用内置 Hook |
+| **Hooks** | GET | /api/hooks/catalog | 获取内置 Hook 列表（只读，强制启用）|
 | | GET | /api/hooks/config | 获取 Hook 配置 |
 | | PUT | /api/hooks/config | 更新 Hook 配置 |
 | | POST | /api/hooks/test | 测试自定义 Hook |

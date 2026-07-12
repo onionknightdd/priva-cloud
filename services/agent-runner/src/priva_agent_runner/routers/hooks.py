@@ -1,154 +1,85 @@
-"""Hooks API — catalog, config, testing, logs, and admin enforcement."""
+"""Hooks API — admin-policy catalog, user config, testing, and logs.
+
+The catalog is the read-only, user-visible face of the admin hook policies
+(data-spine snapshot; script bodies are never exposed). Admin hooks are
+enforced-only and delivered NATIVELY via the managed-policy ConfigMap (D6) —
+there is no per-user enable/disable and no programmatic fallback. User-configured
+hooks live natively in the CLI-loaded ``settings.json`` at the user + project
+scope (D5); the CLI runs every loaded scope, so there is no shadowing.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import inspect
 import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from priva_common.audit_log import AuditEntry, get_audit_logger
 from priva_common.models.hooks import (
-    BuiltInHookInfo,
-    BuiltInHookTestResponse,
+    HookCatalogEntry,
     HookConfig,
-    HookLogEntry,
     HookLogsResponse,
-    HookTestByIdRequest,
     HookTestRequest,
     HookTestResponse,
 )
+from priva_common.user_store import UserRecord
+
 from ..deps import get_user_workspace, require_user
-from ..services.hooks.config_manager import HookConfigManager
-from ..services.hooks.executor import test_builtin_hook, test_hook
+from ..services.hooks.config_manager import VALID_SCOPES, HookConfigManager
+from ..services.hooks.executor import test_hook
 from ..services.hooks.log_store import get_hook_log_store
-from ..services.hooks.prefs import get_enabled_hook_ids as _shared_get_enabled_hook_ids
-from priva_common.audit_log import AuditEntry, get_audit_logger
-from priva_common.user_store import UserRecord, get_user_store
+from ..services.hooks.policy import get_policy_snapshot
 
 router = APIRouter(prefix="/api/sandbox/hooks", tags=["hooks"])
+
+
+def _enforced_policies():
+    """Admin policies active for every user — enforced-only since D6/D7."""
+    return [p for p in get_policy_snapshot() if p.enforced]
 
 
 # -- Helpers ----------------------------------------------------------------
 
 
 def _get_config_manager(user: UserRecord) -> HookConfigManager:
-    cwd = get_user_workspace(user)
-    return HookConfigManager(cwd)
+    return HookConfigManager(user.username)
 
 
-def _get_enforced_hook_ids() -> set[str]:
-    """Return the set of admin-enforced built-in hook IDs."""
-    runtime = get_user_store().get_runtime_config()
-    return set(runtime.get("enforced_hook_ids", []))
+def _catalog_for(username: str) -> list[HookCatalogEntry]:
+    """The admin catalog as shown to users. Enforced-only (D6/D7): every listed
+    policy is enforced, so ``enabled`` mirrors ``enforced`` — there is no per-user
+    toggle."""
+    return [
+        HookCatalogEntry(
+            id=p.id,
+            name=p.name,
+            description=p.description,
+            hook_type=p.hook_type,
+            # Show the events the hook actually fires on (per-event enforcement).
+            events=[e for e in p.events
+                    if e in set(getattr(p, "enforced_events", None) or p.events)],
+            matcher=p.matcher,
+            enforced=p.enforced,
+            default_on=p.default_on,
+            enabled=p.enforced,
+            predefined=p.predefined,
+        )
+        for p in get_policy_snapshot()
+    ]
 
 
-def _get_enabled_hook_ids(username: str) -> set[str]:
-    """Determine which built-in hooks are enabled for a user."""
-    return _shared_get_enabled_hook_ids(username)
+# -- Admin hook-policy catalog (user view, read-only) -------------------------
 
 
-# -- Built-in hook catalog --------------------------------------------------
-
-
-@router.get("/catalog", response_model=list[BuiltInHookInfo])
+@router.get("/catalog", response_model=list[HookCatalogEntry])
 async def list_catalog(user: UserRecord = Depends(require_user)):
-    """List all built-in hooks with metadata, enable status, enforcement."""
-    from ..services.hooks import built_in_hooks as _  # noqa: F401 — trigger registration
-    from ..services.hooks.registry import get_all_hooks
+    """Admin hook policies visible to this user (read-only).
 
-    all_hooks = get_all_hooks()
-    enabled_ids = _get_enabled_hook_ids(user.username)
-    enforced_ids = _get_enforced_hook_ids()
-
-    result = []
-    for meta in all_hooks:
-        try:
-            raw = inspect.getsource(meta.callback)
-            # Strip the @priva_hook(...) decorator block, keep only the function
-            lines = raw.split("\n")
-            func_start = 0
-            for i, line in enumerate(lines):
-                if line.lstrip().startswith("async def ") or line.lstrip().startswith("def "):
-                    func_start = i
-                    break
-            source = "\n".join(lines[func_start:])
-        except (OSError, TypeError):
-            source = None
-        result.append(BuiltInHookInfo(
-            id=meta.id,
-            name=meta.name,
-            description=meta.description,
-            supported_events=meta.events,
-            default_matcher=meta.matcher,
-            can_block=meta.can_block,
-            enabled_by_default=meta.enabled_by_default,
-            enforced=meta.id in enforced_ids,
-            enabled=meta.id in enabled_ids,
-            source_code=source,
-        ))
-    return result
-
-
-# -- Enable / disable built-in hooks ----------------------------------------
-
-
-@router.post("/catalog/{hook_id}/enable")
-async def enable_hook(hook_id: str, user: UserRecord = Depends(require_user)):
-    """Enable a built-in hook for this user."""
-    from ..services.hooks import built_in_hooks as _  # noqa: F401
-    from ..services.hooks.registry import get_hook_by_id
-
-    meta = get_hook_by_id(hook_id)
-    if meta is None:
-        raise HTTPException(404, f"Built-in hook '{hook_id}' not found")
-
-    store = get_user_store()
-    runtime = store.get_runtime_config()
-    user_prefs = runtime.get("user_hook_prefs", {})
-    user_prefs.setdefault(user.username, {})[hook_id] = True
-    store.update_runtime_config("user_hook_prefs", user_prefs)
-
-    audit = get_audit_logger()
-    audit.append(AuditEntry(
-        actor=user.username,
-        action="hooks.builtin_enabled",
-        target=hook_id,
-    ))
-
-    return {"status": "ok", "hook_id": hook_id, "enabled": True}
-
-
-@router.post("/catalog/{hook_id}/disable")
-async def disable_hook(hook_id: str, user: UserRecord = Depends(require_user)):
-    """Disable a built-in hook for this user (unless admin-enforced)."""
-    from ..services.hooks import built_in_hooks as _  # noqa: F401
-    from ..services.hooks.registry import get_hook_by_id
-
-    meta = get_hook_by_id(hook_id)
-    if meta is None:
-        raise HTTPException(404, f"Built-in hook '{hook_id}' not found")
-
-    # Check if admin-enforced
-    enforced_ids = _get_enforced_hook_ids()
-    if hook_id in enforced_ids:
-        raise HTTPException(403, f"Hook '{hook_id}' is admin-enforced and cannot be disabled")
-
-    store = get_user_store()
-    runtime = store.get_runtime_config()
-    user_prefs = runtime.get("user_hook_prefs", {})
-    user_prefs.setdefault(user.username, {})[hook_id] = False
-    store.update_runtime_config("user_hook_prefs", user_prefs)
-
-    audit = get_audit_logger()
-    audit.append(AuditEntry(
-        actor=user.username,
-        action="hooks.builtin_disabled",
-        target=hook_id,
-    ))
-
-    return {"status": "ok", "hook_id": hook_id, "enabled": False}
+    Enforced-only and natively delivered — no enable/disable. No script bodies
+    here; the description is the user-facing contract."""
+    return _catalog_for(user.username)
 
 
 # -- User hook config -------------------------------------------------------
@@ -156,29 +87,72 @@ async def disable_hook(hook_id: str, user: UserRecord = Depends(require_user)):
 
 @router.get("/config")
 async def get_config(user: UserRecord = Depends(require_user)):
-    """Merged view: admin-enforced + project + local hooks."""
+    """User-configured hooks grouped by settings.json scope, plus the admin
+    hooks active for this user.
+
+    ``scopes`` holds one group per scope that carries hooks: ``user``
+    ($CLAUDE_CONFIG_DIR/settings.json, always present) then each project workdir
+    ({cwd}/.claude/settings.json). Every scope is loaded natively by the CLI
+    (setting_sources=["project","user"]) and runs alongside the admin hooks —
+    there is NO shadowing (the CLI merges all loaded scopes and runs every
+    matching hook). ``admin`` lists the admin hooks active per event (virtual
+    entries; managed via the admin policy channel, not editable here)."""
     mgr = _get_config_manager(user)
-    merged = mgr.read_merged()
-    return {"hooks": merged}
+    mgr.purge_all_legacy()
+    scopes = [
+        {"scope": scope, "cwd": cwd, "hooks": hooks}
+        for scope, cwd, hooks in mgr.read_all()
+    ]
+
+    active = _enforced_policies()
+    admin: dict[str, list[dict]] = {}
+    for p in active:
+        # Per-event enforcement: list the hook only under events it fires on.
+        for event in [e for e in p.events
+                      if e in set(getattr(p, "enforced_events", None) or p.events)]:
+            admin.setdefault(event, []).append({
+                "id": p.id,
+                "name": p.name,
+                "description": p.description,
+                "hook_type": p.hook_type,
+                "matcher": p.matcher,
+                "enforced": p.enforced,
+            })
+
+    return {"scopes": scopes, "admin": admin}
 
 
 @router.put("/config")
 async def update_config(
     config: HookConfig,
+    scope: str = Query("project"),
+    cwd: str | None = Query(None),
     user: UserRecord = Depends(require_user),
 ):
-    """Update user's hook bindings.  Writes to .claude/settings.local.json."""
+    """Replace this user's hooks in ONE settings.json scope (``user`` | ``project``).
+
+    Writes natively into the CLI-loaded settings.json (surgical: only the
+    ``hooks`` key is touched, so the user-scope ``env`` cred block is preserved)
+    so the CLI runs the hooks directly. Only the target scope is modified."""
+    if scope not in VALID_SCOPES:
+        raise HTTPException(422, f"Invalid scope: {scope}")
+    if scope == "project" and cwd is not None and not os.path.isabs(cwd):
+        raise HTTPException(400, "An absolute 'cwd' is required for project-scope hooks")
+
     mgr = _get_config_manager(user)
-    mgr.write_local_hooks(config.hooks)
+    mgr.write_scope_hooks(scope, cwd, {
+        event: [entry.model_dump(exclude_none=True) for entry in entries]
+        for event, entries in config.hooks.items()
+    })
 
     audit = get_audit_logger()
     audit.append(AuditEntry(
         actor=user.username,
         action="hooks.config_updated",
-        details={"events": list(config.hooks.keys())},
+        details={"scope": scope, "cwd": cwd, "events": list(config.hooks.keys())},
     ))
 
-    return {"status": "ok", "hooks": config.hooks}
+    return {"status": "ok", "scope": scope, "cwd": cwd, "hooks": config.hooks}
 
 
 # -- Testing ----------------------------------------------------------------
@@ -196,21 +170,6 @@ async def test_hook_endpoint(
         handler=request.handler,
         input_json=request.input_json,
         cwd=cwd,
-    )
-    return result
-
-
-@router.post("/test/builtin", response_model=BuiltInHookTestResponse)
-async def test_builtin_hook_endpoint(
-    request: HookTestByIdRequest,
-    user: UserRecord = Depends(require_user),
-):
-    """Test a built-in hook by calling its Python callback directly."""
-    from ..services.hooks import built_in_hooks as _  # noqa: F401
-    result = await test_builtin_hook(
-        hook_id=request.hook_id,
-        event_type=request.event_type,
-        input_json=request.input_json,
     )
     return result
 

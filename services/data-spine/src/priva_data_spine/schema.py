@@ -150,11 +150,46 @@ DDL: tuple[str, ...] = (
       updated_at                   TEXT    NOT NULL DEFAULT {NOW}
     ) STRICT
     """,
+    # 9 ── hook_policy -------------------------------------------------------
+    # Admin-stored hooks delivered to every agent-runner (the admin "Runtime"
+    # panel). hook_type uses Claude Code native strings; predefined rows are the
+    # legacy builtin hooks, seeded insert-if-absent by HookPolicyService at
+    # startup (ids = legacy slugs). script_body is THE payload for command hooks
+    # (runners materialize it on content_hash change); events / allowed_env_vars
+    # ride as JSON-array TEXT per the wire convention.
+    f"""
+    CREATE TABLE IF NOT EXISTS hook_policy (
+      id               TEXT PRIMARY KEY,
+      hook_type        TEXT NOT NULL CHECK (hook_type IN ('command','http','mcp_tool')),
+      name             TEXT NOT NULL,
+      description      TEXT NOT NULL,
+      events           TEXT NOT NULL,
+      matcher          TEXT NOT NULL DEFAULT '',
+      timeout_seconds  INTEGER NOT NULL DEFAULT 30,
+      interpreter      TEXT NOT NULL DEFAULT '',
+      script_body      TEXT NOT NULL DEFAULT '',
+      content_hash     TEXT NOT NULL DEFAULT '',
+      url              TEXT NOT NULL DEFAULT '',
+      headers_json     TEXT NOT NULL DEFAULT '',
+      allowed_env_vars TEXT NOT NULL DEFAULT '[]',
+      mcp_server       TEXT NOT NULL DEFAULT '',
+      mcp_tool         TEXT NOT NULL DEFAULT '',
+      enabled          INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+      enforced         INTEGER NOT NULL DEFAULT 0 CHECK (enforced IN (0,1)),
+      enforced_events  TEXT NOT NULL DEFAULT '[]',
+      default_on       INTEGER NOT NULL DEFAULT 0 CHECK (default_on IN (0,1)),
+      predefined       INTEGER NOT NULL DEFAULT 0 CHECK (predefined IN (0,1)),
+      seed_version     INTEGER NOT NULL DEFAULT 0,
+      target           TEXT NOT NULL DEFAULT '',
+      updated_at       TEXT NOT NULL DEFAULT {NOW},
+      updated_by       TEXT NOT NULL DEFAULT ''
+    ) STRICT
+    """,
 )
 
 TABLES = (
     "account", "channel_binding", "quota", "scheduled_job", "job_run_record",
-    "account_resource_spec", "pending_registration", "runner_defaults",
+    "account_resource_spec", "pending_registration", "runner_defaults", "hook_policy",
 )
 
 # Idempotent column additions for DBs created before a column existed. CREATE
@@ -165,6 +200,17 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("account", "agent_runner_type",
      "ALTER TABLE account ADD COLUMN agent_runner_type TEXT NOT NULL DEFAULT 'auto_scale' "
      "CHECK (agent_runner_type IN ('auto_scale','persistent'))"),
+    ("hook_policy", "enforced_events",
+     "ALTER TABLE hook_policy ADD COLUMN enforced_events TEXT NOT NULL DEFAULT '[]'"),
+)
+
+# One-time backfills, safe to run every boot. Pre-migration rows carry
+# enforced=1 with an empty enforced_events; post-migration the service derives
+# enforced from enforced_events on every write, so this WHERE never matches
+# again once a row has been normalized.
+_BACKFILLS: tuple[str, ...] = (
+    "UPDATE hook_policy SET enforced_events = events "
+    "WHERE enforced = 1 AND enforced_events = '[]'",
 )
 
 
@@ -179,3 +225,5 @@ def create_all(conn: sqlite3.Connection) -> None:
     for stmt in DDL:
         conn.execute(stmt)
     _apply_migrations(conn)
+    for stmt in _BACKFILLS:
+        conn.execute(stmt)

@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Clock, Cpu, ShieldCheck, Package, Check, Loader } from 'lucide-react'
+import { Clock, Cpu, ShieldCheck, Package, Check, Loader, Settings2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
 import Dropdown from '@shared/components/shared/Dropdown'
 import { getRunnerDefaults, updateRunnerDefaults, getRunnerImages } from '@shared/api/admin'
+import RuntimeHooks from './RuntimeHooks'
 
 // Agent Runner Sandbox — the platform-wide GLOBAL defaults for per-account agent-runner
 // pods. An account inherits each value here unless it carries a per-account override
@@ -74,14 +75,25 @@ const GROUPS = [
       { id: 'runner_image', labelKey: 'admin.sandboxAgentRunnerImage', type: 'image', hintKey: 'admin.sandboxAgentRunnerImageHint' },
     ],
   },
+  // Runtime is a custom section (admin hook policies) — it owns its own data
+  // fetch, staged per-group saves, and drawer, so it has no form `fields` and
+  // no entry in GROUP_KEYS. Rendered specially in the detail column.
+  {
+    id: 'runtime',
+    labelKey: 'admin.sandboxRuntime',
+    icon: Settings2,
+    custom: true,
+  },
 ]
 
-// Persistable API keys per group (egress is not persisted this phase).
+// Persistable API keys per group (egress is not persisted this phase; runtime
+// has its own save path).
 const GROUP_KEYS = {
   lifecycle: ['idle_grace_seconds', 'min_alive_after_wake_seconds'],
   resources: ['cpu_millicores', 'memory_mb', 'storage_gb'],
   isolation: [],
   image: ['runner_image'],
+  runtime: [],
 }
 
 const SPY_SUPPRESS_MS = 600
@@ -361,6 +373,22 @@ export default function AgentRunnerSandbox() {
             ) : (
               GROUPS.map((g) => {
                 const Icon = g.icon
+                if (g.custom) {
+                  return (
+                    <section
+                      key={g.id}
+                      data-group-id={g.id}
+                      ref={(el) => { sectionRefs.current[g.id] = el }}
+                      style={{ marginBottom: 32 }}
+                    >
+                      <div className="flex items-center gap-2" style={{ marginBottom: 14 }}>
+                        <Icon size={16} strokeWidth={1.5} style={{ color: 'var(--text-secondary)' }} />
+                        <h3 className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 14, margin: 0 }}>{t(g.labelKey)}</h3>
+                      </div>
+                      <RuntimeHooks />
+                    </section>
+                  )
+                }
                 const keys = GROUP_KEYS[g.id]
                 const dirty = keys.length > 0 && groupDirty(g.id)
                 const isSaving = saving === g.id

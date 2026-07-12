@@ -4,8 +4,8 @@ These callbacks are injected by ``build_hooks()`` at runtime and do NOT
 appear in ``.claude/settings.json``.  They only fire when the agent is
 run through Priva, not when the user runs ``claude`` directly.
 
-Note: audit_pre_tool and audit_post_tool have been replaced by the
-``audit-tool-use`` built-in hook in ``built_in_hooks.py``.
+Note: tool-use auditing lives in the ``audit-tool-use`` hook policy seed
+(data-spine `hook_policy`), not here.
 """
 
 from __future__ import annotations

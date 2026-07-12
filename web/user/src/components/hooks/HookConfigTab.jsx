@@ -1,6 +1,6 @@
 import { useState, useEffect, useId, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Lock, Pencil, Trash2, Plus, ChevronDown, Code, Loader, Settings } from 'lucide-react'
+import { Lock, Pencil, Trash2, Plus, ChevronDown, Code, Loader, Settings, UsersRound, FolderGit2 } from 'lucide-react'
 import { getRiskyTools, updateRiskyTools } from '@shared/api/admin'
 import hljs from 'highlight.js/lib/core'
 import 'highlight.js/styles/github-dark.css'
@@ -12,6 +12,7 @@ import ruby from 'highlight.js/lib/languages/ruby'
 import go from 'highlight.js/lib/languages/go'
 import rust from 'highlight.js/lib/languages/rust'
 import useHooksStore from '../../stores/hooksStore'
+import useSidebarStore from '../../stores/sidebarStore'
 import useUiStore from '@shared/stores/uiStore'
 import { HOOK_DEFINITIONS } from '../../data/hookDefinitions'
 import { fetchScriptContent } from '../../api/hooks'
@@ -28,12 +29,32 @@ if (!hljs.getLanguage('ruby')) hljs.registerLanguage('ruby', ruby)
 if (!hljs.getLanguage('go')) hljs.registerLanguage('go', go)
 if (!hljs.getLanguage('rust')) hljs.registerLanguage('rust', rust)
 
-const HANDLER_TYPES = ['command', 'http', 'prompt', 'agent']
-const COMING_SOON_TYPES = new Set(['agent'])
+const HANDLER_TYPES = ['command', 'http', 'mcp_tool']
+const COMING_SOON_TYPES = new Set(['mcp_tool'])
+
+// --- Scope (settings.json) selector helpers --------------------------------
+// User hooks live natively in the CLI-loaded settings.json at either User scope
+// ($CLAUDE_CONFIG_DIR) or a Project scope ({cwd}/.claude). The Config tab edits
+// one scope at a time, chosen via the shared Dropdown.
+const SCOPE_USER = 'user'
+function shortCwd(p) {
+  if (!p) return '~'
+  const parts = String(p).split('/').filter(Boolean)
+  return parts.length ? parts[parts.length - 1] : p
+}
+function scopeValue(scope, cwd) {
+  return scope === 'user' ? SCOPE_USER : `project::${cwd}`
+}
+function parseScopeValue(v) {
+  if (v === SCOPE_USER) return { scope: 'user', cwd: null }
+  return { scope: 'project', cwd: v.slice('project::'.length) }
+}
 
 const TYPE_COLORS = {
   command: 'var(--cyan)',
   http: 'var(--blue)',
+  mcp_tool: 'var(--purple)',
+  // legacy types kept for rendering pre-existing handlers, if any remain on disk
   prompt: 'var(--green)',
   agent: 'var(--purple)',
 }
@@ -505,14 +526,14 @@ function RiskyPatternsEditor() {
 }
 
 
-function BuiltInHookCard({ hook: bh, onDisable, onEnable }) {
+function BuiltInHookCard({ hook: bh }) {
   const { t } = useTranslation()
-  const [showSource, setShowSource] = useState(false)
   const [showPatterns, setShowPatterns] = useState(false)
-  const sourceBodyId = useId()
   const patternsBodyId = useId()
+  // rev-5: admin hooks are enforced-only — the user catalog is read-only.
   const isActive = bh.enabled || bh.enforced
   const isRiskyHook = bh.id === 'require-permission-risky-tools'
+  const typeColor = TYPE_COLORS[bh.hook_type] || 'var(--cyan)'
 
   return (
     <div
@@ -528,7 +549,8 @@ function BuiltInHookCard({ hook: bh, onDisable, onEnable }) {
         <span style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>
           {bh.name}
         </span>
-        <Chip color="var(--purple)">BUILT-IN</Chip>
+        <Chip color={typeColor}>{(bh.hook_type || 'command').toUpperCase()}</Chip>
+        {bh.predefined && <Chip color="var(--purple)">{t('hooks.predefined', { defaultValue: 'PREDEFINED' })}</Chip>}
         {bh.enforced && (
           <span className="flex items-center gap-1">
             <Lock size={12} strokeWidth={1.5} style={{ color: 'var(--yellow)' }} />
@@ -537,97 +559,11 @@ function BuiltInHookCard({ hook: bh, onDisable, onEnable }) {
             </span>
           </span>
         )}
-        {bh.can_block && (
-          <Chip color="var(--red)">{t('hooks.canBlock')}</Chip>
-        )}
         <span className="flex-1" />
-        {bh.enforced ? (
-          <Chip color="var(--yellow)">{t('hooks.enforced')}</Chip>
-        ) : isActive ? (
-          <button
-            className="px-2 py-1 text-xs uppercase font-semibold"
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--green)',
-              borderRadius: 4,
-              color: 'var(--green)',
-              cursor: 'pointer',
-              letterSpacing: '0.06em',
-              flexShrink: 0,
-              transition: 'all 150ms ease',
-            }}
-            onClick={onDisable}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'var(--red)'
-              e.currentTarget.style.color = 'var(--red)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'var(--green)'
-              e.currentTarget.style.color = 'var(--green)'
-            }}
-          >
-            {t('hooks.disable')}
-          </button>
-        ) : (
-          <button
-            className="px-2 py-1 text-xs uppercase font-semibold"
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--border)',
-              borderRadius: 4,
-              color: 'var(--blue)',
-              cursor: 'pointer',
-              letterSpacing: '0.06em',
-              flexShrink: 0,
-              transition: 'all 150ms ease',
-            }}
-            onClick={onEnable}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--blue)'
-              e.currentTarget.style.color = 'var(--text-inverse)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent'
-              e.currentTarget.style.color = 'var(--blue)'
-            }}
-          >
-            {t('hooks.enable')}
-          </button>
-        )}
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-dim)', wordBreak: 'break-word' }}>
         {bh.description}
       </div>
-      {bh.source_code && (
-        <div className="flex flex-col" style={{ marginTop: 4 }}>
-          <button
-            className="flex items-center gap-1"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--text-dim)',
-              padding: 0,
-              fontSize: 11,
-              transition: 'color 150ms ease',
-            }}
-            onClick={() => setShowSource(!showSource)}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--blue)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-            aria-expanded={showSource}
-            aria-controls={sourceBodyId}
-          >
-            <Code size={12} strokeWidth={1.5} />
-            <span>{t('hooks.viewSource')}</span>
-            <AnimatedChevron open={showSource}>
-              <ChevronDown size={12} strokeWidth={1.5} />
-            </AnimatedChevron>
-          </button>
-          <AnimatedCollapse open={showSource} id={sourceBodyId}>
-            <SourceCodeViewer code={bh.source_code} language="python" />
-          </AnimatedCollapse>
-        </div>
-      )}
       {isRiskyHook && (
         <div className="flex flex-col" style={{ marginTop: 4 }}>
           <button
@@ -1067,9 +1003,28 @@ export default function HookConfigTab({ hookId }) {
   const addHandler = useHooksStore((s) => s.addHandler)
   const updateHandler = useHooksStore((s) => s.updateHandler)
   const removeHandler = useHooksStore((s) => s.removeHandler)
-  const enableBuiltInHook = useHooksStore((s) => s.enableBuiltInHook)
-  const disableBuiltInHook = useHooksStore((s) => s.disableBuiltInHook)
+  const activeScope = useHooksStore((s) => s.activeScope)
+  const activeCwd = useHooksStore((s) => s.activeCwd)
+  const configuredScopes = useHooksStore((s) => s.configuredScopes)
+  const setActiveScope = useHooksStore((s) => s.setActiveScope)
+  const groups = useSidebarStore((s) => s.groups)
+  const sidebarActiveCwd = useSidebarStore((s) => s.activeCwd)
   const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
+
+  // Scope Dropdown options: User first, then every known project workdir (sidebar
+  // groups ∪ scopes already carrying hooks) so an empty project is a valid target.
+  const scopeOptions = useMemo(() => {
+    const cwds = []
+    const seen = new Set()
+    const projCwds = configuredScopes.filter((s) => s.scope === 'project').map((s) => s.cwd)
+    for (const c of [sidebarActiveCwd, ...groups.map((g) => g.cwd), ...projCwds]) {
+      if (c && !seen.has(c)) { seen.add(c); cwds.push(c) }
+    }
+    return [
+      { value: SCOPE_USER, label: t('hooks.scopeUser'), icon: UsersRound },
+      ...cwds.map((cwd) => ({ value: scopeValue('project', cwd), label: shortCwd(cwd), icon: FolderGit2 })),
+    ]
+  }, [groups, sidebarActiveCwd, configuredScopes, t])
 
   // Find hook definition for matcher target
   const hookDef = HOOK_DEFINITIONS.find((h) => h.id === hookId)
@@ -1082,12 +1037,10 @@ export default function HookConfigTab({ hookId }) {
   const SUPPORTED_EVENTS = ['Setup', 'SessionStart', 'PreToolUse', 'PostToolUse']
   const canAddHandler = SUPPORTED_EVENTS.includes(hookId)
 
-  // Built-in hooks that support this event, split into active vs available
-  const matchingBuiltIn = catalog.filter((bh) =>
-    bh.supported_events?.includes(hookId)
-  )
-  const activeBuiltIn = matchingBuiltIn.filter((bh) => bh.enabled || bh.enforced)
-  const availableBuiltIn = matchingBuiltIn.filter((bh) => !bh.enabled && !bh.enforced)
+  // rev-5: admin hooks are enforced-only. The user catalog is read-only and
+  // shows only the hooks that actually run for this user (enforced) — a
+  // non-enforced predefined row is not delivered, so it isn't surfaced here.
+  const activeBuiltIn = catalog.filter((bh) => bh.events?.includes(hookId) && bh.enforced)
 
   const handleSave = async (entry) => {
     if (editingHandler) {
@@ -1116,8 +1069,22 @@ export default function HookConfigTab({ hookId }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ACTIVE HANDLERS section — custom handlers + enabled built-in hooks */}
-      <div style={labelStyle}>{t('hooks.handlers')}</div>
+      {/* ACTIVE HANDLERS section — custom handlers + enforced admin hooks.
+          The scope Dropdown chooses which settings.json the custom handlers
+          below are read from / written to (User vs a Project workdir). */}
+      <div className="flex items-center gap-2">
+        <span style={{ ...labelStyle, marginBottom: 0 }}>{t('hooks.handlers')}</span>
+        <span className="flex-1" />
+        {canAddHandler && (
+          <Dropdown
+            size="sm"
+            align="right"
+            value={scopeValue(activeScope, activeCwd)}
+            onChange={(v) => { const p = parseScopeValue(v); setActiveScope(p.scope, p.cwd) }}
+            options={scopeOptions}
+          />
+        )}
+      </div>
 
       {entries.length === 0 && activeBuiltIn.length === 0 && !handlerFormOpen && (
         <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>
@@ -1125,9 +1092,9 @@ export default function HookConfigTab({ hookId }) {
         </div>
       )}
 
-      {/* Active built-in hooks */}
+      {/* Enforced admin hooks (read-only) */}
       {activeBuiltIn.map((bh) => (
-        <BuiltInHookCard key={`builtin-${bh.id}`} hook={bh} onDisable={() => disableBuiltInHook(bh.id)} />
+        <BuiltInHookCard key={`builtin-${bh.id}`} hook={bh} />
       ))}
 
       {/* Custom handlers */}
@@ -1201,24 +1168,6 @@ export default function HookConfigTab({ hookId }) {
         </div>
       )}
 
-      {/* AVAILABLE BUILT-IN HOOKS section — disabled hooks that can be enabled */}
-      {availableBuiltIn.length > 0 && (
-        <>
-          <div
-            style={{
-              borderTop: '1px solid var(--border-subtle)',
-              marginTop: 4,
-              paddingTop: 12,
-            }}
-          >
-            <div style={labelStyle}>{t('hooks.builtInHooks')}</div>
-          </div>
-
-          {availableBuiltIn.map((bh) => (
-            <BuiltInHookCard key={bh.id} hook={bh} onEnable={() => enableBuiltInHook(bh.id)} />
-          ))}
-        </>
-      )}
     </div>
   )
 }

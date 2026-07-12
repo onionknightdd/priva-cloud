@@ -30,11 +30,9 @@ const inputStyle = {
 export default function HookTestTab({ hookId }) {
   const { t } = useTranslation()
   const configuredHooks = useHooksStore((s) => s.configuredHooks)
-  const catalog = useHooksStore((s) => s.catalog)
   const testResult = useHooksStore((s) => s.testResult)
   const testRunning = useHooksStore((s) => s.testRunning)
   const runTest = useHooksStore((s) => s.runTest)
-  const testBuiltInHook = useHooksStore((s) => s.testBuiltInHook)
   const clearTestResult = useHooksStore((s) => s.clearTestResult)
 
   const [command, setCommand] = useState('')
@@ -42,7 +40,6 @@ export default function HookTestTab({ hookId }) {
   const [inputJson, setInputJson] = useState('')
   const [jsonError, setJsonError] = useState(null)
   const [selectedQuick, setSelectedQuick] = useState('')
-  const [selectedBuiltInId, setSelectedBuiltInId] = useState(null)
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
   // Pre-fill sample input when hookId changes
@@ -56,7 +53,6 @@ export default function HookTestTab({ hookId }) {
     setCommand('')
     setTimeout_(30)
     setSelectedQuick('')
-    setSelectedBuiltInId(null)
     setJsonError(null)
     clearTestResult()
   }, [hookId])
@@ -81,27 +77,15 @@ export default function HookTestTab({ hookId }) {
       })
     })
 
-    // Built-in hooks matching this event
-    catalog
-      .filter((bh) => bh.supported_events?.includes(hookId))
-      .forEach((bh) => {
-        options.push({
-          label: bh.name,
-          command: '',
-          timeout: 10,
-          source: 'built-in',
-          builtInId: bh.id,
-        })
-      })
-
+    // Admin hooks run as sandboxed subprocesses on the runner, not via a
+    // dry-run callback — only user command handlers are dry-runnable here.
     return options
-  }, [configuredHooks, catalog, hookId])
+  }, [configuredHooks, hookId])
 
   const handleQuickSelect = (option) => {
     setCommand(option.command)
     setTimeout_(option.timeout)
     setSelectedQuick(option.label)
-    setSelectedBuiltInId(option.builtInId || null)
     setDropdownOpen(false)
   }
 
@@ -115,20 +99,15 @@ export default function HookTestTab({ hookId }) {
       return
     }
 
-    if (selectedBuiltInId) {
-      // Test built-in hook directly via Python callback
-      testBuiltInHook(selectedBuiltInId, hookId, parsed)
-    } else {
-      const handler = {
-        type: 'command',
-        command,
-        timeout: Number(timeout) || 30,
-      }
-      runTest(hookId, handler, parsed)
+    const handler = {
+      type: 'command',
+      command,
+      timeout: Number(timeout) || 30,
     }
+    runTest(hookId, handler, parsed)
   }
 
-  const canRun = (command.trim().length > 0 || selectedBuiltInId) && !testRunning
+  const canRun = command.trim().length > 0 && !testRunning
 
   return (
     <div className="flex flex-col gap-4">
@@ -206,36 +185,32 @@ export default function HookTestTab({ hookId }) {
         </div>
       )}
 
-      {/* Command + Timeout (only for custom command hooks, not built-in) */}
-      {!selectedBuiltInId && (
-        <>
-          <div className="flex flex-col gap-1">
-            <div style={labelStyle}>{t('hooks.command')}</div>
-            <input
-              style={inputStyle}
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              placeholder=".claude/hooks/my-hook.sh"
-              onFocus={(e) => { e.target.style.borderColor = 'var(--border-strong)' }}
-              onBlur={(e) => { e.target.style.borderColor = 'var(--border)' }}
-            />
-          </div>
+      {/* Command + Timeout — user command hooks are the only dry-runnable kind */}
+      <div className="flex flex-col gap-1">
+        <div style={labelStyle}>{t('hooks.command')}</div>
+        <input
+          style={inputStyle}
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+          placeholder=".claude/hooks/my-hook.sh"
+          onFocus={(e) => { e.target.style.borderColor = 'var(--border-strong)' }}
+          onBlur={(e) => { e.target.style.borderColor = 'var(--border)' }}
+        />
+      </div>
 
-          <div className="flex flex-col gap-1">
-            <div style={labelStyle}>{t('hooks.timeoutSeconds')}</div>
-            <input
-              type="number"
-              style={{ ...inputStyle, width: 80 }}
-              value={timeout}
-              onChange={(e) => setTimeout_(e.target.value)}
-              min={1}
-              max={300}
-              onFocus={(e) => { e.target.style.borderColor = 'var(--border-strong)' }}
-              onBlur={(e) => { e.target.style.borderColor = 'var(--border)' }}
-            />
-          </div>
-        </>
-      )}
+      <div className="flex flex-col gap-1">
+        <div style={labelStyle}>{t('hooks.timeoutSeconds')}</div>
+        <input
+          type="number"
+          style={{ ...inputStyle, width: 80 }}
+          value={timeout}
+          onChange={(e) => setTimeout_(e.target.value)}
+          min={1}
+          max={300}
+          onFocus={(e) => { e.target.style.borderColor = 'var(--border-strong)' }}
+          onBlur={(e) => { e.target.style.borderColor = 'var(--border)' }}
+        />
+      </div>
 
       {/* Input JSON */}
       <div className="flex flex-col gap-1">

@@ -18,9 +18,8 @@ const WebTerminalDrawer = lazyWithChunkReload(() => import('../terminal/WebTermi
 
 // Plugin sections whose panel draws its own back-button + title header
 // (content-only views like Skills/MCP). The generic ContentOverlay header is
-// suppressed for these; placeholder sections (e.g. memory) still get it so
-// there's a way back. Add each section here as it's converted to content-only.
-const SELF_HEADERED_PLUGIN_SECTIONS = new Set(['skills', 'mcp', 'hooks', 'subagents'])
+// suppressed for these. Every section is now content-only.
+const SELF_HEADERED_PLUGIN_SECTIONS = new Set(['skills', 'mcp', 'hooks', 'subagents', 'commands', 'memory'])
 
 function LazyPanel({ children }) {
   return (

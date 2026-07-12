@@ -23,6 +23,36 @@ import kopf
 from priva_common.config import get_settings
 from priva_operator import GROUP, PLURAL, VERSION, kube, names, storage_backend
 
+# Throttle the global managed-policy render so N per-account handlers don't each
+# hit data-spine every tick. The render is digest-guarded (write only on change);
+# this just bounds the read rate. Module-level: shared across all CR handlers.
+_MANAGED_POLICY_MIN_INTERVAL = 15.0
+_managed_policy_last_render = 0.0
+
+
+def _tenants_namespace() -> str:
+    return get_settings().kubernetes.namespace_tenants
+
+
+def _render_managed_policy(namespace, logger, *, force=False) -> None:
+    """Digest-guarded, throttled render of the global managed-policy ConfigMap."""
+    global _managed_policy_last_render
+    now = time.monotonic()
+    if not force and (now - _managed_policy_last_render) < _MANAGED_POLICY_MIN_INTERVAL:
+        return
+    _managed_policy_last_render = now
+    try:
+        kube.ensure_managed_policy_configmap(namespace)
+    except Exception:
+        logger.warning("managed-policy reconcile failed", exc_info=True)
+
+
+@kopf.on.startup()
+def bootstrap_managed_policy(logger, **_):
+    """Create the managed-policy ConfigMap once at operator boot, before any pod
+    mounts it — so a cold-started account wakes with the current enforced set."""
+    _render_managed_policy(_tenants_namespace(), logger, force=True)
+
 
 def _ids(spec, name):
     account_id = spec.get("accountId") or name
@@ -57,6 +87,9 @@ def ensure(spec, name, namespace, uid, status, patch, logger, **_):
     defaults = _runner_defaults()
     image = kube.resolve_image(spec, s, defaults)
     owner = names.owner_ref(name, uid)
+    # Make sure the global managed-policy CM exists before this account's pod
+    # mounts it (force past the throttle on create/resume).
+    _render_managed_policy(namespace, logger, force=True)
     kube.ensure_runtime_objects(
         namespace, account_id, username, image, s.kubernetes.runner_image_pull_policy, s, owner, spec, defaults)
 
@@ -149,6 +182,10 @@ def reconcile_runtime(spec, name, namespace, status, patch, logger, **_):
     account_id, _ = _ids(spec, name)
     replicas = kube.get_replicas(namespace, account_id)
     defaults = _runner_defaults()  # one fetch per tick; reused below
+
+    # Converge the global managed policy (admin hook edits have no CR event, so
+    # this timer is how they propagate). Throttled + digest-guarded → cheap.
+    _render_managed_policy(namespace, logger)
 
     # --- volume-quota reconcile (restart-free) ---------------------------------------
     # Converge the per-account quota to the effective value (CR override > global default

@@ -88,8 +88,10 @@ def save_user_yaml_key(username: str, key: str, value: Any) -> None:
 
 
 def _list_global_skill_names() -> list[str]:
-    """Filesystem walk of ~/.claude/skills/ — used by migration only."""
-    global_dir = Path.home() / ".claude" / "skills"
+    """Filesystem walk of $CLAUDE_CONFIG_DIR/skills/ — used by migration only."""
+    from .paths import claude_config_dir
+
+    global_dir = claude_config_dir() / "skills"
     if not global_dir.exists():
         return []
     names: list[str] = []

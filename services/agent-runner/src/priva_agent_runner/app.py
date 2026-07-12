@@ -73,6 +73,41 @@ def create_app() -> FastAPI:
         from priva_common.audit_log import get_audit_logger
         get_audit_logger()
 
+        # One-time: relocate resources stranded in the legacy ~/.claude dir —
+        # the CLI only reads $CLAUDE_CONFIG_DIR (see services/legacy_claude_dir.py).
+        try:
+            from .services.legacy_claude_dir import migrate_legacy_home_claude
+            migrate_legacy_home_claude()
+        except Exception as exc:
+            logger.warning("legacy ~/.claude migration skipped: {}", exc)
+
+        # One-time (D5): relocate user hooks from the CLI-invisible
+        # settings.local.json into the CLI-loaded settings.json so the CLI runs
+        # them natively (setting_sources omits the "local" source).
+        try:
+            from .services.legacy_claude_dir import migrate_local_hooks_to_settings
+            migrate_local_hooks_to_settings()
+        except Exception as exc:
+            logger.warning("settings.local hooks migration skipped: {}", exc)
+
+        # Seed platform-required settings.json defaults (setdefault semantics):
+        # enableAllProjectMcpServers so headless runs load UI-managed .mcp.json
+        # servers (they'd otherwise sit "Pending approval" forever).
+        try:
+            from priva_common.user_env import ensure_claude_settings_defaults
+            ensure_claude_settings_defaults()
+        except Exception as exc:
+            logger.warning("settings.json defaults seeding skipped: {}", exc)
+
+        # Materialize the managed risky-tools context up front so a terminal
+        # `claude` (no Priva session) still finds risky_tools.json for the
+        # native managed hook. Refreshed again at each session build.
+        try:
+            from .services.hooks.policy import write_managed_hook_context
+            write_managed_hook_context()
+        except Exception as exc:
+            logger.warning("managed hook context seeding skipped: {}", exc)
+
         # Seed runtime skills from the baked-in bundle.
         try:
             from .services.skill_hub import seed_bundled_skills
@@ -216,6 +251,8 @@ def create_app() -> FastAPI:
     from .routers.skills import router as skills_router
     from .routers.skill_hub import router as skill_hub_router
     from .routers.subagents import router as subagents_router
+    from .routers.commands import router as commands_router
+    from .routers.memory import router as memory_router
     from .routers.user_config import router as user_config_router
     from .routers.user_data import router as user_data_router
     from .routers.credentials import router as credentials_router
@@ -223,6 +260,7 @@ def create_app() -> FastAPI:
     for r in (
         agent_router, pty_router, files_router, user_files_router,
         hooks_router, mcp_router, skills_router, skill_hub_router, subagents_router,
+        commands_router, memory_router,
         user_config_router, user_data_router, credentials_router,
     ):
         app.include_router(r)

@@ -120,6 +120,17 @@ class Repository(ABC):
     def runner_defaults_seed(self, values: dict) -> dict: ...
     @abstractmethod
     def runner_defaults_upsert(self, fields: dict) -> dict: ...
+    # hook_policy
+    @abstractmethod
+    def hook_policy_list(self, enabled_only: bool = False) -> list[dict]: ...
+    @abstractmethod
+    def hook_policy_get(self, policy_id: str) -> dict | None: ...
+    @abstractmethod
+    def hook_policy_insert(self, row: dict) -> None: ...
+    @abstractmethod
+    def hook_policy_update(self, policy_id: str, fields: dict) -> dict | None: ...
+    @abstractmethod
+    def hook_policy_delete(self, policy_id: str) -> bool: ...
     # pending_registration
     @abstractmethod
     def pending_insert(self, row: dict) -> None: ...
@@ -448,6 +459,43 @@ class SqliteRepo(Repository):
             tuple(fields[c] for c in cols),
         )
         return self.runner_defaults_get()
+
+    # hook_policy -------------------------------------------------------------
+    _HOOK_POLICY_COLS = ("id", "hook_type", "name", "description", "events", "matcher",
+                         "timeout_seconds", "interpreter", "script_body", "content_hash",
+                         "url", "headers_json", "allowed_env_vars", "mcp_server", "mcp_tool",
+                         "enabled", "enforced", "enforced_events", "default_on", "predefined",
+                         "seed_version", "target", "updated_by")
+
+    def hook_policy_list(self, enabled_only=False):
+        sql = "SELECT * FROM hook_policy"
+        if enabled_only:
+            sql += " WHERE enabled = 1"
+        return self._all(sql + " ORDER BY id ASC")
+
+    def hook_policy_get(self, policy_id):
+        return self._one("SELECT * FROM hook_policy WHERE id = ?", (policy_id,))
+
+    def hook_policy_insert(self, row):
+        cols = [c for c in self._HOOK_POLICY_COLS if c in row]
+        ph = ", ".join("?" for _ in cols)
+        self._write(
+            f"INSERT INTO hook_policy ({', '.join(cols)}) VALUES ({ph})",
+            tuple(row[c] for c in cols),
+        )
+
+    def hook_policy_update(self, policy_id, fields):
+        cols = [c for c in self._HOOK_POLICY_COLS if c in fields and c != "id"]
+        set_parts = [f"{c} = ?" for c in cols]
+        set_parts.append("updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')")
+        self._write(
+            f"UPDATE hook_policy SET {', '.join(set_parts)} WHERE id = ?",
+            tuple(fields[c] for c in cols) + (policy_id,),
+        )
+        return self.hook_policy_get(policy_id)
+
+    def hook_policy_delete(self, policy_id):
+        return self._write("DELETE FROM hook_policy WHERE id = ?", (policy_id,)) > 0
 
     # pending_registration ---------------------------------------------------
     _PENDING_COLS = ("request_id", "username", "password_hash", "display_name", "runner_type",
@@ -796,6 +844,39 @@ class PgRepo(Repository):
             tuple(fields[c] for c in cols),
         )
         return self.runner_defaults_get()
+
+    # hook_policy -------------------------------------------------------------
+    _HOOK_POLICY_COLS = SqliteRepo._HOOK_POLICY_COLS
+
+    def hook_policy_list(self, enabled_only=False):
+        sql = "SELECT * FROM hook_policy"
+        if enabled_only:
+            sql += " WHERE enabled = 1"
+        return self._all(sql + " ORDER BY id ASC")
+
+    def hook_policy_get(self, policy_id):
+        return self._one("SELECT * FROM hook_policy WHERE id = %s", (policy_id,))
+
+    def hook_policy_insert(self, row):
+        cols = [c for c in self._HOOK_POLICY_COLS if c in row]
+        ph = ", ".join("%s" for _ in cols)
+        self._write(
+            f"INSERT INTO hook_policy ({', '.join(cols)}) VALUES ({ph})",
+            tuple(row[c] for c in cols),
+        )
+
+    def hook_policy_update(self, policy_id, fields):
+        cols = [c for c in self._HOOK_POLICY_COLS if c in fields and c != "id"]
+        set_parts = [f"{c} = %s" for c in cols]
+        set_parts.append(f"updated_at = {self._NOW}")
+        self._write(
+            f"UPDATE hook_policy SET {', '.join(set_parts)} WHERE id = %s",
+            tuple(fields[c] for c in cols) + (policy_id,),
+        )
+        return self.hook_policy_get(policy_id)
+
+    def hook_policy_delete(self, policy_id):
+        return self._write("DELETE FROM hook_policy WHERE id = %s", (policy_id,)) > 0
 
     # pending_registration ---------------------------------------------------
     _PENDING_COLS = SqliteRepo._PENDING_COLS

@@ -108,7 +108,7 @@ const getStoredLanguage = () => safeStorage.getItem('language') || 'zh'
 
 const useUiStore = create((set, get) => ({
   activeNavTab: 'priva',
-  activePluginSection: 'skills', // 'skills' | 'mcp' | 'hooks' | 'subagents' | 'memory'
+  activePluginSection: 'skills', // 'skills' | 'mcp' | 'hooks' | 'subagents' | 'commands' | 'memory'
   canvasVisible: false,
   canvasWidth: getStoredCanvasWidth(),
   canvasMinimized: false,

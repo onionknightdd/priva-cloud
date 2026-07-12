@@ -6,7 +6,7 @@ import {
   Bot, PanelLeftClose, Plus, CalendarClock, PackageSearch, ChartColumnBig,
   Maximize2, Minimize2, FolderOpenDot, FolderGit2, LogOut,
   BarChart3, TrendingUp, ScrollText, FileText, FolderOpen,
-  Cable, Webhook, BrainCircuit, NotebookPen,
+  Cable, Webhook, BrainCircuit, NotebookPen, SquareSlash,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSidebarStore from '../../stores/sidebarStore'
@@ -69,6 +69,7 @@ const PLUGINS_SECTIONS = [
   { id: 'mcp', icon: Cable, labelKey: 'tabs.mcp' },
   { id: 'hooks', icon: Webhook, labelKey: 'tabs.hooks' },
   { id: 'subagents', icon: BrainCircuit, labelKey: 'tabs.subagents' },
+  { id: 'commands', icon: SquareSlash, labelKey: 'tabs.commands' },
   { id: 'memory', icon: NotebookPen, labelKey: 'tabs.memory' },
 ]
 

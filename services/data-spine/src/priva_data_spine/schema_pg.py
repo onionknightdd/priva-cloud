@@ -156,6 +156,37 @@ DDL: tuple[str, ...] = (
       updated_at                   TEXT   NOT NULL DEFAULT {NOW}
     )
     """,
+    # 9 ── hook_policy -------------------------------------------------------
+    # Admin-stored hooks delivered to every agent-runner (the admin "Runtime"
+    # panel). Mirror of schema.py: booleans as 0/1 BIGINTs, JSON arrays as TEXT.
+    f"""
+    CREATE TABLE IF NOT EXISTS hook_policy (
+      id               TEXT PRIMARY KEY,
+      hook_type        TEXT NOT NULL CHECK (hook_type IN ('command','http','mcp_tool')),
+      name             TEXT NOT NULL,
+      description      TEXT NOT NULL,
+      events           TEXT NOT NULL,
+      matcher          TEXT NOT NULL DEFAULT '',
+      timeout_seconds  BIGINT NOT NULL DEFAULT 30,
+      interpreter      TEXT NOT NULL DEFAULT '',
+      script_body      TEXT NOT NULL DEFAULT '',
+      content_hash     TEXT NOT NULL DEFAULT '',
+      url              TEXT NOT NULL DEFAULT '',
+      headers_json     TEXT NOT NULL DEFAULT '',
+      allowed_env_vars TEXT NOT NULL DEFAULT '[]',
+      mcp_server       TEXT NOT NULL DEFAULT '',
+      mcp_tool         TEXT NOT NULL DEFAULT '',
+      enabled          BIGINT NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+      enforced         BIGINT NOT NULL DEFAULT 0 CHECK (enforced IN (0,1)),
+      enforced_events  TEXT NOT NULL DEFAULT '[]',
+      default_on       BIGINT NOT NULL DEFAULT 0 CHECK (default_on IN (0,1)),
+      predefined       BIGINT NOT NULL DEFAULT 0 CHECK (predefined IN (0,1)),
+      seed_version     BIGINT NOT NULL DEFAULT 0,
+      target           TEXT NOT NULL DEFAULT '',
+      updated_at       TEXT NOT NULL DEFAULT {NOW},
+      updated_by       TEXT NOT NULL DEFAULT ''
+    )
+    """,
 )
 
 # Idempotent column additions for DBs created before a column existed (mirror of
@@ -164,6 +195,12 @@ DDL: tuple[str, ...] = (
 _MIGRATIONS: tuple[str, ...] = (
     "ALTER TABLE account ADD COLUMN IF NOT EXISTS agent_runner_type TEXT NOT NULL "
     "DEFAULT 'auto_scale' CHECK (agent_runner_type IN ('auto_scale','persistent'))",
+    "ALTER TABLE hook_policy ADD COLUMN IF NOT EXISTS enforced_events TEXT NOT NULL DEFAULT '[]'",
+    # One-time backfill, safe every boot: pre-migration rows carry enforced=1
+    # with an empty enforced_events; the service keeps enforced derived from
+    # enforced_events afterwards, so this WHERE never matches again.
+    "UPDATE hook_policy SET enforced_events = events "
+    "WHERE enforced = 1 AND enforced_events = '[]'",
 )
 
 

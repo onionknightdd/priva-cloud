@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from priva_common.models.agent import PermissionMode
 from priva_common.config import get_settings
 from priva_common.user_env import read_settings_env
+from priva_common.workspace import get_workspace_for_username
 
 _logger = None
 
@@ -141,8 +142,15 @@ async def build_agent_options(
     enable_permission_feedback: bool = True,
 ) -> ClaudeAgentOptions:
     settings = get_settings()
+
+    if username is None:
+        raise HTTPException(400, "Authentication required for agent runs")
+
     if cwd is None:
-        cwd = os.path.expanduser(settings.server.work_dir)
+        # Fall back to the caller's own workspace (<work_dir>/<username>) — the
+        # same default every HTTP/WS entry point resolves. Bare work_dir would
+        # land one level ABOVE every project dir (and its .claude/ scope).
+        cwd = get_workspace_for_username(username)
     os.makedirs(cwd, exist_ok=True)
 
     # Cred gate. The BYOK creds live in the CLI's own *user* settings file
@@ -152,9 +160,6 @@ async def build_agent_options(
     # a missing base_url/auth_token is a fast 400 instead of an opaque mid-run auth
     # failure. (This file-on-the-PVC home is also what fixes cred staleness: a change
     # is honored on the next run with no re-wake and no per-pod Secret.)
-    if username is None:
-        raise HTTPException(400, "Authentication required for agent runs")
-
     creds = read_settings_env()
     if not creds.get("ANTHROPIC_BASE_URL") or not creds.get("ANTHROPIC_AUTH_TOKEN"):
         raise HTTPException(400, "API credentials not configured. Please set up your API connection in Settings.")
@@ -294,33 +299,30 @@ async def build_agent_options(
             existing.setdefault(event, []).extend(matchers)
         options.hooks = existing
 
-    # MCP server injection
-    # The CLI discovers MCP servers from .mcp.json via setting_sources. To
-    # override that discovery we must pass --strict-mcp-config so the CLI
-    # only uses servers explicitly provided via --mcp-config.
-    from ..mcp.config_manager import McpConfigManager
-    _should_inject = True
-    _filter_names: list[str] | None = None  # None = all servers
-
+    # MCP servers: the FILES are canonical (config-source consistency, item C).
+    # "auto" injects nothing — the CLI discovers user servers from
+    # $CLAUDE_CONFIG_DIR/.claude.json and project servers from {cwd}/.mcp.json
+    # natively (headless approval via the enableAllProjectMcpServers default
+    # seeded at startup), so terminal `claude` and SDK runs see the same set.
+    # Injection + --strict-mcp-config remain ONLY for per-run filtering; the
+    # FileCanvas SDK server added below rides options.mcp_servers either way
+    # (without strict it merges on top of native discovery).
     if mcp_servers is None or mcp_servers == "disable" or mcp_servers == []:
-        _should_inject = False
+        # Shut off all file-discovered servers; platform built-ins added below
+        # are still passed explicitly and therefore survive strict mode.
+        options.extra_args["strict-mcp-config"] = None
     elif isinstance(mcp_servers, list):
-        _filter_names = mcp_servers
-    # else: 'auto' or omitted -> use all servers (_filter_names stays None)
+        from ..mcp.config_manager import McpConfigManager
 
-    if _should_inject:
-        mcp_mgr = McpConfigManager(username)
-        mcp_dict = mcp_mgr.build_mcp_dict(cwd=cwd, filter_names=_filter_names)
+        mcp_dict = McpConfigManager(username).build_mcp_dict(
+            cwd=cwd, filter_names=mcp_servers
+        )
         if mcp_dict:
             options.mcp_servers = mcp_dict
-            # When a specific subset is requested, enforce strict mode so the
-            # CLI does not merge in additional servers from .mcp.json.
-            if _filter_names is not None:
-                options.extra_args["strict-mcp-config"] = None
-    else:
-        # Use --strict-mcp-config with no --mcp-config so the CLI ignores
-        # all MCP servers discovered from .mcp.json / settings.
+        # Strict even when the subset matched nothing — a stale name must mean
+        # "no servers", not "fall back to everything".
         options.extra_args["strict-mcp-config"] = None
+    # else "auto": native file discovery, no injection.
 
     # --- Scheduler MCP tools: deferred (Phase 4). The scheduler subsystem is
     # not part of the agent-runner this phase; the injection block is removed so

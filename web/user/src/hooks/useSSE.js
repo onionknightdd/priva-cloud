@@ -27,9 +27,11 @@ import {
 } from '../utils/generatedTool'
 import {
   FILE_SOURCE_CURRENT,
+  browserSourceLabel,
   fileNameFromPath,
   fileTabFromToolUse,
   fileTabsFromGeneratedFiles,
+  isErroredToolResult,
 } from '../utils/fileArtifacts'
 import { getSplitParams } from '../utils/splitMode'
 
@@ -263,6 +265,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   // Track tool_use_ids that are canvas-only (hidden from message flow)
   const hiddenToolIds = new Set()
   const generatedToolIds = new Set()
+  const pendingWriteFileTabs = new Map()
   // Track TodoWrite tool_use_ids for todo extraction
   const todoWriteIds = new Set()
   // Buffer hook_event payloads keyed by tool_use_id when they arrive before
@@ -321,6 +324,12 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     fxShowCanvas(options.activate ? 'file-browser' : null)
     return true
   }
+  const isPlanWriteTool = (block) => (
+    block?.name === 'Write' &&
+    block.input?.file_path &&
+    block.input.file_path.endsWith('.md') &&
+    block.input.file_path.includes('/plans/')
+  )
 
   const onEvent = (event, data) => {
     const state = S.chat()
@@ -614,9 +623,16 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
 
         for (const block of toolBlocks) {
           if (isGeneratedToolName(block.name)) generatedToolIds.add(block.id)
-          openToolFileInBrowser(block, {
-            activate: block.name === 'Read' || Boolean(data.parent_tool_use_id),
-          })
+          if (block.name === 'Write') {
+            if (!isPlanWriteTool(block)) {
+              const tab = fileTabFromToolUse(block, FILE_SOURCE_CURRENT)
+              if (tab) pendingWriteFileTabs.set(block.id, tab)
+            }
+          } else {
+            openToolFileInBrowser(block, {
+              activate: block.name === 'Read' || Boolean(data.parent_tool_use_id),
+            })
+          }
         }
 
         // Subagent tool_use frame: route tool_use blocks into the subagent's
@@ -707,9 +723,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
             }
 
             // Plan file Write → route to PLAN canvas tab instead of FILES
-            if (block.name === 'Write' && block.input?.file_path &&
-                block.input.file_path.endsWith('.md') &&
-                block.input.file_path.includes('/plans/')) {
+            if (isPlanWriteTool(block)) {
               hiddenToolIds.add(block.id)
               const planContent = block.input.content
               const planFilePath = block.input.file_path
@@ -891,6 +905,19 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
 
         // Process all result blocks
         for (const rb of allResultBlocks) {
+          const isToolResultError = isErroredToolResult(rb, data.tool_use_result)
+          const pendingWriteTab = pendingWriteFileTabs.get(rb.tool_use_id)
+          const handledPendingWrite = Boolean(pendingWriteTab)
+          if (pendingWriteTab) {
+            if (isToolResultError) {
+              const staleTab = S.fileBrowser().tabs.find((tab) => tab.toolUseId === rb.tool_use_id)
+              if (staleTab) S.fileBrowser().closeFile(staleTab.id)
+            } else {
+              openFileBrowserTab(pendingWriteTab)
+            }
+            pendingWriteFileTabs.delete(rb.tool_use_id)
+          }
+
           // Update message flow only for visible tools
           if (!hiddenToolIds.has(rb.tool_use_id)) {
             updateToolResult(rb.tool_use_id, rb)
@@ -980,8 +1007,9 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
             const tur = data.tool_use_result || {}
 
             for (const op of matchingFileOps) {
+              const isErrorResult = isToolResultError || isErroredToolResult(rb, tur)
               S.fileOps().updateFileOp(op.id, {
-                status: rb.is_error ? 'error' : 'success',
+                status: isErrorResult ? 'error' : 'success',
                 endTime: Date.now(),
                 content: tur.content || tur.new_content || null,
                 originalFile: tur.original_file || tur.originalFile || null,
@@ -989,6 +1017,21 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
                 resultContent: typeof rb.content === 'string' ? rb.content : null,
                 toolUseResult: tur,
               })
+              if (op.type === 'write' && !handledPendingWrite) {
+                if (isErrorResult) {
+                  const staleTab = S.fileBrowser().tabs.find((tab) => tab.toolUseId === op.id)
+                  if (staleTab) S.fileBrowser().closeFile(staleTab.id)
+                } else if (op.filePath) {
+                  openFileBrowserTab({
+                    filePath: op.filePath,
+                    name: fileNameFromPath(op.filePath),
+                    source: browserSourceLabel(FILE_SOURCE_CURRENT),
+                    browserSource: FILE_SOURCE_CURRENT,
+                    sourceTool: 'Write',
+                    toolUseId: op.id,
+                  })
+                }
+              }
             }
 
             const generatedFileOps = matchingFileOps

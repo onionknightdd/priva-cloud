@@ -1,8 +1,9 @@
 """Dry-run hook test runner.
 
-Executes a single hook handler with sample JSON input and captures
-exit code, stdout, stderr, and duration.  Also supports testing
-built-in hooks by calling their Python callback directly.
+Executes a single hook handler with sample JSON input and captures exit code,
+stdout, stderr, and duration. Runs under the SAME constructed environment as
+real fires (build_hook_env) so a dry-run that depends on a denied secret fails
+here too, not just in production.
 """
 
 from __future__ import annotations
@@ -12,7 +13,9 @@ import json
 import time
 
 from priva_common.logging import get_app_logger
-from priva_common.models.hooks import BuiltInHookTestResponse, HookHandler, HookTestResponse
+from priva_common.models.hooks import HookHandler, HookTestResponse
+
+from .env import build_hook_env
 
 logger = get_app_logger(__name__)
 
@@ -44,9 +47,10 @@ async def test_hook(
             duration_ms=0,
         )
 
-    env_vars = {
-        "CLAUDE_HOOK_EVENT_NAME": event_type,
-    }
+    env = build_hook_env(
+        handler.allowedEnvVars or [],
+        extra={"CLAUDE_HOOK_EVENT_NAME": event_type, "CLAUDE_PROJECT_DIR": cwd or ""},
+    )
 
     stdin_data = json.dumps(input_json).encode()
     timeout = handler.timeout or 30
@@ -59,7 +63,7 @@ async def test_hook(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
-            env={**dict(__import__("os").environ), **env_vars},
+            env=env,
         )
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(input=stdin_data),
@@ -88,49 +92,4 @@ async def test_hook(
             stdout="",
             stderr=str(exc),
             duration_ms=elapsed_ms,
-        )
-
-
-async def test_builtin_hook(
-    hook_id: str,
-    event_type: str,
-    input_json: dict,
-) -> BuiltInHookTestResponse:
-    """Call a built-in hook's callback directly with sample input."""
-    from .registry import get_hook_by_id
-
-    meta = get_hook_by_id(hook_id)
-    if meta is None:
-        return BuiltInHookTestResponse(
-            hook_id=hook_id,
-            duration_ms=0,
-            error=f"Built-in hook '{hook_id}' not found",
-        )
-
-    # Inject hook_event_name into input
-    test_input = {**input_json, "hook_event_name": event_type}
-
-    start = time.monotonic()
-    try:
-        result = await meta.callback(test_input, None, None)
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-
-        # Extract decision from hookSpecificOutput
-        hso = result.get("hookSpecificOutput", {}) if isinstance(result, dict) else {}
-        decision = hso.get("permissionDecision")
-        reason = hso.get("permissionDecisionReason")
-
-        return BuiltInHookTestResponse(
-            hook_id=hook_id,
-            decision=decision,
-            reason=reason,
-            output=result if isinstance(result, dict) else {},
-            duration_ms=elapsed_ms,
-        )
-    except Exception as exc:
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        return BuiltInHookTestResponse(
-            hook_id=hook_id,
-            duration_ms=elapsed_ms,
-            error=str(exc),
         )

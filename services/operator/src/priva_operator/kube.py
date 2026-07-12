@@ -18,6 +18,14 @@ logger = get_app_logger(__name__)
 
 _loaded = False
 
+# The single, global managed-policy ConfigMap (hook_policy is global scope, so one
+# object is shared by every ar-<account> pod). Mounted whole (no subPath) at the
+# Claude Code managed-settings path so the CLI loads it natively.
+MANAGED_POLICY_CM = "claude-managed-policy"
+MANAGED_POLICY_MOUNT = "/etc/claude-code"
+MANAGED_POLICY_VOLUME = "claude-policy"
+_POLICY_DIGEST_ANNOTATION = "priva.io/policy-digest"
+
 
 def _load() -> None:
     global _loaded
@@ -164,6 +172,11 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                             {"name": "WORKSPACE_DIR", "value": "/workspace"},
                             {"name": "PRIVA_HOME", "value": "/workspace/.priva"},
                             {"name": "CLAUDE_CONFIG_DIR", "value": "/workspace/.claude"},
+                            # Per-account writable dir for managed-hook context (e.g. the
+                            # risky-tools seed's risky_tools.json). The global managed
+                            # command passes this through the fire-log wrapper so a global
+                            # script reads per-account context from a fixed absolute path.
+                            {"name": "PRIVA_HOOK_DIR", "value": "/workspace/.priva/hook-context"},
                             # HOME must be writable on the volume (readOnlyRootFilesystem).
                             {"name": "HOME", "value": "/workspace/.home"},
                             # NOTE: no IS_SANDBOX — the claude CLI refuses
@@ -180,6 +193,10 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                             _data_volume_mount(mount_info),
                             # readOnlyRootFilesystem → give the CLI/node a writable scratch.
                             {"name": "tmp", "mountPath": "/tmp"},
+                            # Global managed policy (enforced admin hooks). Whole-dir,
+                            # NO subPath → ConfigMap edits hot-sync into the running pod.
+                            {"name": MANAGED_POLICY_VOLUME, "mountPath": MANAGED_POLICY_MOUNT,
+                             "readOnly": True},
                         ],
                         "readinessProbe": {
                             "httpGet": {"path": "/health", "port": settings.kubernetes.runner_service_port},
@@ -189,11 +206,70 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                     "volumes": [
                         _data_volume(mount_info),
                         {"name": "tmp", "emptyDir": {}},
+                        # optional:True → a pod still starts if the CM isn't created
+                        # yet (fail-open, consistent with the hooks-snapshot policy).
+                        {"name": MANAGED_POLICY_VOLUME,
+                         "configMap": {"name": MANAGED_POLICY_CM, "optional": True}},
                     ],
                 },
             },
         },
     }
+
+
+def ensure_managed_policy_configmap(namespace) -> bool:
+    """Render the global enforced-hook policy into the shared managed-policy CM.
+
+    Reads enforced+enabled command policies from data-spine and renders the
+    Claude Code managed-settings.json + hook scripts + fire-log wrapper (see
+    priva_common.managed_policy_render). Idempotent: a digest annotation skips
+    the write when the enforced set is unchanged, so calling it from every
+    per-account handler costs one read and no write in steady state. Fail-soft:
+    a data-spine blip logs and returns (pods fail-open on the optional mount).
+    Returns True when a create/replace was performed.
+    """
+    try:
+        from priva_common.dataplane import get_client
+        from priva_common import managed_policy_render as render
+
+        rows = get_client().hook_policies.list(enabled_only=True)
+        enforced = [p for p in rows if p.enforced and p.hook_type == "command"]
+        data = render.render_config_map_data(enforced)
+    except Exception:
+        logger.warning("managed-policy render skipped (data-spine unreachable?)", exc_info=True)
+        return False
+
+    digest = render.content_digest(data)
+    existing = None
+    try:
+        existing = core().read_namespaced_config_map(MANAGED_POLICY_CM, namespace)
+    except client.ApiException as exc:
+        if exc.status != 404:
+            raise
+
+    meta = {"name": MANAGED_POLICY_CM, "namespace": namespace,
+            "annotations": {_POLICY_DIGEST_ANNOTATION: digest}}
+    if existing is None:
+        body = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": meta, "data": data}
+        _ignore_conflict(core().create_namespaced_config_map, namespace, body)
+        logger.info("created %s (%d enforced hooks)", MANAGED_POLICY_CM, len(enforced))
+        return True
+
+    if (existing.metadata.annotations or {}).get(_POLICY_DIGEST_ANNOTATION) == digest:
+        return False  # enforced set unchanged
+    # Retain the prior generation's scripts so an in-flight session whose
+    # settings still point at the old hash keeps working until it ends.
+    data = render.merge_generations(data, existing.data or {})
+    meta["resourceVersion"] = existing.metadata.resource_version
+    body = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": meta, "data": data}
+    try:
+        core().replace_namespaced_config_map(MANAGED_POLICY_CM, namespace, body)
+        logger.info("updated %s (%d enforced hooks)", MANAGED_POLICY_CM, len(enforced))
+        return True
+    except client.ApiException as exc:
+        if exc.status == 409:  # a sibling handler won the race with identical content
+            return False
+        raise
 
 
 def _service_body(namespace, account_id, port, owner) -> dict:

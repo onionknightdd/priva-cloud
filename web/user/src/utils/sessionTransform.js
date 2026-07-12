@@ -8,6 +8,7 @@ import {
   FILE_SOURCE_PAST,
   fileTabFromToolUse,
   fileTabsFromGeneratedFiles,
+  shouldOpenToolFileInBrowser,
 } from './fileArtifacts'
 
 // Monotonic counter for `_cid` (stable React list keys). 's-' prefix keeps
@@ -221,7 +222,9 @@ export function transformSessionMessages(sdkMessages) {
         } else if (block.type === 'tool_use') {
           const result = resultMap[block.id]
           const isError = result?.is_error || false
-          const fileTab = fileTabFromToolUse(block, FILE_SOURCE_PAST)
+          const fileTab = shouldOpenToolFileInBrowser(block, result)
+            ? fileTabFromToolUse(block, FILE_SOURCE_PAST)
+            : null
           if (fileTab) fileBrowserTabs.push(fileTab)
           if (isGeneratedToolName(block.name)) {
             fileBrowserTabs.push(...getGeneratedTabs(block, result))
@@ -269,7 +272,9 @@ export function transformSessionMessages(sdkMessages) {
         const result = resultMap[block.id]
         const isError = result?.is_error || false
         const status = isError ? 'error' : 'success'
-        const fileTab = fileTabFromToolUse(block, FILE_SOURCE_PAST)
+        const fileTab = shouldOpenToolFileInBrowser(block, result)
+          ? fileTabFromToolUse(block, FILE_SOURCE_PAST)
+          : null
         if (fileTab) fileBrowserTabs.push(fileTab)
 
         if (block.name === 'Write' || block.name === 'Edit') {

@@ -1,6 +1,7 @@
 // Compact switch with an ON/OFF text label, matching the existing Priva web
 // plugin toggle: rectangular 4px-radius track and a square sliding thumb.
 const SIZES = {
+  xs: { w: 28, h: 16, knob: 10, offLeft: 2, onLeft: 14, top: 2 },
   sm: { w: 32, h: 18, knob: 12, offLeft: 2, onLeft: 16, top: 2 },
   md: { w: 36, h: 20, knob: 14, offLeft: 2, onLeft: 18, top: 2 },
 }

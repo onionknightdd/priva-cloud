@@ -18,6 +18,7 @@ from priva_common.models.subagents import (
     SubAgentSummary,
     SubAgentUpdateRequest,
 )
+from priva_common.paths import claude_config_dir
 from priva_common.workspace import get_user_workspace
 from priva_common.user_store import get_user_store
 
@@ -66,11 +67,12 @@ VALID_MEMORY_MODES = {"none", "user", "project", "local"}
 def _agents_dir(username: str, scope: str = "project", cwd: str | None = None) -> Path:
     """Resolve a (scope, cwd) pair to its .claude/agents directory (no mkdir).
 
-    - scope "user"    -> ~/.claude/agents
+    - scope "user"    -> $CLAUDE_CONFIG_DIR/agents (~/.claude/agents in local dev;
+                         the CLI discovers user-scope agents ONLY there)
     - scope "project" -> {cwd}/.claude/agents  (cwd=None -> default workspace)
     """
     if scope == "user":
-        return Path.home() / ".claude" / "agents"
+        return claude_config_dir() / "agents"
     if cwd:
         if not os.path.isabs(cwd):
             raise HTTPException(400, "An absolute 'cwd' is required for project subagents")

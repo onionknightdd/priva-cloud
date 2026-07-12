@@ -17,6 +17,7 @@ from concurrent import futures
 
 import grpc
 
+from priva_common.dataplane import converters as cv
 from priva_common.dataplane.v1 import (
     account_pb2,
     account_pb2_grpc,
@@ -25,6 +26,8 @@ from priva_common.dataplane.v1 import (
     binding_pb2,
     binding_pb2_grpc,
     common_pb2,
+    hook_policy_pb2,
+    hook_policy_pb2_grpc,
     quota_pb2,
     quota_pb2_grpc,
     registration_pb2,
@@ -111,6 +114,37 @@ def _rdefaults_pb(r) -> runner_defaults_pb2.RunnerDefaults:
         storage_gb=r.storage_gb,
         runner_image=r.runner_image,
         updated_at=r.updated_at or "",
+    )
+
+
+def _hook_policy_pb(p) -> hook_policy_pb2.HookPolicy:
+    if p is None:
+        return hook_policy_pb2.HookPolicy()  # empty id => not found
+    return hook_policy_pb2.HookPolicy(
+        id=p.id,
+        hook_type=p.hook_type,
+        name=p.name,
+        description=p.description,
+        events=list(p.events),
+        matcher=p.matcher,
+        timeout_seconds=p.timeout_seconds,
+        interpreter=p.interpreter,
+        script_body=p.script_body,
+        content_hash=p.content_hash,
+        url=p.url,
+        headers_json=p.headers_json,
+        allowed_env_vars=list(p.allowed_env_vars),
+        mcp_server=p.mcp_server,
+        mcp_tool=p.mcp_tool,
+        enabled=p.enabled,
+        enforced=p.enforced,
+        default_on=p.default_on,
+        predefined=p.predefined,
+        seed_version=p.seed_version,
+        target=p.target,
+        updated_at=p.updated_at or "",
+        updated_by=p.updated_by,
+        enforced_events=list(p.enforced_events),
     )
 
 
@@ -303,6 +337,39 @@ class _RunnerDefaultsServicer(runner_defaults_pb2_grpc.RunnerDefaultsServiceServ
         return _rdefaults_pb(self.svc.set(**kw))
 
 
+class _HookPolicyServicer(hook_policy_pb2_grpc.HookPolicyServiceServicer):
+    def __init__(self, svc):
+        self.svc = svc
+
+    def List(self, request, context):
+        return hook_policy_pb2.HookPolicyList(
+            items=[_hook_policy_pb(p) for p in self.svc.list(request.enabled_only)])
+
+    def Get(self, request, context):
+        return _hook_policy_pb(self.svc.get(request.id))
+
+    def Upsert(self, request, context):
+        record = cv.hook_policy_from_pb(request.policy)
+        if record is None:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "hook policy id is required")
+        try:
+            return _hook_policy_pb(self.svc.upsert(
+                record, update_mask=list(request.update_mask), expect=request.expect))
+        except ValueError as exc:
+            context.abort(grpc.StatusCode.ALREADY_EXISTS, str(exc))
+        except LookupError as exc:
+            context.abort(grpc.StatusCode.NOT_FOUND, str(exc))
+
+    def Delete(self, request, context):
+        try:
+            self.svc.delete(request.id)
+        except LookupError as exc:
+            context.abort(grpc.StatusCode.NOT_FOUND, str(exc))
+        except PermissionError as exc:
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(exc))
+        return common_pb2.Empty()
+
+
 class _RegistrationServicer(registration_pb2_grpc.RegistrationServiceServicer):
     def __init__(self, svc):
         self.svc = svc
@@ -346,6 +413,8 @@ def build_server(settings, max_workers: int = 16, repo=None) -> grpc.Server:
         _RunnerDefaultsServicer(client.runner_defaults), server)
     registration_pb2_grpc.add_RegistrationServiceServicer_to_server(
         _RegistrationServicer(client.registrations), server)
+    hook_policy_pb2_grpc.add_HookPolicyServiceServicer_to_server(
+        _HookPolicyServicer(client.hook_policies), server)
     return server
 
 

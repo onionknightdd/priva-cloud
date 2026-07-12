@@ -158,32 +158,34 @@ def _make_risky_aware_can_use_tool(
     """Build a can_use_tool callback that pauses for user approval on
     matched risky tools and auto-allows everything else.
 
-    Delegates the decision to require_permission_risky_tools so the hook
-    function is the single source of truth for both the match logic and
-    the user-facing reason text. The no-match branch returns
-    PermissionResultAllow(updated_input=None) -- identical to
-    _auto_approve_tool -- so the CLI's built-in protection for
+    Matches directly via priva_common.risky_matcher (the old
+    require_permission_risky_tools builtin is now a seeded hook policy —
+    this permission-gate path is independent of the hook engine). The
+    no-match branch returns PermissionResultAllow(updated_input=None) --
+    identical to _auto_approve_tool -- so the CLI's built-in protection for
     .claude/{skills,commands,agents}/** continues to work as before.
     """
-    from ..hooks.built_in_hooks import require_permission_risky_tools
     from priva_common.risky_matcher import matches_any
 
     async def wrapped(tool_name, tool_input, context):
-        hook_out = await require_permission_risky_tools(
-            {"tool_name": tool_name, "tool_input": tool_input}, None, None,
-        )
-        spec = (hook_out or {}).get("hookSpecificOutput") or {}
-        if spec.get("permissionDecision") == "ask":
-            _, rule = matches_any(risky_list, tool_name, tool_input)
+        matched, rule = matches_any(risky_list, tool_name, tool_input)
+        if matched:
             return await coordinator.request_permission(
                 tool_name, tool_input, context,
                 risky=True,
                 matched_rule=rule,
-                reason=spec.get("permissionDecisionReason"),
+                reason=_risky_reason(rule),
             )
         return PermissionResultAllow(updated_input=None)
 
     return wrapped
+
+
+def _risky_reason(rule: str | None) -> str:
+    return (
+        f"匹配到高风险工具模式 '{rule}'。"
+        f"请再次确认 Agent 即将要执行的操作是否符合预期。"
+    )
 
 
 def _askuser_answers_map(questions: list | None, answer_text: str) -> dict[str, str]:
@@ -263,7 +265,6 @@ def _make_unified_can_use_tool(
     would otherwise block for a prompt is denied with a default message
     instead of hanging the connection. Non-gated tools are unaffected.
     """
-    from ..hooks.built_in_hooks import require_permission_risky_tools
     from priva_common.risky_matcher import matches_any
 
     _disabled = PermissionResultDeny(message="permission feedback disabled")
@@ -298,19 +299,15 @@ def _make_unified_can_use_tool(
             )
 
         if risky_list:
-            hook_out = await require_permission_risky_tools(
-                {"tool_name": tool_name, "tool_input": tool_input}, None, None,
-            )
-            spec = (hook_out or {}).get("hookSpecificOutput") or {}
-            if spec.get("permissionDecision") == "ask":
+            matched, rule = matches_any(risky_list, tool_name, tool_input)
+            if matched:
                 if not enable_feedback:
                     return _disabled
-                _, rule = matches_any(risky_list, tool_name, tool_input)
                 return await coordinator.request_permission(
                     tool_name, tool_input, context,
                     risky=True,
                     matched_rule=rule,
-                    reason=spec.get("permissionDecisionReason"),
+                    reason=_risky_reason(rule),
                     kind="permission",
                 )
             return PermissionResultAllow(updated_input=None)

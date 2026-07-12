@@ -16,6 +16,19 @@ def priva_home() -> Path:
     return base / "priva"
 
 
+def claude_config_dir() -> Path:
+    """The claude CLI's *user-scope* config dir: $CLAUDE_CONFIG_DIR, else ~/.claude.
+
+    On k8s pods the operator sets CLAUDE_CONFIG_DIR=/workspace/.claude while HOME
+    is remapped to /workspace/.home — so ``Path.home()/".claude"`` is a directory
+    the CLI NEVER reads there. Anything meant for the CLI's user scope
+    (settings.json, skills/, agents/, commands/, .claude.json, ...) must resolve
+    through this helper, never through ``Path.home()``.
+    """
+    raw = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(raw).expanduser() if raw else Path.home() / ".claude"
+
+
 def resource_dir(resource_type: str) -> Path:
     """Runtime resource dir: $PRIVA_HOME/priva/resource/<type>/.
 

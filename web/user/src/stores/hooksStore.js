@@ -4,10 +4,23 @@ import safeStorage from '@shared/utils/safeStorage'
 
 const DEFAULT_DETAIL_WIDTH = 380
 
+// Pull one scope's hooks dict out of the GET /config `scopes` array.
+function hooksForScope(scopes, scope, cwd) {
+  const match = (scopes || []).find(
+    (s) => s.scope === scope && (s.cwd || null) === (cwd || null),
+  )
+  return match ? (match.hooks || {}) : {}
+}
+
 const useHooksStore = create((set, get) => ({
   selectedHookId: null,
   activeDetailTab: 'config',
+  // configuredHooks = the ACTIVE scope's hooks (what the per-event UI renders).
   configuredHooks: {},
+  configuredScopes: [],   // raw GET /config scopes: [{scope, cwd, hooks}]
+  adminHooks: {},         // admin hooks active per event (virtual, read-only)
+  activeScope: 'user',    // 'user' | 'project'
+  activeCwd: null,        // absolute cwd when activeScope === 'project'
   detailWidth: safeStorage.getNumber('hooks-detail-width', DEFAULT_DETAIL_WIDTH, { min: 280, max: 600 }),
   listWidth: safeStorage.getNumber('hooks-list-width', 240, { min: 220, max: 420 }),
 
@@ -60,7 +73,18 @@ const useHooksStore = create((set, get) => ({
     set({ configLoading: true })
     try {
       const data = await hooksApi.fetchConfig()
-      set({ configuredHooks: data.hooks || {}, _configLoaded: true })
+      const scopes = Array.isArray(data.scopes) ? data.scopes : []
+      // Default to the first scope that actually has hooks, else User.
+      const withHooks = scopes.find((s) => Object.keys(s.hooks || {}).length > 0)
+      const active = withHooks || scopes.find((s) => s.scope === 'user') || { scope: 'user', cwd: null }
+      set({
+        configuredScopes: scopes,
+        adminHooks: data.admin || {},
+        activeScope: active.scope,
+        activeCwd: active.cwd || null,
+        configuredHooks: hooksForScope(scopes, active.scope, active.cwd || null),
+        _configLoaded: true,
+      })
     } catch (e) {
       console.error('Failed to load hook config:', e)
     } finally {
@@ -68,11 +92,31 @@ const useHooksStore = create((set, get) => ({
     }
   },
 
+  // Switch which settings.json scope the Config tab shows/edits.
+  setActiveScope: (scope, cwd) => {
+    const { configuredScopes } = get()
+    set({
+      activeScope: scope,
+      activeCwd: cwd || null,
+      configuredHooks: hooksForScope(configuredScopes, scope, cwd || null),
+    })
+  },
+
   saveConfig: async (hooks) => {
+    const { activeScope, activeCwd } = get()
     set({ savingConfig: true })
     try {
-      const data = await hooksApi.updateConfig(hooks)
-      set({ configuredHooks: data.hooks || hooks })
+      const data = await hooksApi.updateConfig(hooks, activeScope, activeCwd)
+      const savedHooks = data.hooks || hooks
+      // Reflect the write back into the active scope entry (insert if new).
+      const scopes = [...get().configuredScopes]
+      const idx = scopes.findIndex(
+        (s) => s.scope === activeScope && (s.cwd || null) === (activeCwd || null),
+      )
+      const entry = { scope: activeScope, cwd: activeCwd || null, hooks: savedHooks }
+      if (idx >= 0) scopes[idx] = entry
+      else scopes.push(entry)
+      set({ configuredHooks: savedHooks, configuredScopes: scopes })
     } catch (e) {
       console.error('Failed to save hook config:', e)
     } finally {
@@ -119,35 +163,7 @@ const useHooksStore = create((set, get) => ({
     }
   },
 
-  enableBuiltInHook: async (hookId) => {
-    try {
-      await hooksApi.enableBuiltInHook(hookId)
-      await get().loadCatalog()
-    } catch (e) {
-      console.error('Failed to enable built-in hook:', e)
-    }
-  },
-
-  disableBuiltInHook: async (hookId) => {
-    try {
-      await hooksApi.disableBuiltInHook(hookId)
-      await get().loadCatalog()
-    } catch (e) {
-      console.error('Failed to disable built-in hook:', e)
-    }
-  },
-
-  testBuiltInHook: async (hookId, eventType, inputJson) => {
-    set({ testRunning: true, testResult: null })
-    try {
-      const result = await hooksApi.testBuiltInHook(hookId, eventType, inputJson)
-      set({ testResult: result })
-    } catch (e) {
-      set({ testResult: { hook_id: hookId, duration_ms: 0, error: e.message } })
-    } finally {
-      set({ testRunning: false })
-    }
-  },
+  // Admin hooks are enforced-only and read-only (D6) — no enable/disable action.
 
   // --- Test ---
   runTest: async (eventType, handler, inputJson) => {
@@ -214,6 +230,10 @@ const useHooksStore = create((set, get) => ({
     selectedHookId: null,
     activeDetailTab: 'config',
     configuredHooks: {},
+    configuredScopes: [],
+    adminHooks: {},
+    activeScope: 'user',
+    activeCwd: null,
     configLoading: false,
     savingConfig: false,
     catalog: [],

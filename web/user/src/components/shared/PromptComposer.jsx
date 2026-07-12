@@ -286,6 +286,18 @@ export default function PromptComposer({
     [availableFiles, filePickerQuery]
   )
 
+  // The host can clear `value` directly after send. Keep transient pickers in
+  // sync so a no-match slash query like `/missing-skill` cannot linger after
+  // the message is submitted.
+  useEffect(() => {
+    if (skill || !value.startsWith('/')) {
+      if (showSkillPicker) setShowSkillPicker(false)
+      if (skillQuery) setSkillQuery('')
+      return
+    }
+    if (value.includes(' ') && showSkillPicker) setShowSkillPicker(false)
+  }, [skill, skillQuery, showSkillPicker, value])
+
   // Reset active index when filtered list changes
   useEffect(() => { setActiveSkillIndex(0) }, [filteredSkills.length])
   useEffect(() => { setActiveFileIndex(0) }, [filteredFiles.length])
@@ -424,6 +436,10 @@ export default function PromptComposer({
           e.preventDefault()
           handleSkillSelect(filteredSkills[activeSkillIndex]?.name)
           return
+        }
+        if (e.key === 'Enter') {
+          setShowSkillPicker(false)
+          setSkillQuery('')
         }
       }
       if (e.key === 'Escape') {
@@ -806,6 +822,10 @@ export default function PromptComposer({
           e.preventDefault()
           handleSkillSelect(filteredSkills[activeSkillIndex]?.name)
           return
+        }
+        if (e.key === 'Enter') {
+          setShowSkillPicker(false)
+          setSkillQuery('')
         }
       }
       if (e.key === 'Escape') {

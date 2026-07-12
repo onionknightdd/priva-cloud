@@ -56,6 +56,16 @@ export const getRunnerDefaults = () => getJSON('/admin/runner-defaults')
 export const updateRunnerDefaults = (data) => putJSON('/admin/runner-defaults', data)
 export const getRunnerImages = () => getJSON('/admin/runner-images')
 
+// Hook Policy (Agent Runner Sandbox → Runtime): admin-stored hooks delivered to
+// every account's agent-runner at its next session build. create saves disabled;
+// deleting a predefined (seeded) row is rejected (409). validate is compile-only.
+export const listHookPolicies = () => getJSON('/admin/hook-policy')
+export const createHookPolicy = (data) => postJSON('/admin/hook-policy', data)
+export const updateHookPolicy = (id, data) => putJSON(`/admin/hook-policy/${encodeURIComponent(id)}`, data)
+export const deleteHookPolicy = (id) => deleteJSON(`/admin/hook-policy/${encodeURIComponent(id)}`)
+export const validateHookPolicy = (data) => postJSON('/admin/hook-policy/validate', data)
+export const getHookPolicySeed = (id) => getJSON(`/admin/hook-policy/${encodeURIComponent(id)}/seed`)
+
 // Per-account: served by the account's own agent-runner pod (gateway routes the
 // /api/sandbox/pty prefix to it). Not admin-gated — each user configures their own pod.
 export const getPtyConfig = () => sandboxGet('/pty/config')
