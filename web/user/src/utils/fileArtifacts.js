@@ -69,7 +69,7 @@ export function isErroredToolResult(result, toolUseResult = null) {
 
 export function shouldOpenToolFileInBrowser(block, result, toolUseResult = null) {
   if (!block || !FILE_TOOL_NAMES.has(block.name)) return false
-  if (block.name === 'Write' && isErroredToolResult(result, toolUseResult)) return false
+  if (isErroredToolResult(result, toolUseResult)) return false
   return true
 }
 
@@ -140,7 +140,9 @@ function addSessionBlockFiles(filesByPath, block, browserSource) {
 
   if (block.type === 'tool_use') {
     if (FILE_TOOL_NAMES.has(block.name)) {
-      addSessionFile(filesByPath, fileTabFromToolUse(block, browserSource))
+      if (shouldOpenToolFileInBrowser(block, block.result)) {
+        addSessionFile(filesByPath, fileTabFromToolUse(block, browserSource))
+      }
     } else if (isGeneratedToolName(block.name)) {
       generatedFilesFromBlock(block, browserSource)
         .forEach((file) => addSessionFile(filesByPath, file))

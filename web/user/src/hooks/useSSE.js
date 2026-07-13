@@ -27,6 +27,7 @@ import {
 } from '../utils/generatedTool'
 import {
   FILE_SOURCE_CURRENT,
+  FILE_TOOL_NAMES,
   browserSourceLabel,
   fileNameFromPath,
   fileTabFromToolUse,
@@ -265,7 +266,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   // Track tool_use_ids that are canvas-only (hidden from message flow)
   const hiddenToolIds = new Set()
   const generatedToolIds = new Set()
-  const pendingWriteFileTabs = new Map()
+  const pendingToolFileTabs = new Map()
   // Track TodoWrite tool_use_ids for todo extraction
   const todoWriteIds = new Set()
   // Buffer hook_event payloads keyed by tool_use_id when they arrive before
@@ -623,10 +624,10 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
 
         for (const block of toolBlocks) {
           if (isGeneratedToolName(block.name)) generatedToolIds.add(block.id)
-          if (block.name === 'Write') {
+          if (FILE_TOOL_NAMES.has(block.name)) {
             if (!isPlanWriteTool(block)) {
               const tab = fileTabFromToolUse(block, FILE_SOURCE_CURRENT)
-              if (tab) pendingWriteFileTabs.set(block.id, tab)
+              if (tab) pendingToolFileTabs.set(block.id, tab)
             }
           } else {
             openToolFileInBrowser(block, {
@@ -906,16 +907,22 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         // Process all result blocks
         for (const rb of allResultBlocks) {
           const isToolResultError = isErroredToolResult(rb, data.tool_use_result)
-          const pendingWriteTab = pendingWriteFileTabs.get(rb.tool_use_id)
-          const handledPendingWrite = Boolean(pendingWriteTab)
-          if (pendingWriteTab) {
+          const pendingFileTab = pendingToolFileTabs.get(rb.tool_use_id)
+          const handledPendingFile = Boolean(pendingFileTab)
+          if (pendingFileTab) {
             if (isToolResultError) {
               const staleTab = S.fileBrowser().tabs.find((tab) => tab.toolUseId === rb.tool_use_id)
               if (staleTab) S.fileBrowser().closeFile(staleTab.id)
             } else {
-              openFileBrowserTab(pendingWriteTab)
+              openFileBrowserTab(pendingFileTab)
+              if (pendingFileTab.sourceTool === 'Read') fxShowCanvas('file-browser')
             }
-            pendingWriteFileTabs.delete(rb.tool_use_id)
+            pendingToolFileTabs.delete(rb.tool_use_id)
+          } else if (isToolResultError) {
+            const staleTab = S.fileBrowser().tabs.find((tab) =>
+              tab.toolUseId === rb.tool_use_id && FILE_TOOL_NAMES.has(tab.sourceTool)
+            )
+            if (staleTab) S.fileBrowser().closeFile(staleTab.id)
           }
 
           // Update message flow only for visible tools
@@ -1017,17 +1024,18 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
                 resultContent: typeof rb.content === 'string' ? rb.content : null,
                 toolUseResult: tur,
               })
-              if (op.type === 'write' && !handledPendingWrite) {
+              if ((op.type === 'write' || op.type === 'edit') && !handledPendingFile) {
                 if (isErrorResult) {
                   const staleTab = S.fileBrowser().tabs.find((tab) => tab.toolUseId === op.id)
                   if (staleTab) S.fileBrowser().closeFile(staleTab.id)
                 } else if (op.filePath) {
+                  const sourceTool = op.type === 'edit' ? 'Edit' : 'Write'
                   openFileBrowserTab({
                     filePath: op.filePath,
                     name: fileNameFromPath(op.filePath),
                     source: browserSourceLabel(FILE_SOURCE_CURRENT),
                     browserSource: FILE_SOURCE_CURRENT,
-                    sourceTool: 'Write',
+                    sourceTool,
                     toolUseId: op.id,
                   })
                 }
