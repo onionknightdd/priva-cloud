@@ -4,9 +4,13 @@ branch of the fire pipeline (claim → checks → StartRun → dispatch verdicts
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from priva_common.models.scheduler import IntervalTriggerConfig, ScheduledJobDefinition
+from priva_common.models.scheduler import (
+    AgentRunConfig,
+    IntervalTriggerConfig,
+    ScheduledJobDefinition,
+)
 
 from priva_scheduler.dispatch import DispatchError
 from priva_scheduler.engine import SchedulerEngine, fire_epoch_for
@@ -55,6 +59,28 @@ def test_fire_epoch_interval_buckets_by_period():
     assert fire_epoch_for(job, bucket) == bucket
     assert fire_epoch_for(job, bucket) == fire_epoch_for(job, bucket + period - 1)
     assert fire_epoch_for(job, bucket + period) != fire_epoch_for(job, bucket)
+
+
+def test_arm_anchors_interval_phase_to_created_at(fake_client):
+    engine, _ = make_engine(fake_client)
+    created = datetime(2026, 7, 1, 10, 7, tzinfo=timezone.utc)
+    job = ScheduledJobDefinition(
+        id="j5", name="every 4h", prompt="tick",
+        trigger=IntervalTriggerConfig(hours=4), timezone="UTC",
+        job_config=AgentRunConfig(prompt="tick"), created_at=created)
+    fake_client.scheduler.jobs["j5"] = ("acct-1", job)
+
+    asyncio.run(engine.sync_jobs())
+
+    (armed,) = engine._scheduler.get_jobs()
+    assert armed.trigger.start_date == created
+    # ticks are created_at + k*interval whatever the arm clock — the same
+    # instants the user API computes for next_run_time
+    now = datetime(2026, 7, 13, 9, 0, tzinfo=timezone.utc)
+    nxt = armed.trigger.get_next_fire_time(None, now)
+    assert nxt == created + timedelta(hours=288)  # 2026-07-13 10:07 UTC
+    # …and a later poll inside the same gap agrees (no phase slide)
+    assert armed.trigger.get_next_fire_time(None, now + timedelta(minutes=30)) == nxt
 
 
 # --- arm/disarm diffing (D6 re-list) ------------------------------------------

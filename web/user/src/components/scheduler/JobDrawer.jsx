@@ -165,7 +165,7 @@ export default function JobDrawer({ onDelete }) {
     clearTimeout(previewTimer.current)
     previewTimer.current = setTimeout(async () => {
       try {
-        const res = await validateTrigger(trigger, tz)
+        const res = await validateTrigger(trigger, tz, editingJob?.created_at ?? null)
         setPreview({ valid: res.valid, next: res.next_run_time, error: res.error })
       } catch {
         setPreview({ valid: true, next: null, error: null }) // preview is best-effort

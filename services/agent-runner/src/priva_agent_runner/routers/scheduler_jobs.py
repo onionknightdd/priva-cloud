@@ -60,7 +60,7 @@ def _next_run_time(defn: ScheduledJobDefinition) -> str | None:
     if defn.status != "active":
         return None  # round-3: blank for paused jobs
     try:
-        return next_run_time(defn.trigger, defn.timezone)
+        return next_run_time(defn.trigger, defn.timezone, anchor=defn.created_at)
     except Exception:
         return None
 
@@ -216,7 +216,7 @@ async def trigger_job(job_id: str, user: UserRecord = Depends(require_account)):
 async def validate_trigger(req: TriggerValidationRequest,
                            user: UserRecord = Depends(require_account)):
     try:
-        nxt = next_run_time(req.trigger, req.timezone)
+        nxt = next_run_time(req.trigger, req.timezone, anchor=req.created_at)
     except Exception as exc:
         return TriggerValidationResponse(valid=False, error=str(exc))
     return TriggerValidationResponse(valid=True, next_run_time=nxt)

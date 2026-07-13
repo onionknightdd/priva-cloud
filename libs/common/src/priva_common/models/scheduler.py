@@ -224,6 +224,9 @@ class ScheduledRunAccepted(BaseModel):
 class TriggerValidationRequest(BaseModel):
     trigger: TriggerConfig
     timezone: str = "UTC"
+    # Editing an existing job: its created_at, so the interval-phase anchor
+    # matches what the engine armed. Absent (creating) ≈ now, same thing.
+    created_at: datetime | None = None
 
 
 class TriggerValidationResponse(BaseModel):

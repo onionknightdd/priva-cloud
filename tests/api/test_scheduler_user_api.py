@@ -127,6 +127,26 @@ def test_ownership_fence_hides_foreign_jobs(harness):
     assert harness.dataplane.scheduler.get_job(foreign.id) is not None
 
 
+def test_interval_next_run_anchored_to_created_at(harness):
+    """next_run_time for interval jobs must not slide with the poll clock —
+    it is created_at + k*interval, the instant the engine actually fires."""
+    from datetime import datetime, timedelta
+
+    http = harness.http
+    job = http.post("/api/sandbox/scheduler/jobs", json={
+        "name": "poller", "timezone": "UTC",
+        "trigger": {"type": "interval", "hours": 4},
+        "job_config": {"job_type": "agent_run", "prompt": "poll"},
+    }).json()
+    assert job["next_run_time"]
+
+    listed = http.get("/api/sandbox/scheduler/jobs").json()["jobs"][0]
+    assert listed["next_run_time"] == job["next_run_time"]  # stable across polls
+
+    parse = lambda s: datetime.fromisoformat(s.replace("Z", "+00:00"))  # noqa: E731
+    assert parse(job["next_run_time"]) - parse(job["created_at"]) == timedelta(hours=4)
+
+
 def test_validate_trigger_preview(harness):
     ok = harness.http.post("/api/sandbox/scheduler/validate-trigger", json={
         "trigger": {"type": "cron", "expr": "0 9 * * 1-5"}, "timezone": "Asia/Shanghai"})
@@ -139,6 +159,14 @@ def test_validate_trigger_preview(harness):
     zero = harness.http.post("/api/sandbox/scheduler/validate-trigger", json={
         "trigger": {"type": "interval"}, "timezone": "UTC"})
     assert zero.json()["valid"] is False  # zero-length interval never fires
+
+    # editing an existing job sends its created_at → preview keeps the armed
+    # phase (ticks at 10:07 + k*4h → minute stays :07 whatever the clock)
+    anchored = harness.http.post("/api/sandbox/scheduler/validate-trigger", json={
+        "trigger": {"type": "interval", "hours": 4}, "timezone": "UTC",
+        "created_at": "2026-07-01T10:07:00Z"})
+    assert anchored.json()["valid"] is True
+    assert anchored.json()["next_run_time"][14:16] == "07"
 
 
 def test_trigger_proxies_scheduler_internal_api(harness):

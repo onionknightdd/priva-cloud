@@ -20,9 +20,10 @@ export const resumeJob = (jobId) => sandboxPost(`/scheduler/jobs/${jobId}/resume
 export const triggerJob = (jobId) => sandboxPost(`/scheduler/jobs/${jobId}/trigger`, {})
 
 // Drawer live preview / custom-cron blur check. Always 200:
-// { valid, next_run_time?, error? }.
-export const validateTrigger = (trigger, timezone) =>
-  sandboxPost('/scheduler/validate-trigger', { trigger, timezone })
+// { valid, next_run_time?, error? }. createdAt (editing an existing job)
+// anchors the interval phase so the preview matches the armed schedule.
+export const validateTrigger = (trigger, timezone, createdAt = null) =>
+  sandboxPost('/scheduler/validate-trigger', { trigger, timezone, created_at: createdAt })
 
 // Stop a live run (HTTP twin of the WS abort frame) — records `cancelled`.
 export const abortRun = (runId) => sandboxPost(`/agent/scheduled-run/${runId}/abort`, {})

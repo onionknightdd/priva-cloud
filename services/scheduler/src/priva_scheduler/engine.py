@@ -15,8 +15,9 @@ roll replicas freely (US-8 misfire semantics cover the gap).
 fire (it IS the dedupe key). APScheduler doesn't hand the callback its
 scheduled time, so we derive a canonical epoch from the trigger shape:
 cron → the fire's minute (cron granularity); interval → the period bucket
-``now // period * period`` (replicas arm at different instants, so buckets —
-not wall clocks — are the shared coordinate; at most one run per period).
+``now // period * period`` (interval ticks are anchored to the job's
+created_at, so replicas fire the same instants; buckets keep the key immune
+to clock skew between them; at most one run per period).
 """
 
 from __future__ import annotations
@@ -53,17 +54,33 @@ from .reconcile import sweep_once
 logger = get_app_logger(__name__)
 
 
-def build_trigger(config, tz: str):
+def build_trigger(config, tz: str, *, anchor: datetime | None = None):
     """APScheduler trigger from a stored TriggerConfig (fork of the monolith's
-    ``shared.build_trigger`` — the only piece of it that carries over)."""
+    ``shared.build_trigger`` — the only piece of it that carries over).
+
+    ``anchor`` (the job's immutable created_at) pins the interval phase:
+    every replica ticks at ``anchor + k*interval`` regardless of when it
+    armed, so the schedule is deterministic across restarts and re-arms —
+    and the user API can compute the same instants for display. Without it
+    APScheduler defaults start_date to arm-time + interval (phase drift).
+    """
     if isinstance(config, CronTriggerConfig):
         return CronTrigger.from_crontab(config.expr, timezone=tz)
     if isinstance(config, IntervalTriggerConfig):
         return IntervalTrigger(
             weeks=config.weeks, days=config.days, hours=config.hours,
             minutes=config.minutes, seconds=config.seconds,
+            start_date=_aware_utc(anchor),
         )
     raise ValueError(f"Unknown trigger type: {config}")
+
+
+def _aware_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def interval_seconds(config: IntervalTriggerConfig) -> int:
@@ -159,7 +176,7 @@ class SchedulerEngine:
 
     def _arm(self, account_id: str, job: ScheduledJobDefinition) -> bool:
         try:
-            trigger = build_trigger(job.trigger, job.timezone)
+            trigger = build_trigger(job.trigger, job.timezone, anchor=job.created_at)
         except Exception as exc:
             logger.error("cannot arm job {} ({}): {}", job.id, job.name, exc)
             return False
