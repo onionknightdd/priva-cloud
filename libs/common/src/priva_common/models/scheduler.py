@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # --- Trigger configs ---
@@ -173,7 +173,7 @@ class JobRunRecord(BaseModel):
     job_id: str
     job_name: str
     username: str
-    started_at: datetime = Field(default_factory=datetime.now)
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: datetime | None = None
     status: Literal["running", "success", "error", "cancelled", "skipped"] = "running"
     duration_ms: int | None = None
@@ -183,6 +183,15 @@ class JobRunRecord(BaseModel):
     total_cost_usd: float | None = None
     result_summary: str | None = None
     session_id: str | None = None
+
+    @field_validator("started_at", "finished_at", mode="after")
+    @classmethod
+    def _naive_is_utc(cls, v: datetime | None) -> datetime | None:
+        # Rows were historically written as UTC wall-clock without an offset;
+        # stamp them aware so the JSON carries it and browsers render local.
+        if isinstance(v, datetime) and v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
 
 
 class JobRunHistoryResponse(BaseModel):

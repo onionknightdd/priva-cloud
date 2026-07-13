@@ -215,6 +215,22 @@ def test_runs_listing_with_filters(harness):
     assert [r["run_id"] for r in rest["runs"]] == ["r0"]
 
 
+def test_run_timestamps_carry_utc_offset(harness):
+    """started_at/finished_at must be tz-aware in the JSON — offset-less
+    strings get parsed as *local* time by `new Date()` in the browser, which
+    displayed run history in UTC wall-clock. Legacy naive rows are stamped UTC."""
+    job_id = harness.http.post(
+        "/api/sandbox/scheduler/jobs", json=_cron_job()).json()["id"]
+    harness.dataplane.scheduler.record_run(harness.account_id, JobRunRecord(
+        run_id="naive", job_id=job_id, job_name="Daily briefing", username="carol",
+        started_at="2026-07-12T09:00:00.000000",  # legacy naive-UTC row
+        finished_at="2026-07-12T09:01:00.000000", status="success"))
+
+    (run,) = harness.http.get("/api/sandbox/scheduler/runs").json()["runs"]
+    for field in ("started_at", "finished_at"):
+        assert run[field].endswith("Z") or "+00:00" in run[field], run[field]
+
+
 # --- the 7 MCP tools -----------------------------------------------------------
 
 
