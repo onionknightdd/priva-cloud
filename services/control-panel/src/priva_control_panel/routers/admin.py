@@ -771,7 +771,7 @@ async def get_system_health():
     from ..provisioner import dataspine_health, deployment_ready
 
     # --- Fan out the independent probes concurrently. ---
-    fleet_snap, gateway, ds_health, operator_dep, dataspine_dep, cp_dep, gw_dep = await asyncio.gather(
+    fleet_snap, gateway, ds_health, operator_dep, dataspine_dep, cp_dep, gw_dep, scheduler_dep = await asyncio.gather(
         _fleet_snapshot(),
         _gateway_snapshot(),
         dataspine_health(),
@@ -782,6 +782,8 @@ async def get_system_health():
         # (deploy/gateway/gateway.yaml / helm gateway.name). Fail-open: an
         # unknown name just means no replica chip on that node.
         asyncio.to_thread(deployment_ready, "priva-gateway"),
+        # scheduler (Phase 4a): leaderless firing engine, Deployment "scheduler".
+        asyncio.to_thread(deployment_ready, "scheduler"),
     )
 
     def _reps(dep: dict | None) -> ReplicaCount | None:
@@ -815,6 +817,17 @@ async def get_system_health():
         op_status = "degraded"
     else:
         op_status = "down"
+
+    # --- scheduler node (Phase 4a): Deployment readiness, same rule as operator.
+    # Shipped as the leaderless firing engine — no longer a planned module. ---
+    if scheduler_dep is None:
+        sched_status = "down"
+    elif scheduler_dep["ready"] >= 1:
+        sched_status = "up"
+    elif scheduler_dep["desired"] >= 1:
+        sched_status = "degraded"
+    else:
+        sched_status = "down"
 
     # --- agent-runner tier: up if any awake, idle if scaled-to-zero, down on probe failure. ---
     awake = fleet_snap["awake_sandboxes"]
@@ -859,8 +872,13 @@ async def get_system_health():
         # (role text: reconciles AgentTenant CRD · injects Secret · idle reaping).
         SystemNode(id="operator", label="operator", sub="kopf · sole scaler 0 ↔ 1",
                    plane="control", status=op_status, replicas=_reps(operator_dep)),
-        SystemNode(id="scheduler", label="scheduler", sub="trigger → claim → wake",
-                   plane="control", status="disabled", detail="planned · phase 4"),
+        # scheduler: shipped in Phase 4a. Leaderless waker/dispatcher — fires,
+        # claims exactly-once over the data-spine, wakes the pod, dispatches the
+        # run; executes nothing itself (the pod runs the job). The replica chip
+        # carries ready/desired; replicas is an availability knob, not sharding.
+        SystemNode(id="scheduler", label="scheduler", sub="claim → wake → dispatch",
+                   plane="control", status=sched_status, detail="leaderless firing",
+                   replicas=_reps(scheduler_dep)),
         SystemNode(id="data-spine", label="data-spine", sub=ds_sub,
                    plane="data", status=ds_status,
                    detail=(ds_health or {}).get("detail") or "source of truth",
@@ -908,9 +926,15 @@ async def get_system_health():
         _edge("control-panel", "data-spine", label="gRPC", kind="grpc", dep_ok=cp_ds_ok),
         _edge("operator", "data-spine", label="gRPC", kind="grpc"),
         _edge("agent-runner", "data-spine", label="gRPC", kind="grpc", dep_ok=ar_ds_ok),
-        # Planned edges (never animated).
-        _edge("scheduler", "operator", kind="control", disabled=True),
-        _edge("scheduler", "agent-runner", kind="control", disabled=True),
+        # scheduler (Phase 4a): the leaderless fire → claim → wake → dispatch path.
+        # Claims the fire over the data-spine gRPC, wakes the pod via a CR patch
+        # (the operator stays the sole scaler), then dispatches the run to the pod
+        # with a 202-admission POST. Animated when the scheduler is up.
+        _edge("scheduler", "data-spine", label="gRPC", kind="grpc"),
+        _edge("scheduler", "operator", label="wake", kind="control"),
+        _edge("scheduler", "agent-runner", label="dispatch", kind="control"),
+        # Planned edges (never animated). Redis stays parked — v1 is Postgres-claim,
+        # re-list, and CR wake (no Redis); the connector/state-reader are unbuilt.
         _edge("channel-connector", "agent-runner", kind="control", disabled=True),
         _edge("data-spine", "redis", kind="grpc", disabled=True),
     ]

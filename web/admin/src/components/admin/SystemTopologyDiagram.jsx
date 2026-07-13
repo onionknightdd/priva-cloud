@@ -82,6 +82,7 @@ const EDGE_ROUTE = {
   'channel-connector|agent-runner|control': { pts: [[805, 374], [805, 326]], mid: [805, 350] },
   'scheduler|operator|control': { pts: [[300, 462], [276, 462]], mid: [288, 462] },
   'scheduler|agent-runner|control': { pts: [[464, 462], [600, 462], [600, 300], [630, 300]], mid: [600, 382] },
+  'scheduler|data-spine|grpc': { pts: [[382, 502], [382, 584]], mid: [382, 543], lab: [390, 542, 'start'] },
   'data-spine|redis|grpc': { pts: [[650, 628], [690, 628]], mid: [670, 628] },
 }
 
