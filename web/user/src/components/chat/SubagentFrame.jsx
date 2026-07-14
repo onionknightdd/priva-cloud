@@ -148,11 +148,12 @@ function SubagentFrame({ block, reverted = false }) {
       {/* Header row */}
       <button
         type="button"
-        className="flex items-center gap-2 w-full px-3 py-2 text-sm overflow-hidden"
+        className="message-tool-card-frame flex items-center gap-2 w-full px-3 py-2 text-sm overflow-hidden"
         style={{
           background: bgTint,
           border: '1px solid var(--border)',
-          borderLeft: `3px solid ${borderColor}`,
+          '--message-tool-accent': borderColor,
+          '--message-tool-accent-width': '2px',
           borderRadius: 0,
           cursor: 'pointer',
           textAlign: 'left',

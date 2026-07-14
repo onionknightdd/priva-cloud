@@ -375,13 +375,12 @@ export default function FileToolCard({ kind, block = null, op = null, reverted =
     <div
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        className="w-full overflow-hidden"
+        className="message-tool-card-frame w-full overflow-hidden"
         style={{
           background: 'var(--bg-elevated)',
-          borderTop: `1px solid ${hovered ? 'var(--border)' : 'var(--border-subtle)'}`,
-          borderRight: `1px solid ${hovered ? 'var(--border)' : 'var(--border-subtle)'}`,
-          borderBottom: `1px solid ${hovered ? 'var(--border)' : 'var(--border-subtle)'}`,
-          borderLeft: `${compact ? 2 : 3}px solid ${statusColor}`,
+          border: `1px solid ${hovered ? 'var(--border)' : 'var(--border-subtle)'}`,
+          '--message-tool-accent': statusColor,
+          '--message-tool-accent-width': '2px',
           borderRadius: 0,
           transition: 'border-color 150ms ease, background 150ms ease',
           opacity: reverted ? 0.55 : 1,

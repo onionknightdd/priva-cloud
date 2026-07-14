@@ -1003,6 +1003,35 @@ html, body {
 .status-row.pending { border-left-color: var(--status-pending); }
 .status-row.error   { border-left-color: var(--status-error); }
 
+.message-tool-card-frame,
+.status-row.message-tool-card-square {
+  position: relative;
+  box-sizing: border-box;
+  border-radius: 0;
+}
+
+.message-tool-card-frame::before,
+.status-row.message-tool-card-square::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--message-tool-accent-width, 2px);
+  background: var(--message-tool-accent, transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.status-row.message-tool-card-square {
+  border-left: 1px solid var(--border);
+}
+
+.status-row.message-tool-card-square.running { --message-tool-accent: var(--status-running); }
+.status-row.message-tool-card-square.success { --message-tool-accent: var(--status-success); }
+.status-row.message-tool-card-square.pending { --message-tool-accent: var(--status-pending); }
+.status-row.message-tool-card-square.error   { --message-tool-accent: var(--status-error); }
+
 .status-row h3 {
   margin: 0;
   color: var(--text-secondary);

@@ -53,13 +53,14 @@ export default function TodoWriteCard({ block, mode = 'full' }) {
   return (
     <div
       ref={cardRef}
-      className="overflow-hidden"
+      className="message-tool-card-frame overflow-hidden"
       data-tool-card
       data-tool-use-id={block.id}
       style={{
         background: 'var(--bg-elevated)',
         border: '1px solid var(--border)',
-        borderLeft: '3px solid var(--purple)',
+        '--message-tool-accent': 'var(--purple)',
+        '--message-tool-accent-width': '2px',
         borderRadius: 0,
       }}
     >

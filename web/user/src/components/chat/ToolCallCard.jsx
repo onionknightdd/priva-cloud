@@ -477,19 +477,20 @@ export default function ToolCallCard({ block, reverted = false, compact = false 
   return (
     <div
       ref={cardRef}
-      className={`overflow-hidden${compact ? ' tool-call-card-compact' : ''}`}
+      className={`message-tool-card-frame overflow-hidden${compact ? ' tool-call-card-compact' : ''}`}
       data-tool-card
       data-tool-use-id={block.id}
       style={{
         background: 'var(--bg-elevated)',
         border: '1px solid var(--border)',
-        borderLeft: status === 'success'
-          ? `${compact ? 2 : 3}px solid var(--green)`
+        '--message-tool-accent': status === 'success'
+          ? 'var(--green)'
           : isError
-            ? `${compact ? 2 : 3}px solid var(--red)`
+            ? 'var(--red)'
             : status === 'running'
-              ? `${compact ? 2 : 3}px solid var(--purple)`
-              : '1px solid var(--border)',
+              ? 'var(--purple)'
+              : 'var(--border)',
+        '--message-tool-accent-width': '2px',
         borderRadius: 0,
         opacity: reverted ? 0.55 : 1,
         filter: reverted ? 'grayscale(0.4)' : 'none',
