@@ -1007,6 +1007,7 @@ html, body {
 .status-row.message-tool-card-square {
   position: relative;
   box-sizing: border-box;
+  border: 1px solid var(--border);
   border-radius: 0 !important;
 }
 
