@@ -238,11 +238,12 @@ export default function PermissionRequestCard({ block, onRespond }) {
   if (status === 'allowed') {
     return (
       <div
-        className="flex items-center gap-2 px-3 py-2"
+        className="message-tool-card-frame flex items-center gap-2 px-3 py-2"
         style={{
-          borderLeft: '2px solid var(--green)',
           background: 'var(--bg-surface)',
-          borderRadius: 4,
+          '--message-tool-accent': 'var(--green)',
+          '--message-tool-accent-width': '2px',
+          borderRadius: 0,
         }}
       >
         <Check size={14} strokeWidth={1.5} style={{ color: 'var(--green)' }} />
@@ -265,11 +266,12 @@ export default function PermissionRequestCard({ block, onRespond }) {
   if (status === 'denied') {
     return (
       <div
-        className="flex items-center gap-2 px-3 py-2"
+        className="message-tool-card-frame flex items-center gap-2 px-3 py-2"
         style={{
-          borderLeft: '2px solid var(--red)',
           background: 'var(--bg-surface)',
-          borderRadius: 4,
+          '--message-tool-accent': 'var(--red)',
+          '--message-tool-accent-width': '2px',
+          borderRadius: 0,
         }}
       >
         <X size={14} strokeWidth={1.5} style={{ color: 'var(--red)' }} />
@@ -298,12 +300,12 @@ export default function PermissionRequestCard({ block, onRespond }) {
         />
       )}
       <div
+        className="message-tool-card-frame"
         style={{
-          borderLeft: isRisky ? '2px solid var(--red)' : '2px solid var(--yellow)',
           border: '1px solid var(--border)',
-          borderLeftWidth: 2,
-          borderLeftColor: isRisky ? 'var(--red)' : 'var(--yellow)',
-          borderRadius: 4,
+          '--message-tool-accent': isRisky ? 'var(--red)' : 'var(--yellow)',
+          '--message-tool-accent-width': '2px',
+          borderRadius: 0,
           background: 'var(--bg-surface)',
           padding: 16,
         }}

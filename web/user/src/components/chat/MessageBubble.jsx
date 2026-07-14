@@ -1688,12 +1688,13 @@ function CanvasRefIndicator({ count }) {
   const label = t('chat.toolsRunningInCanvas', { count })
   return (
     <button
-      className="flex items-center gap-2 px-3 py-1 text-xs"
+      className="message-tool-card-frame flex items-center gap-2 px-3 py-1 text-xs"
       style={{
         background: 'transparent',
         border: '1px solid var(--border)',
-        borderLeft: '2px solid var(--purple)',
-        borderRadius: '4px',
+        '--message-tool-accent': 'var(--purple)',
+        '--message-tool-accent-width': '2px',
+        borderRadius: 0,
         cursor: 'pointer',
         color: 'var(--text-secondary)',
         transition: 'background 150ms ease',

@@ -995,7 +995,7 @@ html, body {
 }
 
 .message-tool-card-square {
-  border-radius: 0;
+  border-radius: 0 !important;
 }
 
 .status-row.running { border-left-color: var(--status-running); }
@@ -1007,7 +1007,11 @@ html, body {
 .status-row.message-tool-card-square {
   position: relative;
   box-sizing: border-box;
-  border-radius: 0;
+  border-radius: 0 !important;
+}
+
+[data-tool-card] {
+  border-radius: 0 !important;
 }
 
 .message-tool-card-frame::before,

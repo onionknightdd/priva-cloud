@@ -48,12 +48,12 @@ export default function PlanApprovalCard({ approval, onApprove }) {
 
   return (
     <div
+      className="message-tool-card-frame"
       style={{
-        borderLeft: '2px solid var(--cyan)',
         border: '1px solid var(--border)',
-        borderLeftWidth: 2,
-        borderLeftColor: 'var(--cyan)',
-        borderRadius: 4,
+        '--message-tool-accent': 'var(--cyan)',
+        '--message-tool-accent-width': '2px',
+        borderRadius: 0,
         background: 'var(--bg-surface)',
         padding: 16,
       }}

@@ -46,10 +46,12 @@ export default function ErrorBlock({ message }) {
 
   return (
     <div
+      className="message-tool-card-frame"
       style={{
         background: 'var(--bg-elevated)',
-        borderLeft: '2px solid var(--red)',
-        borderRadius: 2,
+        '--message-tool-accent': 'var(--red)',
+        '--message-tool-accent-width': '2px',
+        borderRadius: 0,
         padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
