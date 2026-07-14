@@ -20,11 +20,13 @@ export default function HomeOverviewPager() {
   const dragRef = useRef(null)
   const wheelRef = useRef({ deltaX: 0, resetTimer: null })
   const suppressClickRef = useRef(false)
+  const suppressClickTimerRef = useRef(null)
   const reducedMotion = useReducedMotion()
 
   useEffect(() => () => {
     animationsRef.current.forEach((animation) => animation.cancel())
     if (wheelRef.current.resetTimer) window.clearTimeout(wheelRef.current.resetTimer)
+    if (suppressClickTimerRef.current) window.clearTimeout(suppressClickTimerRef.current)
   }, [])
 
   // Preserve the usage card's old two-column width on wide tracks. Below the
@@ -147,7 +149,6 @@ export default function HomeOverviewPager() {
     }
     if (drag.direction !== 'horizontal') return
 
-    event.preventDefault()
     drag.deltaX = deltaX
     const page = pageRefs.current[activePage]
     if (!page || reducedMotion) return
@@ -165,6 +166,11 @@ export default function HomeOverviewPager() {
 
     if (drag.direction === 'horizontal' && Math.abs(drag.deltaX) >= 56) {
       suppressClickRef.current = true
+      if (suppressClickTimerRef.current) window.clearTimeout(suppressClickTimerRef.current)
+      suppressClickTimerRef.current = window.setTimeout(() => {
+        suppressClickRef.current = false
+        suppressClickTimerRef.current = null
+      }, 0)
       moveToPage(activePage + (drag.deltaX < 0 ? 1 : -1))
       return
     }
@@ -173,7 +179,6 @@ export default function HomeOverviewPager() {
 
   const handleWheel = (event) => {
     if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) || !event.deltaX) return
-    event.preventDefault()
 
     const wheel = wheelRef.current
     wheel.deltaX += event.deltaX
@@ -207,6 +212,8 @@ export default function HomeOverviewPager() {
           event.preventDefault()
           event.stopPropagation()
           suppressClickRef.current = false
+          if (suppressClickTimerRef.current) window.clearTimeout(suppressClickTimerRef.current)
+          suppressClickTimerRef.current = null
         }}
         style={{
           width: pageWidth ? `${pageWidth}px` : '100%',
