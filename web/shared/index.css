@@ -994,6 +994,10 @@ html, body {
   min-width: 0;
 }
 
+.message-tool-card-square {
+  border-radius: 0;
+}
+
 .status-row.running { border-left-color: var(--status-running); }
 .status-row.success { border-left-color: var(--status-success); }
 .status-row.pending { border-left-color: var(--status-pending); }

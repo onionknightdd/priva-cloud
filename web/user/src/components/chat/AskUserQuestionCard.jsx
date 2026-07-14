@@ -277,7 +277,7 @@ export default function AskUserQuestionCard({ block, onAnswer, onSkip }) {
       <div
         style={{
           border: '1px solid var(--green)',
-          borderRadius: 4,
+          borderRadius: 0,
           background: 'var(--bg-surface)',
           padding: 12,
           opacity: 0.9,
@@ -429,7 +429,7 @@ export default function AskUserQuestionCard({ block, onAnswer, onSkip }) {
       <div
         style={{
           border: '1px solid var(--border)',
-          borderRadius: 4,
+          borderRadius: 0,
           background: 'var(--bg-surface)',
           padding: 12,
           opacity: 0.7,
@@ -453,7 +453,7 @@ export default function AskUserQuestionCard({ block, onAnswer, onSkip }) {
       data-tool-card
       style={{
         border: '1px solid var(--border)',
-        borderRadius: 4,
+        borderRadius: 0,
         background: 'var(--bg-surface)',
         padding: 16,
       }}

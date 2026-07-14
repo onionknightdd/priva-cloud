@@ -140,7 +140,7 @@ function SubagentFrame({ block, reverted = false }) {
       data-subagent-frame
       data-tool-use-id={block.id}
       style={{
-        borderRadius: 4,
+        borderRadius: 0,
         opacity: reverted ? 0.55 : 1,
         filter: reverted ? 'grayscale(0.4)' : 'none',
       }}
@@ -153,7 +153,7 @@ function SubagentFrame({ block, reverted = false }) {
           background: bgTint,
           border: '1px solid var(--border)',
           borderLeft: `3px solid ${borderColor}`,
-          borderRadius: 4,
+          borderRadius: 0,
           cursor: 'pointer',
           textAlign: 'left',
           color: 'var(--text-primary)',

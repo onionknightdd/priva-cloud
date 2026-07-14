@@ -506,7 +506,7 @@ export default function WorkflowStatusRow({ workflow }) {
   return (
     <>
       {/* 3px left status border to match the standard tool card. */}
-      <div className={`status-row full ${rowStatus(status)} overflow-hidden`} style={{ borderLeftWidth: 3 }}>
+      <div className={`status-row full ${rowStatus(status)} message-tool-card-square overflow-hidden`} style={{ borderLeftWidth: 3 }}>
         {/* Header — click (or Enter/Space) to collapse/expand. Auto-collapses
             when the run finishes; the chevron rotates to signal state. */}
         <div

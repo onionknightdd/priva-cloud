@@ -576,7 +576,7 @@ function FileToolCard({ kind, block = null, op = null, reverted = false }) {
         borderRight: `1px solid ${hovered ? 'var(--border)' : 'var(--border-subtle)'}`,
         borderBottom: `1px solid ${hovered ? 'var(--border)' : 'var(--border-subtle)'}`,
         borderLeft: `3px solid ${statusColor}`,
-        borderRadius: '4px',
+        borderRadius: 0,
         transition: 'border-color 150ms ease, background 150ms ease',
         opacity: reverted ? 0.55 : 1,
         filter: reverted ? 'grayscale(0.4)' : 'none',

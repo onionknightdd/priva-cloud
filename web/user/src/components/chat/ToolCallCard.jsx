@@ -490,7 +490,7 @@ export default function ToolCallCard({ block, reverted = false, compact = false 
             : status === 'running'
               ? `${compact ? 2 : 3}px solid var(--purple)`
               : '1px solid var(--border)',
-        borderRadius: '4px',
+        borderRadius: 0,
         opacity: reverted ? 0.55 : 1,
         filter: reverted ? 'grayscale(0.4)' : 'none',
       }}

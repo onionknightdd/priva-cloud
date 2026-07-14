@@ -46,6 +46,7 @@ function LaunchedRow({ block }) {
         steps={[]}
         actions={actions}
         collapsible={false}
+        className="message-tool-card-square"
       />
       {showScript && createPortal(
         <div

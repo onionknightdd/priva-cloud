@@ -60,7 +60,7 @@ export default function TodoWriteCard({ block, mode = 'full' }) {
         background: 'var(--bg-elevated)',
         border: '1px solid var(--border)',
         borderLeft: '3px solid var(--purple)',
-        borderRadius: 4,
+        borderRadius: 0,
       }}
     >
       <button
