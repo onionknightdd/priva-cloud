@@ -119,17 +119,19 @@ export default function ModelSelector() {
     setFilter('')
   }
 
-  // Truncate model name for display
-  const truncatedName = displayModel.length > 20
-    ? displayModel.slice(0, 18) + '...'
-    : displayModel
-
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div
+      className="relative"
+      ref={dropdownRef}
+      style={{ flex: '0 1 auto', minWidth: 0, maxWidth: 'min(50vw, 420px)' }}
+    >
       <button
         className="flex items-center gap-1 px-2"
         style={{
           height: 26,
+          width: 'fit-content',
+          maxWidth: '100%',
+          minWidth: 0,
           background: 'var(--bg-surface)',
           border: '1px solid var(--border)',
           borderRadius: 4,
@@ -138,7 +140,6 @@ export default function ModelSelector() {
           fontSize: 11,
           fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
           transition: 'color 150ms ease, border-color 150ms ease',
-          maxWidth: 156,
           whiteSpace: 'nowrap',
           overflow: 'hidden',
         }}
@@ -156,7 +157,7 @@ export default function ModelSelector() {
         title={displayModel}
       >
         <Cpu size={11} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-        <span className="truncate">{truncatedName}</span>
+        <span className="truncate" style={{ minWidth: 0 }}>{displayModel}</span>
         <ChevronDown size={9} strokeWidth={1.5} style={{ flexShrink: 0 }} />
       </button>
 

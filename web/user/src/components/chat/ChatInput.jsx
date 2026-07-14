@@ -667,10 +667,10 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
     </div>
   )
 
-  // Model selector + send/stop buttons (toolbar right)
+  // Send/stop buttons stay inside the input toolbar. The model selector lives
+  // in the composer controls row below, aligned with the workspace controls.
   const toolbarRightContent = (
     <>
-      <ModelSelector />
       {isStreaming && (
         <button
           ref={stopBtnRef}
@@ -772,6 +772,15 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
         <FolderPlus size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
         <span>{addDirs.length ? t('chat.addDirsCount', { count: addDirs.length }) : t('chat.addDirs')}</span>
       </button>
+    </div>
+  )
+
+  const composerControlsRow = (
+    <div className="flex items-end justify-between gap-2 min-w-0">
+      {cwdRow}
+      <div className="flex-shrink-0 min-w-0">
+        <ModelSelector />
+      </div>
     </div>
   )
 
@@ -888,7 +897,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
 
         {cwdPlacement === 'below' && (
           <div className="min-w-0" style={{ marginTop: 8 }}>
-            {cwdRow}
+            {composerControlsRow}
           </div>
         )}
       </div>

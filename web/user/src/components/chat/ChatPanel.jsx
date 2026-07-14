@@ -13,8 +13,8 @@ import useSplitStore from '../../stores/splitStore'
 import CopyButton from '@shared/components/shared/CopyButton'
 import MessageListBoundary from './MessageListBoundary'
 import ChatInput from './ChatInput'
-import UsageStatsOverview, { UsageStatsOverviewTitle } from './UsageStatsOverview'
-import RecentActivities from './RecentActivities'
+import { UsageStatsOverviewTitle } from './UsageStatsOverview'
+import HomeOverviewPager from './HomeOverviewPager'
 import QuickActionChips from './QuickActionChips'
 import CheckpointToggle from './CheckpointToggle'
 import RewindBanner from './RewindBanner'
@@ -572,7 +572,7 @@ export default function ChatPanel() {
         style={{ background: 'var(--bg-base)' }}
       >
         {headerBar}
-        {/* Top: scrollable overview + recent activity + chips */}
+        {/* Top: scrollable overview pager + chips */}
         <div
           className="flex-1 overflow-y-auto"
           style={{ background: 'var(--bg-base)' }}
@@ -580,17 +580,8 @@ export default function ChatPanel() {
           <div className="flex min-h-full flex-col">
             <div style={{ ...TRACK_STYLE, paddingTop: 24 }}>
               <UsageStatsOverviewTitle />
-              <div
-                className="grid"
-                style={{
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
-                  gap: 20,
-                  alignItems: 'start',
-                  marginTop: 12,
-                }}
-              >
-                <UsageStatsOverview showTitle={false} />
-                <RecentActivities />
+              <div style={{ marginTop: 12 }}>
+                <HomeOverviewPager />
               </div>
             </div>
             <div

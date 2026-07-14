@@ -70,7 +70,7 @@ function RecentActivitySkeleton() {
   )
 }
 
-export default function RecentActivities() {
+export default function RecentActivities({ showTitle = true }) {
   const recentActivities = useSidebarStore((s) => s.recentActivities)
   const sessions = useSidebarStore((s) => s.sessions)
   const overviewLoading = useUserDataStore((s) => s.overviewLoading)
@@ -96,16 +96,18 @@ export default function RecentActivities() {
 
   return (
     <div className="flex flex-col min-w-0" style={{ gap: 6 }}>
-      <div
-        className="font-semibold"
-        style={{
-          color: 'var(--text-primary)',
-          fontSize: 12,
-          lineHeight: 1.3,
-        }}
-      >
-        Recent activities
-      </div>
+      {showTitle && (
+        <div
+          className="font-semibold"
+          style={{
+            color: 'var(--text-primary)',
+            fontSize: 12,
+            lineHeight: 1.3,
+          }}
+        >
+          Recent activities
+        </div>
+      )}
 
       <div
         className="flex flex-col min-w-0"
