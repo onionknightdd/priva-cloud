@@ -204,18 +204,34 @@ exit 0
 
 # ── require-permission-risky-tools ──────────────────────────────────────────
 # Standalone port of priva_common.risky_matcher (same grammar, same semantics).
-# Patterns are NOT embedded: the session build materializes the account's
-# risky_tool_list to $PRIVA_HOOK_DIR/risky_tools.json next to this script.
+# v3: patterns are EMBEDDED in the script (like block-dangerous-bash) — no
+# runtime context file, so the hook is self-contained wherever the CLI runs it.
 
 _REQUIRE_PERMISSION_RISKY_TOOLS = '''#!/usr/bin/env python3
 # Priva hook: pause for user confirmation on risky tool patterns (PreToolUse).
+# Patterns live HERE — editing this script edits the policy.
 # Grammar: Bash | Bash(rm:*) | Write(/etc/**) | WebFetch(domain:x) | mcp__a__b
 import fnmatch
 import json
-import os
 import re
 import sys
 from urllib.parse import urlparse
+
+RISKY_RULES = [
+    "Bash(rm:*)",
+    "Bash(sudo:*)",
+    "Bash(chmod:*)",
+    "Bash(chown:*)",
+    "Bash(dd:*)",
+    "Bash(mkfs:*)",
+    "Bash(shutdown:*)",
+    "Bash(reboot:*)",
+    "Write(/etc/**)",
+    "Edit(/etc/**)",
+    "Write(**/.ssh/**)",
+    "Edit(**/.ssh/**)",
+    "mcp__*__delete_*",
+]
 
 PATH_TOOLS = {"Write", "Edit", "Read", "NotebookEdit", "MultiEdit"}
 RULE_RE = re.compile(r"^(?P<tool>[A-Za-z_]\\w*|mcp__\\S+)(?:\\((?P<arg>.*)\\))?$")
@@ -324,18 +340,7 @@ def main():
     tool_input = data.get("tool_input") or {}
     if not tool_name:
         return 0
-    hook_dir = os.environ.get("PRIVA_HOOK_DIR", "")
-    path = os.path.join(hook_dir, "risky_tools.json") if hook_dir else ""
-    if not path or not os.path.exists(path):
-        return 0
-    try:
-        with open(path) as f:
-            rules = json.load(f)
-    except Exception:
-        return 0
-    if not isinstance(rules, list):
-        return 0
-    for raw in rules:
+    for raw in RISKY_RULES:
         rule = parse_rule(raw)
         if rule and rule_matches(rule, tool_name, tool_input):
             print(json.dumps({
@@ -405,7 +410,12 @@ HOOK_SEEDS: tuple[HookSeed, ...] = (
         timeout_seconds=10,
         default_on=True,
         enforced=True,
-        seed_version=2,
+        seed_version=3,
+        # v2 body read rules from $PRIVA_HOOK_DIR/risky_tools.json (runner-
+        # materialized); v3 embeds them. Unedited v2 rows auto-refresh.
+        previous_hashes=(
+            "2c5b3089e71b4ee3ef5fa9b307deebfc72eec81a2685e60b7dc2081eaf600a58",
+        ),
     ),
 )
 

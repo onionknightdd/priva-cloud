@@ -13,10 +13,6 @@ concerns that are not policy-driven:
 
 1. System callbacks: the hook execution logger (+ FileCanvas reminder).
 2. PII masking (Settings → Sensitive patterns) — rewrites tool output in-process.
-
-It also refreshes the managed risky-tools context so the NATIVE risky-tools hook
-(which can fire in a terminal ``claude`` outside any Priva session) sees this
-account's current ``risky_tool_list``.
 """
 
 from __future__ import annotations
@@ -37,15 +33,6 @@ def build_hooks(username: str, cwd: str, auth_method: str = "jwt") -> dict[str, 
     Admin AND user hooks are native (managed ConfigMap / settings.json) and are
     NOT assembled here. Only the system logger and PII masking are programmatic.
     """
-    # Refresh the managed risky-tools context so the NATIVE managed hook (which
-    # also fires in terminal claude) sees this account's current risky_tool_list.
-    try:
-        from .policy import write_managed_hook_context
-
-        write_managed_hook_context()
-    except Exception as exc:
-        logger.warning("managed hook context refresh skipped: {}", exc)
-
     hooks: dict[str, list[HookMatcher]] = {}
 
     # 1. System callbacks (hook_execution_logger only)

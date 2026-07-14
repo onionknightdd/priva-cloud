@@ -172,10 +172,10 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                             {"name": "WORKSPACE_DIR", "value": "/workspace"},
                             {"name": "PRIVA_HOME", "value": "/workspace/.priva"},
                             {"name": "CLAUDE_CONFIG_DIR", "value": "/workspace/.claude"},
-                            # Per-account writable dir for managed-hook context (e.g. the
-                            # risky-tools seed's risky_tools.json). The global managed
-                            # command passes this through the fire-log wrapper so a global
-                            # script reads per-account context from a fixed absolute path.
+                            # Per-account writable dir for hook context. Passed through the
+                            # fire-log wrapper so a global managed script CAN read per-account
+                            # context from a fixed absolute path (no shipped seed uses it since
+                            # risky-tools v3 embedded its patterns; kept for custom hooks).
                             {"name": "PRIVA_HOOK_DIR", "value": "/workspace/.priva/hook-context"},
                             # HOME must be writable on the volume (readOnlyRootFilesystem).
                             {"name": "HOME", "value": "/workspace/.home"},

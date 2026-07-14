@@ -99,15 +99,6 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logger.warning("settings.json defaults seeding skipped: {}", exc)
 
-        # Materialize the managed risky-tools context up front so a terminal
-        # `claude` (no Priva session) still finds risky_tools.json for the
-        # native managed hook. Refreshed again at each session build.
-        try:
-            from .services.hooks.policy import write_managed_hook_context
-            write_managed_hook_context()
-        except Exception as exc:
-            logger.warning("managed hook context seeding skipped: {}", exc)
-
         # Seed runtime skills from the baked-in bundle.
         try:
             from .services.skill_hub import seed_bundled_skills
