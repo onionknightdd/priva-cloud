@@ -36,9 +36,14 @@ def test_warm_wake_changed_ip_resets_started_at(monkeypatch, patch_obj, stub_log
     assert "startedAt" in patch_obj.status  # replacement pod -> fresh min_alive window
 
 
-def test_cold_wake_scales(monkeypatch, patch_obj, stub_logger):
-    called = {"scale": 0}
+def test_cold_wake_converges_template_then_scales(monkeypatch, patch_obj, stub_logger):
+    # The cold path must converge the FULL template (ensure_runtime_objects) before
+    # scaling, so a tenant born under an older operator picks up template additions
+    # (e.g. the managed-policy mount) on wake.
+    called = {"scale": 0, "converge": 0}
     monkeypatch.setattr(R.kube, "get_replicas", lambda ns, aid: 0)
+    monkeypatch.setattr(R.kube, "ensure_runtime_objects",
+                        lambda *a, **k: called.__setitem__("converge", called["converge"] + 1))
     monkeypatch.setattr(R.kube, "scale",
                         lambda *a, **k: called.__setitem__("scale", called["scale"] + 1))
     monkeypatch.setattr(R.kube, "wait_pod_ready", lambda ns, aid, timeout=0: "10.0.0.2")
@@ -46,7 +51,7 @@ def test_cold_wake_scales(monkeypatch, patch_obj, stub_logger):
     R.on_wake(spec={"accountId": "acct"}, name="acct", namespace="ns", uid="u1",
               status={}, patch=patch_obj, logger=stub_logger)
 
-    assert called == {"scale": 1}
+    assert called == {"scale": 1, "converge": 1}
     assert patch_obj.status["phase"] == "Running"
     assert patch_obj.status["podIP"] == "10.0.0.2"
     assert "startedAt" in patch_obj.status

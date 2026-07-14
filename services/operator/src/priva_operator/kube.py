@@ -252,7 +252,7 @@ def ensure_managed_policy_configmap(namespace) -> bool:
     if existing is None:
         body = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": meta, "data": data}
         _ignore_conflict(core().create_namespaced_config_map, namespace, body)
-        logger.info("created %s (%d enforced hooks)", MANAGED_POLICY_CM, len(enforced))
+        logger.info("created {} ({} enforced hooks)", MANAGED_POLICY_CM, len(enforced))
         return True
 
     if (existing.metadata.annotations or {}).get(_POLICY_DIGEST_ANNOTATION) == digest:
@@ -264,7 +264,7 @@ def ensure_managed_policy_configmap(namespace) -> bool:
     body = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": meta, "data": data}
     try:
         core().replace_namespaced_config_map(MANAGED_POLICY_CM, namespace, body)
-        logger.info("updated %s (%d enforced hooks)", MANAGED_POLICY_CM, len(enforced))
+        logger.info("updated {} ({} enforced hooks)", MANAGED_POLICY_CM, len(enforced))
         return True
     except client.ApiException as exc:
         if exc.status == 409:  # a sibling handler won the race with identical content
@@ -285,6 +285,15 @@ def _service_body(namespace, account_id, port, owner) -> dict:
 
 # --- reconcile primitives ---------------------------------------------------
 
+def _read_deployment(namespace, account_id):
+    try:
+        return apps().read_namespaced_deployment(names.deploy_name(account_id), namespace)
+    except client.ApiException as exc:
+        if exc.status == 404:
+            return None
+        raise
+
+
 def ensure_runtime_objects(namespace, account_id, username, image, pull_policy, settings, owner, spec,
                            defaults=None) -> None:
     # Provision the per-account subdir + quota on the shared export FIRST (idempotent:
@@ -293,9 +302,24 @@ def ensure_runtime_objects(namespace, account_id, username, image, pull_policy, 
     mount_info = get_backend(settings).provision(account_id, resolve_storage_gb(spec, settings, defaults))
     _ignore_conflict(core().create_namespaced_service,
                      namespace, _service_body(namespace, account_id, settings.kubernetes.runner_service_port, owner))
-    _ignore_conflict(apps().create_namespaced_deployment,
-                     namespace, _deployment_body(namespace, account_id, username, image, pull_policy,
-                                                 settings, owner, spec, mount_info, defaults))
+    body = _deployment_body(namespace, account_id, username, image, pull_policy,
+                            settings, owner, spec, mount_info, defaults)
+    existing = _read_deployment(namespace, account_id)
+    if existing is None:
+        _ignore_conflict(apps().create_namespaced_deployment, namespace, body)
+        return
+    # Converge an existing Deployment to the current template. Create-only (the old
+    # behavior) strands tenants born under an older operator: template additions —
+    # e.g. the managed-policy mount — would never reach them. Only while scaled to
+    # 0: strategy=Recreate restarts the pod on any template write, and the policy is
+    # apply-on-next-restart (reconcile must never kill a running session).
+    if (existing.spec.replicas or 0) > 0:
+        return
+    body["spec"]["replicas"] = existing.spec.replicas or 0
+    body["metadata"]["resourceVersion"] = existing.metadata.resource_version
+    # 409 = a concurrent writer (wake/scale) won the race; the next ensure converges.
+    _ignore_conflict(apps().replace_namespaced_deployment,
+                     names.deploy_name(account_id), namespace, body)
 
 
 def patch_deployment_resources(namespace, account_id, resources: dict) -> None:
@@ -303,16 +327,6 @@ def patch_deployment_resources(namespace, account_id, resources: dict) -> None:
     this restarts a running pod with the new requests/limits (dormant at replicas 0)."""
     body = {"spec": {"template": {"spec": {"containers": [
         {"name": "agent-runner", "resources": resources}]}}}}
-    apps().patch_namespaced_deployment(names.deploy_name(account_id), namespace, body)
-
-
-def patch_deployment_runtime(namespace, account_id, resources: dict, image: str) -> None:
-    """Patch the container resources + image together (by container name). Called from
-    the wake/ensure scale-up path while the Deployment is at replicas 0, so a stale
-    template is refreshed to the current effective config WITHOUT restarting a running
-    pod (the "apply on next restart" policy)."""
-    body = {"spec": {"template": {"spec": {"containers": [
-        {"name": "agent-runner", "resources": resources, "image": image}]}}}}
     apps().patch_namespaced_deployment(names.deploy_name(account_id), namespace, body)
 
 

@@ -100,10 +100,8 @@ def ensure(spec, name, namespace, uid, status, patch, logger, **_):
     # Guard on desiredState so an offboarding/purge account is never force-woken.
     if _is_persistent(spec) and spec.get("desiredState", "active") == "active":
         if replicas != 1:
-            # About to scale up — refresh the template to the current effective config
-            # while at 0 (free; the running-pod case below is left untouched).
-            kube.patch_deployment_runtime(
-                namespace, account_id, kube.resolve_resources(spec, s, defaults), image)
+            # ensure_runtime_objects above already converged the full template to the
+            # current effective config while at 0 — just scale up.
             kube.scale(namespace, account_id, 1)
         pod_ip = kube.wait_pod_ready(namespace, account_id, timeout=float(s.kubernetes.wake_timeout_seconds))
         if pod_ip:
@@ -126,7 +124,7 @@ def ensure(spec, name, namespace, uid, status, patch, logger, **_):
 @kopf.on.field(GROUP, VERSION, PLURAL, field="spec.wake.requestedAt")
 def on_wake(spec, name, namespace, uid, status, patch, logger, **_):
     s = get_settings()
-    account_id, _username = _ids(spec, name)
+    account_id, username = _ids(spec, name)
 
     # Reality-based guard (#1/#4): when the Deployment is already scaled to 1, don't
     # re-scale — resolve the *real* Ready pod IP and write it. Trusting status.podIP
@@ -150,13 +148,14 @@ def on_wake(spec, name, namespace, uid, status, patch, logger, **_):
         logger.info("wake resolved (already scaled to 1) account=%s pod=%s", account_id, pod_ip)
         return
 
-    # Cold scale-up: refresh the Deployment template to the current effective config
-    # (CR override > global default > env seed) while at replicas 0, so this wake picks
-    # up any default change without ever restarting a running pod.
+    # Cold scale-up: converge the FULL Deployment template (volumes/env/mounts, not just
+    # image+resources) to the current effective config (CR override > global default >
+    # env seed) while at replicas 0 — so a tenant born under an older operator picks up
+    # template additions on its next wake, without ever restarting a running pod.
     defaults = _runner_defaults()
-    kube.patch_deployment_runtime(
-        namespace, account_id, kube.resolve_resources(spec, s, defaults),
-        kube.resolve_image(spec, s, defaults))
+    kube.ensure_runtime_objects(
+        namespace, account_id, username, kube.resolve_image(spec, s, defaults),
+        s.kubernetes.runner_image_pull_policy, s, names.owner_ref(name, uid), spec, defaults)
     kube.scale(namespace, account_id, 1)
     patch.status["phase"] = "Waking"
     pod_ip = kube.wait_pod_ready(namespace, account_id, timeout=float(s.kubernetes.wake_timeout_seconds))
