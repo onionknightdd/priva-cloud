@@ -580,7 +580,7 @@ export default function ChatPanel() {
           <div className="flex min-h-full flex-col">
             <div style={{ ...TRACK_STYLE, paddingTop: 24 }}>
               <UsageStatsOverviewTitle />
-              <div style={{ marginTop: 12 }}>
+              <div style={{ marginTop: 20 }}>
                 <HomeOverviewPager />
               </div>
             </div>
