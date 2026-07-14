@@ -500,7 +500,9 @@ export default function Sidebar() {
   const groups = useSidebarStore((s) => s.groups)
   const activeCwd = useSidebarStore((s) => s.activeCwd)
   const expandedCwds = useSidebarStore((s) => s.expandedCwds)
+  const expandedScheduledCwds = useSidebarStore((s) => s.expandedScheduledCwds)
   const toggleGroup = useSidebarStore((s) => s.toggleGroup)
+  const toggleScheduledGroup = useSidebarStore((s) => s.toggleScheduledGroup)
   const setAllGroupsExpanded = useSidebarStore((s) => s.setAllGroupsExpanded)
   const fetchMoreInGroup = useSidebarStore((s) => s.fetchMoreInGroup)
   const groupLoadingCwd = useSidebarStore((s) => s.groupLoadingCwd)
@@ -610,7 +612,10 @@ export default function Sidebar() {
   }, [sessions, groups, searchQuery, activeTag, activeCwd])
 
   const filtersActive = !!searchQuery.trim() || !!activeTag
-  const allGroupsExpanded = renderedGroups.length > 0 && renderedGroups.every((g) => !!expandedCwds[g.cwd])
+  const allGroupsExpanded = renderedGroups.length > 0 && renderedGroups.every((g) => (
+    !!expandedCwds[g.cwd]
+    && (!g.sessions.some((s) => s.origin === 'scheduler') || !!expandedScheduledCwds[g.cwd])
+  ))
   // A nav menu being expanded (Data & Usage or Plugins/Customize) drops the PROJECT
   // block to the sidebar bottom and collapses it; collapsing the menu restores it.
   const menuExpanded = dataMenuOpen || pluginsMenuOpen
@@ -847,6 +852,30 @@ export default function Sidebar() {
       },
     })
   }
+
+  const renderSessionItem = (session, indent) => (
+    <SessionItem
+      key={session.id}
+      session={session}
+      isActive={session.id === activeSessionId}
+      openMenuId={openMenuId}
+      menuRef={menuRef}
+      onSelect={handleSelectSession}
+      onMenuToggle={setOpenMenuId}
+      onDelete={handleDeleteSession}
+      onRenameStart={handleRenameStart}
+      onTagStart={handleTagStart}
+      onPinToggle={handlePinSession}
+      onArchive={handleArchiveSession}
+      renameEditingId={renameEditingId}
+      onRenameCommit={handleRenameCommit}
+      onRenameCancel={handleRenameCancel}
+      onDragStartSession={beginSessionDrag}
+      onDragEndSession={endSessionDrag}
+      t={t}
+      indent={indent}
+    />
+  )
 
   // Small icon-button style shared by the brand collapse + bottom controls.
   const iconBtn = {
@@ -1192,6 +1221,11 @@ export default function Sidebar() {
                 const isExpanded = filtersActive || !!expandedCwds[group.cwd]
                 const loadedCount = group.sessions.length
                 const showMore = !filtersActive && loadedCount < group.total
+                const regularSessions = group.sessions.filter((session) => session.origin !== 'scheduler')
+                const scheduledSessions = group.sessions.filter((session) => session.origin === 'scheduler')
+                // Search/tag filtering must reveal matching scheduled sessions;
+                // otherwise this nested group intentionally starts collapsed.
+                const scheduledExpanded = filtersActive || !!expandedScheduledCwds[group.cwd]
                 return (
                   <div key={group.cwd} style={{ marginBottom: 2 }}>
                     {/* Group header — toggle + (hover) workdir menu & new-chat */}
@@ -1278,29 +1312,41 @@ export default function Sidebar() {
                     {/* Group sessions */}
                     {isExpanded && (
                       <>
-                        {group.sessions.map((session) => (
-                          <SessionItem
-                            key={session.id}
-                            session={session}
-                            isActive={session.id === activeSessionId}
-                            openMenuId={openMenuId}
-                            menuRef={menuRef}
-                            onSelect={handleSelectSession}
-                            onMenuToggle={setOpenMenuId}
-                            onDelete={handleDeleteSession}
-                            onRenameStart={handleRenameStart}
-                            onTagStart={handleTagStart}
-                            onPinToggle={handlePinSession}
-                            onArchive={handleArchiveSession}
-                            renameEditingId={renameEditingId}
-                            onRenameCommit={handleRenameCommit}
-                            onRenameCancel={handleRenameCancel}
-                            onDragStartSession={beginSessionDrag}
-                            onDragEndSession={endSessionDrag}
-                            t={t}
-                            indent={28}
-                          />
-                        ))}
+                        {/* Regular sessions remain directly visible — only scheduler
+                            sessions gain their own collapsible subgroup. */}
+                        {regularSessions.map((session) => renderSessionItem(session, 28))}
+                        {scheduledSessions.length > 0 && (
+                          <div style={{ marginTop: regularSessions.length > 0 ? 2 : 0 }}>
+                            <button
+                              type="button"
+                              className="flex items-center gap-1 w-full py-1 min-w-0"
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--text-dim)',
+                                cursor: 'pointer',
+                                paddingLeft: 28,
+                                paddingRight: 12,
+                                transition: 'color 150ms ease',
+                              }}
+                              onClick={() => toggleScheduledGroup(group.cwd)}
+                              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
+                              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+                            >
+                              {scheduledExpanded
+                                ? <ChevronDown size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                                : <ChevronRight size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />}
+                              <CalendarClock size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                              <span
+                                className="flex-1 truncate uppercase"
+                                style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', minWidth: 0, textAlign: 'left' }}
+                              >
+                                {t('sidebar.scheduledSessions', { defaultValue: 'Scheduled sessions' })}
+                              </span>
+                            </button>
+                            {scheduledExpanded && scheduledSessions.map((session) => renderSessionItem(session, 44))}
+                          </div>
+                        )}
                         {showMore && (
                           <button
                             type="button"

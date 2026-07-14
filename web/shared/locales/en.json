@@ -18,6 +18,7 @@
   },
   "sidebar": {
     "scheduled": "scheduled",
+    "scheduledSessions": "Scheduled sessions",
     "newChat": "New Chat",
     "noSessions": "No sessions yet",
     "deleteSession": "Delete session",

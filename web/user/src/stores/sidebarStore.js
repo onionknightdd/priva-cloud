@@ -12,11 +12,24 @@ import safeStorage from '@shared/utils/safeStorage'
 
 const STORAGE_KEY_WIDTH = 'sidebar-width'
 const STORAGE_KEY_COLLAPSED = 'sidebar-collapsed'
+const STORAGE_KEY_SCHEDULED_GROUPS = 'sidebar-scheduled-groups'
 const GROUP_PAGE_SIZE = 20 // per "more in this dir" page
 
 const getStoredWidth = () => safeStorage.getNumber(STORAGE_KEY_WIDTH, 240, { min: 180, max: 480 })
 
 const getStoredCollapsed = () => safeStorage.getBoolean(STORAGE_KEY_COLLAPSED)
+
+function getStoredScheduledGroups() {
+  const stored = safeStorage.getJSON(STORAGE_KEY_SCHEDULED_GROUPS)
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {}
+  return Object.fromEntries(
+    Object.entries(stored).filter(([, expanded]) => typeof expanded === 'boolean')
+  )
+}
+
+function persistScheduledGroups(groups) {
+  safeStorage.setItem(STORAGE_KEY_SCHEDULED_GROUPS, JSON.stringify(groups))
+}
 
 let _widthSaveTimer = null
 const persistWidth = (width) => {
@@ -65,6 +78,9 @@ const useSidebarStore = create((set, get) => ({
   activeCwd: null,
   recentActivities: [],
   expandedCwds: {}, // { [cwd]: bool } — active cwd defaults open, others closed
+  // Scheduler-origin sessions are a nested, opt-in accordion in each workdir.
+  // It starts collapsed and survives a refresh without changing project expansion.
+  expandedScheduledCwds: getStoredScheduledGroups(),
   activeSessionId: null,
   sessionsLoading: false,   // initial grouped load
   groupLoadingCwd: null,    // a single cwd's "more" load in flight
@@ -94,15 +110,31 @@ const useSidebarStore = create((set, get) => ({
     expandedCwds: { ...s.expandedCwds, [cwd]: !s.expandedCwds[cwd] },
   })),
 
-  // Expand or collapse every workdir group at once (PROJECT header toggle).
+  toggleScheduledGroup: (cwd) => set((s) => {
+    const expandedScheduledCwds = {
+      ...s.expandedScheduledCwds,
+      [cwd]: !s.expandedScheduledCwds[cwd],
+    }
+    persistScheduledGroups(expandedScheduledCwds)
+    return { expandedScheduledCwds }
+  }),
+
+  // Expand or collapse every workdir and its Scheduled subgroup at once
+  // (PROJECT header toggle).
   setAllGroupsExpanded: (expanded) => set((s) => {
     const next = {}
+    const expandedScheduledCwds = { ...s.expandedScheduledCwds }
     for (const g of s.groups) next[g.cwd] = expanded
+    for (const g of s.groups) expandedScheduledCwds[g.cwd] = expanded
     // Preserve cwds not yet in `groups` (e.g. a freshly created session).
     for (const cwd of Object.keys(s.expandedCwds)) {
       if (!(cwd in next)) next[cwd] = expanded
     }
-    return { expandedCwds: next }
+    for (const cwd of Object.keys(expandedScheduledCwds)) {
+      if (!(cwd in next)) expandedScheduledCwds[cwd] = expanded
+    }
+    persistScheduledGroups(expandedScheduledCwds)
+    return { expandedCwds: next, expandedScheduledCwds }
   }),
 
   updateSession: (id, data) => set((s) => ({
@@ -246,6 +278,7 @@ const useSidebarStore = create((set, get) => ({
 
   reset: () => set({
     sessions: [], groups: [], activeCwd: null, recentActivities: [], expandedCwds: {},
+    expandedScheduledCwds: getStoredScheduledGroups(),
     activeSessionId: null, sessionsLoading: false, groupLoadingCwd: null,
   }),
 }))

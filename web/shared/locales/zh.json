@@ -18,6 +18,7 @@
   },
   "sidebar": {
     "scheduled": "定时",
+    "scheduledSessions": "定时会话",
     "newChat": "新建对话",
     "noSessions": "暂无会话",
     "deleteSession": "删除会话",
