@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
@@ -27,6 +28,93 @@ from .session_heal import heal_orphan_tool_uses
 logger = get_app_logger(__name__)
 
 StreamQueue = asyncio.Queue[dict[str, Any] | None]
+
+# Background task types whose completion outlives the launching turn: the tool
+# returns a task id immediately, the task keeps running after the turn's
+# ResultMessage, and its terminal notification (plus the model re-invocation it
+# triggers) arrives later on the same client stream. The run must NOT tear down
+# the CLI at end-of-turn while any of these are still live, or the task is killed
+# mid-flight and its card is finalized as STOPPED. Scoped to workflows — the
+# reported case; background bash is surfaced via its own polling channel.
+_BG_TASK_TYPES = frozenset({"local_workflow"})
+
+# Task `status` (task_notification) / `patch.status` (task_updated) values that
+# mean the task has actually finished. Superset of the SDK's
+# TERMINAL_TASK_STATUSES plus the transport-side aborted/cancelled aliases;
+# mirrors the frontend's TERMINAL_RAW_STATUSES.
+_TERMINAL_TASK_STATUSES = frozenset(
+    {"completed", "failed", "stopped", "killed", "aborted", "cancelled"}
+)
+
+# How long the run may sit with NO events at all while still waiting on a live
+# background task before it gives up. This bounds the drain by *inactivity*, not
+# by total wall-clock — a workflow that keeps emitting progress runs as long as
+# it needs; only a genuinely silent (wedged) one is reclaimed after this window.
+# Any real event (task_progress, a re-invocation turn, …) resets the timer.
+_BG_IDLE_TIMEOUT = 600
+
+# Once every background task has reached a terminal status, wait at most this
+# long for the model re-invocation (summary) turn to begin before finishing —
+# short, because a re-invocation starts promptly if it's coming at all (some
+# terminal paths, e.g. TaskStop, produce none).
+_BG_SETTLE_SECONDS = 15
+
+
+def should_stop_bg_drain(outstanding_count: int, idle_seconds: float) -> bool:
+    """Idle-based give-up decision while draining background tasks.
+
+    Called only when the run is waiting on background tasks and has just gone
+    idle (a keepalive tick). Returns True to stop waiting and finish the run:
+
+    - no tasks left  → finish once a short settle passes with no re-invocation
+      summary turn (streaming activity keeps ``idle_seconds`` small and defers
+      the decision to the next end-of-turn instead);
+    - tasks still live → finish only after a long silence, so a workflow that
+      keeps emitting progress runs as long as it needs and only a wedged one is
+      reclaimed.
+    """
+    if outstanding_count == 0:
+        return idle_seconds >= _BG_SETTLE_SECONDS
+    return idle_seconds >= _BG_IDLE_TIMEOUT
+
+
+def classify_bg_task_event(event: str | None, data: dict | None) -> tuple[str | None, str | None]:
+    """Classify an emitted event's effect on the set of live background tasks.
+
+    Returns ``("start", task_id)`` when a background task (see _BG_TASK_TYPES)
+    launches, ``("terminal", task_id)`` when one finishes (terminal status from
+    a task_notification OR a task_updated patch — the SDK notes a killed/stopped
+    task may report only via task_updated), else ``(None, None)``.
+
+    Task events arrive as ``system`` messages (the SDK's Task*Message are
+    SystemMessage subclasses, so get_event_label labels them ``system``) carrying
+    ``subtype`` + a nested payload; a flat ``task_*`` label is handled defensively.
+    """
+    data = data or {}
+    if event == "system":
+        subtype = data.get("subtype")
+        payload = data.get("data") if isinstance(data.get("data"), dict) else {}
+    elif event in ("task_started", "task_progress", "task_notification"):
+        subtype = event
+        payload = data
+    else:
+        return (None, None)
+
+    task_id = payload.get("task_id") or data.get("task_id")
+    if not task_id:
+        return (None, None)
+
+    if subtype == "task_started":
+        if payload.get("task_type") in _BG_TASK_TYPES:
+            return ("start", task_id)
+    elif subtype == "task_notification":
+        if payload.get("status") in _TERMINAL_TASK_STATUSES:
+            return ("terminal", task_id)
+    elif subtype == "task_updated":
+        patch = payload.get("patch") if isinstance(payload.get("patch"), dict) else (data.get("patch") or {})
+        if patch.get("status") in _TERMINAL_TASK_STATUSES:
+            return ("terminal", task_id)
+    return (None, None)
 
 
 def _build_prompt_with_attachments(prompt: str, attachments: list[dict] | None) -> str:
@@ -782,6 +870,22 @@ async def agent_run_events(
             )
 
             outstanding_tool_uses: set[str] = set()
+            # task_id of every still-running background task (see _BG_TASK_TYPES).
+            outstanding_bg_tasks: set[str] = set()
+            # True once we've re-armed the pump to wait on background tasks.
+            draining_bg = False
+            # Monotonic time of the last real (non-keepalive) event; the idle
+            # give-up window is measured from here. Seeded to "now" so the first
+            # drain window starts at end-of-turn, not at process start.
+            last_event_ts = time.monotonic()
+
+            def _track_bg_task(evt_item: dict) -> None:
+                """Add/remove a live background task id from its lifecycle event."""
+                kind, task_id = classify_bg_task_event(evt_item.get("event"), evt_item.get("data"))
+                if kind == "start":
+                    outstanding_bg_tasks.add(task_id)
+                elif kind == "terminal":
+                    outstanding_bg_tasks.discard(task_id)
 
             async def _flush_next_queued() -> bool:
                 """Pop one queued user message and submit it as a new turn."""
@@ -810,12 +914,41 @@ async def agent_run_events(
                         item = await asyncio.wait_for(output_queue.get(), timeout=2.0)
                     except asyncio.TimeoutError:
                         await emit("keepalive", {})
+                        # Only relevant once we're keeping the CLI alive purely to
+                        # drain background tasks (an idle gap during a normal turn
+                        # is just the model thinking).
+                        if draining_bg:
+                            idle = time.monotonic() - last_event_ts
+                            if should_stop_bg_drain(len(outstanding_bg_tasks), idle):
+                                if outstanding_bg_tasks:
+                                    logger.warning(
+                                        "[STREAM] no workflow activity for %ss; giving up "
+                                        "with %d background task(s) still unfinished",
+                                        _BG_IDLE_TIMEOUT, len(outstanding_bg_tasks),
+                                    )
+                                break
                         continue
 
                     if item is None:
                         if retry_signal is not None:
                             break
                         if await _flush_next_queued():
+                            continue
+                        # End-of-turn with background workflows still live: their
+                        # progress, terminal notification, and the model
+                        # re-invocation they trigger all arrive later on THIS
+                        # client. Keep it alive and re-arm the pump to read the
+                        # next batch instead of tearing the CLI down (which would
+                        # kill the workflows). The idle-timeout guard in the
+                        # keepalive branch reclaims a wedged (silent) workflow; a
+                        # turn just ended here, so activity is fresh — re-arm.
+                        if outstanding_bg_tasks and not (cancelled and cancelled.is_set()):
+                            draining_bg = True
+                            pump_task = asyncio.create_task(
+                                _pump_stream_messages(
+                                    client, output_queue, username, stream_id, model_tracker
+                                )
+                            )
                             continue
                         break
 
@@ -842,6 +975,14 @@ async def agent_run_events(
                                 await session_meta.record_recent_activity(options.cwd, new_sid)
 
                     await emit(item["event"], item["data"])
+
+                    # Any real event = the run is alive; reset the idle window
+                    # that bounds the background-task drain.
+                    last_event_ts = time.monotonic()
+
+                    # Track background workflow lifecycle so the run stays alive
+                    # until every launched workflow reaches a terminal status.
+                    _track_bg_task(item)
 
                     # Track tool_use lifecycle so we only interrupt at a
                     # clean boundary (no in-flight parallel tools).
