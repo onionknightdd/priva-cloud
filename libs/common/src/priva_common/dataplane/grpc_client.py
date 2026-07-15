@@ -37,6 +37,8 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         binding_pb2,
         binding_pb2_grpc,
         common_pb2,
+        feishu_channel_config_pb2,
+        feishu_channel_config_pb2_grpc,
         hook_policy_pb2,
         hook_policy_pb2_grpc,
         quota_pb2,
@@ -167,12 +169,12 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
 
         def bind(self, account_id, session_uuid, feishu_chat_id=None):
             return cv.binding_from_pb(self._s.Bind(
-                binding_pb2.BindRequest(account_id=account_id, session_uuid=session_uuid,
+                binding_pb2.BindRequest(account_id=account_id, session_uuid=session_uuid or "",
                                         feishu_chat_id=feishu_chat_id or "")))
 
         def rebind(self, account_id, session_uuid, feishu_chat_id=None):
             return cv.binding_from_pb(self._s.Rebind(
-                binding_pb2.RebindRequest(account_id=account_id, session_uuid=session_uuid,
+                binding_pb2.RebindRequest(account_id=account_id, session_uuid=session_uuid or "",
                                           feishu_chat_id=feishu_chat_id or "")))
 
         def claim_first_run_im(self, binding_id):
@@ -224,6 +226,102 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
 
         def list(self):
             return [cv.resource_spec_from_pb(r) for r in self._s.List(common_pb2.Empty()).specs]
+
+    class _FeishuConfigs:
+        def __init__(self):
+            self._s = feishu_channel_config_pb2_grpc.FeishuChannelConfigServiceStub(channel)
+
+        def get(self, account_id):
+            return cv.feishu_config_from_pb(
+                self._s.Get(common_pb2.AccountRef(account_id=account_id)))
+
+        def set_user(self, account_id, *, app_id=None, app_secret=UNSET, user_enabled=None,
+                     single_chat_access_mode=None, allowed_union_ids=None, welcome_message=None,
+                     reject_message=None, model=None, max_queue_size=None,
+                     enable_permission_feedback=None, feedback_timeout_seconds=None,
+                     domain=None, updated_by=""):
+            req = feishu_channel_config_pb2.SetFeishuUserConfigRequest(
+                account_id=account_id, updated_by=updated_by)
+            mask: list[str] = []
+            if app_id is not None:
+                req.app_id = app_id
+                mask.append("app_id")
+            if app_secret is not UNSET:
+                req.app_secret = app_secret or ""  # "" (in mask) => clear
+                mask.append("app_secret")
+            if user_enabled is not None:
+                req.user_enabled = user_enabled
+                mask.append("user_enabled")
+            if single_chat_access_mode is not None:
+                req.single_chat_access_mode = single_chat_access_mode
+                mask.append("single_chat_access_mode")
+            if allowed_union_ids is not None:
+                req.allowed_union_ids = allowed_union_ids
+                mask.append("allowed_union_ids")
+            if welcome_message is not None:
+                req.welcome_message = welcome_message
+                mask.append("welcome_message")
+            if reject_message is not None:
+                req.reject_message = reject_message
+                mask.append("reject_message")
+            if model is not None:
+                req.model = model
+                mask.append("model")
+            if max_queue_size is not None:
+                req.max_queue_size = max_queue_size
+                mask.append("max_queue_size")
+            if enable_permission_feedback is not None:
+                req.enable_permission_feedback = enable_permission_feedback
+                mask.append("enable_permission_feedback")
+            if feedback_timeout_seconds is not None:
+                req.feedback_timeout_seconds = feedback_timeout_seconds
+                mask.append("feedback_timeout_seconds")
+            if domain is not None:
+                req.domain = domain
+                mask.append("domain")
+            req.update_mask.extend(mask)
+            return cv.feishu_config_from_pb(self._s.SetUser(req))
+
+        def set_admin(self, account_id, *, admin_disabled=None, updated_by=""):
+            req = feishu_channel_config_pb2.SetFeishuAdminConfigRequest(
+                account_id=account_id, updated_by=updated_by)
+            mask: list[str] = []
+            if admin_disabled is not None:
+                req.admin_disabled = admin_disabled
+                mask.append("admin_disabled")
+            req.update_mask.extend(mask)
+            return cv.feishu_config_from_pb(self._s.SetAdmin(req))
+
+        def set_status(self, account_id, *, conn_status=None, last_error_code=None,
+                       last_error_message=None, last_connected_at=None):
+            req = feishu_channel_config_pb2.SetFeishuStatusRequest(account_id=account_id)
+            mask: list[str] = []
+            if conn_status is not None:
+                req.conn_status = conn_status
+                mask.append("conn_status")
+            if last_error_code is not None:
+                req.last_error_code = last_error_code
+                mask.append("last_error_code")
+            if last_error_message is not None:
+                req.last_error_message = last_error_message
+                mask.append("last_error_message")
+            if last_connected_at is not None:
+                req.last_connected_at = last_connected_at
+                mask.append("last_connected_at")
+            req.update_mask.extend(mask)
+            return cv.feishu_config_from_pb(self._s.SetStatus(req))
+
+        def list(self):
+            return [cv.feishu_config_from_pb(r)
+                    for r in self._s.List(common_pb2.Empty()).configs]
+
+        def list_effective(self):
+            return [cv.feishu_config_from_pb(r)
+                    for r in self._s.ListEffective(common_pb2.Empty()).configs]
+
+        def get_secret(self, account_id):
+            return cv.feishu_secret_from_pb(
+                self._s.GetFeishuSecret(common_pb2.AccountRef(account_id=account_id)))
 
     class _RunnerDefaults:
         def __init__(self):
@@ -450,6 +548,7 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         runner_defaults=_RunnerDefaults(),
         registrations=_Registrations(),
         hook_policies=_HookPolicies(),
+        feishu_configs=_FeishuConfigs(),
     )
     _cache[dsn] = client
     return client

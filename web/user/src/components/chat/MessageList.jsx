@@ -7,6 +7,7 @@ import useUiStore from '@shared/stores/uiStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import MessageBubble from './MessageBubble'
 import CompactBoundary from './CompactBoundary'
+import TaskNotificationCard from './TaskNotificationCard'
 import JumpToLatest from './JumpToLatest'
 import { useSSE } from '../../hooks/useSSE'
 import { rewindFiles, forkSession } from '../../api/sessions'
@@ -375,6 +376,16 @@ export default function MessageList() {
               row = (
                 <div className="overflow-hidden" style={ROW_COLUMN_STYLE}>
                   <RewindDivider rewindTs={item.rewindTs} />
+                </div>
+              )
+            } else if (item.msg.role === 'system' && item.msg.type === 'task_notification') {
+              // CLI-injected <task-notification> (a background Workflow / Bash
+              // finished and re-invoked the model) → slim system card, not a
+              // raw-XML user bubble. The summary streams as the next assistant turn.
+              const animClass = item.originalIndex >= mountedCountRef.current ? ' chat-message-in' : ''
+              row = (
+                <div className={`overflow-hidden${animClass}`} style={ROW_COLUMN_STYLE}>
+                  <TaskNotificationCard notif={item.msg.notif} />
                 </div>
               )
             } else {

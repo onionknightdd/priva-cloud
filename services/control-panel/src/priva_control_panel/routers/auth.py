@@ -17,6 +17,8 @@ from priva_common.models.auth import (
     SetupStatus,
     UserPublic,
 )
+from priva_common.models.feishu import FeishuConfigResponse, FeishuUserConfigUpdate
+from ..services.feishu_connector import nudge_reconcile
 from ..services.auth import (
     create_jwt,
     decode_jwt,
@@ -276,6 +278,59 @@ async def revoke_my_apikey(user: UserRecord = Depends(require_user)):
     ))
 
     return ApiKeyResponse(has_key=False)
+
+
+_FEISHU_ACCESS_MODES = ("owner_only", "allowlist", "all")
+_FEISHU_DOMAINS = ("feishu", "lark")
+
+
+@router.get("/me/feishu-config", response_model=FeishuConfigResponse)
+async def get_my_feishu_config(user: UserRecord = Depends(require_user)):
+    from priva_common.dataplane import get_client
+    rec = get_client().feishu_configs.get(user.account_id)
+    return FeishuConfigResponse.from_record(rec, user.account_id)
+
+
+@router.put("/me/feishu-config", response_model=FeishuConfigResponse)
+async def update_my_feishu_config(
+    request: FeishuUserConfigUpdate,
+    user: UserRecord = Depends(require_user),
+):
+    """User self-serve: the ONLY writer of app_id/app_secret + user_enabled + behaviour.
+    admin_disabled is not in this DTO, so a user can never lift an admin kill-switch."""
+    from priva_common.dataplane import get_client
+
+    if request.single_chat_access_mode is not None and request.single_chat_access_mode not in _FEISHU_ACCESS_MODES:
+        raise HTTPException(400, "Invalid single_chat_access_mode")
+    if request.domain is not None and request.domain not in _FEISHU_DOMAINS:
+        raise HTTPException(400, "Invalid domain")
+
+    audit = get_audit_logger()
+    kwargs: dict = {}
+    if request.app_id is not None:
+        kwargs["app_id"] = request.app_id.strip()
+    if request.app_secret is not None:
+        if request.app_secret == "__clear__":
+            kwargs["app_secret"] = ""  # data-plane clears app_secret_enc
+            audit.append(AuditEntry(actor=user.username, action="self.feishu_secret_cleared",
+                                    target=user.username, details={"secret_set": False}))
+        elif request.app_secret == "":
+            raise HTTPException(400, "app_secret cannot be empty; send '__clear__' to remove it")
+        else:
+            kwargs["app_secret"] = request.app_secret  # encrypted at data-spine; never logged
+            audit.append(AuditEntry(actor=user.username, action="self.feishu_secret_set",
+                                    target=user.username, details={"secret_set": True}))
+    if request.user_enabled is not None:
+        kwargs["user_enabled"] = request.user_enabled
+    for f in ("single_chat_access_mode", "allowed_union_ids", "welcome_message", "reject_message",
+              "model", "max_queue_size", "enable_permission_feedback", "feedback_timeout_seconds", "domain"):
+        v = getattr(request, f)
+        if v is not None:
+            kwargs[f] = v
+
+    rec = get_client().feishu_configs.set_user(user.account_id, updated_by=user.username, **kwargs)
+    await nudge_reconcile(user.account_id, user.username)  # best-effort; poll is the backstop
+    return FeishuConfigResponse.from_record(rec, user.account_id)
 
 
 @router.put("/me/password")

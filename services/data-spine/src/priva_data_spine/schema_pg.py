@@ -31,6 +31,7 @@ DDL: tuple[str, ...] = (
       agent_runner_type TEXT NOT NULL DEFAULT 'auto_scale' CHECK (agent_runner_type IN ('auto_scale','persistent')),
       feishu_user_id      TEXT,
       feishu_display_name TEXT,
+      feishu_open_id      TEXT,
       created_at     TEXT NOT NULL DEFAULT {NOW},
       updated_at     TEXT NOT NULL DEFAULT {NOW}
     )
@@ -43,15 +44,17 @@ DDL: tuple[str, ...] = (
     CREATE TABLE IF NOT EXISTS channel_binding (
       binding_id     TEXT PRIMARY KEY,
       account_id     TEXT NOT NULL REFERENCES account(account_id) ON DELETE CASCADE,
-      session_uuid   TEXT NOT NULL,
+      session_uuid   TEXT,
       first_run_done BIGINT NOT NULL DEFAULT 0 CHECK (first_run_done IN (0,1)),
       feishu_chat_id TEXT,
       bound_at       TEXT NOT NULL DEFAULT {NOW},
       rebound_at     TEXT
     )
     """,
+    # session_uuid NULLable: "/new" detaches the binding (NULL) → next DM starts a
+    # fresh SDK session; the unique index is partial so detached rows coexist.
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_account ON channel_binding(account_id)",
-    "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_session ON channel_binding(session_uuid)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_session_active ON channel_binding(session_uuid) WHERE session_uuid IS NOT NULL",
     # 3 ── quota ------------------------------------------------------------
     f"""
     CREATE TABLE IF NOT EXISTS quota (
@@ -201,6 +204,38 @@ DDL: tuple[str, ...] = (
       updated_by       TEXT NOT NULL DEFAULT ''
     )
     """,
+    # 10 ── feishu_channel_config (mirror of schema.py: 0/1 flags as BIGINT) --
+    f"""
+    CREATE TABLE IF NOT EXISTS feishu_channel_config (
+      account_id              TEXT PRIMARY KEY REFERENCES account(account_id) ON DELETE CASCADE,
+      app_id                  TEXT,
+      app_secret_enc          TEXT,
+      app_secret_updated_at   TEXT,
+      user_enabled            BIGINT NOT NULL DEFAULT 0 CHECK (user_enabled   IN (0,1)),
+      admin_disabled          BIGINT NOT NULL DEFAULT 0 CHECK (admin_disabled IN (0,1)),
+      single_chat_access_mode TEXT NOT NULL DEFAULT 'owner_only'
+                              CHECK (single_chat_access_mode IN ('owner_only','allowlist','all')),
+      allowed_union_ids       TEXT NOT NULL DEFAULT '[]',
+      welcome_message         TEXT NOT NULL DEFAULT '',
+      reject_message          TEXT NOT NULL DEFAULT '',
+      model                   TEXT,
+      max_queue_size          BIGINT NOT NULL DEFAULT 3,
+      enable_permission_feedback BIGINT NOT NULL DEFAULT 1 CHECK (enable_permission_feedback IN (0,1)),
+      feedback_timeout_seconds   BIGINT NOT NULL DEFAULT 180,
+      domain                  TEXT NOT NULL DEFAULT 'feishu' CHECK (domain IN ('feishu','lark')),
+      conn_status             TEXT NOT NULL DEFAULT 'disabled'
+                              CHECK (conn_status IN ('disabled','connecting','connected','auth_failed','error','conflict')),
+      last_error_code         BIGINT,
+      last_error_message      TEXT,
+      last_connected_at       TEXT,
+      status_updated_at       TEXT,
+      desired_digest          TEXT,
+      updated_by              TEXT NOT NULL DEFAULT '',
+      updated_at              TEXT NOT NULL DEFAULT {NOW}
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_feishu_effective ON feishu_channel_config(account_id) "
+    "WHERE user_enabled = 1 AND admin_disabled = 0",
 )
 
 # Idempotent column additions for DBs created before a column existed (mirror of
@@ -210,6 +245,12 @@ _MIGRATIONS: tuple[str, ...] = (
     "ALTER TABLE account ADD COLUMN IF NOT EXISTS agent_runner_type TEXT NOT NULL "
     "DEFAULT 'auto_scale' CHECK (agent_runner_type IN ('auto_scale','persistent'))",
     "ALTER TABLE hook_policy ADD COLUMN IF NOT EXISTS enforced_events TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE account ADD COLUMN IF NOT EXISTS feishu_open_id TEXT",
+    # session_uuid: drop NOT NULL for the "/new" detach flow, and retire the old
+    # non-partial index in favour of the partial ux_binding_session_active (created
+    # by the DDL above). All idempotent — safe to run every boot.
+    "ALTER TABLE channel_binding ALTER COLUMN session_uuid DROP NOT NULL",
+    "DROP INDEX IF EXISTS ux_binding_session",
     # One-time backfill, safe every boot: pre-migration rows carry enforced=1
     # with an empty enforced_events; the service keeps enforced derived from
     # enforced_events afterwards, so this WHERE never matches again.

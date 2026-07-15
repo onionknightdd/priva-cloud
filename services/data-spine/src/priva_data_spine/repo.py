@@ -118,6 +118,17 @@ class Repository(ABC):
     def resource_spec_upsert(self, account_id: str, fields: dict) -> dict: ...
     @abstractmethod
     def resource_spec_list(self) -> list[dict]: ...
+    # feishu_channel_config
+    @abstractmethod
+    def feishu_get(self, account_id: str) -> dict | None: ...
+    @abstractmethod
+    def feishu_upsert(self, account_id: str, fields: dict) -> dict: ...          # desired cols; stamps updated_at
+    @abstractmethod
+    def feishu_status_update(self, account_id: str, fields: dict) -> dict | None: ...  # status cols only; NOT updated_at
+    @abstractmethod
+    def feishu_list(self) -> list[dict]: ...
+    @abstractmethod
+    def feishu_list_effective(self) -> list[dict]: ...
     # runner_defaults (single row, id=1)
     @abstractmethod
     def runner_defaults_get(self) -> dict | None: ...
@@ -449,6 +460,60 @@ class SqliteRepo(Repository):
 
     def resource_spec_list(self):
         return self._all("SELECT * FROM account_resource_spec ORDER BY account_id")
+
+    # feishu_channel_config --------------------------------------------------
+    # Desired columns (user + admin roles, filtered by role in the service before
+    # they reach here) + the service-computed desired_digest / updated_by. The
+    # status columns are written by a SEPARATE method so status write-back never
+    # stamps updated_at (the connector poll diffs on desired_digest).
+    _FEISHU_COLS = (
+        "app_id", "app_secret_enc", "app_secret_updated_at",
+        "user_enabled", "admin_disabled",
+        "single_chat_access_mode", "allowed_union_ids", "welcome_message",
+        "reject_message", "model", "max_queue_size", "enable_permission_feedback",
+        "feedback_timeout_seconds", "domain", "desired_digest", "updated_by",
+    )
+    _FEISHU_STATUS_COLS = ("conn_status", "last_error_code", "last_error_message", "last_connected_at")
+
+    def feishu_get(self, account_id):
+        return self._one("SELECT * FROM feishu_channel_config WHERE account_id = ?", (account_id,))
+
+    def feishu_upsert(self, account_id, fields):
+        cols = [c for c in self._FEISHU_COLS if c in fields]
+        insert_cols = ["account_id"] + cols
+        ph = ", ".join("?" for _ in insert_cols)
+        updates = ", ".join(f"{c}=excluded.{c}" for c in cols)
+        updates = (updates + ", " if updates else "") + "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+        self._write(
+            f"INSERT INTO feishu_channel_config ({', '.join(insert_cols)}) VALUES ({ph}) "
+            f"ON CONFLICT(account_id) DO UPDATE SET {updates}",
+            tuple([account_id] + [fields[c] for c in cols]),
+        )
+        return self.feishu_get(account_id)
+
+    def feishu_status_update(self, account_id, fields):
+        cols = {c: fields[c] for c in self._FEISHU_STATUS_COLS if c in fields}
+        if not cols:
+            return self.feishu_get(account_id)
+        clause, params = _set_clause(cols)
+        self._write(
+            f"UPDATE feishu_channel_config SET {clause}, "
+            "status_updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE account_id = ?",
+            tuple(params) + (account_id,),
+        )
+        return self.feishu_get(account_id)
+
+    def feishu_list(self):
+        return self._all("SELECT * FROM feishu_channel_config ORDER BY account_id")
+
+    def feishu_list_effective(self):
+        return self._all(
+            "SELECT * FROM feishu_channel_config "
+            "WHERE user_enabled = 1 AND admin_disabled = 0 "
+            "AND app_id IS NOT NULL AND app_id <> '' "
+            "AND app_secret_enc IS NOT NULL AND app_secret_enc <> '' "
+            "ORDER BY account_id"
+        )
 
     # runner_defaults (single row id=1) --------------------------------------
     _RDEFAULTS_COLS = ("idle_grace_seconds", "min_alive_after_wake_seconds",
@@ -855,6 +920,50 @@ class PgRepo(Repository):
 
     def resource_spec_list(self):
         return self._all("SELECT * FROM account_resource_spec ORDER BY account_id")
+
+    # feishu_channel_config --------------------------------------------------
+    _FEISHU_COLS = SqliteRepo._FEISHU_COLS
+    _FEISHU_STATUS_COLS = SqliteRepo._FEISHU_STATUS_COLS
+
+    def feishu_get(self, account_id):
+        return self._one("SELECT * FROM feishu_channel_config WHERE account_id = %s", (account_id,))
+
+    def feishu_upsert(self, account_id, fields):
+        cols = [c for c in self._FEISHU_COLS if c in fields]
+        insert_cols = ["account_id"] + cols
+        ph = ", ".join("%s" for _ in insert_cols)
+        updates = ", ".join(f"{c}=excluded.{c}" for c in cols)
+        updates = (updates + ", " if updates else "") + f"updated_at = {self._NOW}"
+        self._write(
+            f"INSERT INTO feishu_channel_config ({', '.join(insert_cols)}) VALUES ({ph}) "
+            f"ON CONFLICT (account_id) DO UPDATE SET {updates}",
+            tuple([account_id] + [fields[c] for c in cols]),
+        )
+        return self.feishu_get(account_id)
+
+    def feishu_status_update(self, account_id, fields):
+        cols = {c: fields[c] for c in self._FEISHU_STATUS_COLS if c in fields}
+        if not cols:
+            return self.feishu_get(account_id)
+        clause, params = _set_clause_pg(cols)
+        self._write(
+            f"UPDATE feishu_channel_config SET {clause}, "
+            f"status_updated_at = {self._NOW} WHERE account_id = %s",
+            tuple(params) + (account_id,),
+        )
+        return self.feishu_get(account_id)
+
+    def feishu_list(self):
+        return self._all("SELECT * FROM feishu_channel_config ORDER BY account_id")
+
+    def feishu_list_effective(self):
+        return self._all(
+            "SELECT * FROM feishu_channel_config "
+            "WHERE user_enabled = 1 AND admin_disabled = 0 "
+            "AND app_id IS NOT NULL AND app_id <> '' "
+            "AND app_secret_enc IS NOT NULL AND app_secret_enc <> '' "
+            "ORDER BY account_id"
+        )
 
     # runner_defaults (single row id=1) --------------------------------------
     _RDEFAULTS_COLS = SqliteRepo._RDEFAULTS_COLS

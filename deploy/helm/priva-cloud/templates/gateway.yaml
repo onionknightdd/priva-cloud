@@ -10,6 +10,13 @@ metadata:
     {{- include "priva-cloud.labels" . | nindent 4 }}
 spec:
   gatewayClassName: {{ .Values.gateway.className }}
+  {{- if .Values.gateway.serviceType }}
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: {{ .Values.gateway.name }}-params
+  {{- end }}
   listeners:
     - name: http
       port: {{ .Values.gateway.listenerPort }}
@@ -17,6 +24,24 @@ spec:
       allowedRoutes:
         namespaces:
           from: Same
+{{- if .Values.gateway.serviceType }}
+---
+# Overrides the Service agentgateway provisions for the Gateway. Its default is
+# type LoadBalancer — on a cloud cluster the CCM would provision a second LB for
+# it. When an external LB/Ingress fronts the gateway, ClusterIP (LB-to-pod direct
+# / VPC-CNI) or NodePort (node-routed) is what you want instead.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: {{ .Values.gateway.name }}-params
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  service:
+    spec:
+      type: {{ .Values.gateway.serviceType }}
+{{- end }}
 ---
 # The pool of per-account agent-runner pods. Its EndpointPicker is the control-panel
 # ext_proc brain (:9000): agentgateway calls it per request and routes to the returned

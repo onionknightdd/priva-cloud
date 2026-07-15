@@ -137,6 +137,22 @@ gateway:
   listenerPort: 80
   inferencePoolName: agent-runners
   runnerTargetPort: 8091         # the port the EPP routes to on each runner pod
+  # Type of the Service agentgateway provisions for the Gateway. "" keeps the
+  # agentgateway default (LoadBalancer — fine on minikube, pending forever).
+  # Set ClusterIP/NodePort when an external LB/Ingress fronts the gateway,
+  # otherwise the cloud CCM provisions a second, unwanted LB for it.
+  serviceType: ""
+
+# ---------------------------------------------------------------------------
+# Optional cloud Ingress in front of the gateway (TLS at the external LB, all
+# path routing stays in the HTTPRoute). Pair with gateway.serviceType above.
+# See values-volcengine.yaml for the VKE ALB overlay.
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: alb                 # for VKE ALB: the ALBInstance resource name
+  host: ""                       # "" = match any host
+  annotations: {}                # controller-specific, passed through verbatim
 
 # ---------------------------------------------------------------------------
 # DEV-ONLY shared-RWX storage backend: in-cluster NFSv4 server on a loopback

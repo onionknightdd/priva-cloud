@@ -27,6 +27,8 @@ from priva_common.dataplane.v1 import (
     binding_pb2,
     binding_pb2_grpc,
     common_pb2,
+    feishu_channel_config_pb2,
+    feishu_channel_config_pb2_grpc,
     hook_policy_pb2,
     hook_policy_pb2_grpc,
     quota_pb2,
@@ -89,7 +91,7 @@ def _binding_pb(b) -> binding_pb2.Binding:
     return binding_pb2.Binding(
         binding_id=b.binding_id,
         account_id=b.account_id,
-        session_uuid=b.session_uuid,
+        session_uuid=b.session_uuid or "",  # NULL (detached) → "" on the wire
         first_run_done=b.first_run_done,
         feishu_chat_id=b.feishu_chat_id or "",
         bound_at=b.bound_at or "",
@@ -105,6 +107,37 @@ def _rspec_pb(r) -> resource_spec_pb2.ResourceSpec:
         cpu_cores=r.cpu_cores,
         memory_mb=r.memory_mb,
         volume_gb=r.volume_gb,
+        updated_at=r.updated_at or "",
+    )
+
+
+def _feishu_pb(r) -> feishu_channel_config_pb2.FeishuChannelConfig:
+    if r is None:
+        return feishu_channel_config_pb2.FeishuChannelConfig()  # empty account_id => unset
+    return feishu_channel_config_pb2.FeishuChannelConfig(
+        account_id=r.account_id,
+        app_id=r.app_id or "",
+        has_app_secret=r.has_app_secret,        # presence only — app_secret is NEVER serialized
+        app_secret_updated_at=r.app_secret_updated_at or "",
+        user_enabled=r.user_enabled,
+        admin_disabled=r.admin_disabled,
+        effective_enabled=r.effective_enabled,
+        single_chat_access_mode=r.single_chat_access_mode or "owner_only",
+        allowed_union_ids=r.allowed_union_ids or "[]",
+        welcome_message=r.welcome_message or "",
+        reject_message=r.reject_message or "",
+        model=r.model or "",
+        max_queue_size=r.max_queue_size,
+        enable_permission_feedback=r.enable_permission_feedback,
+        feedback_timeout_seconds=r.feedback_timeout_seconds,
+        domain=r.domain or "feishu",
+        conn_status=r.conn_status or "disabled",
+        last_error_code=r.last_error_code or 0,
+        last_error_message=r.last_error_message or "",
+        last_connected_at=r.last_connected_at or "",
+        status_updated_at=r.status_updated_at or "",
+        desired_digest=r.desired_digest or "",
+        updated_by=r.updated_by or "",
         updated_at=r.updated_at or "",
     )
 
@@ -243,10 +276,14 @@ class _BindingServicer(binding_pb2_grpc.BindingServiceServicer):
         self.svc = svc
 
     def Bind(self, request, context):
-        return _binding_pb(self.svc.bind(request.account_id, request.session_uuid, request.feishu_chat_id or None))
+        # session_uuid "" → NULL (detached): "" is not NULL, so it would collide on
+        # the partial unique index the moment a second account also detaches.
+        return _binding_pb(self.svc.bind(
+            request.account_id, request.session_uuid or None, request.feishu_chat_id or None))
 
     def Rebind(self, request, context):
-        return _binding_pb(self.svc.rebind(request.account_id, request.session_uuid, request.feishu_chat_id or None))
+        return _binding_pb(self.svc.rebind(
+            request.account_id, request.session_uuid or None, request.feishu_chat_id or None))
 
     def ClaimFirstRunIM(self, request, context):
         return common_pb2.BoolValue(value=self.svc.claim_first_run_im(request.binding_id))
@@ -314,6 +351,84 @@ class _ResourceSpecServicer(resource_spec_pb2_grpc.ResourceSpecServiceServicer):
 
     def List(self, request, context):
         return resource_spec_pb2.ResourceSpecList(specs=[_rspec_pb(r) for r in self.svc.list()])
+
+
+class _FeishuChannelConfigServicer(
+        feishu_channel_config_pb2_grpc.FeishuChannelConfigServiceServicer):
+    def __init__(self, svc):
+        self.svc = svc
+
+    def Get(self, request, context):
+        return _feishu_pb(self.svc.get(request.account_id))
+
+    def SetUser(self, request, context):
+        mask = set(request.update_mask)
+        kw = {}
+        if "app_id" in mask:
+            kw["app_id"] = request.app_id
+        if "app_secret" in mask:
+            kw["app_secret"] = request.app_secret        # "" => clear, non-empty => set/rotate
+        if "user_enabled" in mask:
+            kw["user_enabled"] = request.user_enabled
+        if "single_chat_access_mode" in mask:
+            kw["single_chat_access_mode"] = request.single_chat_access_mode
+        if "allowed_union_ids" in mask:
+            kw["allowed_union_ids"] = request.allowed_union_ids
+        if "welcome_message" in mask:
+            kw["welcome_message"] = request.welcome_message
+        if "reject_message" in mask:
+            kw["reject_message"] = request.reject_message
+        if "model" in mask:
+            kw["model"] = request.model
+        if "max_queue_size" in mask:
+            kw["max_queue_size"] = request.max_queue_size
+        if "enable_permission_feedback" in mask:
+            kw["enable_permission_feedback"] = request.enable_permission_feedback
+        if "feedback_timeout_seconds" in mask:
+            kw["feedback_timeout_seconds"] = request.feedback_timeout_seconds
+        if "domain" in mask:
+            kw["domain"] = request.domain
+        return _feishu_pb(self.svc.set_user(request.account_id, updated_by=request.updated_by, **kw))
+
+    def SetAdmin(self, request, context):
+        mask = set(request.update_mask)
+        kw = {}
+        if "admin_disabled" in mask:
+            kw["admin_disabled"] = request.admin_disabled
+        return _feishu_pb(self.svc.set_admin(request.account_id, updated_by=request.updated_by, **kw))
+
+    def SetStatus(self, request, context):
+        mask = set(request.update_mask)
+        kw = {}
+        if "conn_status" in mask:
+            kw["conn_status"] = request.conn_status
+        if "last_error_code" in mask:
+            kw["last_error_code"] = request.last_error_code
+        if "last_error_message" in mask:
+            kw["last_error_message"] = request.last_error_message
+        if "last_connected_at" in mask:
+            kw["last_connected_at"] = request.last_connected_at
+        return _feishu_pb(self.svc.set_status(request.account_id, **kw))
+
+    def List(self, request, context):
+        return feishu_channel_config_pb2.FeishuChannelConfigList(
+            configs=[_feishu_pb(r) for r in self.svc.list()])
+
+    def ListEffective(self, request, context):
+        return feishu_channel_config_pb2.FeishuChannelConfigList(
+            configs=[_feishu_pb(r) for r in self.svc.list_effective()])
+
+    def GetFeishuSecret(self, request, context):
+        # Connector-only privileged read: decrypted plaintext app_secret.
+        r = self.svc.get_secret(request.account_id)
+        if r is None:
+            return feishu_channel_config_pb2.FeishuSecret()  # empty account_id => no row
+        return feishu_channel_config_pb2.FeishuSecret(
+            account_id=r.account_id,
+            app_id=r.app_id or "",
+            app_secret=r.app_secret or "",
+            domain=r.domain or "feishu",
+        )
 
 
 class _RunnerDefaultsServicer(runner_defaults_pb2_grpc.RunnerDefaultsServiceServicer):
@@ -570,6 +685,8 @@ def build_server(settings, max_workers: int = 16, repo=None) -> grpc.Server:
     admin_pb2_grpc.add_AdminServiceServicer_to_server(_AdminServicer(client.admin), server)
     resource_spec_pb2_grpc.add_ResourceSpecServiceServicer_to_server(
         _ResourceSpecServicer(client.resource_specs), server)
+    feishu_channel_config_pb2_grpc.add_FeishuChannelConfigServiceServicer_to_server(
+        _FeishuChannelConfigServicer(client.feishu_configs), server)
     runner_defaults_pb2_grpc.add_RunnerDefaultsServiceServicer_to_server(
         _RunnerDefaultsServicer(client.runner_defaults), server)
     registration_pb2_grpc.add_RegistrationServiceServicer_to_server(

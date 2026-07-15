@@ -112,6 +112,7 @@ function SessionItem({
         marginLeft: (indent || 12) - 8,
         paddingLeft: 8,
         background: isActive ? 'var(--bg-elevated)' : 'transparent',
+        borderRadius: isActive ? 3 : 0,
         color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
         cursor: editing ? 'default' : 'pointer',
         fontSize: 13,

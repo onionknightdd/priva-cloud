@@ -295,6 +295,18 @@
     "selectPhase": "Select a phase",
     "detailEmpty": "No agents in this phase yet"
   },
+  "notification": {
+    "workflowLabel": "Workflow {{status}}",
+    "taskLabel": "Background task {{status}}",
+    "status": {
+      "completed": "completed",
+      "failed": "failed",
+      "stopped": "stopped",
+      "killed": "killed",
+      "aborted": "aborted",
+      "cancelled": "cancelled"
+    }
+  },
   "toolCall": {
     "input": "INPUT",
     "output": "OUTPUT",
@@ -659,6 +671,29 @@
     "template": "Please first understand my selected content in the context of the full file.\n\nMy question:\n{{question}}"
   },
   "admin": {
+    "feishu": {
+      "title": "Feishu Bot",
+      "refresh": "Refresh",
+      "appId": "App ID",
+      "appSecret": "App Secret",
+      "secretConfigured": "configured ✓",
+      "secretNotSet": "not set",
+      "adminDisable": "Admin Disable",
+      "on": "ON",
+      "off": "OFF",
+      "disable": "Disable",
+      "disableConfirm": "Disable the Feishu bot for @{{username}}? The connector will drop this user's connection and stop answering their DMs until you re-enable it. In-flight replies are cancelled.",
+      "stDisabledAdmin": "Disabled (admin)",
+      "stDisabledAdminDesc": "kill-switch on — connector will drop the bot",
+      "stNotConfigured": "Not configured",
+      "stNotConfiguredDesc": "user hasn't set app_id + app_secret",
+      "stConnected": "Connected",
+      "stConnecting": "Connecting…",
+      "stAuthFailed": "Auth failed",
+      "stError": "Error",
+      "stConflict": "Conflict",
+      "stPendingConnector": "Waiting for connector"
+    },
     "navScheduler": "Scheduler",
     "schedulerAccounts": "Accounts",
     "schedulerPauseAll": "Pause all",
@@ -1005,6 +1040,37 @@
     "errorFutureDate": "Cannot select future date"
   },
   "settings": {
+    "channels": "Channels",
+    "feishu": {
+      "desc": "Connect your own Feishu self-built app so the bot answers your DMs. You provide the app credentials; only you can edit them.",
+      "adminDisabledBanner": "An administrator has disabled this bot. You can't re-enable it until they lift the block.",
+      "refresh": "Refresh",
+      "enabled": "Enabled",
+      "enabledHint": "Turn the bot on for your account.",
+      "appId": "App ID",
+      "save": "Save",
+      "appSecret": "App Secret",
+      "secretConfigured": "configured ✓",
+      "secretNotSet": "not set",
+      "setSecret": "Set secret",
+      "rotate": "Rotate",
+      "clear": "Clear",
+      "saveSecret": "Save secret",
+      "secretPlaceholder": "paste your app secret",
+      "writeOnlyHint": "Write-only · never shown after saving",
+      "clearConfirm": "Remove the stored app secret? The bot can't authenticate until you set it again.",
+      "domain": "Domain",
+      "stDisabledAdmin": "Disabled by administrator",
+      "stNotConfigured": "Not configured",
+      "stNotConfiguredDesc": "set app_id + app_secret to connect",
+      "stOff": "Off",
+      "stConnected": "Connected",
+      "stConnecting": "Connecting…",
+      "stAuthFailed": "Auth failed — check your app secret",
+      "stError": "Error",
+      "stConflict": "Conflict",
+      "stPendingConnector": "Waiting for connector"
+    },
     "archived": "Archived",
     "archivedHint": "Archived sessions are hidden from the sidebar. Restore one to bring it (and its workdir) back.",
     "archivedEmpty": "No archived sessions",

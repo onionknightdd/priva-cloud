@@ -29,15 +29,6 @@ logger = get_app_logger(__name__)
 
 StreamQueue = asyncio.Queue[dict[str, Any] | None]
 
-# Background task types whose completion outlives the launching turn: the tool
-# returns a task id immediately, the task keeps running after the turn's
-# ResultMessage, and its terminal notification (plus the model re-invocation it
-# triggers) arrives later on the same client stream. The run must NOT tear down
-# the CLI at end-of-turn while any of these are still live, or the task is killed
-# mid-flight and its card is finalized as STOPPED. Scoped to workflows — the
-# reported case; background bash is surfaced via its own polling channel.
-_BG_TASK_TYPES = frozenset({"local_workflow"})
-
 # Task `status` (task_notification) / `patch.status` (task_updated) values that
 # mean the task has actually finished. Superset of the SDK's
 # TERMINAL_TASK_STATUSES plus the transport-side aborted/cancelled aliases;
@@ -78,17 +69,18 @@ def should_stop_bg_drain(outstanding_count: int, idle_seconds: float) -> bool:
     return idle_seconds >= _BG_IDLE_TIMEOUT
 
 
-def classify_bg_task_event(event: str | None, data: dict | None) -> tuple[str | None, str | None]:
-    """Classify an emitted event's effect on the set of live background tasks.
-
-    Returns ``("start", task_id)`` when a background task (see _BG_TASK_TYPES)
-    launches, ``("terminal", task_id)`` when one finishes (terminal status from
-    a task_notification OR a task_updated patch — the SDK notes a killed/stopped
-    task may report only via task_updated), else ``(None, None)``.
+def classify_bg_task_event(
+    event: str | None, data: dict | None
+) -> tuple[str | None, str | None, str | None, bool]:
+    """Decode a task-lifecycle event into ``(subtype, task_id, tool_use_id,
+    is_terminal)``; ``(None, None, None, False)`` if it isn't one.
 
     Task events arrive as ``system`` messages (the SDK's Task*Message are
     SystemMessage subclasses, so get_event_label labels them ``system``) carrying
     ``subtype`` + a nested payload; a flat ``task_*`` label is handled defensively.
+    ``is_terminal`` is true when a task_notification status OR a task_updated
+    ``patch.status`` is terminal (the SDK notes a killed/stopped task may report
+    only via task_updated).
     """
     data = data or {}
     if event == "system":
@@ -98,23 +90,82 @@ def classify_bg_task_event(event: str | None, data: dict | None) -> tuple[str | 
         subtype = event
         payload = data
     else:
-        return (None, None)
+        return (None, None, None, False)
+
+    if subtype not in ("task_started", "task_progress", "task_notification", "task_updated"):
+        return (None, None, None, False)
 
     task_id = payload.get("task_id") or data.get("task_id")
-    if not task_id:
-        return (None, None)
+    tool_use_id = payload.get("tool_use_id") or data.get("tool_use_id")
 
-    if subtype == "task_started":
-        if payload.get("task_type") in _BG_TASK_TYPES:
-            return ("start", task_id)
-    elif subtype == "task_notification":
-        if payload.get("status") in _TERMINAL_TASK_STATUSES:
-            return ("terminal", task_id)
+    is_terminal = False
+    if subtype == "task_notification":
+        is_terminal = payload.get("status") in _TERMINAL_TASK_STATUSES
     elif subtype == "task_updated":
         patch = payload.get("patch") if isinstance(payload.get("patch"), dict) else (data.get("patch") or {})
-        if patch.get("status") in _TERMINAL_TASK_STATUSES:
-            return ("terminal", task_id)
-    return (None, None)
+        is_terminal = patch.get("status") in _TERMINAL_TASK_STATUSES
+
+    return (subtype, task_id, tool_use_id, is_terminal)
+
+
+class WorkflowDrainTracker:
+    """Tracks background workflows that are launched-but-not-finished so the
+    streaming run can stay alive until they complete instead of tearing the CLI
+    down at end-of-turn (which killed live workflows and finalized their cards as
+    STOPPED).
+
+    Anchored on the **Workflow tool_use**, whose id is seen while the launching
+    turn is still streaming — the model cannot emit the turn's ResultMessage
+    before its tool calls resolve, so this can never lose the end-of-turn race
+    the way the asynchronously-emitted ``task_started`` can (that race is what
+    stopped workflows intermittently). A launch is cleared on an error
+    tool_result (a failed launch spawns no task) or on a terminal task event,
+    correlated by tool_use_id or by the task_id→tool_use_id map learned from
+    task events.
+    """
+
+    def __init__(self) -> None:
+        self._outstanding: set[str] = set()      # Workflow tool_use ids, live
+        self._workflow_tool_ids: set[str] = set()  # every Workflow tool_use id seen
+        self._task_to_tool: dict[str, str] = {}    # task_id -> tool_use_id
+
+    @property
+    def outstanding_count(self) -> int:
+        return len(self._outstanding)
+
+    def observe(self, event: str | None, data: dict | None) -> None:
+        data = data or {}
+        if event == "tool_use":
+            for block in data.get("content") or []:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_use"
+                    and block.get("name") == "Workflow"
+                    and block.get("id")
+                ):
+                    self._workflow_tool_ids.add(block["id"])
+                    self._outstanding.add(block["id"])
+            return
+        if event == "tool_result":
+            for block in data.get("content") or []:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_result"
+                    and block.get("tool_use_id") in self._workflow_tool_ids
+                    and block.get("is_error")
+                ):
+                    self._outstanding.discard(block["tool_use_id"])
+            return
+
+        subtype, task_id, tool_use_id, is_terminal = classify_bg_task_event(event, data)
+        if subtype is None:
+            return
+        if task_id and tool_use_id:
+            self._task_to_tool[task_id] = tool_use_id
+        if is_terminal:
+            tid = tool_use_id or (task_id and self._task_to_tool.get(task_id))
+            if tid:
+                self._outstanding.discard(tid)
 
 
 def _build_prompt_with_attachments(prompt: str, attachments: list[dict] | None) -> str:
@@ -870,22 +921,14 @@ async def agent_run_events(
             )
 
             outstanding_tool_uses: set[str] = set()
-            # task_id of every still-running background task (see _BG_TASK_TYPES).
-            outstanding_bg_tasks: set[str] = set()
-            # True once we've re-armed the pump to wait on background tasks.
+            # Live background workflows (launched, not yet finished).
+            wf_tracker = WorkflowDrainTracker()
+            # True once we've re-armed the pump to wait on background workflows.
             draining_bg = False
             # Monotonic time of the last real (non-keepalive) event; the idle
             # give-up window is measured from here. Seeded to "now" so the first
             # drain window starts at end-of-turn, not at process start.
             last_event_ts = time.monotonic()
-
-            def _track_bg_task(evt_item: dict) -> None:
-                """Add/remove a live background task id from its lifecycle event."""
-                kind, task_id = classify_bg_task_event(evt_item.get("event"), evt_item.get("data"))
-                if kind == "start":
-                    outstanding_bg_tasks.add(task_id)
-                elif kind == "terminal":
-                    outstanding_bg_tasks.discard(task_id)
 
             async def _flush_next_queued() -> bool:
                 """Pop one queued user message and submit it as a new turn."""
@@ -919,12 +962,13 @@ async def agent_run_events(
                         # is just the model thinking).
                         if draining_bg:
                             idle = time.monotonic() - last_event_ts
-                            if should_stop_bg_drain(len(outstanding_bg_tasks), idle):
-                                if outstanding_bg_tasks:
+                            outstanding = wf_tracker.outstanding_count
+                            if should_stop_bg_drain(outstanding, idle):
+                                if outstanding:
                                     logger.warning(
-                                        "[STREAM] no workflow activity for %ss; giving up "
-                                        "with %d background task(s) still unfinished",
-                                        _BG_IDLE_TIMEOUT, len(outstanding_bg_tasks),
+                                        "[STREAM] no workflow activity for {}s; giving up "
+                                        "with {} background workflow(s) still unfinished",
+                                        _BG_IDLE_TIMEOUT, outstanding,
                                     )
                                 break
                         continue
@@ -942,7 +986,13 @@ async def agent_run_events(
                         # kill the workflows). The idle-timeout guard in the
                         # keepalive branch reclaims a wedged (silent) workflow; a
                         # turn just ended here, so activity is fresh — re-arm.
-                        if outstanding_bg_tasks and not (cancelled and cancelled.is_set()):
+                        if wf_tracker.outstanding_count and not (cancelled and cancelled.is_set()):
+                            if not draining_bg:
+                                logger.info(
+                                    "[STREAM] end-of-turn with {} background workflow(s) live; "
+                                    "keeping run alive to drain",
+                                    wf_tracker.outstanding_count,
+                                )
                             draining_bg = True
                             pump_task = asyncio.create_task(
                                 _pump_stream_messages(
@@ -977,12 +1027,12 @@ async def agent_run_events(
                     await emit(item["event"], item["data"])
 
                     # Any real event = the run is alive; reset the idle window
-                    # that bounds the background-task drain.
+                    # that bounds the background-workflow drain.
                     last_event_ts = time.monotonic()
 
-                    # Track background workflow lifecycle so the run stays alive
-                    # until every launched workflow reaches a terminal status.
-                    _track_bg_task(item)
+                    # Track background workflow launches/finishes so the run
+                    # stays alive until every launched workflow completes.
+                    wf_tracker.observe(item["event"], item.get("data"))
 
                     # Track tool_use lifecycle so we only interrupt at a
                     # clean boundary (no in-flight parallel tools).

@@ -12,7 +12,8 @@ A full Helm chart for the Priva Cloud control plane, templated from the raw mani
 | Config | `priva-config` ConfigMap, `priva-shared-secret` Secret (random, preserved across upgrades) |
 | Control plane | `data-spine` (Deployment+PVC+Service), `control-panel` (Deployment+Service), `operator` (Deployment) |
 | RBAC | ServiceAccounts + Roles/Bindings for operator (incl. discovery ClusterRole) and control-panel |
-| Edge (`gateway.enabled`) | `Gateway`, `InferencePool`, `HTTPRoute` |
+| Edge (`gateway.enabled`) | `Gateway`, `InferencePool`, `HTTPRoute` (+ `AgentgatewayParameters` when `gateway.serviceType` set) |
+| LB front (`ingress.enabled`) | `Ingress` — "/" catch-all to the gateway Service, for an external cloud LB (e.g. Volcengine ALB) |
 | Dev storage (`devStorage.enabled`) | `priva-nfs` StatefulSet, `priva-nfs`/`priva-quota` Services, `priva-export` PV+PVC |
 
 Per-account **agent-runner** pods are created by the operator at wake — not by this chart.
@@ -55,6 +56,15 @@ helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace \
   -f deploy/helm/priva-cloud/values-uat.yaml
 ```
 
+```bash
+# Volcengine VKE — layer the ALB edge overlay on top of the cluster overlay.
+# EDIT ingress.host (and className if the SRE's ALBInstance isn't named "alb").
+# Prereqs + SRE boundary notes are in values-volcengine.yaml comments.
+helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace \
+  -f deploy/helm/priva-cloud/values-uat.yaml \
+  -f deploy/helm/priva-cloud/values-volcengine.yaml
+```
+
 You can still `--set key=value` on top for one-off tweaks.
 
 ## Key values
@@ -69,6 +79,8 @@ You can still `--set key=value` on top for one-off tweaks.
 | `sharedSecret.create` | `true` | random jwt+hmac, preserved across upgrades via `lookup`; set values to pin |
 | `config.kubernetes.storageBackend` | `nfs_xfs` | `nfs_xfs` (dev) or `cephfs` (prod) |
 | `gateway.enabled` | `true` | the `Gateway`/`HTTPRoute`/`InferencePool` trio |
+| `gateway.serviceType` | `""` | override the agentgateway-provisioned Service type (default LoadBalancer); set `ClusterIP`/`NodePort` when an external LB fronts the gateway |
+| `ingress.enabled` | `false` | "/" catch-all Ingress to the gateway Service; `className`/`host`/`annotations` are controller-specific (see `values-volcengine.yaml`) |
 | `devStorage.enabled` | `true` | **privileged** in-cluster NFS — disable for prod |
 | `devStorage.nfs.clusterIP` | `10.96.200.200` | pinned (PV references an IP, not DNS) — keep it free in the service CIDR |
 

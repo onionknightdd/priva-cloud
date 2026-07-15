@@ -5,6 +5,11 @@ export const createUser = (data) => postJSON('/admin/users', data)
 export const updateUser = (username, data) => putJSON(`/admin/users/${encodeURIComponent(username)}`, data)
 export const deleteUser = (username) => deleteJSON(`/admin/users/${encodeURIComponent(username)}`)
 
+// Feishu bot config — admin can READ status + toggle the kill-switch (admin_disabled)
+// only; credentials are edited by the user themselves. The secret is never returned.
+export const getUserFeishuConfig = (username) => getJSON(`/admin/users/${encodeURIComponent(username)}/feishu-config`)
+export const updateUserFeishuConfig = (username, data) => putJSON(`/admin/users/${encodeURIComponent(username)}/feishu-config`, data)
+
 export const getPendingRegistrations = () => getJSON('/admin/pending-registrations')
 export const approvePendingUser = (requestId) => postJSON(`/admin/pending-registrations/${encodeURIComponent(requestId)}/approve`)
 export const rejectPendingUser = (requestId) => postJSON(`/admin/pending-registrations/${encodeURIComponent(requestId)}/reject`)

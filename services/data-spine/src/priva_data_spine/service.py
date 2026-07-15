@@ -18,6 +18,8 @@ from priva_common.crypto import decrypt_value, encrypt_value
 from priva_common.dataplane import (
     BindingRecord,
     DataplaneClient,
+    FeishuChannelConfigRecord,
+    FeishuSecretRecord,
     HookPolicyRecord,
     PendingRegistrationRecord,
     QuotaRecord,
@@ -495,6 +497,165 @@ class ResourceSpecService:
         return [self._to_record(r) for r in self.repo.resource_spec_list()]
 
 
+# --- FeishuChannelConfig ----------------------------------------------------
+
+class FeishuChannelConfigService:
+    """Per-account Feishu bot config (Model B). Three role-scoped setters mirror the
+    wire's separate Set RPCs. app_secret is Fernet-encrypted at set and NEVER
+    returned in cleartext — the record exposes only ``has_app_secret``. The
+    connection ``desired_digest`` (app_id + secret fingerprint + enable gates +
+    domain) is recomputed on every desired write so the connector can teardown/
+    re-arm the WS only when the connection identity actually changes; status
+    write-back goes through a separate path that never touches updated_at/digest."""
+
+    # Desired columns whose change requires the connector to teardown/re-arm the WS.
+    _DIGEST_COLS = ("app_id", "app_secret_enc", "user_enabled", "admin_disabled", "domain")
+
+    def __init__(self, repo: Repository):
+        self.repo = repo
+
+    @staticmethod
+    def _digest(merged: dict) -> str:
+        payload = json.dumps(
+            [
+                merged.get("app_id") or "",
+                merged.get("app_secret_enc") or "",   # ciphertext fingerprint; changes on rotate/clear
+                int(merged.get("user_enabled") or 0),
+                int(merged.get("admin_disabled") or 0),
+                merged.get("domain") or "feishu",
+            ],
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+    @staticmethod
+    def _to_record(row: dict | None) -> FeishuChannelConfigRecord | None:
+        if row is None:
+            return None
+        has_secret = bool(row.get("app_secret_enc"))
+        user_enabled = bool(row.get("user_enabled"))
+        admin_disabled = bool(row.get("admin_disabled"))
+        effective = user_enabled and not admin_disabled and bool(row.get("app_id")) and has_secret
+        return FeishuChannelConfigRecord(
+            account_id=row["account_id"],
+            app_id=row.get("app_id") or None,
+            has_app_secret=has_secret,
+            app_secret_updated_at=row.get("app_secret_updated_at"),
+            user_enabled=user_enabled,
+            admin_disabled=admin_disabled,
+            effective_enabled=effective,
+            single_chat_access_mode=row.get("single_chat_access_mode") or "owner_only",
+            allowed_union_ids=row.get("allowed_union_ids") or "[]",
+            welcome_message=row.get("welcome_message") or "",
+            reject_message=row.get("reject_message") or "",
+            model=row.get("model") or None,
+            max_queue_size=int(row.get("max_queue_size") or 3),
+            enable_permission_feedback=bool(row.get("enable_permission_feedback")),
+            feedback_timeout_seconds=int(row.get("feedback_timeout_seconds") or 180),
+            domain=row.get("domain") or "feishu",
+            conn_status=row.get("conn_status") or "disabled",
+            last_error_code=row.get("last_error_code"),
+            last_error_message=row.get("last_error_message"),
+            last_connected_at=row.get("last_connected_at"),
+            status_updated_at=row.get("status_updated_at"),
+            desired_digest=row.get("desired_digest"),
+            updated_by=row.get("updated_by") or "",
+            updated_at=row.get("updated_at"),
+        )
+
+    def get(self, account_id):
+        return self._to_record(self.repo.feishu_get(account_id))
+
+    def _write_desired(self, account_id, fields: dict):
+        if not fields:
+            return self._to_record(self.repo.feishu_get(account_id))
+        merged = {**(self.repo.feishu_get(account_id) or {}), **fields}
+        fields["desired_digest"] = self._digest(merged)
+        return self._to_record(self.repo.feishu_upsert(account_id, fields))
+
+    def set_user(self, account_id, *, app_id=None, app_secret=UNSET, user_enabled=None,
+                 single_chat_access_mode=None, allowed_union_ids=None, welcome_message=None,
+                 reject_message=None, model=None, max_queue_size=None,
+                 enable_permission_feedback=None, feedback_timeout_seconds=None,
+                 domain=None, updated_by=""):
+        fields: dict = {}
+        if app_id is not None:
+            fields["app_id"] = app_id
+        if app_secret is not UNSET:
+            if app_secret:                                    # non-empty => set/rotate
+                fields["app_secret_enc"] = encrypt_value(app_secret)
+                fields["app_secret_updated_at"] = _now_iso()
+            else:                                             # "" => clear
+                fields["app_secret_enc"] = None
+                fields["app_secret_updated_at"] = None
+        if user_enabled is not None:
+            fields["user_enabled"] = 1 if user_enabled else 0
+        if single_chat_access_mode is not None:
+            fields["single_chat_access_mode"] = single_chat_access_mode
+        if allowed_union_ids is not None:
+            fields["allowed_union_ids"] = allowed_union_ids
+        if welcome_message is not None:
+            fields["welcome_message"] = welcome_message
+        if reject_message is not None:
+            fields["reject_message"] = reject_message
+        if model is not None:
+            fields["model"] = model
+        if max_queue_size is not None:
+            fields["max_queue_size"] = int(max_queue_size)
+        if enable_permission_feedback is not None:
+            fields["enable_permission_feedback"] = 1 if enable_permission_feedback else 0
+        if feedback_timeout_seconds is not None:
+            fields["feedback_timeout_seconds"] = int(feedback_timeout_seconds)
+        if domain is not None:
+            fields["domain"] = domain
+        if updated_by:
+            fields["updated_by"] = updated_by
+        return self._write_desired(account_id, fields)
+
+    def set_admin(self, account_id, *, admin_disabled=None, updated_by=""):
+        fields: dict = {}
+        if admin_disabled is not None:
+            fields["admin_disabled"] = 1 if admin_disabled else 0
+        if updated_by:
+            fields["updated_by"] = updated_by
+        return self._write_desired(account_id, fields)
+
+    def set_status(self, account_id, *, conn_status=None, last_error_code=None,
+                   last_error_message=None, last_connected_at=None):
+        fields: dict = {}
+        if conn_status is not None:
+            fields["conn_status"] = conn_status
+        if last_error_code is not None:
+            fields["last_error_code"] = int(last_error_code)
+        if last_error_message is not None:
+            fields["last_error_message"] = last_error_message
+        if last_connected_at is not None:
+            fields["last_connected_at"] = last_connected_at
+        return self._to_record(self.repo.feishu_status_update(account_id, fields))
+
+    def list(self):
+        return [self._to_record(r) for r in self.repo.feishu_list()]
+
+    def list_effective(self):
+        return [self._to_record(r) for r in self.repo.feishu_list_effective()]
+
+    def get_secret(self, account_id) -> FeishuSecretRecord | None:
+        """Connector-only: decrypt and return the plaintext app_secret. app_secret is
+        "" when unset OR when the ciphertext fails to decrypt (decrypt_value → None on
+        key rotation/corruption) — the connector treats "" as unusable and parks the
+        app with conn_status=error. Never logged."""
+        row = self.repo.feishu_get(account_id)
+        if row is None:
+            return None
+        enc = row.get("app_secret_enc")
+        return FeishuSecretRecord(
+            account_id=row["account_id"],
+            app_id=row.get("app_id") or None,
+            app_secret=(decrypt_value(enc) or "") if enc else "",
+            domain=row.get("domain") or "feishu",
+        )
+
+
 # --- RunnerDefaults ---------------------------------------------------------
 
 class RunnerDefaultsService:
@@ -870,6 +1031,7 @@ def build_inprocess_client(repo: Repository, settings) -> DataplaneClient:
         runner_defaults=RunnerDefaultsService(repo, settings),
         registrations=RegistrationService(repo),
         hook_policies=HookPolicyService(repo),
+        feishu_configs=FeishuChannelConfigService(repo),
     )
 
 

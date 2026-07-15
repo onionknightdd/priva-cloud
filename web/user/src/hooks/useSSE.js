@@ -35,6 +35,7 @@ import {
   isErroredToolResult,
 } from '../utils/fileArtifacts'
 import { getSplitParams } from '../utils/splitMode'
+import { parseTaskNotification } from '../utils/taskNotification'
 
 // Max characters of background-shell output kept in the task store; only the
 // tail is retained beyond this.
@@ -424,6 +425,40 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
       }
 
       case 'user_message': {
+        // A CLI-injected <task-notification> re-invokes the model after a
+        // background Workflow / Bash finishes. Materialize it as a slim system
+        // card + a fresh assistant turn for the summary to stream into — never
+        // a raw-XML user bubble. Covers both the live drain and attach replay.
+        {
+          const rawText = Array.isArray(data.content)
+            ? data.content.filter((b) => b?.type === 'text').map((b) => b.text).join('\n')
+            : (typeof data.content === 'string' ? data.content : '')
+          const notif = parseTaskNotification(rawText)
+          if (notif) {
+            const recent = S.chat().messages
+            const dup = recent.slice(-4).some((m) => (
+              m.role === 'system' && m.type === 'task_notification' && (
+                (notif.taskId && m.notif?.taskId === notif.taskId) ||
+                (notif.toolUseId && m.notif?.toolUseId === notif.toolUseId)
+              )
+            ))
+            if (!dup) {
+              const kind = notif.toolUseId && S.workflow().workflows[notif.toolUseId]
+                ? 'workflow' : 'task'
+              S.chat().addMessage({
+                role: 'system',
+                type: 'task_notification',
+                notif: { ...notif, kind },
+                uuid: data.uuid,
+                timestamp: Date.now(),
+              })
+              // Fresh placeholder so the re-invocation summary streams as its
+              // own turn below the card, not appended to the prior assistant.
+              S.chat().addMessage({ role: 'assistant', content: [], timestamp: Date.now() })
+            }
+            break
+          }
+        }
         // Raw user frame (checkpoint carrier). Record UUID + attach to
         // the most recent user chat message so inline rewind/fork have
         // a target UUID. Deduped in-store by uuid.

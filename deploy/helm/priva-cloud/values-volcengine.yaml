@@ -1,0 +1,38 @@
+# Volcengine VKE edge overlay — fronts the agentgateway with the SRE-managed ALB.
+# EDGE ONLY: layer it on top of the cluster overlay, e.g.
+#   helm install priva deploy/helm/priva-cloud -n priva-cloud --create-namespace \
+#     -f deploy/helm/priva-cloud/values-uat.yaml \
+#     -f deploy/helm/priva-cloud/values-volcengine.yaml
+#
+# Topology (path routing stays in the HTTPRoute — never split paths on the ALB):
+#   internet --HTTPS 443--> ALB (SRE's instance, TLS terminates)
+#     --Ingress "/" catch-all--> svc/priva-gateway:80 (ClusterIP, LB-to-pod direct)
+#     --HTTPRoute--> /api/sandbox -> InferencePool/EPP ; rest -> control-panel
+#
+# Cluster prerequisites (SRE side):
+#   - alb-ingress-controller add-on installed (VKE add-on management)
+#   - an ALBInstance CR bound to the ALB instance, with the HTTPS:443 listener
+#     + certificate. ingress.className below = that ALBInstance's resource name.
+#   - VPC-CNI cluster network (required by loadbalancer-pass-through; on a
+#     Flannel cluster drop that annotation and set gateway.serviceType: NodePort)
+#
+# Mind the ownership boundary: listeners/rules the controller creates on the ALB
+# are prefixed k8s_ and must NOT be hand-edited in the ALB console (they'd fight).
+# Ask the SRE to keep the ALB idle timeout comfortably high — the app streams
+# SSE (/api/sandbox/.../run/stream) and WebSockets (web terminal).
+
+gateway:
+  # agentgateway's provisioned Service defaults to LoadBalancer; on VKE the CCM
+  # would try to create a CLB for it. ClusterIP is enough with pass-through
+  # (ALB targets the gateway pods' VPC IPs directly).
+  serviceType: ClusterIP
+
+ingress:
+  enabled: true
+  className: alb                       # <-- EDIT if the SRE's ALBInstance is named differently
+  host: ""                             # <-- EDIT to the assigned domain, e.g. priva.example.com
+  annotations:
+    # attach the rules to the ALB's HTTPS listener (must already exist on the ALBInstance)
+    ingress.vke.volcengine.com/listen-ports: '[{"HTTPS": 443}]'
+    # LB-to-pod direct mode: ALB targets pod IPs, no NodePort hop (VPC-CNI only)
+    ingress.vke.volcengine.com/loadbalancer-pass-through: "true"

@@ -293,6 +293,18 @@
     "selectPhase": "选择阶段",
     "detailEmpty": "该阶段暂无智能体"
   },
+  "notification": {
+    "workflowLabel": "工作流{{status}}",
+    "taskLabel": "后台任务{{status}}",
+    "status": {
+      "completed": "已完成",
+      "failed": "失败",
+      "stopped": "已停止",
+      "killed": "已终止",
+      "aborted": "已中止",
+      "cancelled": "已取消"
+    }
+  },
   "toolCall": {
     "input": "输入",
     "output": "输出",
@@ -644,6 +656,29 @@
     "template": "请先结合整个文件语境理解我选中的内容。\n\n我的问题：\n{{question}}"
   },
   "admin": {
+    "feishu": {
+      "title": "飞书机器人",
+      "refresh": "刷新",
+      "appId": "App ID",
+      "appSecret": "App Secret",
+      "secretConfigured": "已配置 ✓",
+      "secretNotSet": "未设置",
+      "adminDisable": "管理员停用",
+      "on": "开",
+      "off": "关",
+      "disable": "停用",
+      "disableConfirm": "停用 @{{username}} 的飞书机器人？连接器将断开该用户的连接并停止回复其私信，直到你重新启用。进行中的回复会被取消。",
+      "stDisabledAdmin": "已停用（管理员）",
+      "stDisabledAdminDesc": "kill-switch 已开，连接器将断开机器人",
+      "stNotConfigured": "未配置",
+      "stNotConfiguredDesc": "用户尚未填写 app_id + app_secret",
+      "stConnected": "已连接",
+      "stConnecting": "连接中…",
+      "stAuthFailed": "鉴权失败",
+      "stError": "错误",
+      "stConflict": "冲突",
+      "stPendingConnector": "等待连接器"
+    },
     "navScheduler": "定时任务",
     "schedulerAccounts": "账号",
     "schedulerPauseAll": "全部暂停",
@@ -990,6 +1025,37 @@
     "errorFutureDate": "不能选择未来日期"
   },
   "settings": {
+    "channels": "渠道",
+    "feishu": {
+      "desc": "接入你自己的飞书企业自建应用，让机器人回复你的私信。应用凭证由你自己填写，也只有你能修改。",
+      "adminDisabledBanner": "管理员已停用此机器人。在其解除之前，你无法自行启用。",
+      "refresh": "刷新",
+      "enabled": "启用",
+      "enabledHint": "为你的账号开启机器人。",
+      "appId": "App ID",
+      "save": "保存",
+      "appSecret": "App Secret",
+      "secretConfigured": "已配置 ✓",
+      "secretNotSet": "未设置",
+      "setSecret": "设置密钥",
+      "rotate": "更换",
+      "clear": "清除",
+      "saveSecret": "保存密钥",
+      "secretPlaceholder": "粘贴你的 app secret",
+      "writeOnlyHint": "只写 · 保存后不再显示",
+      "clearConfirm": "移除已保存的 app secret？在重新设置前机器人将无法鉴权。",
+      "domain": "域",
+      "stDisabledAdmin": "已被管理员停用",
+      "stNotConfigured": "未配置",
+      "stNotConfiguredDesc": "填写 app_id + app_secret 以连接",
+      "stOff": "已关闭",
+      "stConnected": "已连接",
+      "stConnecting": "连接中…",
+      "stAuthFailed": "鉴权失败——请检查 app secret",
+      "stError": "错误",
+      "stConflict": "冲突",
+      "stPendingConnector": "等待连接器"
+    },
     "archived": "已归档",
     "archivedHint": "已归档的会话不会显示在侧边栏。恢复某个会话即可让它（及其工作目录）重新出现。",
     "archivedEmpty": "暂无已归档会话",

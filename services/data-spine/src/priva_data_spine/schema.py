@@ -25,6 +25,7 @@ DDL: tuple[str, ...] = (
       agent_runner_type TEXT NOT NULL DEFAULT 'auto_scale' CHECK (agent_runner_type IN ('auto_scale','persistent')),
       feishu_user_id      TEXT,
       feishu_display_name TEXT,
+      feishu_open_id      TEXT,
       created_at     TEXT NOT NULL DEFAULT {NOW},
       updated_at     TEXT NOT NULL DEFAULT {NOW}
     ) STRICT
@@ -37,15 +38,18 @@ DDL: tuple[str, ...] = (
     CREATE TABLE IF NOT EXISTS channel_binding (
       binding_id     TEXT PRIMARY KEY,
       account_id     TEXT NOT NULL REFERENCES account(account_id) ON DELETE CASCADE,
-      session_uuid   TEXT NOT NULL,
+      session_uuid   TEXT,
       first_run_done INTEGER NOT NULL DEFAULT 0 CHECK (first_run_done IN (0,1)),
       feishu_chat_id TEXT,
       bound_at       TEXT NOT NULL DEFAULT {NOW},
       rebound_at     TEXT
     ) STRICT
     """,
+    # session_uuid is NULLable: the "/new" (empty session id) command detaches the
+    # binding (session_uuid = NULL) so the next DM starts a fresh SDK session; the
+    # unique index is partial so many detached rows coexist.
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_account ON channel_binding(account_id)",
-    "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_session ON channel_binding(session_uuid)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_session_active ON channel_binding(session_uuid) WHERE session_uuid IS NOT NULL",
     # 3 ── quota ------------------------------------------------------------
     f"""
     CREATE TABLE IF NOT EXISTS quota (
@@ -200,11 +204,60 @@ DDL: tuple[str, ...] = (
       updated_by       TEXT NOT NULL DEFAULT ''
     ) STRICT
     """,
+    # 10 ── feishu_channel_config -------------------------------------------
+    # Per-account Feishu bot config (Model B: each user's own self-built app).
+    # Column classes are spec/status-separated (like a k8s status subresource);
+    # write authority is enforced by which columns each caller lists in its
+    # update_mask — the USER route writes credentials + user_enabled + behaviour,
+    # the ADMIN route writes ONLY admin_disabled, the CONNECTOR writes ONLY the
+    # status/* columns. app_secret_enc is Fernet-encrypted (never returned in
+    # cleartext; the read DTO exposes only a boolean). The connector polls the
+    # effective set and diffs on desired_digest (NOT updated_at — status
+    # write-back must not perturb the diff).
+    f"""
+    CREATE TABLE IF NOT EXISTS feishu_channel_config (
+      account_id              TEXT PRIMARY KEY REFERENCES account(account_id) ON DELETE CASCADE,
+      -- desired · credentials (user-written only) --------------------------
+      app_id                  TEXT,
+      app_secret_enc          TEXT,
+      app_secret_updated_at   TEXT,
+      -- desired · enable double-gate --------------------------------------
+      user_enabled            INTEGER NOT NULL DEFAULT 0 CHECK (user_enabled   IN (0,1)),
+      admin_disabled          INTEGER NOT NULL DEFAULT 0 CHECK (admin_disabled IN (0,1)),
+      -- desired · behaviour -----------------------------------------------
+      single_chat_access_mode TEXT NOT NULL DEFAULT 'owner_only'
+                              CHECK (single_chat_access_mode IN ('owner_only','allowlist','all')),
+      allowed_union_ids       TEXT NOT NULL DEFAULT '[]',
+      welcome_message         TEXT NOT NULL DEFAULT '',
+      reject_message          TEXT NOT NULL DEFAULT '',
+      model                   TEXT,
+      max_queue_size          INTEGER NOT NULL DEFAULT 3,
+      enable_permission_feedback INTEGER NOT NULL DEFAULT 1 CHECK (enable_permission_feedback IN (0,1)),
+      feedback_timeout_seconds   INTEGER NOT NULL DEFAULT 180,
+      domain                  TEXT NOT NULL DEFAULT 'feishu' CHECK (domain IN ('feishu','lark')),
+      -- status · connector-written only -----------------------------------
+      conn_status             TEXT NOT NULL DEFAULT 'disabled'
+                              CHECK (conn_status IN ('disabled','connecting','connected','auth_failed','error','conflict')),
+      last_error_code         INTEGER,
+      last_error_message      TEXT,
+      last_connected_at       TEXT,
+      status_updated_at       TEXT,
+      -- diff key + provenance ---------------------------------------------
+      desired_digest          TEXT,
+      updated_by              TEXT NOT NULL DEFAULT '',
+      updated_at              TEXT NOT NULL DEFAULT {NOW}
+    ) STRICT
+    """,
+    # Partial index for the connector's list_effective() poll (enabled rows only;
+    # the creds-present filter is applied in SQL on top of this).
+    "CREATE INDEX IF NOT EXISTS ix_feishu_effective ON feishu_channel_config(account_id) "
+    "WHERE user_enabled = 1 AND admin_disabled = 0",
 )
 
 TABLES = (
     "account", "channel_binding", "quota", "scheduled_job", "job_run_record", "job_fire",
     "account_resource_spec", "pending_registration", "runner_defaults", "hook_policy",
+    "feishu_channel_config",
 )
 
 # Idempotent column additions for DBs created before a column existed. CREATE
@@ -217,6 +270,8 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
      "CHECK (agent_runner_type IN ('auto_scale','persistent'))"),
     ("hook_policy", "enforced_events",
      "ALTER TABLE hook_policy ADD COLUMN enforced_events TEXT NOT NULL DEFAULT '[]'"),
+    ("account", "feishu_open_id",
+     "ALTER TABLE account ADD COLUMN feishu_open_id TEXT"),
 )
 
 # One-time backfills, safe to run every boot. Pre-migration rows carry
@@ -236,9 +291,50 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
             conn.execute(ddl)
 
 
+def _migrate_binding_session_nullable(conn: sqlite3.Connection) -> None:
+    """Drop the NOT NULL on channel_binding.session_uuid for DBs created before
+    the "/new" detach flow. SQLite can't ALTER a column's NOT NULL in place, so
+    rebuild the (greenfield/empty) table. Idempotent: skips once session_uuid is
+    already nullable. Runs before the fresh-DDL index would notice, so it also
+    retires the old non-partial ux_binding_session index."""
+    info = conn.execute("PRAGMA table_info(channel_binding)").fetchall()
+    if not info:
+        return  # table not created yet — fresh DDL builds it nullable
+    notnull = {row[1]: row[3] for row in info}  # row = (cid, name, type, notnull, dflt, pk)
+    if notnull.get("session_uuid", 0) == 0:
+        return  # already nullable
+    conn.execute("DROP INDEX IF EXISTS ux_binding_account")
+    conn.execute("DROP INDEX IF EXISTS ux_binding_session")
+    conn.execute("ALTER TABLE channel_binding RENAME TO _channel_binding_old")
+    conn.execute(f"""
+    CREATE TABLE channel_binding (
+      binding_id     TEXT PRIMARY KEY,
+      account_id     TEXT NOT NULL REFERENCES account(account_id) ON DELETE CASCADE,
+      session_uuid   TEXT,
+      first_run_done INTEGER NOT NULL DEFAULT 0 CHECK (first_run_done IN (0,1)),
+      feishu_chat_id TEXT,
+      bound_at       TEXT NOT NULL DEFAULT {NOW},
+      rebound_at     TEXT
+    ) STRICT
+    """)
+    conn.execute(
+        "INSERT INTO channel_binding "
+        "(binding_id, account_id, session_uuid, first_run_done, feishu_chat_id, bound_at, rebound_at) "
+        "SELECT binding_id, account_id, session_uuid, first_run_done, feishu_chat_id, bound_at, rebound_at "
+        "FROM _channel_binding_old"
+    )
+    conn.execute("DROP TABLE _channel_binding_old")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_account ON channel_binding(account_id)")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_session_active "
+        "ON channel_binding(session_uuid) WHERE session_uuid IS NOT NULL"
+    )
+
+
 def create_all(conn: sqlite3.Connection) -> None:
     for stmt in DDL:
         conn.execute(stmt)
     _apply_migrations(conn)
+    _migrate_binding_session_nullable(conn)
     for stmt in _BACKFILLS:
         conn.execute(stmt)

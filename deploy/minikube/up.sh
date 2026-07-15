@@ -49,7 +49,7 @@ kubectl -n agentgateway-system rollout status deploy/agentgateway --timeout=180s
 
 echo "==> 5. AgentTenant CRD + RBAC"
 kubectl apply -f deploy/crds/agenttenant.yaml
-kubectl apply -f deploy/rbac/operator-rbac.yaml -f deploy/rbac/control-panel-rbac.yaml
+kubectl apply -f deploy/rbac/operator-rbac.yaml -f deploy/rbac/control-panel-rbac.yaml -f deploy/rbac/channel-connector-rbac.yaml
 
 echo "==> 6. config + shared secret (generated; not committed)"
 kubectl apply -f deploy/k8s/configmap.yaml
@@ -63,6 +63,10 @@ kubectl apply -f deploy/k8s/data-spine.yaml -f deploy/k8s/control-panel.yaml -f 
 kubectl -n "$NS" rollout status deploy/data-spine --timeout=120s
 kubectl -n "$NS" rollout status deploy/control-panel --timeout=120s
 kubectl -n "$NS" rollout status deploy/operator --timeout=120s
+
+echo "==> 7b. channel-connector (Feishu WS byte-path)"
+kubectl apply -f deploy/k8s/channel-connector.yaml
+kubectl -n "$NS" rollout status deploy/channel-connector --timeout=120s
 
 echo "==> 8. edge: Gateway + InferencePool + HTTPRoute"
 kubectl apply -f deploy/gateway/gateway.yaml -f deploy/gateway/inferencepool.yaml -f deploy/gateway/httproute.yaml

@@ -7,6 +7,7 @@ import useAdminStore from '../../stores/adminStore'
 import * as adminApi from '@shared/api/admin'
 import CopyButton from '@shared/components/shared/CopyButton'
 import Dropdown from '@shared/components/shared/Dropdown'
+import FeishuConfigSection from './FeishuConfigSection'
 
 export default function UserEditDrawer() {
   const { t } = useTranslation()
@@ -383,6 +384,9 @@ export default function UserEditDrawer() {
               </button>
             )}
           </div>
+
+          {/* Feishu bot — status + kill-switch (admin never edits credentials) */}
+          <FeishuConfigSection username={user.username} />
 
           {/* Timestamps */}
           <div className="flex flex-col gap-1" style={{ marginTop: 'auto' }}>

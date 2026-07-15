@@ -39,8 +39,10 @@ from priva_common.models.admin import (
     SystemNode,
 )
 from priva_common.models.auth import UserCreate, UserPublic, UserUpdate
+from priva_common.models.feishu import FeishuAdminConfigUpdate, FeishuConfigResponse
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from ..services.auth import require_admin, user_record_to_public
+from ..services.feishu_connector import nudge_reconcile
 from priva_common.config import get_settings
 from priva_common.logging import get_app_logger
 from priva_common.user_store import UserRecord, get_user_store
@@ -343,6 +345,48 @@ async def update_user(
         rd = get_client().runner_defaults.get()
         pub.cpu_cores, pub.memory_mb, pub.volume_gb = rd.cpu_cores, rd.memory_mb, rd.storage_gb
     return pub
+
+
+@router.get("/users/{username}/feishu-config", response_model=FeishuConfigResponse)
+async def get_user_feishu_config(username: str):
+    """Admin read: status + credential PRESENCE only — the app_secret is never returned."""
+    store = get_user_store()
+    existing = store.get_user(username)
+    if existing is None:
+        raise HTTPException(404, f"User '{username}' not found")
+    from priva_common.dataplane import get_client
+    rec = get_client().feishu_configs.get(existing.account_id)
+    return FeishuConfigResponse.from_record(rec, existing.account_id)
+
+
+@router.put("/users/{username}/feishu-config", response_model=FeishuConfigResponse)
+async def update_user_feishu_config(
+    username: str,
+    request: FeishuAdminConfigUpdate,
+    current_user: UserRecord = Depends(require_admin),
+):
+    """Admin write: the kill-switch (admin_disabled) ONLY. Credentials + the user's own
+    toggle are not in this DTO — the admin cannot touch them (edit right stays with the user)."""
+    store = get_user_store()
+    existing = store.get_user(username)
+    if existing is None:
+        raise HTTPException(404, f"User '{username}' not found")
+    from priva_common.dataplane import get_client
+
+    if request.admin_disabled is None:
+        rec = get_client().feishu_configs.get(existing.account_id)
+        return FeishuConfigResponse.from_record(rec, existing.account_id)
+
+    rec = get_client().feishu_configs.set_admin(
+        existing.account_id, admin_disabled=request.admin_disabled, updated_by=current_user.username)
+    get_audit_logger().append(AuditEntry(
+        actor=current_user.username,
+        action="user.feishu_disabled" if request.admin_disabled else "user.feishu_enabled",
+        target=username,
+        details={"admin_disabled": request.admin_disabled},
+    ))
+    await nudge_reconcile(existing.account_id, existing.username)  # best-effort; poll is the backstop
+    return FeishuConfigResponse.from_record(rec, existing.account_id)
 
 
 @router.delete("/users/{username}")

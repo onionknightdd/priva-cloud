@@ -540,6 +540,82 @@ function getTextUnits(value) {
   }, 0)
 }
 
+function getCellTextLines(value) {
+  const text = toCellDisplayValue(value)
+  return text.split(/\r\n|\n|\r/)
+}
+
+function getPreviewFontSize(style) {
+  return Number.isFinite(style?.fontSize) ? style.fontSize : 12
+}
+
+function estimateCellTextWidth(value, style = {}) {
+  const fontSize = getPreviewFontSize(style)
+  const weightRatio = style.fontWeight >= 600 ? 1.08 : 1
+  const maxUnits = getCellTextLines(value).reduce((max, line) => Math.max(max, getTextUnits(line.trim())), 0)
+  return Math.ceil(maxUnits * fontSize * 0.72 * weightRatio + 24)
+}
+
+function estimateWrappedLineCount(line, width, style = {}) {
+  const fontSize = getPreviewFontSize(style)
+  const availableWidth = Math.max(width - 20, 12)
+  const unitsPerLine = Math.max(1, availableWidth / (fontSize * 0.72))
+  return Math.max(1, Math.ceil(getTextUnits(line) / unitsPerLine))
+}
+
+function getBestFitColumnWidth(columnIndex, rows, cellStyles = {}, hiddenCells = {}, mergedCells = {}) {
+  let bestWidth = estimateCellTextWidth(getColumnLabel(columnIndex), { fontWeight: 700 })
+
+  rows.forEach((row, rowIndex) => {
+    const key = getCellKey(rowIndex, columnIndex)
+    if (hiddenCells[key]) return
+
+    const style = cellStyles[key] || {}
+    const merge = mergedCells[key]
+    const span = merge?.colSpan || 1
+    const value = row?.[columnIndex] ?? ''
+    let width = estimateCellTextWidth(value, style)
+    if (style.diagonal) width += 28
+    if (span > 1) width = Math.ceil(width / span)
+    bestWidth = Math.max(bestWidth, width)
+  })
+
+  return clamp(bestWidth, SPREADSHEET_MIN_COLUMN_WIDTH, SPREADSHEET_MAX_COLUMN_WIDTH)
+}
+
+function getBestFitRowHeight(rowIndex, rows, cellStyles = {}, hiddenCells = {}, mergedCells = {}, columnWidths = []) {
+  const row = rows[rowIndex] || []
+  let bestHeight = SPREADSHEET_MIN_ROW_HEIGHT
+
+  for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
+    const key = getCellKey(rowIndex, columnIndex)
+    if (hiddenCells[key]) continue
+
+    const style = cellStyles[key] || {}
+    const merge = mergedCells[key]
+    const colSpan = merge?.colSpan || 1
+    const rowSpan = merge?.rowSpan || 1
+    const width = colSpan > 1 ? getSpanWidth(columnIndex, colSpan, columnWidths) : columnWidths[columnIndex]
+    const lines = getCellTextLines(row[columnIndex])
+    const fontSize = getPreviewFontSize(style)
+    const lineCount = style.wrapText
+      ? lines.reduce((sum, line) => sum + estimateWrappedLineCount(line, width || SPREADSHEET_MIN_COLUMN_WIDTH, style), 0)
+      : Math.max(lines.length, 1)
+
+    let height = Math.ceil(lineCount * (fontSize + 4) + 16)
+    if (style.diagonal && lines.length > 1) {
+      height = Math.max(height, Math.ceil(fontSize * 2 + 28))
+    }
+    if (style.textRotation && style.textRotation !== 'vertical') {
+      height = Math.max(height, Math.ceil(estimateCellTextWidth(row[columnIndex], style) * 0.6))
+    }
+    if (rowSpan > 1) height = Math.ceil(height / rowSpan)
+    bestHeight = Math.max(bestHeight, height)
+  }
+
+  return clamp(bestHeight, SPREADSHEET_MIN_ROW_HEIGHT, SPREADSHEET_MAX_ROW_HEIGHT)
+}
+
 function estimateColumnWidths(rows, viewportWidth, columnCount) {
   const sampleRows = rows.slice(0, Math.min(rows.length, 40))
   const estimated = Array.from({ length: columnCount }, (_, columnIndex) => {
@@ -763,6 +839,52 @@ function getSpanHeight(startRow, rowSpan, rowHeights) {
     height += rowHeights[index] || 0
   }
   return height
+}
+
+function shouldUseDiagonalTextLayout(style, value) {
+  if (!style?.diagonal || style.textRotation) return false
+  return getCellTextLines(value).filter((line) => line.trim() !== '').length >= 2
+}
+
+function DiagonalCellText({ value, style }) {
+  const lines = getCellTextLines(value).filter((line) => line.trim() !== '')
+  if (lines.length < 2) return null
+  const first = lines[0]
+  const second = lines.slice(1).join('\n')
+  const down = style?.diagonal?.down || !style?.diagonal?.up
+  const base = {
+    position: 'absolute',
+    zIndex: 3,
+    maxWidth: '58%',
+    overflow: 'hidden',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    lineHeight: 1.25,
+    color: style.color || 'var(--text-secondary)',
+  }
+
+  return (
+    <>
+      <span
+        style={{
+          ...base,
+          top: 8,
+          ...(down ? { right: 10, textAlign: 'right' } : { left: 10, textAlign: 'left' }),
+        }}
+      >
+        {first}
+      </span>
+      <span
+        style={{
+          ...base,
+          bottom: 8,
+          ...(down ? { left: 10, textAlign: 'left' } : { right: 10, textAlign: 'right' }),
+        }}
+      >
+        {second}
+      </span>
+    </>
+  )
 }
 
 function DiagonalCellBorders({ diagonal }) {
@@ -1142,14 +1264,23 @@ function SpreadsheetGrid({
                     padding: '0 14px',
                   }}
                 >
-                  {getColumnLabel(index)}
-                  <div
-                    onMouseDown={(event) => {
-                      event.preventDefault()
-                      event.stopPropagation()
-                      setDragState({
-                        type: 'column',
-                        index,
+	                  {getColumnLabel(index)}
+	                  <div
+	                    onDoubleClick={(event) => {
+	                      event.preventDefault()
+	                      event.stopPropagation()
+	                      onColumnWidthChange?.(
+	                        index,
+	                        getBestFitColumnWidth(index, safeRows, safeCellStyles, safeHiddenCells, safeMergedCells)
+	                      )
+	                    }}
+	                    onMouseDown={(event) => {
+	                      event.preventDefault()
+	                      event.stopPropagation()
+	                      if (event.detail > 1) return
+	                      setDragState({
+	                        type: 'column',
+	                        index,
                         startClient: event.clientX,
                         startSize: width,
                       })
@@ -1209,14 +1340,23 @@ function SpreadsheetGrid({
 	                    paddingTop: resolvedRowHeights[rowIndex] === 0 ? 0 : 10,
 	                  }}
                 >
-                  {rowIndex + 1}
-                  <div
-                    onMouseDown={(event) => {
-                      event.preventDefault()
-                      event.stopPropagation()
-                      setDragState({
-                        type: 'row',
-                        index: rowIndex,
+	                  {rowIndex + 1}
+	                  <div
+	                    onDoubleClick={(event) => {
+	                      event.preventDefault()
+	                      event.stopPropagation()
+	                      onRowHeightChange?.(
+	                        rowIndex,
+	                        getBestFitRowHeight(rowIndex, safeRows, safeCellStyles, safeHiddenCells, safeMergedCells, resolvedColumnWidths)
+	                      )
+	                    }}
+	                    onMouseDown={(event) => {
+	                      event.preventDefault()
+	                      event.stopPropagation()
+	                      if (event.detail > 1) return
+	                      setDragState({
+	                        type: 'row',
+	                        index: rowIndex,
                         startClient: event.clientY,
                         startSize: resolvedRowHeights[rowIndex],
                       })
@@ -1243,12 +1383,13 @@ function SpreadsheetGrid({
                 const cellWidth = colSpan > 1 ? getSpanWidth(columnIndex, colSpan, resolvedColumnWidths) : width
                 const cellHeight = rowSpan > 1 ? getSpanHeight(rowIndex, rowSpan, resolvedRowHeights) : resolvedRowHeights[rowIndex]
                 const displayValue = toCellDisplayValue(row?.[columnIndex] ?? '')
-                const selectionState = getCellSelectionState(rowIndex, columnIndex, activeSelection)
-                const horizontal = getHorizontalAlignment(cellStyle.horizontal)
-                const rotationStyle = getCellTextRotationStyle(cellStyle)
-                const whiteSpace = cellStyle.wrapText ? 'pre-wrap' : 'nowrap'
-                return (
-                  <td
+	                const selectionState = getCellSelectionState(rowIndex, columnIndex, activeSelection)
+	                const horizontal = getHorizontalAlignment(cellStyle.horizontal)
+	                const rotationStyle = getCellTextRotationStyle(cellStyle)
+	                const whiteSpace = cellStyle.wrapText ? 'pre-wrap' : 'nowrap'
+	                const useDiagonalTextLayout = shouldUseDiagonalTextLayout(cellStyle, displayValue)
+	                return (
+	                  <td
                     key={columnIndex}
                     rowSpan={rowSpan}
                     colSpan={colSpan}
@@ -1297,12 +1438,12 @@ function SpreadsheetGrid({
 	                  >
 	                    <div
 	                      style={{
-	                        position: 'relative',
-	                        minHeight: cellHeight,
-	                        padding: cellHeight === 0 || cellWidth === 0 ? 0 : '8px 10px',
-	                        overflow: 'hidden',
-	                        whiteSpace,
-	                        wordBreak: cellStyle.wrapText ? 'break-word' : 'normal',
+		                        position: 'relative',
+		                        minHeight: cellHeight,
+		                        padding: cellHeight === 0 || cellWidth === 0 || useDiagonalTextLayout ? 0 : '8px 10px',
+		                        overflow: 'hidden',
+		                        whiteSpace,
+		                        wordBreak: cellStyle.wrapText ? 'break-word' : 'normal',
 	                        display: 'flex',
 	                        alignItems: getVerticalAlignment(cellStyle.vertical),
 	                        justifyContent: horizontal.justifyContent,
@@ -1330,20 +1471,24 @@ function SpreadsheetGrid({
 	                            zIndex: 2,
 	                          }}
 	                        />
-	                      )}
-	                      <span
-	                        style={{
-	                          minWidth: 0,
-	                          maxWidth: '100%',
-	                          overflow: 'hidden',
-	                          textOverflow: cellStyle.wrapText ? 'clip' : 'ellipsis',
-	                          position: 'relative',
-	                          zIndex: 3,
-	                          ...rotationStyle,
-	                        }}
-	                      >
-	                        {displayValue}
-	                      </span>
+		                      )}
+		                      {useDiagonalTextLayout ? (
+		                        <DiagonalCellText value={displayValue} style={cellStyle} />
+		                      ) : (
+		                        <span
+		                          style={{
+		                            minWidth: 0,
+		                            maxWidth: '100%',
+		                            overflow: 'hidden',
+		                            textOverflow: cellStyle.wrapText ? 'clip' : 'ellipsis',
+		                            position: 'relative',
+		                            zIndex: 3,
+		                            ...rotationStyle,
+		                          }}
+		                        >
+		                          {displayValue}
+		                        </span>
+		                      )}
 	                      {selectionState.anchor && (
 	                        <span
 	                          style={{

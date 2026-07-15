@@ -21,7 +21,9 @@ import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { getLucideIcon, ICON_NAMES } from '../../utils/lucideIconMap'
 import WebTerminalTab from './WebTerminalTab'
 import Toggle from '@shared/components/shared/Toggle'
+import Dropdown from '@shared/components/shared/Dropdown'
 import DrawIcon from '@shared/components/shared/DrawIcon'
+import { getFeishuConfig, updateFeishuConfig } from '../../api/channels'
 
 function FilterableModelSelect({ models, value, onChange, label, labelStyle, inputStyle, placeholder, filterPlaceholder, noMatchesText }) {
   const [open, setOpen] = useState(false)
@@ -1641,6 +1643,227 @@ function ArchivedTab() {
   )
 }
 
+const FEISHU_MONO = "'JetBrains Mono', 'Source Han Mono SC', monospace"
+const feishuSecBtn = {
+  padding: '6px 12px', borderRadius: 4, fontSize: 12, background: 'transparent',
+  border: '1px solid var(--border)', color: 'var(--text-secondary)', cursor: 'pointer',
+}
+
+function feishuStatusView(cfg, t) {
+  if (!cfg) return { color: 'var(--border)', label: '—', desc: '' }
+  if (cfg.admin_disabled) return { color: 'var(--border)', label: t('settings.feishu.stDisabledAdmin'), desc: '' }
+  if (!cfg.app_id || !cfg.app_secret_set) {
+    return { color: 'var(--border)', label: t('settings.feishu.stNotConfigured'), desc: t('settings.feishu.stNotConfiguredDesc') }
+  }
+  if (!cfg.user_enabled) return { color: 'var(--border)', label: t('settings.feishu.stOff'), desc: '' }
+  const MAP = {
+    connected: { color: 'var(--green)', label: t('settings.feishu.stConnected') },
+    connecting: { color: 'var(--yellow)', label: t('settings.feishu.stConnecting') },
+    auth_failed: { color: 'var(--red)', label: t('settings.feishu.stAuthFailed') },
+    error: { color: 'var(--red)', label: t('settings.feishu.stError') },
+    conflict: { color: 'var(--yellow)', label: t('settings.feishu.stConflict') },
+    disabled: { color: 'var(--yellow)', label: t('settings.feishu.stPendingConnector') },
+  }
+  const conn = cfg.connection || {}
+  const v = MAP[conn.conn_status] || MAP.disabled
+  const parts = []
+  if (conn.last_error_code) parts.push(String(conn.last_error_code))
+  if (conn.last_connected_at) parts.push(new Date(conn.last_connected_at).toLocaleTimeString())
+  return { color: v.color, label: v.label, desc: parts.join(' · ') }
+}
+
+// Feishu bot — the user is the sole editor of their own app_id / app_secret; the
+// secret is write-only (only app_secret_set comes back). admin_disabled is a hard
+// gate the user cannot lift (rendered read-only when set).
+function ChannelsTab() {
+  const { t } = useTranslation()
+  const [cfg, setCfg] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [appIdDraft, setAppIdDraft] = useState('')
+  const [secretMode, setSecretMode] = useState(false)
+  const [secretDraft, setSecretDraft] = useState('')
+  const [showSecret, setShowSecret] = useState(false)
+  const [pendingClear, setPendingClear] = useState(false)
+  const initedRef = useRef(false)
+  const mountedRef = useRef(true)
+
+  const refresh = useCallback(async ({ spin = false } = {}) => {
+    if (spin) setRefreshing(true)
+    try {
+      const data = await getFeishuConfig()
+      if (!mountedRef.current) return
+      setCfg(data); setError(null)
+      if (!initedRef.current) { setAppIdDraft(data.app_id || ''); initedRef.current = true }
+    } catch (e) {
+      if (mountedRef.current) setError(e.message)  // fail-soft: keep last good cfg
+    } finally {
+      if (mountedRef.current) { setLoading(false); setRefreshing(false) }
+    }
+  }, [])
+
+  useEffect(() => {
+    mountedRef.current = true
+    refresh()
+    const id = setInterval(() => refresh(), 8000)
+    return () => { mountedRef.current = false; clearInterval(id) }
+  }, [refresh])
+
+  const save = async (patch) => {
+    setBusy(true)
+    try {
+      const data = await updateFeishuConfig(patch)
+      if (mountedRef.current) { setCfg(data); setError(null); setAppIdDraft(data.app_id || '') }
+      return true
+    } catch (e) {
+      if (mountedRef.current) setError(e.message)
+      return false
+    } finally {
+      if (mountedRef.current) setBusy(false)
+    }
+  }
+
+  const adminDisabled = !!cfg?.admin_disabled
+  const appIdDirty = appIdDraft.trim() !== (cfg?.app_id || '')
+  const status = feishuStatusView(cfg, t)
+
+  const saveSecret = async () => {
+    if (!secretDraft) return
+    const ok = await save({ app_secret: secretDraft })
+    if (ok && mountedRef.current) { setSecretMode(false); setSecretDraft(''); setShowSecret(false) }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="skeleton" style={{ height: 48, width: '100%', borderRadius: 4 }} />
+        <div className="skeleton" style={{ height: 36, width: '60%', borderRadius: 4 }} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <p className="text-xs" style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+        {t('settings.feishu.desc')}
+      </p>
+
+      {adminDisabled && (
+        <div className="px-3 py-2 text-xs" style={{ borderLeft: '2px solid var(--red)', background: 'var(--bg-elevated)', borderRadius: 4, color: 'var(--red)' }}>
+          {t('settings.feishu.adminDisabledBanner')}
+        </div>
+      )}
+
+      {/* Connection status — 2px left border carries the status color */}
+      <div className="flex items-center gap-2 px-3 py-2 overflow-hidden" style={{ background: 'var(--bg-surface)', borderRadius: 4, borderLeft: `2px solid ${status.color}` }}>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>{status.label}</div>
+          {status.desc && <div className="text-xs truncate" style={{ color: 'var(--text-dim)', fontFamily: FEISHU_MONO }}>{status.desc}</div>}
+        </div>
+        <button type="button" onClick={() => refresh({ spin: true })} title={t('settings.feishu.refresh')}
+          style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 2 }}>
+          <RefreshCw size={14} strokeWidth={1.5} style={refreshing ? { animation: 'spin 1s linear infinite' } : undefined} />
+        </button>
+      </div>
+
+      {/* Enabled (user's own toggle) */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <label style={labelStyle}>{t('settings.feishu.enabled')}</label>
+          <span className="text-xs" style={{ color: 'var(--text-dim)' }}>{t('settings.feishu.enabledHint')}</span>
+        </div>
+        <Toggle size="sm" checked={!!cfg?.user_enabled} disabled={busy || adminDisabled} onChange={(next) => save({ user_enabled: next })} />
+      </div>
+
+      {/* App ID */}
+      <div>
+        <label style={labelStyle}>{t('settings.feishu.appId')}</label>
+        <div className="flex items-center gap-2">
+          <input style={{ ...inputStyle, fontFamily: FEISHU_MONO, fontSize: 12 }} value={appIdDraft}
+            onChange={(e) => setAppIdDraft(e.target.value)} placeholder="cli_..." />
+          <button type="button" disabled={!appIdDirty || busy} onClick={() => save({ app_id: appIdDraft.trim() })}
+            style={{ padding: '8px 12px', borderRadius: 4, fontSize: 13, flexShrink: 0, background: 'transparent',
+              border: `1px solid ${appIdDirty ? 'var(--border-strong)' : 'var(--border)'}`,
+              color: appIdDirty ? 'var(--text-primary)' : 'var(--text-dim)',
+              cursor: (!appIdDirty || busy) ? 'not-allowed' : 'pointer' }}>
+            {t('settings.feishu.save')}
+          </button>
+        </div>
+      </div>
+
+      {/* App Secret — write-only three states */}
+      <div>
+        <label style={labelStyle}>{t('settings.feishu.appSecret')}</label>
+        {secretMode ? (
+          <div className="flex flex-col gap-2">
+            <div className="relative">
+              <input type={showSecret ? 'text' : 'password'} autoFocus value={secretDraft}
+                onChange={(e) => setSecretDraft(e.target.value)} placeholder={t('settings.feishu.secretPlaceholder')}
+                style={{ ...inputStyle, fontFamily: FEISHU_MONO, fontSize: 12, paddingRight: 40 }} />
+              <button type="button" onClick={() => setShowSecret(!showSecret)}
+                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 2 }}>
+                {showSecret ? <EyeOff size={14} strokeWidth={1.5} /> : <Eye size={14} strokeWidth={1.5} />}
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" disabled={!secretDraft || busy} onClick={saveSecret}
+                style={{ padding: '6px 12px', borderRadius: 4, fontSize: 12, border: 'none', background: 'var(--blue)', color: 'var(--text-inverse)', cursor: (!secretDraft || busy) ? 'not-allowed' : 'pointer', opacity: (!secretDraft || busy) ? 0.5 : 1 }}>
+                {t('settings.feishu.saveSecret')}
+              </button>
+              <button type="button" onClick={() => { setSecretMode(false); setSecretDraft(''); setShowSecret(false) }}
+                style={{ padding: '6px 12px', borderRadius: 4, fontSize: 12, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                {t('confirm.cancel')}
+              </button>
+              <span className="text-xs" style={{ color: 'var(--text-dim)' }}>{t('settings.feishu.writeOnlyHint')}</span>
+            </div>
+          </div>
+        ) : cfg?.app_secret_set ? (
+          <div className="flex items-center gap-3">
+            <span className="text-xs px-2 py-1" style={{ color: 'var(--green)', borderLeft: '2px solid var(--green)', background: 'var(--bg-elevated)', borderRadius: 4 }}>
+              {t('settings.feishu.secretConfigured')}
+            </span>
+            <button type="button" onClick={() => setSecretMode(true)} style={feishuSecBtn}>{t('settings.feishu.rotate')}</button>
+            <button type="button" onClick={() => setPendingClear(true)} style={{ ...feishuSecBtn, borderColor: 'var(--red)', color: 'var(--red)' }}>{t('settings.feishu.clear')}</button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <span className="text-xs px-2 py-1" style={{ color: 'var(--text-dim)', borderLeft: '2px solid var(--border)', background: 'var(--bg-elevated)', borderRadius: 4 }}>
+              {t('settings.feishu.secretNotSet')}
+            </span>
+            <button type="button" onClick={() => setSecretMode(true)} style={feishuSecBtn}>{t('settings.feishu.setSecret')}</button>
+          </div>
+        )}
+        {pendingClear && (
+          <div className="flex flex-col gap-2 px-3 py-2" style={{ marginTop: 8, borderLeft: '2px solid var(--red)', background: 'var(--bg-elevated)', borderRadius: 4 }}>
+            <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('settings.feishu.clearConfirm')}</span>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setPendingClear(false)}
+                style={{ padding: '4px 12px', borderRadius: 4, fontSize: 12, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                {t('confirm.cancel')}
+              </button>
+              <button type="button" disabled={busy} onClick={async () => { const ok = await save({ app_secret: '__clear__' }); if (ok && mountedRef.current) setPendingClear(false) }}
+                style={{ padding: '4px 12px', borderRadius: 4, fontSize: 12, border: 'none', background: 'var(--red)', color: 'var(--text-inverse)', cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.5 : 1 }}>
+                {t('settings.feishu.clear')}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Domain */}
+      <div>
+        <label style={labelStyle}>{t('settings.feishu.domain')}</label>
+        <Dropdown size="sm" value={cfg?.domain || 'feishu'} onChange={(v) => save({ domain: v })}
+          options={[{ value: 'feishu', label: 'Feishu (飞书)' }, { value: 'lark', label: 'Lark' }]} />
+      </div>
+
+      {error && <div className="text-xs" style={{ color: 'var(--red)' }}>{error}</div>}
+    </div>
+  )
+}
+
 /**
  * SettingsPanel renders the tab content only when given an `activeTabOverride` prop.
  * Used by SettingsOverlay to render the appropriate settings tab.
@@ -1653,6 +1876,7 @@ export default function SettingsPanel({ activeTabOverride }) {
       {activeTab === 'account' && <AccountTab />}
       {activeTab === 'api' && <ApiKeyTab />}
       {activeTab === 'models' && <ModelsTab />}
+      {activeTab === 'channels' && <ChannelsTab />}
       {activeTab === 'quickactions' && <QuickActionsTab />}
       {activeTab === 'advanced' && <AdvancedTab />}
       {activeTab === 'webterminal' && <WebTerminalTab />}

@@ -10,6 +10,7 @@ import {
   fileTabsFromGeneratedFiles,
   shouldOpenToolFileInBrowser,
 } from './fileArtifacts'
+import { parseTaskNotification } from './taskNotification'
 
 // Monotonic counter for `_cid` (stable React list keys). 's-' prefix keeps
 // load-path ids distinct from chatStore's live 'c-' ids.
@@ -192,12 +193,16 @@ function getGeneratedTabs(block, result) {
 
 export function transformSessionMessages(sdkMessages) {
   const resultMap = {}
+  // Workflow tool_use ids — used to tag a <task-notification> as a workflow (vs
+  // a background Bash) so the replayed card shows the right glyph/label.
+  const workflowToolIds = new Set()
   for (const msg of sdkMessages) {
-    if (msg.type !== 'user') continue
     const blocks = getContentBlocks(msg)
     for (const b of blocks) {
       if (b.type === 'tool_result' && b.tool_use_id) {
         resultMap[b.tool_use_id] = b
+      } else if (b.type === 'tool_use' && b.name === 'Workflow' && b.id) {
+        workflowToolIds.add(b.id)
       }
     }
   }
@@ -241,6 +246,21 @@ export function transformSessionMessages(sdkMessages) {
     if (msg.type === 'user') {
       const blocks = getContentBlocks(msg)
       const text = extractUserText(blocks)
+      // CLI-injected <task-notification> (a background Workflow / Bash finished
+      // and re-invoked the model) → slim system card, not a raw-XML user bubble.
+      // The following assistant message stays its own turn (the summary).
+      const notif = parseTaskNotification(text)
+      if (notif) {
+        const kind = notif.toolUseId && workflowToolIds.has(notif.toolUseId)
+          ? 'workflow' : 'task'
+        messages.push({
+          role: 'system',
+          type: 'task_notification',
+          notif: { ...notif, kind },
+          uuid: msg.uuid,
+        })
+        continue
+      }
       const imageBlocks = Array.isArray(blocks)
         ? blocks.filter((b) => b.type === 'image')
         : []

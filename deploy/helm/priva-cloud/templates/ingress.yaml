@@ -1,0 +1,34 @@
+{{- if .Values.ingress.enabled }}
+{{- $ns := include "priva-cloud.namespace" . -}}
+# Optional cloud Ingress in front of the gateway. The external LB only terminates
+# TLS and forwards everything to the agentgateway Service — ALL path routing
+# (/api/sandbox -> InferencePool/EPP, rest -> control-panel) stays in the
+# HTTPRoute, so never add per-path rules here. Annotations are controller-specific
+# and passed through verbatim (see values-volcengine.yaml for the VKE ALB set).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: priva-edge
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - {{- if .Values.ingress.host }}
+      host: {{ .Values.ingress.host }}
+      {{- end }}
+      http:
+        paths:
+          - pathType: Prefix
+            path: /
+            backend:
+              service:
+                name: {{ .Values.gateway.name }}
+                port:
+                  number: {{ .Values.gateway.listenerPort }}
+{{- end }}

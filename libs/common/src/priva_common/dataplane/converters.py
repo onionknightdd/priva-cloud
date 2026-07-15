@@ -12,6 +12,8 @@ import json
 
 from priva_common.dataplane.client import (
     BindingRecord,
+    FeishuChannelConfigRecord,
+    FeishuSecretRecord,
     HookPolicyRecord,
     PendingRegistrationRecord,
     QuotaRecord,
@@ -58,7 +60,7 @@ def binding_from_pb(m) -> BindingRecord | None:
     return BindingRecord(
         binding_id=m.binding_id,
         account_id=m.account_id,
-        session_uuid=m.session_uuid,
+        session_uuid=m.session_uuid or None,  # "" (detached) → None
         first_run_done=m.first_run_done,
         feishu_chat_id=m.feishu_chat_id or None,
         bound_at=m.bound_at or None,
@@ -75,6 +77,49 @@ def resource_spec_from_pb(m) -> ResourceSpecRecord | None:
         memory_mb=m.memory_mb,
         volume_gb=m.volume_gb,
         updated_at=m.updated_at or None,
+    )
+
+
+def feishu_config_from_pb(m) -> FeishuChannelConfigRecord | None:
+    if not m.account_id:
+        return None
+    return FeishuChannelConfigRecord(
+        account_id=m.account_id,
+        app_id=m.app_id or None,
+        has_app_secret=m.has_app_secret,
+        app_secret_updated_at=m.app_secret_updated_at or None,
+        user_enabled=m.user_enabled,
+        admin_disabled=m.admin_disabled,
+        effective_enabled=m.effective_enabled,
+        single_chat_access_mode=m.single_chat_access_mode or "owner_only",
+        allowed_union_ids=m.allowed_union_ids or "[]",
+        welcome_message=m.welcome_message,
+        reject_message=m.reject_message,
+        model=m.model or None,
+        max_queue_size=m.max_queue_size,
+        enable_permission_feedback=m.enable_permission_feedback,
+        feedback_timeout_seconds=m.feedback_timeout_seconds,
+        domain=m.domain or "feishu",
+        conn_status=m.conn_status or "disabled",
+        last_error_code=m.last_error_code if m.last_error_code else None,
+        last_error_message=m.last_error_message or None,
+        last_connected_at=m.last_connected_at or None,
+        status_updated_at=m.status_updated_at or None,
+        desired_digest=m.desired_digest or None,
+        updated_by=m.updated_by,
+        updated_at=m.updated_at or None,
+    )
+
+
+def feishu_secret_from_pb(m) -> FeishuSecretRecord | None:
+    # Connector-only. account_id "" means the account had no config row at all.
+    if not m.account_id:
+        return None
+    return FeishuSecretRecord(
+        account_id=m.account_id,
+        app_id=m.app_id or None,
+        app_secret=m.app_secret or "",
+        domain=m.domain or "feishu",
     )
 
 

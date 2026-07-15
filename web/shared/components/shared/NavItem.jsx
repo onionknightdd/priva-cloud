@@ -83,8 +83,8 @@ export default function NavItem({
         // Reserved 2px lane; the paintable rail below overlays it so it can
         // scaleY-tick (a border can't be transformed).
         borderLeft: '2px solid transparent',
-        // Full-bleed (square) like SessionItem — the 2px left bar is the active indicator.
-        borderRadius: 0,
+        // Active and hover fills share the same restrained row treatment.
+        borderRadius: 3,
         background: active ? 'var(--bg-elevated)' : 'transparent',
         color: disabled ? 'var(--text-dim)' : baseColor,
         cursor: disabled ? 'not-allowed' : 'pointer',

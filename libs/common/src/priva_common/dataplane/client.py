@@ -29,6 +29,7 @@ __all__ = [
     "RunnerDefaultsRecord",
     "PendingRegistrationRecord",
     "HookPolicyRecord",
+    "FeishuChannelConfigRecord",
     "AccountClient",
     "BindingClient",
     "QuotaClient",
@@ -38,6 +39,7 @@ __all__ = [
     "RunnerDefaultsClient",
     "RegistrationClient",
     "HookPolicyClient",
+    "FeishuChannelConfigClient",
     "DataplaneClient",
 ]
 
@@ -49,7 +51,7 @@ UNSET: Any = ...
 class BindingRecord(BaseModel):
     binding_id: str
     account_id: str
-    session_uuid: str
+    session_uuid: str | None = None  # None = detached ("/new"); next DM starts fresh
     first_run_done: bool = False
     feishu_chat_id: str | None = None
     bound_at: str | None = None
@@ -77,6 +79,48 @@ class ResourceSpecRecord(BaseModel):
     memory_mb: int = 2048
     volume_gb: int = 1
     updated_at: str | None = None
+
+
+class FeishuChannelConfigRecord(BaseModel):
+    """Per-account Feishu bot config (`feishu_channel_config`). Model B: each user's
+    own self-built app. app_secret is NEVER carried in cleartext — only `has_app_secret`
+    (presence) crosses this boundary on read. effective_enabled is server-computed
+    (user_enabled AND NOT admin_disabled AND credentials present)."""
+    account_id: str
+    app_id: str | None = None
+    has_app_secret: bool = False
+    app_secret_updated_at: str | None = None
+    user_enabled: bool = False
+    admin_disabled: bool = False
+    effective_enabled: bool = False
+    single_chat_access_mode: str = "owner_only"  # owner_only | allowlist | all
+    allowed_union_ids: str = "[]"                 # JSON array as string
+    welcome_message: str = ""
+    reject_message: str = ""
+    model: str | None = None
+    max_queue_size: int = 3
+    enable_permission_feedback: bool = True
+    feedback_timeout_seconds: int = 180
+    domain: str = "feishu"                        # feishu | lark
+    conn_status: str = "disabled"
+    last_error_code: int | None = None
+    last_error_message: str | None = None
+    last_connected_at: str | None = None
+    status_updated_at: str | None = None
+    desired_digest: str | None = None
+    updated_by: str = ""
+    updated_at: str | None = None
+
+
+class FeishuSecretRecord(BaseModel):
+    """Connector-only privileged read: the DECRYPTED plaintext app_secret needed to
+    open the Feishu WS / mint tenant_access_token. `app_secret` is "" when unset OR
+    when the stored ciphertext failed to decrypt (key rotation/corruption) — the
+    connector treats "" as unusable. NEVER log this record."""
+    account_id: str
+    app_id: str | None = None
+    app_secret: str = ""      # plaintext; "" = unset or undecryptable
+    domain: str = "feishu"
 
 
 class RunnerDefaultsRecord(BaseModel):
@@ -173,8 +217,8 @@ class AccountClient(Protocol):
 
 
 class BindingClient(Protocol):
-    def bind(self, account_id: str, session_uuid: str, feishu_chat_id: str | None = None) -> BindingRecord: ...
-    def rebind(self, account_id: str, session_uuid: str, feishu_chat_id: str | None = None) -> BindingRecord: ...
+    def bind(self, account_id: str, session_uuid: str | None, feishu_chat_id: str | None = None) -> BindingRecord: ...
+    def rebind(self, account_id: str, session_uuid: str | None, feishu_chat_id: str | None = None) -> BindingRecord: ...
     def claim_first_run_im(self, binding_id: str) -> bool: ...
     def get_binding(self, binding_id: str) -> BindingRecord | None: ...
     def list_bindings(self, account_id: str) -> list[BindingRecord]: ...
@@ -244,6 +288,52 @@ class ResourceSpecClient(Protocol):
     def list(self) -> list[ResourceSpecRecord]: ...
 
 
+class FeishuChannelConfigClient(Protocol):
+    """Per-account Feishu bot config. Three role-scoped setters mirror the wire's
+    separate Set RPCs so a caller can only write columns in its role: the USER
+    route writes credentials + user_enabled + behaviour, the ADMIN route writes
+    only admin_disabled, the CONNECTOR writes only observed status. `set_status`
+    must not perturb updated_at / desired_digest (the connector poll diffs on
+    desired_digest, so status write-back stays invisible to it)."""
+
+    def get(self, account_id: str) -> FeishuChannelConfigRecord | None: ...
+    def set_user(
+        self,
+        account_id: str,
+        *,
+        app_id: str | None = None,
+        app_secret: Any = UNSET,  # UNSET=keep, ""=clear, str=set/rotate
+        user_enabled: bool | None = None,
+        single_chat_access_mode: str | None = None,
+        allowed_union_ids: str | None = None,
+        welcome_message: str | None = None,
+        reject_message: str | None = None,
+        model: str | None = None,
+        max_queue_size: int | None = None,
+        enable_permission_feedback: bool | None = None,
+        feedback_timeout_seconds: int | None = None,
+        domain: str | None = None,
+        updated_by: str = "",
+    ) -> FeishuChannelConfigRecord: ...
+    def set_admin(
+        self, account_id: str, *, admin_disabled: bool | None = None, updated_by: str = ""
+    ) -> FeishuChannelConfigRecord: ...
+    def set_status(
+        self,
+        account_id: str,
+        *,
+        conn_status: str | None = None,
+        last_error_code: int | None = None,
+        last_error_message: str | None = None,
+        last_connected_at: str | None = None,
+    ) -> FeishuChannelConfigRecord: ...
+    def list(self) -> list[FeishuChannelConfigRecord]: ...
+    def list_effective(self) -> list[FeishuChannelConfigRecord]: ...
+    # Connector-only privileged read: decrypted plaintext app_secret. None when the
+    # account has no config row at all.
+    def get_secret(self, account_id: str) -> FeishuSecretRecord | None: ...
+
+
 class RunnerDefaultsClient(Protocol):
     def get(self) -> RunnerDefaultsRecord: ...  # seeded from settings when never set
     def set(
@@ -308,3 +398,4 @@ class DataplaneClient:
     runner_defaults: RunnerDefaultsClient
     registrations: RegistrationClient
     hook_policies: HookPolicyClient
+    feishu_configs: FeishuChannelConfigClient

@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package priva.dataplane.v1;
+
+import "priva_common/dataplane/v1/common.proto";
+
+// feishu_channel_config — per-account Feishu bot config (Model B: each user's own
+// self-built app). Spec/status-separated columns; write authority is enforced by
+// SEPARATE masked Set RPCs (SetUser / SetAdmin / SetStatus) so a caller physically
+// cannot write a column outside its role. The read message OMITS app_secret_enc
+// entirely and exposes only `has_app_secret`; the plaintext app_secret rides only
+// in SetFeishuUserConfigRequest and is Fernet-encrypted at rest. effective_enabled
+// is server-computed (user_enabled AND NOT admin_disabled AND credentials present).
+message FeishuChannelConfig {
+  string account_id = 1;
+  // desired · credentials (app_secret is NEVER returned) ---------------------
+  string app_id = 2;
+  bool   has_app_secret = 3;
+  string app_secret_updated_at = 4;
+  // desired · enable double-gate --------------------------------------------
+  bool   user_enabled = 5;
+  bool   admin_disabled = 6;
+  bool   effective_enabled = 7;          // server-computed
+  // desired · behaviour ------------------------------------------------------
+  string single_chat_access_mode = 8;    // owner_only | allowlist | all
+  string allowed_union_ids = 9;          // JSON array as string
+  string welcome_message = 10;
+  string reject_message = 11;
+  string model = 12;
+  int32  max_queue_size = 13;
+  bool   enable_permission_feedback = 14;
+  int32  feedback_timeout_seconds = 15;
+  string domain = 16;                    // feishu | lark
+  // status · connector-written only -----------------------------------------
+  string conn_status = 17;
+  int32  last_error_code = 18;
+  string last_error_message = 19;
+  string last_connected_at = 20;
+  string status_updated_at = 21;
+  // diff key + provenance ---------------------------------------------------
+  string desired_digest = 22;
+  string updated_by = 23;
+  string updated_at = 24;
+}
+
+// USER route — credentials + user_enabled + behaviour. app_secret plaintext:
+// name present in update_mask + non-empty => encrypt & store; present + empty
+// => clear (app_secret_enc = NULL); absent from mask => keep existing.
+message SetFeishuUserConfigRequest {
+  string account_id = 1;
+  string app_id = 2;
+  string app_secret = 3;
+  bool   user_enabled = 4;
+  string single_chat_access_mode = 5;
+  string allowed_union_ids = 6;
+  string welcome_message = 7;
+  string reject_message = 8;
+  string model = 9;
+  int32  max_queue_size = 10;
+  bool   enable_permission_feedback = 11;
+  int32  feedback_timeout_seconds = 12;
+  string domain = 13;
+  string updated_by = 14;
+  repeated string update_mask = 15;
+}
+
+// ADMIN route — kill-switch only.
+message SetFeishuAdminConfigRequest {
+  string account_id = 1;
+  bool   admin_disabled = 2;
+  string updated_by = 3;
+  repeated string update_mask = 4;
+}
+
+// CONNECTOR — observed status only; must NOT perturb updated_at / desired_digest.
+message SetFeishuStatusRequest {
+  string account_id = 1;
+  string conn_status = 2;
+  int32  last_error_code = 3;
+  string last_error_message = 4;
+  string last_connected_at = 5;
+  repeated string update_mask = 6;
+}
+
+message FeishuChannelConfigList { repeated FeishuChannelConfig configs = 1; }
+
+// CONNECTOR-ONLY privileged read: the decrypted plaintext app_secret the connector
+// needs to open the Feishu WS / mint tenant_access_token. Follows the api_key trust
+// model (data-spine decrypts and returns plaintext over cluster-internal gRPC; the
+// connector never holds the Fernet key). `app_secret` is "" when unset OR when the
+// stored ciphertext failed to decrypt — the connector treats "" as unusable and
+// writes conn_status=error(secret_undecryptable). This message must NEVER be logged.
+message FeishuSecret {
+  string account_id = 1;
+  string app_id = 2;
+  string app_secret = 3;   // plaintext; "" = unset or undecryptable
+  string domain = 4;       // feishu | lark
+}
+
+service FeishuChannelConfigService {
+  rpc Get(AccountRef) returns (FeishuChannelConfig);   // empty account_id when unset
+  rpc SetUser(SetFeishuUserConfigRequest) returns (FeishuChannelConfig);
+  rpc SetAdmin(SetFeishuAdminConfigRequest) returns (FeishuChannelConfig);
+  rpc SetStatus(SetFeishuStatusRequest) returns (FeishuChannelConfig);
+  rpc List(Empty) returns (FeishuChannelConfigList);
+  rpc ListEffective(Empty) returns (FeishuChannelConfigList);
+  rpc GetFeishuSecret(AccountRef) returns (FeishuSecret);  // connector-only; plaintext
+}
