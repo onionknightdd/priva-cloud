@@ -771,7 +771,7 @@ async def get_system_health():
     from ..provisioner import dataspine_health, deployment_ready
 
     # --- Fan out the independent probes concurrently. ---
-    fleet_snap, gateway, ds_health, operator_dep, dataspine_dep, cp_dep, gw_dep, scheduler_dep = await asyncio.gather(
+    fleet_snap, gateway, ds_health, operator_dep, dataspine_dep, cp_dep, gw_dep, scheduler_dep, connector_dep = await asyncio.gather(
         _fleet_snapshot(),
         _gateway_snapshot(),
         dataspine_health(),
@@ -784,6 +784,8 @@ async def get_system_health():
         asyncio.to_thread(deployment_ready, "priva-gateway"),
         # scheduler (Phase 4a): leaderless firing engine, Deployment "scheduler".
         asyncio.to_thread(deployment_ready, "scheduler"),
+        # channel-connector (Phase 4b): the Feishu WS bridge, Deployment "channel-connector".
+        asyncio.to_thread(deployment_ready, "channel-connector"),
     )
 
     def _reps(dep: dict | None) -> ReplicaCount | None:
@@ -828,6 +830,18 @@ async def get_system_health():
         sched_status = "degraded"
     else:
         sched_status = "down"
+
+    # --- channel-connector node (Phase 4b): Deployment readiness, same rule as the
+    # operator/scheduler. Shipped as the Feishu WS bridge — no longer a planned
+    # module. None (no kube / unknown name) → down, no replica chip. ---
+    if connector_dep is None:
+        conn_status = "down"
+    elif connector_dep["ready"] >= 1:
+        conn_status = "up"
+    elif connector_dep["desired"] >= 1:
+        conn_status = "degraded"
+    else:
+        conn_status = "down"
 
     # --- agent-runner tier: up if any awake, idle if scaled-to-zero, down on probe failure. ---
     awake = fleet_snap["awake_sandboxes"]
@@ -892,8 +906,14 @@ async def get_system_health():
                             "running": float(fleet_snap["running_sessions"]),
                             "total": float(fleet_snap["total_accounts"])},
                    deps=ar_deps),
-        SystemNode(id="channel-connector", label="channel-connector", sub="WeCom / Feishu fan-out",
-                   plane="tenant", status="disabled", detail="planned · phase 4"),
+        # feishu: the external IM (self-built app). Not our infra — modeled like
+        # `browser`, an always-present external entry point. Its edges to the
+        # connector go ✕ automatically when the connector is down.
+        SystemNode(id="feishu", label="feishu", sub="external IM · WS/REST",
+                   plane="edge", status="up", detail="self-built app"),
+        SystemNode(id="channel-connector", label="channel-connector",
+                   sub=":8083 · Feishu WS fan-out", plane="tenant", status=conn_status,
+                   detail="IM ⇄ runtime bridge", replicas=_reps(connector_dep)),
         SystemNode(id="state-reader", label="state-reader", sub="wake-free JSONL reads",
                    plane="tenant", status="disabled", detail="planned · phase 5"),
     ]
@@ -933,9 +953,21 @@ async def get_system_health():
         _edge("scheduler", "data-spine", label="gRPC", kind="grpc"),
         _edge("scheduler", "operator", label="wake", kind="control"),
         _edge("scheduler", "agent-runner", label="dispatch", kind="control"),
-        # Planned edges (never animated). Redis stays parked — v1 is Postgres-claim,
-        # re-list, and CR wake (no Redis); the connector/state-reader are unbuilt.
-        _edge("channel-connector", "agent-runner", kind="control", disabled=True),
+        # channel-connector (Phase 4b): the Feishu WS bridge. Inbound DM over the WS
+        # long-connection, reply over REST (feishu ⇄ connector, unlabeled — the
+        # particle flow shows the duplex). Wakes the pod via a CR patch (operator
+        # stays sole scaler, same pattern as the scheduler) and dials /run/stream,
+        # relaying the assistant text back. control-panel pushes a targeted reconcile
+        # on config edit. gRPC to the data-spine for bindings/secret/status. All
+        # animated when the connector is up.
+        _edge("feishu", "channel-connector", kind="byte", bytepath=True),
+        _edge("channel-connector", "feishu", kind="byte", bytepath=True),
+        _edge("channel-connector", "agent-runner", label="/run/stream", kind="byte", bytepath=True),
+        _edge("channel-connector", "operator", label="wake", kind="control"),
+        _edge("channel-connector", "data-spine", label="gRPC", kind="grpc"),
+        _edge("control-panel", "channel-connector", label="reconcile", kind="control"),
+        # Planned edge (never animated). Redis stays parked — v1 is Postgres-claim,
+        # re-list, and CR wake (no Redis).
         _edge("data-spine", "redis", kind="grpc", disabled=True),
     ]
 
