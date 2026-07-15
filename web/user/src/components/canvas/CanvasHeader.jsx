@@ -11,11 +11,37 @@ const MAIN_AREA_HEADER_HEIGHT = 30
 function CountedTabLabel({ label, count }) {
   if (!count) return label
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, lineHeight: '12px' }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, lineHeight: '16px' }}>
       <span>{label}</span>
-      <span>(</span>
-      <RollingInteger value={count} height={11} color="currentColor" fontSize={11} fontWeight={600} verticalAlign="middle" />
-      <span>)</span>
+      <span
+        aria-label={`(${count})`}
+        style={{
+          display: 'inline-grid',
+          gridTemplateColumns: '4px 8px 4px',
+          alignItems: 'center',
+          justifyItems: 'center',
+          height: 16,
+          fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+          fontSize: 11,
+          fontWeight: 600,
+          lineHeight: '16px',
+          fontVariantNumeric: 'tabular-nums',
+          color: 'currentColor',
+        }}
+      >
+        <span aria-hidden="true" style={{ lineHeight: '16px' }}>(</span>
+        <RollingInteger
+          value={count}
+          minDigits={1}
+          height={11}
+          width={7}
+          color="currentColor"
+          fontSize={11}
+          fontWeight={600}
+          verticalAlign="baseline"
+        />
+        <span aria-hidden="true" style={{ lineHeight: '16px' }}>)</span>
+      </span>
     </span>
   )
 }

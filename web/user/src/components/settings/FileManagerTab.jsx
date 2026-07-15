@@ -1,34 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Folder, FileText, Download, Upload, ChevronRight, Image, FileCode, Search, ArrowUp, ArrowDown, Copy, Check, Sparkles } from 'lucide-react'
+import { Folder, FileText, Download, Upload, ChevronRight, Search, ArrowUp, ArrowDown, Copy, Sparkles } from 'lucide-react'
 import { getFileIcon } from '../../utils/fileIcons'
 import { useTranslation } from 'react-i18next'
-import hljs from 'highlight.js/lib/core'
-import 'highlight.js/styles/github-dark.css'
-import bash from 'highlight.js/lib/languages/bash'
-import python from 'highlight.js/lib/languages/python'
-import javascript from 'highlight.js/lib/languages/javascript'
-import typescript from 'highlight.js/lib/languages/typescript'
-import yaml from 'highlight.js/lib/languages/yaml'
-import jsonLang from 'highlight.js/lib/languages/json'
-import xml from 'highlight.js/lib/languages/xml'
-import css from 'highlight.js/lib/languages/css'
-import sql from 'highlight.js/lib/languages/sql'
-import goLang from 'highlight.js/lib/languages/go'
-import rust from 'highlight.js/lib/languages/rust'
-import java from 'highlight.js/lib/languages/java'
-import markdown from 'highlight.js/lib/languages/markdown'
-import dockerfile from 'highlight.js/lib/languages/dockerfile'
-import ini from 'highlight.js/lib/languages/ini'
-import ruby from 'highlight.js/lib/languages/ruby'
-import cpp from 'highlight.js/lib/languages/cpp'
-import c from 'highlight.js/lib/languages/c'
-import swift from 'highlight.js/lib/languages/swift'
-import kotlin from 'highlight.js/lib/languages/kotlin'
-import lua from 'highlight.js/lib/languages/lua'
-import perl from 'highlight.js/lib/languages/perl'
-import scss from 'highlight.js/lib/languages/scss'
-import CopyButton from '@shared/components/shared/CopyButton'
 import OptimizePopup from '../shared/OptimizePopup'
 import getLineFromNode from '../../utils/getLineFromNode'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
@@ -37,159 +11,7 @@ import { useResizable } from '@shared/hooks/useResizable'
 import safeStorage from '@shared/utils/safeStorage'
 import { formatDateTime } from '../../utils/formatTime'
 import DrawIcon from '@shared/components/shared/DrawIcon'
-
-hljs.registerLanguage('bash', bash)
-hljs.registerLanguage('python', python)
-hljs.registerLanguage('javascript', javascript)
-hljs.registerLanguage('typescript', typescript)
-hljs.registerLanguage('yaml', yaml)
-hljs.registerLanguage('json', jsonLang)
-hljs.registerLanguage('xml', xml)
-hljs.registerLanguage('html', xml)
-hljs.registerLanguage('css', css)
-hljs.registerLanguage('scss', scss)
-hljs.registerLanguage('sql', sql)
-hljs.registerLanguage('go', goLang)
-hljs.registerLanguage('rust', rust)
-hljs.registerLanguage('java', java)
-hljs.registerLanguage('markdown', markdown)
-hljs.registerLanguage('dockerfile', dockerfile)
-hljs.registerLanguage('ini', ini)
-hljs.registerLanguage('ruby', ruby)
-hljs.registerLanguage('cpp', cpp)
-hljs.registerLanguage('c', c)
-hljs.registerLanguage('swift', swift)
-hljs.registerLanguage('kotlin', kotlin)
-hljs.registerLanguage('lua', lua)
-hljs.registerLanguage('perl', perl)
-hljs.registerLanguage('plaintext', () => ({ contains: [] }))
-
-const EXT_TO_LANG = {
-  '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
-  '.jsx': 'javascript', '.tsx': 'typescript',
-  '.sh': 'bash', '.bash': 'bash', '.zsh': 'bash', '.fish': 'bash',
-  '.json': 'json', '.yaml': 'yaml', '.yml': 'yaml',
-  '.xml': 'xml', '.html': 'html', '.css': 'css', '.scss': 'scss',
-  '.sql': 'sql', '.go': 'go', '.rs': 'rust', '.java': 'java',
-  '.kt': 'kotlin', '.rb': 'ruby', '.c': 'c', '.cpp': 'cpp',
-  '.h': 'c', '.hpp': 'cpp', '.swift': 'swift',
-  '.lua': 'lua', '.pl': 'perl', '.md': 'markdown',
-  '.toml': 'ini', '.ini': 'ini', '.cfg': 'ini', '.conf': 'ini',
-  '.properties': 'ini', '.env': 'ini',
-}
-
-const NAME_TO_LANG = {
-  'Makefile': 'bash', 'Dockerfile': 'dockerfile',
-  '.bashrc': 'bash', '.bash_profile': 'bash', '.bash_logout': 'bash',
-  '.zshrc': 'bash', '.zprofile': 'bash', '.zshenv': 'bash',
-  '.profile': 'bash', '.gitignore': 'plaintext',
-  '.gitconfig': 'ini', '.editorconfig': 'ini',
-  '.npmrc': 'ini', '.yarnrc': 'yaml',
-  '.prettierrc': 'json', '.eslintrc': 'json',
-  '.dockerignore': 'plaintext',
-}
-
-function detectLanguage(filename) {
-  if (NAME_TO_LANG[filename]) return NAME_TO_LANG[filename]
-  const idx = filename.lastIndexOf('.')
-  if (idx >= 0) {
-    const ext = filename.slice(idx).toLowerCase()
-    if (EXT_TO_LANG[ext]) return EXT_TO_LANG[ext]
-  }
-  return null
-}
-
-function HighlightedPreview({ content, filename }) {
-  const language = detectLanguage(filename)
-
-  const lines = useMemo(() => {
-    if (!content) return []
-    const raw = content.replace(/\n$/, '')
-    let highlighted = null
-    try {
-      if (language && hljs.getLanguage(language)) {
-        highlighted = hljs.highlight(raw, { language }).value
-      } else {
-        highlighted = hljs.highlightAuto(raw).value
-      }
-    } catch { /* fallback to plain */ }
-
-    if (highlighted) {
-      return highlighted.split('\n').map((html) => ({ html }))
-    }
-    return raw.split('\n').map((text) => ({ text }))
-  }, [content, language])
-
-  const gutterWidth = String(lines.length).length * 8 + 24
-
-  return (
-    <div className="relative copyable">
-      <CopyButton content={content} />
-      <div className="overflow-x-auto" style={{ background: 'var(--bg-elevated)', borderRadius: 4 }}>
-        <table style={{
-          borderCollapse: 'collapse',
-          fontSize: 12, lineHeight: 1.5,
-          fontFamily: 'var(--font-mono)',
-          width: '100%', tableLayout: 'fixed',
-        }}>
-          <tbody>
-            {lines.map((line, i) => (
-              <tr key={i}>
-                <td style={{
-                  width: gutterWidth, minWidth: gutterWidth,
-                  padding: i === 0
-                    ? '12px 8px 0 12px'
-                    : i === lines.length - 1
-                      ? '0 8px 12px 12px'
-                      : '0 8px 0 12px',
-                  textAlign: 'right',
-                  color: 'var(--text-dim)',
-                  userSelect: 'none',
-                  verticalAlign: 'top',
-                  borderRight: '1px solid var(--border-subtle)',
-                  position: 'sticky', left: 0,
-                  background: 'var(--bg-elevated)',
-                }}>
-                  {i + 1}
-                </td>
-                {line.html != null ? (
-                  <td
-                    style={{
-                      padding: i === 0
-                        ? '12px 16px 0 12px'
-                        : i === lines.length - 1
-                          ? '0 16px 12px 12px'
-                          : '0 16px 0 12px',
-                      whiteSpace: 'pre-wrap',
-                      overflowWrap: 'anywhere',
-                      wordBreak: 'break-word',
-                      color: 'var(--text-primary)',
-                    }}
-                    dangerouslySetInnerHTML={{ __html: line.html || '&nbsp;' }}
-                  />
-                ) : (
-                  <td style={{
-                    padding: i === 0
-                      ? '12px 16px 0 12px'
-                      : i === lines.length - 1
-                        ? '0 16px 12px 12px'
-                        : '0 16px 0 12px',
-                    whiteSpace: 'pre-wrap',
-                    overflowWrap: 'anywhere',
-                    wordBreak: 'break-word',
-                    color: 'var(--text-primary)',
-                  }}>
-                    {line.text || ' '}
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
+import FilePreviewRenderer, { detectFileLanguage } from '../shared/FilePreviewRenderer'
 
 function formatSize(bytes) {
   if (bytes == null) return ''
@@ -256,8 +78,7 @@ export default function FileManagerTab() {
 
   // Preview state
   const [preview, setPreview] = useState(null)
-  const [previewLoading, setPreviewLoading] = useState(false)
-  const [previewImageUrl, setPreviewImageUrl] = useState(null)
+  const [previewText, setPreviewText] = useState(null)
   const [selectedFileName, setSelectedFileName] = useState(null)
 
   // Selection tooltip + optimize popup state (Ask for Priva)
@@ -303,7 +124,7 @@ export default function FileManagerTab() {
     // Single-tenant pod: the explorer browses the whole pod filesystem; access is
     // governed solely by the sandbox uid's OS permissions (no app-level path gate).
     setPreview(null)
-    setPreviewImageUrl(null)
+    setPreviewText(null)
     setSelectedFileName(null)
     setSearchQuery('')
     setSortField(null)
@@ -352,25 +173,51 @@ export default function FileManagerTab() {
     return list
   }, [entries, searchQuery, sortField, sortDir])
 
-  const handleFileClick = async (entry) => {
+  const handleFileClick = (entry) => {
     const fullPath = resolvedPath === '/' ? `/${entry.name}` : `${resolvedPath}/${entry.name}`
     setSelectedFileName(entry.name)
-    setPreviewLoading(true)
-    setPreview(null)
-    setPreviewImageUrl(null)
-    try {
-      const data = await previewFile(fullPath)
-      setPreview(data)
-      if (data.preview_url) {
-        const blob = await downloadFile(fullPath)
-        setPreviewImageUrl(URL.createObjectURL(blob))
-      }
-    } catch (e) {
-      setPreview({ name: entry.name, path: fullPath, error: e.message })
-    } finally {
-      setPreviewLoading(false)
-    }
+    setPreviewText(null)
+    setPreview({
+      name: entry.name,
+      path: fullPath,
+      size: entry.size,
+      modified: entry.modified,
+      mime_type: entry.mime_type || entry.mimeType || null,
+      ext: entry.ext || null,
+    })
   }
+
+  const previewCacheKey = useMemo(() => {
+    if (!preview?.path) return null
+    return `${preview.path}:${preview.modified || ''}:${preview.size ?? ''}`
+  }, [preview?.modified, preview?.path, preview?.size])
+
+  const loadPreviewText = useCallback(async () => {
+    if (!preview?.path) return ''
+    try {
+      const data = await previewFile(preview.path, { cacheBustKey: previewCacheKey })
+      if (typeof data?.content === 'string') return data.content
+    } catch { /* fall back to download */ }
+
+    const blob = await downloadFile(preview.path, {
+      cacheBustKey: previewCacheKey,
+      cacheMode: 'no-store',
+    })
+    return blob.text()
+  }, [preview?.path, previewCacheKey])
+
+  const loadPreviewBlob = useCallback(async () => {
+    if (!preview?.path) throw new Error('No file selected')
+    return downloadFile(preview.path, {
+      cacheBustKey: previewCacheKey,
+      cacheMode: 'no-store',
+    })
+  }, [preview?.path, previewCacheKey])
+
+  const loadPreviewArrayBuffer = useCallback(async () => {
+    const blob = await loadPreviewBlob()
+    return blob.arrayBuffer()
+  }, [loadPreviewBlob])
 
   const handleDownload = async (entry) => {
     const fullPath = resolvedPath === '/' ? `/${entry.name}` : `${resolvedPath}/${entry.name}`
@@ -469,8 +316,8 @@ export default function FileManagerTab() {
 
   // Handle "Ask for Priva" tooltip click
   const handleAskPrivaClick = useCallback(() => {
-    if (!tooltip || !preview) return
-    const allLines = (preview.content || '').replace(/\n$/, '').split('\n')
+    if (!tooltip || !preview || previewText == null) return
+    const allLines = previewText.replace(/\n$/, '').split('\n')
     const selStart = tooltip.startLine
     const selEnd = tooltip.endLine
     const ctxStart = Math.max(1, selStart - 2)
@@ -483,7 +330,7 @@ export default function FileManagerTab() {
         isSelected: i >= selStart && i <= selEnd,
       })
     }
-    const language = detectLanguage(preview.name) || ''
+    const language = detectFileLanguage(preview.path || preview.name) || ''
     setOptimizeData({
       source: 'file',
       filePath: preview.path || '',
@@ -497,12 +344,12 @@ export default function FileManagerTab() {
     })
     setTooltip(null)
     window.getSelection()?.removeAllRanges()
-  }, [tooltip, preview])
+  }, [tooltip, preview, previewText])
 
   // Handle Sparkles icon click in preview header (full file)
   const handleAskPrivaFull = useCallback(() => {
-    if (!preview?.content) return
-    const allLines = preview.content.replace(/\n$/, '').split('\n')
+    if (!preview || previewText == null) return
+    const allLines = previewText.replace(/\n$/, '').split('\n')
     const totalLines = allLines.length
     const ctxEnd = Math.min(totalLines, 4)
     const previewLines = []
@@ -512,19 +359,19 @@ export default function FileManagerTab() {
     if (totalLines > 4) {
       previewLines.push({ lineNum: -1, text: `... (${totalLines - 4} more lines)`, isSelected: false })
     }
-    const language = detectLanguage(preview.name) || ''
+    const language = detectFileLanguage(preview.path || preview.name) || ''
     setOptimizeData({
       source: 'file',
       filePath: preview.path || '',
       startLine: 1,
       endLine: totalLines,
-      selectedText: preview.content.replace(/\n$/, ''),
+      selectedText: previewText.replace(/\n$/, ''),
       language,
       previewLines,
       anchorX: Math.min(window.innerWidth / 2, window.innerWidth - 460),
       anchorY: 120,
     })
-  }, [preview])
+  }, [preview, previewText])
 
   // Breadcrumb segments (absolute — the explorer browses the whole pod filesystem)
   const segments = resolvedPath ? resolvedPath.split('/').filter(Boolean) : []
@@ -806,7 +653,7 @@ export default function FileManagerTab() {
                 <span className="flex-1 truncate" style={{ color: 'var(--text-primary)', fontSize: 12, fontFamily: 'var(--font-mono)' }}>
                   {preview?.path || selectedFileName || ''}
                 </span>
-                {preview?.content != null && (
+                {previewText != null && (
                   <button
                     className="flex items-center justify-center flex-shrink-0"
                     style={{
@@ -845,40 +692,18 @@ export default function FileManagerTab() {
               </div>
 
               {/* Preview content */}
-              <div ref={previewContentRef} className="flex-1 overflow-y-auto p-3" style={{ minHeight: 0 }}>
-                {previewLoading ? (
-                  <div className="flex flex-col gap-2">
-                    {[1, 2, 3].map((i) => (
-                      <div key={i} className="skeleton" style={{ height: 16, borderRadius: 2 }} />
-                    ))}
-                  </div>
-                ) : preview?.error ? (
+              <div ref={previewContentRef} className="flex-1 min-w-0 min-h-0 overflow-hidden" style={{ minHeight: 0 }}>
+                {preview?.error ? (
                   <div style={{ color: 'var(--red)', fontSize: 13 }}>{preview.error}</div>
-                ) : preview?.content != null ? (
-                  <HighlightedPreview content={preview.content} filename={preview.name} />
-                ) : preview?.mime_type === 'application/pdf' && previewImageUrl ? (
-                  <object
-                    data={previewImageUrl}
-                    type="application/pdf"
-                    style={{ width: '100%', height: '100%', minHeight: 500, border: 'none' }}
-                  >
-                    <div className="flex flex-col items-center gap-3 py-8" style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-                      <FileText size={32} strokeWidth={1.5} style={{ color: 'var(--text-dim)' }} />
-                      <span>{t('settings.fileManagerPdfNotSupported', 'PDF preview not supported in this browser.')}</span>
-                    </div>
-                  </object>
-                ) : previewImageUrl ? (
-                  <img
-                    src={previewImageUrl}
-                    alt={preview?.name}
-                    style={{ maxWidth: '100%', borderRadius: 4 }}
+                ) : preview?.path ? (
+                  <FilePreviewRenderer
+                    file={preview}
+                    cacheKey={previewCacheKey}
+                    loadText={loadPreviewText}
+                    loadArrayBuffer={loadPreviewArrayBuffer}
+                    loadBlob={loadPreviewBlob}
+                    onTextLoaded={setPreviewText}
                   />
-                ) : preview?.is_binary ? (
-                  <div className="flex flex-col items-center gap-3 py-8" style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-                    <FileText size={32} strokeWidth={1.5} style={{ color: 'var(--text-dim)' }} />
-                    <span>{t('settings.fileManagerBinaryFile')}</span>
-                    <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>{formatSize(preview.size)}</span>
-                  </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center" style={{ color: 'var(--text-dim)', fontSize: 12, height: '100%' }}>
                     <FileText size={28} strokeWidth={1.5} style={{ color: 'var(--text-dim)', marginBottom: 8 }} />
@@ -892,7 +717,7 @@ export default function FileManagerTab() {
       </div>
 
       {/* "Ask for Priva" tooltip — portaled to body */}
-      {tooltip && preview?.content != null && createPortal(
+      {tooltip && previewText != null && createPortal(
         <button
           className="flex items-center gap-1"
           onClick={handleAskPrivaClick}

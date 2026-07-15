@@ -24,6 +24,7 @@
     "@xterm/xterm": "^5.5.0",
     "animejs": "^4.5.0",
     "excalidraw-animate": "^0.7.2",
+    "exceljs": "^4.4.0",
     "highlight.js": "^11.9.0",
     "i18next": "^25.8.14",
     "jszip": "^3.10.1",

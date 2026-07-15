@@ -134,6 +134,9 @@ async def get_user_overview(user: UserRecord = Depends(require_user)):
         longest_streak=block.longest_streak,
         peak_hour=block.peak_hour,
         tagline=block.tagline,
+        skill_usage=block.skill_usage,
+        explored_skills=block.explored_skills,
+        skill_invocations=block.skill_invocations,
         bootstrap=bootstrap,
     )
 

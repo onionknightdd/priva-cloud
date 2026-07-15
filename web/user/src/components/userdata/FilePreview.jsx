@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react'
 import { getAuthHeaders } from '@shared/api/client'
-import RichFilePreview from '../shared/RichFilePreview'
+import FilePreviewRenderer from '../shared/FilePreviewRenderer'
 
 async function fetchUserFile(uuid) {
   const res = await fetch(`/api/sandbox/agent-attachments/${encodeURIComponent(uuid)}`, {
@@ -18,11 +18,12 @@ export default function FilePreview({ file }) {
     () => ({
       name: file.original_name,
       original_name: file.original_name,
+      path: file.path,
       mime_type: file.mime_type,
       ext: file.ext,
       uuid: file.uuid,
     }),
-    [file.ext, file.mime_type, file.original_name, file.uuid]
+    [file.ext, file.mime_type, file.original_name, file.path, file.uuid]
   )
 
   const loadText = useCallback(async () => {
@@ -41,7 +42,7 @@ export default function FilePreview({ file }) {
   }, [file.uuid])
 
   return (
-    <RichFilePreview
+    <FilePreviewRenderer
       file={previewFile}
       cacheKey={file.uuid}
       loadText={loadText}

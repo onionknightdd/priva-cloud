@@ -15,6 +15,7 @@ from priva_common.models.auth import (
     DailyModelTokens,
     HeatmapBucket,
     ModelUsage,
+    SkillUsage,
     UsageCounts,
     UsageStats,
 )
@@ -47,6 +48,9 @@ class UserStatsBlock:
     longest_streak: int
     peak_hour: int | None
     tagline: str | None
+    skill_usage: list[SkillUsage]
+    explored_skills: int
+    skill_invocations: int
 
 
 def _read_all_audit_entries(username: str) -> list[dict]:
@@ -259,6 +263,8 @@ def compute_user_stats(username: str) -> UserStatsBlock:
     day_events: Counter[date] = Counter()
     # Hour of day distribution
     hour_counts: Counter[int] = Counter()
+    # Skill usage is aggregated from the persisted audit stream.
+    skill_counts: Counter[str] = Counter()
 
     for entry in entries:
         ts = _parse_ts(entry.get("timestamp"))
@@ -270,6 +276,11 @@ def compute_user_stats(username: str) -> UserStatsBlock:
 
         action = entry.get("action") or ""
         details = entry.get("details") or {}
+        if action == "skill.invoked":
+            skill = str(entry.get("target") or "").strip()
+            if skill and skill != "unknown":
+                skill_counts[skill] += 1
+
         if action == "agent.run_completed":
             ins = int(details.get("input_tokens") or 0)
             outs = int(details.get("output_tokens") or 0)
@@ -308,8 +319,11 @@ def compute_user_stats(username: str) -> UserStatsBlock:
         last_7d=_compute_counts(sessions, session_msg_counts, token_buckets, now - timedelta(days=7)),
     )
 
-    # --- Heatmap (rolling half-year, by event count) ---
-    heatmap_counts: dict[date, int] = {d: c for d, c in day_events.items()}
+    # --- Heatmap (rolling half-year, by total daily tokens) ---
+    heatmap_counts: dict[date, int] = {
+        day: input_tokens + output_tokens
+        for day, (input_tokens, output_tokens) in token_buckets.items()
+    }
     heatmap = _compute_heatmap(heatmap_counts)
 
     # --- Streaks (based on days with any activity) ---
@@ -349,6 +363,11 @@ def compute_user_stats(username: str) -> UserStatsBlock:
     # --- Tagline ---
     tagline = _compute_tagline(stats.all.total_tokens)
 
+    skill_usage = [
+        SkillUsage(skill=skill, count=count)
+        for skill, count in skill_counts.most_common(5)
+    ]
+
     return UserStatsBlock(
         stats=stats,
         heatmap=heatmap,
@@ -359,4 +378,7 @@ def compute_user_stats(username: str) -> UserStatsBlock:
         longest_streak=longest_streak,
         peak_hour=peak_hour,
         tagline=tagline,
+        skill_usage=skill_usage,
+        explored_skills=len(skill_counts),
+        skill_invocations=sum(skill_counts.values()),
     )

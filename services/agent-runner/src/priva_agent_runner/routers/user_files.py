@@ -64,8 +64,14 @@ def _looks_like_text(path: str, limit: int = 8192) -> bool:
         return False
 
 
-def _canonicalize(path: str) -> str:
-    return os.path.realpath(os.path.expanduser(path))
+def _canonicalize(path: str, base: str | None = None) -> str:
+    # A relative path (e.g. a bare "read_jsonl.py" from a Write tool) would
+    # otherwise resolve against this server process's cwd — never the agent
+    # session's cwd — and 404. Anchor it to the user's workspace instead.
+    expanded = os.path.expanduser(path)
+    if base and not os.path.isabs(expanded):
+        expanded = os.path.join(base, expanded)
+    return os.path.realpath(expanded)
 
 
 def _sanitize_filename(name: str) -> str:
@@ -93,7 +99,7 @@ async def list_directory(
     if path == "~":
         real_path = os.path.realpath(get_user_workspace(user))
     else:
-        real_path = _canonicalize(path)
+        real_path = _canonicalize(path, base=get_user_workspace(user))
 
     if not os.path.isdir(real_path):
         raise HTTPException(400, f"Not a directory: {real_path}")
@@ -133,7 +139,7 @@ async def download_file(
     path: str = Query(...),
     user: UserRecord = Depends(require_user),
 ):
-    real_path = _canonicalize(path)
+    real_path = _canonicalize(path, base=get_user_workspace(user))
     if not os.path.isfile(real_path):
         raise HTTPException(404, f"File not found: {real_path}")
 
@@ -156,7 +162,7 @@ async def preview_file(
     path: str = Query(...),
     user: UserRecord = Depends(require_user),
 ):
-    real_path = _canonicalize(path)
+    real_path = _canonicalize(path, base=get_user_workspace(user))
     if not os.path.isfile(real_path):
         raise HTTPException(404, f"File not found: {real_path}")
 
@@ -220,7 +226,7 @@ async def upload_file(
     directory: str = Form(...),
     user: UserRecord = Depends(require_user),
 ):
-    real_dir = _canonicalize(directory)
+    real_dir = _canonicalize(directory, base=get_user_workspace(user))
 
     if not os.path.isdir(real_dir):
         raise HTTPException(400, f"Not a directory: {real_dir}")

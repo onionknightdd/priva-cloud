@@ -112,6 +112,7 @@
         "sessions": "会话",
         "messages": "消息",
         "tokens": "总 Token",
+        "peakDailyTokens": "单日峰值 Token",
         "activeDays": "活跃天数",
         "currentStreak": "当前连续",
         "longestStreak": "最长连续",
@@ -121,7 +122,8 @@
       "heatmap": {
         "less": "少",
         "more": "多",
-        "tooltip": "{{date}}: {{count}} 次活动",
+        "period": "近半年",
+        "tooltip": "{{date}}: {{count}} Token",
         "day": {
           "sun": "周日",
           "mon": "周一",
@@ -136,7 +138,18 @@
         "noData": "当前范围暂无模型使用数据。",
         "showMore": "再显示 {{count}} 项",
         "showLess": "收起",
-        "inOut": "{{input}} 入 · {{output}} 出"
+        "inOut": "{{input}} 入 · {{output}} 出",
+        "total": "{{total}} Token"
+      },
+      "tokenActivity": "Token 活动",
+      "activityInsights": "活动洞察",
+      "workspaceData": "工作区数据",
+      "skills": {
+        "title": "最常用的技能",
+        "explored": "已探索的技能",
+        "totalUses": "使用的技能总数",
+        "runs": "{{count}} 次调用",
+        "noData": "尚未使用任何技能。"
       },
       "streakDays": "{{count}}天",
       "hourSuffix": "时",

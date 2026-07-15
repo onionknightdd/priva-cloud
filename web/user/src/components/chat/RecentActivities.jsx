@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { useStaggerEntrance } from '@shared/motion/useStaggerEntrance'
 import useSidebarStore from '../../stores/sidebarStore'
@@ -61,7 +61,7 @@ function RecentActivitySkeleton() {
           key={i}
           className="skeleton"
           style={{
-            height: 36,
+            height: 32,
             borderRadius: 4,
           }}
         />
@@ -74,8 +74,13 @@ export default function RecentActivities({ showTitle = true }) {
   const recentActivities = useSidebarStore((s) => s.recentActivities)
   const sessions = useSidebarStore((s) => s.sessions)
   const overviewLoading = useUserDataStore((s) => s.overviewLoading)
+  const fetchOverview = useUserDataStore((s) => s.fetchOverview)
   const [loadingSessionId, setLoadingSessionId] = useState(null)
   const entranceRef = useStaggerEntrance({ duration: 220, rise: 6, stepMs: 35 })
+
+  // The overview bootstrap hydrates recent_activities. Keep this dependency
+  // local now that the home screen no longer mounts UsageStatsOverview.
+  useEffect(() => { fetchOverview() }, [fetchOverview])
 
   const rows = useMemo(
     () => buildRows(recentActivities, sessions),
@@ -95,13 +100,13 @@ export default function RecentActivities({ showTitle = true }) {
   }
 
   return (
-    <div className="flex flex-col min-w-0" style={{ gap: 6 }}>
+    <div className="flex flex-col min-w-0" style={{ gap: 5 }}>
       {showTitle && (
         <div
           className="font-semibold"
           style={{
             color: 'var(--text-primary)',
-            fontSize: 12,
+            fontSize: 11,
             lineHeight: 1.3,
           }}
         >
@@ -112,7 +117,7 @@ export default function RecentActivities({ showTitle = true }) {
       <div
         className="flex flex-col min-w-0"
         style={{
-          gap: 6,
+          gap: 5,
         }}
       >
         {overviewLoading && rows.length === 0 ? (
@@ -140,9 +145,9 @@ export default function RecentActivities({ showTitle = true }) {
                 onClick={() => openActivity(row)}
                 className="flex items-center gap-2 min-w-0"
                 style={{
-                  minHeight: 36,
+                  minHeight: 32,
                   width: '100%',
-                  padding: '6px 8px',
+                  padding: '5px 8px',
                   background: 'var(--bg-elevated)',
                   border: 'none',
                   borderRadius: 4,
@@ -160,12 +165,12 @@ export default function RecentActivities({ showTitle = true }) {
                   event.currentTarget.style.color = 'var(--text-secondary)'
                 }}
               >
-                <div className="flex items-center min-w-0 flex-1" style={{ gap: 6 }}>
+                <div className="flex items-center min-w-0 flex-1" style={{ gap: 5 }}>
                   <span
                     className="truncate"
                     style={{
                       color: 'var(--text-primary)',
-                      fontSize: 12,
+                      fontSize: 11,
                       fontWeight: 500,
                       maxWidth: '38%',
                       minWidth: 0,
@@ -178,7 +183,7 @@ export default function RecentActivities({ showTitle = true }) {
                     className="truncate"
                     style={{
                       color: 'var(--text-secondary)',
-                      fontSize: 11,
+                      fontSize: 10,
                       fontWeight: 300,
                       minWidth: 0,
                       flex: 1,
@@ -192,7 +197,7 @@ export default function RecentActivities({ showTitle = true }) {
                   <span
                     style={{
                       color: 'var(--text-dim)',
-                      fontSize: 10,
+                      fontSize: 9,
                       fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
                       flexShrink: 0,
                     }}
@@ -200,7 +205,7 @@ export default function RecentActivities({ showTitle = true }) {
                     {row.time}
                   </span>
                 )}
-                <ChevronRight size={13} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
+                <ChevronRight size={12} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
               </button>
             )
           })

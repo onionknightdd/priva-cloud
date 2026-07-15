@@ -55,6 +55,11 @@ class ModelUsage(BaseModel):
     percentage: float
 
 
+class SkillUsage(BaseModel):
+    skill: str
+    count: int
+
+
 class DailyModelTokens(BaseModel):
     date: str
     by_model: dict[str, int]
@@ -81,6 +86,9 @@ class UserPublic(BaseModel):
     longest_streak: int = 0
     peak_hour: int | None = None
     tagline: str | None = None
+    skill_usage: list[SkillUsage] | None = None
+    explored_skills: int = 0
+    skill_invocations: int = 0
 
 
 class UserOverviewBootstrap(BaseModel):
@@ -108,6 +116,9 @@ class UserOverviewResponse(BaseModel):
     longest_streak: int = 0
     peak_hour: int | None = None
     tagline: str | None = None
+    skill_usage: list[SkillUsage] = Field(default_factory=list)
+    explored_skills: int = 0
+    skill_invocations: int = 0
     bootstrap: UserOverviewBootstrap = Field(default_factory=UserOverviewBootstrap)
 
 

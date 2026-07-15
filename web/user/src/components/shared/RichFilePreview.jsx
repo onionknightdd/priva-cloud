@@ -50,16 +50,134 @@ const ZIP_SIGNATURES = [
 ]
 const OLE_SIGNATURE = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]
 const SPREADSHEET_ROW_HEADER_WIDTH = 52
-const SPREADSHEET_MIN_COLUMN_WIDTH = 96
+const SPREADSHEET_MIN_COLUMN_WIDTH = 48
 const SPREADSHEET_MAX_COLUMN_WIDTH = 360
-const SPREADSHEET_DEFAULT_ROW_HEIGHT = 40
-const SPREADSHEET_MIN_ROW_HEIGHT = 28
+const SPREADSHEET_DEFAULT_ROW_HEIGHT = 28
+const SPREADSHEET_MIN_ROW_HEIGHT = 22
 const SPREADSHEET_MAX_ROW_HEIGHT = 160
 const SPREADSHEET_HEADER_HEIGHT = 34
 const SPREADSHEET_AUTOSCROLL_EDGE_SIZE = 48
 const SPREADSHEET_AUTOSCROLL_MAX_STEP = 24
 const SPREADSHEET_SELECTED_CELL_BACKGROUND = 'color-mix(in srgb, var(--blue) 10%, var(--bg-base))'
 const SPREADSHEET_SELECTED_HEADER_BACKGROUND = 'color-mix(in srgb, var(--blue) 10%, var(--bg-elevated))'
+const EXCEL_POINT_TO_PX = 96 / 72
+const EXCEL_DEFAULT_COLUMN_WIDTH = 8.43
+const EXCEL_THEME_COLORS = ['FFFFFF', '000000', 'EEECE1', '1F497D', '4F81BD', 'C0504D', '9BBB59', '8064A2', '4BACC6', 'F79646']
+const EXCEL_INDEXED_COLORS = [
+  '000000', 'FFFFFF', 'FF0000', '00FF00', '0000FF', 'FFFF00', 'FF00FF', '00FFFF',
+  '000000', 'FFFFFF', 'FF0000', '00FF00', '0000FF', 'FFFF00', 'FF00FF', '00FFFF',
+  '800000', '008000', '000080', '808000', '800080', '008080', 'C0C0C0', '808080',
+  '9999FF', '993366', 'FFFFCC', 'CCFFFF', '660066', 'FF8080', '0066CC', 'CCCCFF',
+  '000080', 'FF00FF', 'FFFF00', '00FFFF', '800080', '800000', '008080', '0000FF',
+  '00CCFF', 'CCFFFF', 'CCFFCC', 'FFFF99', '99CCFF', 'FF99CC', 'CC99FF', 'FFCC99',
+  '3366FF', '33CCCC', '99CC00', 'FFCC00', 'FF9900', 'FF6600', '666699', '969696',
+  '003366', '339966', '003300', '333300', '993300', '993366', '333399', '333333',
+]
+
+function clampByte(value) {
+  return Math.min(255, Math.max(0, Math.round(value)))
+}
+
+function applyTintToChannel(channel, tint) {
+  if (!Number.isFinite(tint) || tint === 0) return channel
+  if (tint < 0) return clampByte(channel * (1 + tint))
+  return clampByte(channel + (255 - channel) * tint)
+}
+
+function applyTintToHex(hex, tint) {
+  const normalized = String(hex || '').replace(/^#/, '')
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) return hex
+  const r = parseInt(normalized.slice(0, 2), 16)
+  const g = parseInt(normalized.slice(2, 4), 16)
+  const b = parseInt(normalized.slice(4, 6), 16)
+  return [
+    applyTintToChannel(r, tint),
+    applyTintToChannel(g, tint),
+    applyTintToChannel(b, tint),
+  ].map((value) => value.toString(16).padStart(2, '0')).join('').toUpperCase()
+}
+
+function excelColorToCss(color, fallback = null) {
+  if (!color) return fallback
+  let hex = null
+  if (color.argb) {
+    const value = String(color.argb).replace(/^#/, '')
+    hex = value.length === 8 ? value.slice(2) : value
+  } else if (color.rgb) {
+    hex = String(color.rgb).replace(/^#/, '')
+  } else if (Number.isFinite(color.theme)) {
+    hex = EXCEL_THEME_COLORS[color.theme] || null
+  } else if (Number.isFinite(color.indexed)) {
+    hex = EXCEL_INDEXED_COLORS[color.indexed] || null
+  }
+
+  if (!hex || !/^[0-9a-f]{6}$/i.test(hex)) return fallback
+  return `#${applyTintToHex(hex, color.tint)}`
+}
+
+function excelBorderToPreview(edge) {
+  if (!edge?.style || edge.style === 'none') return null
+  const widthMap = {
+    hair: 1,
+    thin: 1,
+    medium: 2,
+    thick: 3,
+    double: 3,
+  }
+  const styleMap = {
+    dashed: 'dashed',
+    dashDot: 'dashed',
+    dashDotDot: 'dashed',
+    mediumDashed: 'dashed',
+    mediumDashDot: 'dashed',
+    mediumDashDotDot: 'dashed',
+    dotted: 'dotted',
+    double: 'double',
+  }
+  const width = widthMap[edge.style] || 1
+  const lineStyle = styleMap[edge.style] || 'solid'
+  const color = excelColorToCss(edge.color, 'var(--border-subtle)')
+  return {
+    css: `${width}px ${lineStyle} ${color}`,
+    color,
+    width,
+    dashArray: lineStyle === 'dashed' ? '6 4' : lineStyle === 'dotted' ? '2 3' : undefined,
+  }
+}
+
+function decodeCellAddress(address) {
+  const match = String(address || '').match(/^([A-Z]+)(\d+)$/i)
+  if (!match) return null
+  const letters = match[1].toUpperCase()
+  let col = 0
+  for (const letter of letters) {
+    col = col * 26 + (letter.charCodeAt(0) - 64)
+  }
+  return { row: Number(match[2]) - 1, col: col - 1 }
+}
+
+function decodeCellRange(range) {
+  const [start, end] = String(range || '').split(':')
+  const startAddress = decodeCellAddress(start)
+  const endAddress = decodeCellAddress(end || start)
+  if (!startAddress || !endAddress) return null
+  return {
+    startRow: Math.min(startAddress.row, endAddress.row),
+    endRow: Math.max(startAddress.row, endAddress.row),
+    startCol: Math.min(startAddress.col, endAddress.col),
+    endCol: Math.max(startAddress.col, endAddress.col),
+  }
+}
+
+function excelColumnWidthToPx(width) {
+  const safeWidth = Number.isFinite(width) ? width : EXCEL_DEFAULT_COLUMN_WIDTH
+  return Math.round(safeWidth * 7 + 5)
+}
+
+function excelRowHeightToPx(height) {
+  if (!Number.isFinite(height)) return null
+  return Math.round(height * EXCEL_POINT_TO_PX)
+}
 
 function getLanguage(ext) {
   const map = {
@@ -228,6 +346,191 @@ function toCellDisplayValue(value) {
   if (value == null) return ''
   if (typeof value === 'string') return value
   return String(value)
+}
+
+function getExcelCellDisplayValue(cell) {
+  if (!cell) return ''
+  const value = cell.value
+  if (cell.text) return cell.text
+  if (value == null) return ''
+  if (value instanceof Date) return value.toLocaleString()
+  if (typeof value !== 'object') return String(value)
+  if (Array.isArray(value.richText)) {
+    return value.richText.map((part) => part.text || '').join('')
+  }
+  if (value.text != null) return String(value.text)
+  if (value.result != null) return String(value.result)
+  if (value.formula) return value.result != null ? String(value.result) : `=${value.formula}`
+  if (value.hyperlink && value.text) return String(value.text)
+  return String(value)
+}
+
+function getExcelTextDecoration(font = {}) {
+  const decorations = []
+  if (font.underline) decorations.push('underline')
+  if (font.strike) decorations.push('line-through')
+  return decorations.length ? decorations.join(' ') : undefined
+}
+
+function getExcelFontFamily(name) {
+  if (!name) return undefined
+  const escaped = String(name).replace(/["\\]/g, '')
+  return `"${escaped}", "Noto Sans", sans-serif`
+}
+
+function getExcelCellStyle(cell) {
+  const style = cell?.style || {}
+  const font = style.font || {}
+  const alignment = style.alignment || {}
+  const border = style.border || {}
+  const fill = style.fill || {}
+  const previewStyle = {}
+
+  const fillColor = fill?.fgColor || fill?.bgColor
+  if (fill.type === 'pattern' && fill.pattern !== 'none') {
+    const background = excelColorToCss(fillColor)
+    if (background) previewStyle.background = background
+  }
+
+  const color = excelColorToCss(font.color)
+  if (color) previewStyle.color = color
+  if (font.bold) previewStyle.fontWeight = 700
+  if (font.italic) previewStyle.fontStyle = 'italic'
+  if (font.size) previewStyle.fontSize = Math.round(font.size * EXCEL_POINT_TO_PX)
+  if (font.name) previewStyle.fontFamily = getExcelFontFamily(font.name)
+  const textDecoration = getExcelTextDecoration(font)
+  if (textDecoration) previewStyle.textDecoration = textDecoration
+
+  if (alignment.horizontal) previewStyle.horizontal = alignment.horizontal
+  if (alignment.vertical) previewStyle.vertical = alignment.vertical
+  if (alignment.wrapText) previewStyle.wrapText = true
+  if (alignment.textRotation) previewStyle.textRotation = alignment.textRotation
+
+  const top = excelBorderToPreview(border.top)
+  const right = excelBorderToPreview(border.right)
+  const bottom = excelBorderToPreview(border.bottom)
+  const left = excelBorderToPreview(border.left)
+  if (top) previewStyle.borderTop = top.css
+  if (right) previewStyle.borderRight = right.css
+  if (bottom) previewStyle.borderBottom = bottom.css
+  if (left) previewStyle.borderLeft = left.css
+
+  const diagonal = excelBorderToPreview(border.diagonal)
+  if (diagonal && (border.diagonal?.up || border.diagonal?.down)) {
+    previewStyle.diagonal = {
+      up: Boolean(border.diagonal.up),
+      down: Boolean(border.diagonal.down),
+      color: diagonal.color,
+      width: diagonal.width,
+      dashArray: diagonal.dashArray,
+    }
+  }
+
+  return Object.keys(previewStyle).length ? previewStyle : null
+}
+
+function getSheetMergeMaps(worksheet) {
+  const mergedCells = {}
+  const hiddenCells = {}
+  const ranges = worksheet?.model?.merges || []
+
+  ranges.forEach((rangeText) => {
+    const range = decodeCellRange(rangeText)
+    if (!range) return
+    const rowSpan = range.endRow - range.startRow + 1
+    const colSpan = range.endCol - range.startCol + 1
+    if (rowSpan <= 1 && colSpan <= 1) return
+
+    mergedCells[`${range.startRow}:${range.startCol}`] = { rowSpan, colSpan }
+    for (let rowIndex = range.startRow; rowIndex <= range.endRow; rowIndex += 1) {
+      for (let colIndex = range.startCol; colIndex <= range.endCol; colIndex += 1) {
+        if (rowIndex !== range.startRow || colIndex !== range.startCol) {
+          hiddenCells[`${rowIndex}:${colIndex}`] = true
+        }
+      }
+    }
+  })
+
+  return { mergedCells, hiddenCells }
+}
+
+function getWorksheetBounds(worksheet) {
+  const mergeRanges = worksheet?.model?.merges || []
+  let rowCount = Math.max(worksheet?.rowCount || 0, worksheet?.actualRowCount || 0, 1)
+  let columnCount = Math.max(worksheet?.columnCount || 0, worksheet?.actualColumnCount || 0, 1)
+
+  worksheet?.eachRow?.({ includeEmpty: true }, (row, rowNumber) => {
+    rowCount = Math.max(rowCount, rowNumber)
+    columnCount = Math.max(columnCount, row.cellCount || 0, row.actualCellCount || 0)
+  })
+
+  mergeRanges.forEach((rangeText) => {
+    const range = decodeCellRange(rangeText)
+    if (!range) return
+    rowCount = Math.max(rowCount, range.endRow + 1)
+    columnCount = Math.max(columnCount, range.endCol + 1)
+  })
+
+  return { rowCount, columnCount: Math.max(columnCount, 1) }
+}
+
+function getPreviewSheetFromExcelWorksheet(worksheet) {
+  const { rowCount, columnCount } = getWorksheetBounds(worksheet)
+  const rows = Array.from({ length: rowCount }, () => Array.from({ length: columnCount }, () => ''))
+  const cellStyles = {}
+  const rowHeights = {}
+  const columnWidths = {}
+  const { mergedCells, hiddenCells } = getSheetMergeMaps(worksheet)
+  const defaultRowHeight = excelRowHeightToPx(worksheet?.properties?.defaultRowHeight)
+
+  for (let colIndex = 0; colIndex < columnCount; colIndex += 1) {
+    const column = worksheet.getColumn(colIndex + 1)
+    if (column?.hidden) {
+      columnWidths[colIndex] = 0
+    } else if (column?.width) {
+      columnWidths[colIndex] = excelColumnWidthToPx(column.width)
+    }
+  }
+
+  for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+    const row = worksheet.getRow(rowIndex + 1)
+    if (row?.hidden) {
+      rowHeights[rowIndex] = 0
+    } else if (row?.height) {
+      rowHeights[rowIndex] = excelRowHeightToPx(row.height)
+    } else if (defaultRowHeight) {
+      rowHeights[rowIndex] = defaultRowHeight
+    }
+
+    for (let colIndex = 0; colIndex < columnCount; colIndex += 1) {
+      const cell = row.getCell(colIndex + 1)
+      rows[rowIndex][colIndex] = getExcelCellDisplayValue(cell)
+      const previewStyle = getExcelCellStyle(cell)
+      if (previewStyle) cellStyles[`${rowIndex}:${colIndex}`] = previewStyle
+    }
+  }
+
+  return {
+    name: worksheet.name,
+    rows,
+    cellStyles,
+    mergedCells,
+    hiddenCells,
+    columnWidths,
+    rowHeights,
+  }
+}
+
+async function readXlsxWorkbook(buffer) {
+  const mod = await import('exceljs/dist/exceljs.min.js')
+  const ExcelJS = mod.default || mod
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer.slice(0))
+  const sheets = []
+  workbook.eachSheet((worksheet) => {
+    sheets.push(getPreviewSheetFromExcelWorksheet(worksheet))
+  })
+  return sheets
 }
 
 function getTextUnits(value) {
@@ -419,9 +722,101 @@ function getCellSelectionState(rowIndex, columnIndex, selection) {
   }
 }
 
+function getCellKey(rowIndex, columnIndex) {
+  return `${rowIndex}:${columnIndex}`
+}
+
+function getHorizontalAlignment(value) {
+  if (value === 'center') return { justifyContent: 'center', textAlign: 'center' }
+  if (value === 'right') return { justifyContent: 'flex-end', textAlign: 'right' }
+  return { justifyContent: 'flex-start', textAlign: 'left' }
+}
+
+function getVerticalAlignment(value) {
+  if (value === 'middle') return 'center'
+  if (value === 'bottom') return 'flex-end'
+  return 'flex-start'
+}
+
+function getCellTextRotationStyle(style) {
+  if (!style?.textRotation) return undefined
+  if (style.textRotation === 'vertical') return { writingMode: 'vertical-rl' }
+  const rotation = Number(style.textRotation)
+  if (!Number.isFinite(rotation) || rotation === 0) return undefined
+  return {
+    transform: `rotate(${rotation > 90 ? 90 - rotation : -rotation}deg)`,
+    transformOrigin: 'center',
+  }
+}
+
+function getSpanWidth(startColumn, colSpan, columnWidths) {
+  let width = 0
+  for (let index = startColumn; index < startColumn + colSpan; index += 1) {
+    width += columnWidths[index] || 0
+  }
+  return width
+}
+
+function getSpanHeight(startRow, rowSpan, rowHeights) {
+  let height = 0
+  for (let index = startRow; index < startRow + rowSpan; index += 1) {
+    height += rowHeights[index] || 0
+  }
+  return height
+}
+
+function DiagonalCellBorders({ diagonal }) {
+  if (!diagonal?.up && !diagonal?.down) return null
+  return (
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      style={{
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        overflow: 'hidden',
+        zIndex: 1,
+      }}
+    >
+      {diagonal.down && (
+        <line
+          x1="0"
+          y1="0"
+          x2="100%"
+          y2="100%"
+          stroke={diagonal.color}
+          strokeWidth={diagonal.width}
+          strokeDasharray={diagonal.dashArray}
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+      {diagonal.up && (
+        <line
+          x1="0"
+          y1="100%"
+          x2="100%"
+          y2="0"
+          stroke={diagonal.color}
+          strokeWidth={diagonal.width}
+          strokeDasharray={diagonal.dashArray}
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+    </svg>
+  )
+}
+
 function SpreadsheetGrid({
   rows,
   t,
+  cellStyles,
+  mergedCells,
+  hiddenCells,
+  sheetColumnWidths,
+  sheetRowHeights,
   columnWidths,
   rowHeights,
   viewportWidth,
@@ -439,6 +834,11 @@ function SpreadsheetGrid({
   const lastSelectionMouseEventRef = useRef(null)
   const autoScrollFrameRef = useRef(null)
   const safeRows = rows || []
+  const safeCellStyles = cellStyles || {}
+  const safeMergedCells = mergedCells || {}
+  const safeHiddenCells = hiddenCells || {}
+  const safeSheetColumnWidths = sheetColumnWidths || {}
+  const safeSheetRowHeights = sheetRowHeights || {}
   const columnCount = getMaxColumnCount(safeRows)
   const resolvedColumnWidths = useMemo(() => {
     const estimated = estimateColumnWidths(safeRows, viewportWidth, columnCount)
@@ -447,12 +847,19 @@ function SpreadsheetGrid({
       if (userWidth != null) {
         return clamp(userWidth, SPREADSHEET_MIN_COLUMN_WIDTH, SPREADSHEET_MAX_COLUMN_WIDTH)
       }
-      return Math.max(SPREADSHEET_MIN_COLUMN_WIDTH, width)
+      const workbookWidth = safeSheetColumnWidths[index]
+      if (workbookWidth != null) {
+        return workbookWidth === 0 ? 0 : clamp(workbookWidth, SPREADSHEET_MIN_COLUMN_WIDTH, SPREADSHEET_MAX_COLUMN_WIDTH)
+      }
+      return clamp(width, SPREADSHEET_MIN_COLUMN_WIDTH, SPREADSHEET_MAX_COLUMN_WIDTH)
     })
-  }, [columnCount, columnWidths, safeRows, viewportWidth])
+  }, [columnCount, columnWidths, safeRows, safeSheetColumnWidths, viewportWidth])
   const resolvedRowHeights = useMemo(
-    () => safeRows.map((_, index) => clamp(rowHeights?.[index] ?? SPREADSHEET_DEFAULT_ROW_HEIGHT, SPREADSHEET_MIN_ROW_HEIGHT, SPREADSHEET_MAX_ROW_HEIGHT)),
-    [rowHeights, safeRows]
+    () => safeRows.map((_, index) => {
+      const height = rowHeights?.[index] ?? safeSheetRowHeights[index] ?? SPREADSHEET_DEFAULT_ROW_HEIGHT
+      return height === 0 ? 0 : clamp(height, SPREADSHEET_MIN_ROW_HEIGHT, SPREADSHEET_MAX_ROW_HEIGHT)
+    }),
+    [rowHeights, safeRows, safeSheetRowHeights]
   )
   const tableWidth = useMemo(
     () => SPREADSHEET_ROW_HEADER_WIDTH + resolvedColumnWidths.reduce((sum, width) => sum + width, 0),
@@ -796,11 +1203,11 @@ function SpreadsheetGrid({
                   style={{
                     position: 'relative',
                     height: resolvedRowHeights[rowIndex],
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    justifyContent: 'center',
-                    paddingTop: 10,
-                  }}
+	                    display: 'flex',
+	                    alignItems: 'flex-start',
+	                    justifyContent: 'center',
+	                    paddingTop: resolvedRowHeights[rowIndex] === 0 ? 0 : 10,
+	                  }}
                 >
                   {rowIndex + 1}
                   <div
@@ -827,11 +1234,24 @@ function SpreadsheetGrid({
                 </div>
               </th>
               {resolvedColumnWidths.map((width, columnIndex) => {
+                const cellKey = getCellKey(rowIndex, columnIndex)
+                if (safeHiddenCells[cellKey]) return null
+                const cellStyle = safeCellStyles[cellKey] || {}
+                const merge = safeMergedCells[cellKey]
+                const colSpan = merge?.colSpan || 1
+                const rowSpan = merge?.rowSpan || 1
+                const cellWidth = colSpan > 1 ? getSpanWidth(columnIndex, colSpan, resolvedColumnWidths) : width
+                const cellHeight = rowSpan > 1 ? getSpanHeight(rowIndex, rowSpan, resolvedRowHeights) : resolvedRowHeights[rowIndex]
                 const displayValue = toCellDisplayValue(row?.[columnIndex] ?? '')
                 const selectionState = getCellSelectionState(rowIndex, columnIndex, activeSelection)
+                const horizontal = getHorizontalAlignment(cellStyle.horizontal)
+                const rotationStyle = getCellTextRotationStyle(cellStyle)
+                const whiteSpace = cellStyle.wrapText ? 'pre-wrap' : 'nowrap'
                 return (
                   <td
                     key={columnIndex}
+                    rowSpan={rowSpan}
+                    colSpan={colSpan}
                     onMouseDown={(event) => {
                       if (event.button !== 0 || dragState) return
                       event.preventDefault()
@@ -861,60 +1281,83 @@ function SpreadsheetGrid({
                       selectionDraftRef.current = nextDraft
                       setSelectionDraft(nextDraft)
                     }}
-                    style={{
-                      color: 'var(--text-secondary)',
-                      borderBottom: '1px solid var(--border-subtle)',
-                      borderRight: '1px solid var(--border-subtle)',
-                      width,
-                      minWidth: width,
-                      verticalAlign: 'top',
-                      padding: 0,
-                      background: 'var(--bg-base)',
-                      cursor: 'cell',
-                    }}
-                  >
-                    <div
-                      style={{
-                        position: 'relative',
-                        height: resolvedRowHeights[rowIndex],
-                        padding: '8px 10px',
-                        overflow: 'hidden',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        background: selectionState.selected ? SPREADSHEET_SELECTED_CELL_BACKGROUND : 'var(--bg-base)',
-                      }}
-                    >
-                      {selectionState.selected && (
-                        <span
-                          style={{
+	                    style={{
+	                      color: cellStyle.color || 'var(--text-secondary)',
+	                      borderTop: cellStyle.borderTop || 'none',
+	                      borderBottom: cellStyle.borderBottom || '1px solid var(--border-subtle)',
+	                      borderLeft: cellStyle.borderLeft || 'none',
+	                      borderRight: cellStyle.borderRight || '1px solid var(--border-subtle)',
+	                      width: cellWidth,
+	                      minWidth: cellWidth,
+	                      verticalAlign: 'top',
+	                      padding: 0,
+	                      background: cellStyle.background || 'var(--bg-base)',
+	                      cursor: 'cell',
+	                    }}
+	                  >
+	                    <div
+	                      style={{
+	                        position: 'relative',
+	                        minHeight: cellHeight,
+	                        padding: cellHeight === 0 || cellWidth === 0 ? 0 : '8px 10px',
+	                        overflow: 'hidden',
+	                        whiteSpace,
+	                        wordBreak: cellStyle.wrapText ? 'break-word' : 'normal',
+	                        display: 'flex',
+	                        alignItems: getVerticalAlignment(cellStyle.vertical),
+	                        justifyContent: horizontal.justifyContent,
+	                        textAlign: horizontal.textAlign,
+	                        background: selectionState.selected ? SPREADSHEET_SELECTED_CELL_BACKGROUND : (cellStyle.background || 'var(--bg-base)'),
+	                        fontFamily: cellStyle.fontFamily,
+	                        fontSize: cellStyle.fontSize,
+	                        fontStyle: cellStyle.fontStyle,
+	                        fontWeight: cellStyle.fontWeight,
+	                        textDecoration: cellStyle.textDecoration,
+	                      }}
+	                    >
+	                      <DiagonalCellBorders diagonal={cellStyle.diagonal} />
+	                      {selectionState.selected && (
+	                        <span
+	                          style={{
                             position: 'absolute',
                             inset: 0,
                             pointerEvents: 'none',
-                            borderTop: selectionState.top ? '2px solid var(--blue)' : 'none',
-                            borderBottom: selectionState.bottom ? '2px solid var(--blue)' : 'none',
-                            borderLeft: selectionState.left ? '2px solid var(--blue)' : 'none',
-                            borderRight: selectionState.right ? '2px solid var(--blue)' : 'none',
-                            outline: selectionState.anchor ? '1px solid rgba(37, 99, 235, 0.4)' : 'none',
-                            outlineOffset: -1,
-                          }}
-                        />
-                      )}
-                      {displayValue}
-                      {selectionState.anchor && (
-                        <span
-                          style={{
-                            position: 'absolute',
-                            right: 2,
+	                            borderTop: selectionState.top ? '2px solid var(--blue)' : 'none',
+	                            borderBottom: selectionState.bottom ? '2px solid var(--blue)' : 'none',
+	                            borderLeft: selectionState.left ? '2px solid var(--blue)' : 'none',
+	                            borderRight: selectionState.right ? '2px solid var(--blue)' : 'none',
+	                            background: selectionState.anchor ? 'color-mix(in srgb, var(--blue) 6%, transparent)' : 'transparent',
+	                            zIndex: 2,
+	                          }}
+	                        />
+	                      )}
+	                      <span
+	                        style={{
+	                          minWidth: 0,
+	                          maxWidth: '100%',
+	                          overflow: 'hidden',
+	                          textOverflow: cellStyle.wrapText ? 'clip' : 'ellipsis',
+	                          position: 'relative',
+	                          zIndex: 3,
+	                          ...rotationStyle,
+	                        }}
+	                      >
+	                        {displayValue}
+	                      </span>
+	                      {selectionState.anchor && (
+	                        <span
+	                          style={{
+	                            position: 'absolute',
+	                            right: 2,
                             bottom: 2,
                             width: 6,
-                            height: 6,
-                            background: 'var(--blue)',
-                            borderRadius: 1,
-                          }}
-                        />
-                      )}
+	                            height: 6,
+	                            background: 'var(--blue)',
+	                            borderRadius: 1,
+	                            zIndex: 4,
+	                          }}
+	                        />
+	                      )}
                     </div>
                   </td>
                 )
@@ -1074,12 +1517,17 @@ function WorkbookPreview({ sheets, activeSheetIndex, onSelectSheet, t, filePath 
           }}
         >
           <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex' }}>
-            <SpreadsheetGrid
-              rows={activeSheet?.rows || []}
-              t={t}
-              columnWidths={activeLayout.columnWidths || {}}
-              rowHeights={activeLayout.rowHeights || {}}
-              viewportWidth={activeLayout.viewportWidth || 0}
+	            <SpreadsheetGrid
+	              rows={activeSheet?.rows || []}
+	              t={t}
+	              cellStyles={activeSheet?.cellStyles || {}}
+	              mergedCells={activeSheet?.mergedCells || {}}
+	              hiddenCells={activeSheet?.hiddenCells || {}}
+	              sheetColumnWidths={activeSheet?.columnWidths || {}}
+	              sheetRowHeights={activeSheet?.rowHeights || {}}
+	              columnWidths={activeLayout.columnWidths || {}}
+	              rowHeights={activeLayout.rowHeights || {}}
+	              viewportWidth={activeLayout.viewportWidth || 0}
               onViewportWidthChange={handleViewportWidthChange}
               onColumnWidthChange={handleColumnWidthChange}
               onRowHeightChange={handleRowHeightChange}
@@ -1491,7 +1939,10 @@ function ImagePreview({ src, alt }) {
 }
 
 function getFileExtension(file) {
-  if (file.ext) return String(file.ext).toLowerCase()
+  if (file.ext) {
+    const ext = String(file.ext).trim().toLowerCase()
+    return ext && !ext.startsWith('.') ? `.${ext}` : ext
+  }
   const name = file.name || file.original_name || ''
   const idx = name.lastIndexOf('.')
   return idx >= 0 ? name.slice(idx).toLowerCase() : ''
@@ -1504,7 +1955,7 @@ function getMimeType(file) {
 function inferPreviewKind(file, ext) {
   const mimeType = getMimeType(file)
 
-  if (ext === '.csv' || mimeType === 'text/csv') return 'csv'
+  if (ext === '.csv' || ext === '.tsv' || mimeType === 'text/csv' || mimeType === 'text/tab-separated-values') return 'csv'
   if (SPREADSHEET_EXTENSIONS.has(ext) || SPREADSHEET_MIME_TYPES.has(mimeType) || mimeType.includes('spreadsheetml')) {
     return 'spreadsheet'
   }
@@ -1679,23 +2130,32 @@ export default function RichFilePreview({
         if (previewKind === 'csv') {
           const text = await fetchTextContent()
           const Papa = (await import('papaparse')).default
-          const result = Papa.parse(text, { skipEmptyLines: true })
-          if (!cancelled) setTables([{ name: 'CSV', rows: result.data }])
+          const isTsv = ext === '.tsv' || getMimeType(file) === 'text/tab-separated-values'
+          const result = Papa.parse(text, {
+            skipEmptyLines: true,
+            ...(isTsv ? { delimiter: '\t' } : {}),
+          })
+          if (!cancelled) setTables([{ name: isTsv ? 'TSV' : 'CSV', rows: result.data }])
           return
         }
 
-        if (previewKind === 'spreadsheet') {
-          const buffer = await fetchArrayBuffer()
-          assertValidOfficeBuffer(file, ext, previewKind, buffer)
-          const XLSX = await import('xlsx')
-          const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' })
-          const allSheets = workbook.SheetNames.map((sheetName) => ({
-            name: sheetName,
-            rows: XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' }),
-          }))
-          const firstNonEmptySheetIndex = allSheets.findIndex((sheet) =>
-            sheet.rows.some((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim() !== ''))
-          )
+	        if (previewKind === 'spreadsheet') {
+	          const buffer = await fetchArrayBuffer()
+	          assertValidOfficeBuffer(file, ext, previewKind, buffer)
+	          let allSheets
+	          if (ext === '.xlsx') {
+	            allSheets = await readXlsxWorkbook(buffer)
+	          } else {
+	            const XLSX = await import('xlsx')
+	            const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' })
+	            allSheets = workbook.SheetNames.map((sheetName) => ({
+	              name: sheetName,
+	              rows: XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' }),
+	            }))
+	          }
+	          const firstNonEmptySheetIndex = allSheets.findIndex((sheet) =>
+	            sheet.rows.some((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim() !== ''))
+	          )
           if (!cancelled) {
             setTables(allSheets)
             setActiveSheetIndex(firstNonEmptySheetIndex >= 0 ? firstNonEmptySheetIndex : 0)

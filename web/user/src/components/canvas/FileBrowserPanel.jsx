@@ -1,88 +1,23 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { animate } from 'animejs'
-import { X, RefreshCw, FileText, FolderTree, Copy, Check, ChevronDown, ChevronLeft, CornerDownLeft } from 'lucide-react'
+import { X, RefreshCw, FileText, FolderTree, Copy, ChevronDown, CornerDownLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import hljs from 'highlight.js/lib/core'
-import 'highlight.js/styles/github-dark.css'
-import bash from 'highlight.js/lib/languages/bash'
-import python from 'highlight.js/lib/languages/python'
-import javascript from 'highlight.js/lib/languages/javascript'
-import typescript from 'highlight.js/lib/languages/typescript'
-import yaml from 'highlight.js/lib/languages/yaml'
-import json from 'highlight.js/lib/languages/json'
-import xml from 'highlight.js/lib/languages/xml'
-import css from 'highlight.js/lib/languages/css'
-import sql from 'highlight.js/lib/languages/sql'
-import go from 'highlight.js/lib/languages/go'
-import rust from 'highlight.js/lib/languages/rust'
-import java from 'highlight.js/lib/languages/java'
-import markdown from 'highlight.js/lib/languages/markdown'
-import dockerfile from 'highlight.js/lib/languages/dockerfile'
-import ini from 'highlight.js/lib/languages/ini'
 import useFileBrowserStore from '../../stores/fileBrowserStore'
 import useChatStore from '../../stores/chatStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { downloadFile, listDirectory, previewFile } from '../../api/userFiles'
-import RichFilePreview from '../shared/RichFilePreview'
 import { usePresence } from '@shared/motion/usePresence'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
 import { useSlidingUnderline, useSlidingVerticalIndicator } from '@shared/motion/useSlidingUnderline'
 import { DUR_MIGRATION, EASE_ACCORDION } from '@shared/motion/tokens'
-import MarkdownRenderer from '../markdown/MarkdownRenderer'
-import VirtualizedCodeLines from '../shared/VirtualizedCodeLines'
-import MermaidDiagram from '../markdown/MermaidDiagram'
-import ExcalidrawDiagram from '../markdown/ExcalidrawDiagram'
+import FilePreviewRenderer, { RawFilePreview, detectFileLanguage, isPlainTextFile } from '../shared/FilePreviewRenderer'
 import SelectedFilePopup from '../shared/SelectedFilePopup'
 import getLineFromNode from '../../utils/getLineFromNode'
 import { getFileIcon } from '../../utils/fileIcons'
 import DrawIcon from '@shared/components/shared/DrawIcon'
 
-hljs.registerLanguage('bash', bash)
-hljs.registerLanguage('python', python)
-hljs.registerLanguage('javascript', javascript)
-hljs.registerLanguage('typescript', typescript)
-hljs.registerLanguage('yaml', yaml)
-hljs.registerLanguage('json', json)
-hljs.registerLanguage('xml', xml)
-hljs.registerLanguage('html', xml)
-hljs.registerLanguage('css', css)
-hljs.registerLanguage('sql', sql)
-hljs.registerLanguage('go', go)
-hljs.registerLanguage('rust', rust)
-hljs.registerLanguage('java', java)
-hljs.registerLanguage('markdown', markdown)
-hljs.registerLanguage('dockerfile', dockerfile)
-hljs.registerLanguage('ini', ini)
-hljs.registerLanguage('plaintext', () => ({ contains: [] }))
-
-const EXT_TO_LANG = {
-  '.py': 'python', '.js': 'javascript', '.jsx': 'javascript', '.ts': 'typescript', '.tsx': 'typescript',
-  '.go': 'go', '.rs': 'rust', '.java': 'java', '.sh': 'bash', '.bash': 'bash', '.zsh': 'bash',
-  '.sql': 'sql', '.css': 'css', '.json': 'json', '.yaml': 'yaml', '.yml': 'yaml',
-  '.xml': 'xml', '.html': 'html', '.htm': 'html', '.md': 'markdown', '.markdown': 'markdown',
-  '.ini': 'ini', '.conf': 'ini', '.env': 'ini', '.toml': 'ini',
-  '.dockerfile': 'dockerfile',
-  '.excalidraw': 'json',
-}
-
-function detectLanguage(filePath) {
-  if (!filePath) return 'plaintext'
-  const lower = filePath.toLowerCase()
-  if (lower.endsWith('/dockerfile') || lower === 'dockerfile') return 'dockerfile'
-  const dot = lower.lastIndexOf('.')
-  if (dot < 0) return 'plaintext'
-  return EXT_TO_LANG[lower.slice(dot)] || 'plaintext'
-}
-
-const PLAIN_TEXT_EXTENSIONS = new Set([
-  '.txt', '.md', '.markdown', '.html', '.htm', '.css', '.js', '.jsx', '.ts', '.tsx',
-  '.json', '.yaml', '.yml', '.toml', '.xml', '.csv', '.tsv', '.log', '.conf', '.ini',
-  '.env', '.dockerfile', '.py', '.java', '.go', '.rs', '.rb', '.php', '.c', '.cpp',
-  '.h', '.hpp', '.swift', '.kt', '.scala', '.r', '.lua', '.sh', '.sql',
-  '.excalidraw',
-])
 const MAIN_AREA_HEADER_HEIGHT = 30
 const PATH_MODE_BUTTON_HEIGHT = 22
 
@@ -269,6 +204,16 @@ function joinPath(base, name) {
   return `${normalizePath(base)}/${name}`
 }
 
+// A relative Write path (e.g. "read_jsonl.py") is anchored to the agent
+// session's cwd, not the file-server process cwd — resolve it here so the
+// backend's realpath() lands on the real file instead of 404ing.
+function resolveAgainstCwd(filePath, cwd) {
+  if (!filePath) return filePath
+  if (filePath[0] === '/' || filePath[0] === '~') return filePath
+  if (!cwd || cwd === '~') return filePath
+  return joinPath(cwd, filePath.replace(/^\.\/+/, ''))
+}
+
 function isWithinPath(filePath, rootPath) {
   const file = normalizePath(filePath)
   const root = normalizePath(rootPath)
@@ -380,13 +325,6 @@ function getPptxSelectionMeta(range, root) {
   }
 }
 
-function isPlainText(tab) {
-  const mime = (tab.mimeType || '').toLowerCase()
-  if (mime.startsWith('text/')) return true
-  if (mime === 'application/json' || mime.includes('xml') || mime.includes('yaml')) return true
-  return PLAIN_TEXT_EXTENSIONS.has(extensionFor(tab))
-}
-
 async function readTextFile(filePath, options = {}) {
   try {
     const data = await previewFile(filePath, options)
@@ -398,6 +336,38 @@ async function readTextFile(filePath, options = {}) {
     cacheMode: 'no-store',
   })
   return blob.text()
+}
+
+function previewFileForTab(tab) {
+  const name = tab.name || fileName(tab.filePath)
+  return {
+    name,
+    path: tab.filePath,
+    ext: extensionFor(tab),
+    mime_type: tab.mimeType || null,
+  }
+}
+
+function previewCacheKeyForTab(tab) {
+  return `${tab.filePath}:${tab.refreshKey}:${tab.mimeType || ''}`
+}
+
+function useTabPreviewLoaders(tab) {
+  const previewFile = useMemo(() => previewFileForTab(tab), [tab])
+  const cacheKey = previewCacheKeyForTab(tab)
+  const loadBlob = useCallback(
+    async () => downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' }),
+    [tab.filePath, tab.refreshKey]
+  )
+  const loadText = useCallback(async () => {
+    return readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
+  }, [tab.filePath, tab.refreshKey])
+  const loadArrayBuffer = useCallback(async () => {
+    const blob = await downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' })
+    return blob.arrayBuffer()
+  }, [tab.filePath, tab.refreshKey])
+
+  return { previewFile, cacheKey, loadText, loadArrayBuffer, loadBlob }
 }
 
 function ModeButton({ active, children, onClick, position }) {
@@ -461,78 +431,14 @@ function CopyPathButton({ path }) {
 }
 
 function RawTextView({ tab, onTextLoaded }) {
-  const [content, setContent] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    setContent('')
-
-    readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
-      .then((text) => {
-        if (!cancelled) {
-          setContent(text)
-          onTextLoaded?.(text)
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err?.message || String(err))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [tab.filePath, tab.refreshKey, onTextLoaded])
-
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-2 p-4">
-        <div className="skeleton" style={{ width: '100%', height: 16 }} />
-        <div className="skeleton" style={{ width: '80%', height: 16 }} />
-        <div className="skeleton" style={{ width: '60%', height: 16 }} />
-      </div>
-    )
-  }
-
-  if (error) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--red)' }}>{error}</div>
-  }
-
-  return <HighlightedCode content={content} language={detectLanguage(tab.filePath)} />
-}
-
-function HighlightedCode({ content, language }) {
-  const highlighted = useMemo(() => {
-    if (!content) return null
-    try {
-      if (language && hljs.getLanguage(language)) {
-        return hljs.highlight(content, { language }).value
-      }
-      return hljs.highlightAuto(content).value
-    } catch {
-      return null
-    }
-  }, [content, language])
-
-  const lines = useMemo(() => {
-    if (!content) return []
-    const raw = content.replace(/\n$/, '')
-    if (!highlighted) {
-      return raw.split('\n').map((line) => ({ text: line, html: null }))
-    }
-    return highlighted.replace(/\n$/, '').split('\n').map((html) => ({ text: null, html }))
-  }, [content, highlighted])
-
+  const { previewFile, cacheKey, loadText } = useTabPreviewLoaders(tab)
   return (
-    <div className="flex-1 min-w-0 min-h-0 overflow-hidden" style={{ width: '100%', height: '100%' }}>
-      <VirtualizedCodeLines lines={lines} />
-    </div>
+    <RawFilePreview
+      file={previewFile}
+      cacheKey={cacheKey}
+      loadText={loadText}
+      onTextLoaded={onTextLoaded}
+    />
   )
 }
 
@@ -577,240 +483,17 @@ function NonPlainRawNotice({ onPreview }) {
   )
 }
 
-function MarkdownPreviewView({ tab, onTextLoaded }) {
-  const [content, setContent] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    setContent('')
-    readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
-      .then((text) => {
-        if (!cancelled) {
-          setContent(text)
-          onTextLoaded?.(text)
-        }
-      })
-      .catch((err) => { if (!cancelled) setError(err?.message || String(err)) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [tab.filePath, tab.refreshKey, onTextLoaded])
-
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-2 p-4">
-        <div className="skeleton" style={{ width: '100%', height: 16 }} />
-        <div className="skeleton" style={{ width: '80%', height: 16 }} />
-        <div className="skeleton" style={{ width: '60%', height: 16 }} />
-      </div>
-    )
-  }
-  if (error) return <div className="p-4 text-xs" style={{ color: 'var(--red)' }}>{error}</div>
-
-  return (
-    <div className="overflow-auto" style={{ height: '100%', padding: '12px 16px' }}>
-      <MarkdownRenderer content={content} />
-    </div>
-  )
-}
-
-function MermaidPreviewView({ tab, onTextLoaded }) {
-  const [content, setContent] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    setContent('')
-    readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
-      .then((text) => {
-        if (!cancelled) {
-          setContent(text)
-          onTextLoaded?.(text)
-        }
-      })
-      .catch((err) => { if (!cancelled) setError(err?.message || String(err)) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [tab.filePath, tab.refreshKey, onTextLoaded])
-
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-2 p-4">
-        <div className="skeleton" style={{ width: '100%', height: 16 }} />
-        <div className="skeleton" style={{ width: '80%', height: 200 }} />
-      </div>
-    )
-  }
-  if (error) return <div className="p-4 text-xs" style={{ color: 'var(--red)' }}>{error}</div>
-
-  return (
-    <div
-      className="overflow-hidden"
-      style={{
-        width: '100%',
-        minWidth: 0,
-        height: '100%',
-        minHeight: 0,
-        padding: '12px 16px',
-        boxSizing: 'border-box',
-      }}
-    >
-      <MermaidDiagram code={content} fill />
-    </div>
-  )
-}
-
-function ExcalidrawPreviewView({ tab, onTextLoaded }) {
-  const [content, setContent] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    setContent('')
-    readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
-      .then((text) => {
-        if (!cancelled) {
-          setContent(text)
-          onTextLoaded?.(text)
-        }
-      })
-      .catch((err) => { if (!cancelled) setError(err?.message || String(err)) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [tab.filePath, tab.refreshKey, onTextLoaded])
-
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-2 p-4">
-        <div className="skeleton" style={{ width: '100%', height: 16 }} />
-        <div className="skeleton" style={{ width: '80%', height: 200 }} />
-      </div>
-    )
-  }
-  if (error) return <div className="p-4 text-xs" style={{ color: 'var(--red)' }}>{error}</div>
-
-  return (
-    <div
-      className="overflow-hidden"
-      style={{
-        width: '100%',
-        minWidth: 0,
-        height: '100%',
-        minHeight: 0,
-        padding: '12px 16px',
-        boxSizing: 'border-box',
-      }}
-    >
-      <ExcalidrawDiagram code={content} fill />
-    </div>
-  )
-}
-
-function CodePreviewView({ tab, onTextLoaded }) {
-  const [content, setContent] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    setContent('')
-    readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
-      .then((text) => {
-        if (!cancelled) {
-          setContent(text)
-          onTextLoaded?.(text)
-        }
-      })
-      .catch((err) => { if (!cancelled) setError(err?.message || String(err)) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [tab.filePath, tab.refreshKey, onTextLoaded])
-
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-2 p-4">
-        <div className="skeleton" style={{ width: '100%', height: 16 }} />
-        <div className="skeleton" style={{ width: '80%', height: 16 }} />
-      </div>
-    )
-  }
-  if (error) return <div className="p-4 text-xs" style={{ color: 'var(--red)' }}>{error}</div>
-
-  return <HighlightedCode content={content} language={detectLanguage(tab.filePath)} />
-}
-
-const RICH_PREVIEW_EXTS = new Set([
-  '.html', '.htm', '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp',
-  '.xlsx', '.xls', '.csv', '.tsv', '.pptx', '.docx',
-])
-
 function PreviewView({ tab, onTextLoaded }) {
-  const ext = extensionFor(tab).toLowerCase()
-
-  if (ext === '.md' || ext === '.markdown') {
-    return <MarkdownPreviewView tab={tab} onTextLoaded={onTextLoaded} />
-  }
-
-  if (ext === '.mmd' || ext === '.mermaid') {
-    return <MermaidPreviewView tab={tab} onTextLoaded={onTextLoaded} />
-  }
-
-  if (ext === '.excalidraw') {
-    return <ExcalidrawPreviewView tab={tab} onTextLoaded={onTextLoaded} />
-  }
-
-  if (RICH_PREVIEW_EXTS.has(ext)) {
-    return <RichFilePreviewView tab={tab} />
-  }
-
-  if (isPlainText(tab)) {
-    return <CodePreviewView tab={tab} onTextLoaded={onTextLoaded} />
-  }
-
-  return <RichFilePreviewView tab={tab} />
-}
-
-function RichFilePreviewView({ tab }) {
-  const previewFile = useMemo(() => {
-    const name = tab.name || fileName(tab.filePath)
-    return {
-      name,
-      path: tab.filePath,
-      ext: extensionFor(tab),
-      mime_type: tab.mimeType || null,
-    }
-  }, [tab])
-
-  const loadBlob = useCallback(
-    async () => downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' }),
-    [tab.filePath, tab.refreshKey]
-  )
-  const loadText = useCallback(async () => {
-    return readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
-  }, [tab.filePath, tab.refreshKey])
-  const loadArrayBuffer = useCallback(async () => {
-    const blob = await downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' })
-    return blob.arrayBuffer()
-  }, [tab.filePath, tab.refreshKey])
+  const { previewFile, cacheKey, loadText, loadArrayBuffer, loadBlob } = useTabPreviewLoaders(tab)
 
   return (
-    <RichFilePreview
+    <FilePreviewRenderer
       file={previewFile}
-      cacheKey={`${tab.filePath}:${tab.refreshKey}:${tab.mimeType || ''}`}
+      cacheKey={cacheKey}
       loadText={loadText}
       loadArrayBuffer={loadArrayBuffer}
       loadBlob={loadBlob}
+      onTextLoaded={onTextLoaded}
     />
   )
 }
@@ -820,7 +503,6 @@ function FileTreeSidebar({
   rootPath,
   treeOpen,
   treeWidth,
-  setTreeOpen,
   openFileTab,
 }) {
   const { t } = useTranslation()
@@ -976,25 +658,7 @@ function FileTreeSidebar({
   }
 
   if (!treeOpen) {
-    return (
-      <button
-        type="button"
-        onClick={() => setTreeOpen(true)}
-        title={t('fileBrowser.fileTree', 'File tree')}
-        className="flex items-start justify-center flex-shrink-0"
-        style={{
-          width: 30,
-          border: 'none',
-          borderRight: '1px solid var(--border-subtle)',
-          background: 'var(--bg-surface)',
-          color: 'var(--text-dim)',
-          cursor: 'pointer',
-          paddingTop: 10,
-        }}
-      >
-        <FolderTree size={16} strokeWidth={1.5} />
-      </button>
-    )
+    return null
   }
 
   return (
@@ -1009,42 +673,6 @@ function FileTreeSidebar({
         position: 'relative',
       }}
     >
-      <div
-        className="flex items-center"
-        style={{
-          height: 32,
-          padding: '0 10px 0 8px',
-          borderBottom: '1px solid var(--border-subtle)',
-          color: 'var(--text-dim)',
-          gap: 6,
-        }}
-      >
-        <span
-          className="text-xs font-semibold uppercase"
-          style={{ letterSpacing: '0.06em' }}
-        >
-          {t('fileBrowser.tree', 'Files')}
-        </span>
-        <button
-          type="button"
-          onClick={() => setTreeOpen(false)}
-          title={t('fileBrowser.collapseTree', 'Collapse file tree')}
-          className="flex items-center flex-shrink-0"
-          style={{
-            border: 'none',
-            background: 'transparent',
-            color: 'inherit',
-            cursor: 'pointer',
-            padding: 0,
-            marginLeft: 'auto',
-            height: 32,
-            justifyContent: 'flex-end',
-          }}
-        >
-          <ChevronLeft size={16} strokeWidth={1.5} />
-        </button>
-      </div>
-
       <div className="flex-1 overflow-auto" style={{ padding: '4px 0' }}>
         <div ref={treeContentRef} style={{ position: 'relative', minHeight: '100%' }}>
           <span
@@ -1144,11 +772,19 @@ export default function FileBrowserPanel() {
   // No authUser.workspace fallback — it is the control-panel's /tmp/cp-workspace
   // path, not the agent-runner's real /workspace cwd where files live.
   const activeCwd = activeSession?.cwd || ''
+  // The tab keeps whatever path Write reported (possibly relative); every path
+  // consumer below (backend calls, tree, path bar) uses the cwd-anchored one.
+  const resolvedActiveTab = useMemo(() => {
+    if (!activeTab) return null
+    const resolved = resolveAgainstCwd(activeTab.filePath, activeCwd)
+    return resolved === activeTab.filePath ? activeTab : { ...activeTab, filePath: resolved }
+  }, [activeTab, activeCwd])
   const treeRootPath = useMemo(() => {
-    const fileDir = dirname(activeTab?.filePath || '')
-    if (activeCwd && (!activeTab?.filePath || isWithinPath(activeTab.filePath, activeCwd))) return activeCwd
+    const filePath = resolvedActiveTab?.filePath || ''
+    const fileDir = dirname(filePath)
+    if (activeCwd && (!filePath || isWithinPath(filePath, activeCwd))) return activeCwd
     return fileDir || activeCwd || '~'
-  }, [activeCwd, activeTab?.filePath])
+  }, [activeCwd, resolvedActiveTab?.filePath])
 
   useEffect(() => {
     fileTextRef.current = ''
@@ -1331,11 +967,11 @@ export default function FileBrowserPanel() {
   }, [])
 
   const handleAskPrivaClick = useCallback(() => {
-    if (!tooltip || !activeTab) return
+    if (!tooltip || !resolvedActiveTab) return
     const selStart = tooltip.startLine
     const selEnd = tooltip.endLine
-    const language = detectLanguage(activeTab.filePath) || ''
-    const ext = extensionFor(activeTab).toLowerCase()
+    const language = detectFileLanguage(resolvedActiveTab.filePath) || ''
+    const ext = extensionFor(resolvedActiveTab).toLowerCase()
     const isPptx = ext === '.pptx' || ext === '.ppt'
     const pptxMeta = isPptx ? tooltip.pptxMeta : null
     const locator = isPptx
@@ -1344,8 +980,8 @@ export default function FileBrowserPanel() {
 
     setSelectedFileData({
       kind: isPptx ? 'pptx' : 'plain-text',
-      filePath: activeTab.filePath,
-      fileName: activeTab.name || fileName(activeTab.filePath),
+      filePath: resolvedActiveTab.filePath,
+      fileName: resolvedActiveTab.name || fileName(resolvedActiveTab.filePath),
       locator,
       startLine: selStart,
       endLine: selEnd,
@@ -1361,7 +997,7 @@ export default function FileBrowserPanel() {
     })
     setTooltip(null)
     window.getSelection()?.removeAllRanges()
-  }, [tooltip, activeTab])
+  }, [tooltip, resolvedActiveTab])
 
   if (tabs.length === 0 || !activeTab) {
     return (
@@ -1371,7 +1007,7 @@ export default function FileBrowserPanel() {
     )
   }
 
-  const plain = isPlainText(activeTab)
+  const plain = isPlainTextFile(previewFileForTab(resolvedActiveTab))
   const mode = activeTab.mode || 'preview'
 
   return (
@@ -1529,9 +1165,39 @@ export default function FileBrowserPanel() {
         className="flex items-center gap-2 px-3 flex-shrink-0"
         style={{ height: MAIN_AREA_HEADER_HEIGHT, borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-base)' }}
       >
+        <button
+          type="button"
+          onClick={() => setTreeOpen((open) => !open)}
+          title={treeOpen ? t('fileBrowser.collapseTree', 'Collapse file tree') : t('fileBrowser.fileTree', 'File tree')}
+          aria-label={treeOpen ? t('fileBrowser.collapseTree', 'Collapse file tree') : t('fileBrowser.fileTree', 'File tree')}
+          aria-expanded={treeOpen}
+          className="inline-flex items-center justify-center flex-shrink-0"
+          style={{
+            width: 20,
+            height: 22,
+            padding: 0,
+            boxSizing: 'border-box',
+            border: treeOpen ? '1px solid var(--border)' : '1px solid transparent',
+            borderRadius: 2,
+            background: 'transparent',
+            color: 'var(--text-dim)',
+            cursor: 'pointer',
+            transition: 'color 150ms ease, background 150ms ease, border-color 150ms ease',
+          }}
+          onMouseEnter={(event) => {
+            event.currentTarget.style.color = 'var(--text-secondary)'
+            event.currentTarget.style.background = 'var(--bg-elevated)'
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.color = 'var(--text-dim)'
+            event.currentTarget.style.background = 'transparent'
+          }}
+        >
+          <FolderTree size={16} strokeWidth={1.5} />
+        </button>
         <span
           className="truncate text-xs"
-          title={activeTab.filePath}
+          title={resolvedActiveTab.filePath}
           style={{
             flex: 1,
             minWidth: 0,
@@ -1539,9 +1205,9 @@ export default function FileBrowserPanel() {
             fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
           }}
         >
-          {activeTab.filePath}
+          {resolvedActiveTab.filePath}
         </span>
-        <CopyPathButton path={activeTab.filePath} />
+        <CopyPathButton path={resolvedActiveTab.filePath} />
         <button
           type="button"
           onClick={() => refreshFile(activeTab.id)}
@@ -1577,11 +1243,10 @@ export default function FileBrowserPanel() {
       <div className="flex flex-1 min-h-0 overflow-hidden" style={{ background: 'var(--bg-base)' }}>
         <div ref={treeRef} className="flex min-h-0 flex-shrink-0">
           <FileTreeSidebar
-            activeTab={activeTab}
+            activeTab={resolvedActiveTab}
             rootPath={treeRootPath}
             treeOpen={treeOpen}
             treeWidth={treeWidth}
-            setTreeOpen={setTreeOpen}
             openFileTab={openFileTab}
           />
         </div>
@@ -1618,9 +1283,9 @@ export default function FileBrowserPanel() {
         <div ref={previewContentRef} className="flex-1 min-w-0 min-h-0 overflow-hidden">
           {mode === 'raw'
             ? plain
-              ? <RawTextView tab={activeTab} onTextLoaded={handleTextLoaded} />
+              ? <RawTextView tab={resolvedActiveTab} onTextLoaded={handleTextLoaded} />
               : <NonPlainRawNotice onPreview={() => setMode(activeTab.id, 'preview')} />
-            : <PreviewView tab={activeTab} onTextLoaded={handleTextLoaded} />}
+            : <PreviewView tab={resolvedActiveTab} onTextLoaded={handleTextLoaded} />}
         </div>
       </div>
 

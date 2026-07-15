@@ -112,6 +112,7 @@
         "sessions": "Sessions",
         "messages": "Messages",
         "tokens": "Total tokens",
+        "peakDailyTokens": "Peak daily tokens",
         "activeDays": "Active days",
         "currentStreak": "Current streak",
         "longestStreak": "Longest streak",
@@ -121,7 +122,8 @@
       "heatmap": {
         "less": "Less",
         "more": "More",
-        "tooltip": "{{date}}: {{count}} events",
+        "period": "Past six months",
+        "tooltip": "{{date}}: {{count}} tokens",
         "day": {
           "sun": "Sun",
           "mon": "Mon",
@@ -136,7 +138,18 @@
         "noData": "No model usage yet in this range.",
         "showMore": "Show {{count}} more",
         "showLess": "Show less",
-        "inOut": "{{input}} in · {{output}} out"
+        "inOut": "{{input}} in · {{output}} out",
+        "total": "{{total}} tokens"
+      },
+      "tokenActivity": "Token activity",
+      "activityInsights": "Activity insights",
+      "workspaceData": "Workspace data",
+      "skills": {
+        "title": "Most used skills",
+        "explored": "Skills explored",
+        "totalUses": "Total skill uses",
+        "runs": "{{count}} runs",
+        "noData": "No skills used yet."
       },
       "streakDays": "{{count}}d",
       "hourSuffix": ":00",
