@@ -1,5 +1,4 @@
-"""Parse the agent-runner ``/run/stream`` SSE and fold it into a ``StreamState`` /
-``RunOutcome``.
+"""Parse the agent-runner ``/run/stream`` SSE and fold it into an ordered ``StreamState``.
 
 The fold is a pure function over ``(event, data_json)`` frames so it is unit-testable
 without httpx or a live pod. Event contract (from ``priva_common.serialization`` +
@@ -9,15 +8,13 @@ without httpx or a live pod. Event contract (from ``priva_common.serialization``
     ``{type:"tool_use", id, name, input}`` (and possibly text blocks too)
   - ``event: tool_result`` → a *user*-shaped payload; ``content[]`` carries
     ``{type:"tool_result", tool_use_id, content, is_error}`` — paired to its tool_use by id
-  - ``event: result``    → ``data.session_id`` (authoritative), ``is_error``, ``duration_ms``,
-    ``num_turns``
+  - ``event: result``    → ``session_id`` (authoritative), ``is_error``, ``duration_ms``, ``num_turns``
   - ``event: stream_error`` / ``retry_exhausted`` → fatal run error (``data.message``)
   - other events (system, stream_init, keepalive, hook_event, task_*, …) → ignored
 
-Streaming relay policy (2026-07-16): the connector now folds assistant text + tool steps
-into a live ``StreamState`` and renders/patches a Feishu card from it (see ``cards.py``).
-``reduce_sse`` remains as the batch entry point (re-expressed on ``step``) for the
-non-streaming fallback and the unit tests.
+``StreamState.timeline`` preserves message order — a flat list whose items are either a
+text run (``str``) or a ``ToolStep`` — so the card renders text and tool steps interleaved
+exactly as they streamed, instead of lumping all steps at the end.
 """
 
 from __future__ import annotations
@@ -49,11 +46,11 @@ class ToolStep:
 
 @dataclass
 class StreamState:
-    """Running snapshot folded from the SSE frames (see ``step``). Mutated in place as
-    frames arrive; ``.text`` / ``.steps`` are the visible surface, the rest is bookkeeping."""
-    _texts: list[str] = field(default_factory=list)   # per-assistant-message text, joined by "\n"
-    steps: list[ToolStep] = field(default_factory=list)
-    _by_id: dict = field(default_factory=dict)        # tool_use_id -> ToolStep (pairing)
+    """Running snapshot folded from the SSE frames (see ``step``), mutated in place as
+    frames arrive. ``timeline`` is the ordered surface (``str`` text runs interleaved with
+    ``ToolStep``); the rest is bookkeeping."""
+    timeline: list = field(default_factory=list)   # ordered: str (text run) | ToolStep
+    _by_id: dict = field(default_factory=dict)      # tool_use_id -> ToolStep (pairing)
     session_id: str | None = None
     is_error: bool = False
     error_text: str | None = None
@@ -62,18 +59,22 @@ class StreamState:
 
     @property
     def text(self) -> str:
-        return "\n".join(self._texts)
+        return "\n".join(t for t in self.timeline if isinstance(t, str) and t)
+
+    @property
+    def steps(self) -> list:
+        return [t for t in self.timeline if isinstance(t, ToolStep)]
 
     def outcome(self) -> RunOutcome:
         return RunOutcome(self.session_id, self.text, self.is_error, self.error_text)
 
     @classmethod
     def from_outcome(cls, o: RunOutcome) -> "StreamState":
-        """Rebuild a minimal state from a RunOutcome — used when the stream never fired an
-        incremental update (e.g. a wake/dial failure returned before any frame)."""
+        """Rebuild a minimal state from a RunOutcome — used when a run failed before any
+        frame arrived (wake/dial failure) so the caller still has something to render."""
         s = cls(session_id=o.session_id, is_error=o.is_error, error_text=o.error_text)
         if o.text:
-            s._texts.append(o.text)
+            s.timeline.append(o.text)
         return s
 
 
@@ -128,9 +129,8 @@ def _summarize_input(name: str, tool_input) -> str:
 
 def step(state: StreamState, event: str, data_str: str) -> bool:
     """Fold ONE ``(event, data_json_str)`` frame into ``state`` (pure + sync). Returns
-    True when the *visible* snapshot changed (text grew / a step was added or its status
-    flipped / an error surfaced) — the caller throttles card patches on that signal.
-    Pure bookkeeping (result's session_id/is_error/timing) returns False."""
+    True when the *visible* snapshot changed (a text run or a step was appended / a step
+    status flipped / an error surfaced). Pure bookkeeping (result timing) returns False."""
     try:
         data = json.loads(data_str) if data_str else {}
     except (ValueError, TypeError):
@@ -140,7 +140,7 @@ def step(state: StreamState, event: str, data_str: str) -> bool:
 
     if event in ("assistant", "tool_use"):
         changed = False
-        text_parts: list[str] = []
+        buf: list[str] = []
         for b in data.get("content", []):
             if not isinstance(b, dict):
                 continue
@@ -148,17 +148,20 @@ def step(state: StreamState, event: str, data_str: str) -> bool:
             if btype == "text":
                 t = b.get("text", "")
                 if t:
-                    text_parts.append(t)
+                    buf.append(t)
             elif btype == "tool_use":
+                if buf:                       # flush pending text before the tool (keep order)
+                    state.timeline.append("".join(buf))
+                    buf = []
                 tid = b.get("id") or ""
                 st = ToolStep(tid, b.get("name") or "tool", "running",
                               _summarize_input(b.get("name") or "", b.get("input")))
-                state.steps.append(st)
+                state.timeline.append(st)
                 if tid:
                     state._by_id[tid] = st
                 changed = True
-        if text_parts:
-            state._texts.append("".join(text_parts))
+        if buf:
+            state.timeline.append("".join(buf))
             changed = True
         return changed
 
@@ -177,7 +180,6 @@ def step(state: StreamState, event: str, data_str: str) -> bool:
         return changed
 
     if event == "result":
-        # session_id here is authoritative (the SDK's real id, post any rotation).
         state.session_id = data.get("session_id") or state.session_id
         state.is_error = state.is_error or bool(data.get("is_error"))
         if data.get("duration_ms") is not None:

@@ -98,10 +98,18 @@ class FakeDialer:
         self.calls: list[dict] = []
 
     async def run(self, account_id, username, *, prompt, session_id=None, model=None,
-                  do_wake=True, on_update=None):
+                  do_wake=True, state=None):
         self.calls.append({"account_id": account_id, "prompt": prompt, "session_id": session_id})
-        # dial.run returns the terminal StreamState — project the fake outcome into one.
-        return StreamState.from_outcome(self._outcome)
+        # dial.run folds into the worker's shared state and returns it.
+        if state is None:
+            state = StreamState()
+        o = self._outcome
+        if o.text:
+            state.timeline.append(o.text)
+        state.session_id = o.session_id
+        state.is_error = o.is_error
+        state.error_text = o.error_text
+        return state
 
 
 def _cfg(account_id, digest, mode="owner_only"):
@@ -191,9 +199,9 @@ def test_worker_run_captures_session_and_replies():
         assert len(t.cards) == 1 and t.cards[0][0] == "oc_1"
         assert t.patches, "final card patch expected"
         final = t.patches[-1][1]
-        assert "header" not in final                                       # no header (user)
+        assert final["schema"] == "2.0" and "header" not in final          # card-json-v2, no header
         assert "hi there" in final["body"]["elements"][0]["content"]
-        assert not any(e.get("tag") == "note" for e in final["body"]["elements"])  # no footer when done
+        assert not any("Thinking" in e.get("content", "") for e in final["body"]["elements"])  # no footer
         assert t.sent == []
         # fresh run -> session captured into the binding
         assert client.bindings.list_bindings("A")[0].session_uuid == "sess-new"
@@ -311,25 +319,28 @@ def test_worker_card_matches_failed_outcome_after_output():
     """#2: a run that streamed text then hit a terminal error must render a RED card
     carrying the error — the card can't claim success while the reaction says failure."""
     async def go():
-        errored = StreamState(_texts=["partial output"], is_error=True, error_text="dial_failed")
-
         class ErroredDialer:
             def __init__(self):
                 self.calls = []
 
-            async def run(self, *a, on_update=None, **k):
-                if on_update:
-                    await on_update(errored)   # a live frame fired (the stale-holder trap)
-                return errored
+            async def run(self, *a, state=None, **k):
+                # streamed some text, then a terminal error — folded into the shared state
+                if state is None:
+                    state = StreamState()
+                state.timeline.append("partial output")
+                state.is_error = True
+                state.error_text = "dial_failed"
+                return state
 
         worker, created = _worker_with(ErroredDialer())
         await worker.start()
         t = created[0]
         await t.inject(_msg("A", "hi"))
         final = t.patches[-1][1]
-        assert "header" not in final
-        body = final["body"]["elements"][0]["content"]
-        assert body.startswith("⚠️") and "dial_failed" in body and "partial output" in body
+        assert final["schema"] == "2.0" and "header" not in final
+        els = final["body"]["elements"]
+        assert els[0]["content"].startswith("⚠️") and "dial_failed" in els[0]["content"]  # error headline
+        assert any("partial output" in e.get("content", "") for e in els)                 # partial text kept
         assert t.emojis == [_worker_emoji("TYPING"), _worker_emoji("ERROR")]
 
     asyncio.run(go())
@@ -389,21 +400,24 @@ def test_render_card_no_header_and_running_footer():
     from priva_channel_connector.cards import render_card
     from priva_channel_connector.sse import StreamState, ToolStep
 
-    s = StreamState(_texts=["working"], steps=[ToolStep("t1", "Bash", "running", "ls")])
+    s = StreamState(timeline=["working", ToolStep("t1", "Bash", "running", "ls")])
     running = render_card(s, final=False)
-    assert "header" not in running                                          # no header (user)
+    assert running["schema"] == "2.0" and "header" not in running          # card-json-v2, no header
     els = running["body"]["elements"]
-    assert els[0]["element_id"] == "md_text" and "working" in els[0]["content"]
+    assert els[0]["tag"] == "markdown" and "working" in els[0]["content"]   # text in message order
     panel = els[1]
-    assert panel["tag"] == "collapsible_panel" and panel["expanded"] is True  # D3: expanded while running
-    assert "⟳" in panel["elements"][0]["content"] and "Bash" in panel["elements"][0]["content"]
-    assert els[-1]["tag"] == "note" and els[-1]["elements"][0]["content"] == "Thinking…"
+    assert panel["tag"] == "collapsible_panel" and panel["expanded"] is False  # always folded
+    step_md = panel["elements"][0]["content"]
+    assert "⟳" in step_md and "Bash" in step_md
+    assert els[-1]["tag"] == "markdown" and "Thinking" in els[-1]["content"]  # animated footer
 
     s.steps[0].status = "done"
     final = render_card(s, final=True)
     assert "header" not in final
-    assert final["body"]["elements"][1]["expanded"] is False                # collapsed on clean finish
-    assert not any(e.get("tag") == "note" for e in final["body"]["elements"])  # no footer when done
+    assert final["body"]["elements"][1]["expanded"] is False                # folded on the final card too
+    assert not any("Thinking" in e.get("content", "") for e in final["body"]["elements"])  # no footer
+    done_md = final["body"]["elements"][1]["elements"][0]["content"]
+    assert "green" in done_md and "✔" in done_md                            # completed tool = green check
 
 
 def test_render_card_running_no_text_is_thinking_only():
@@ -411,10 +425,17 @@ def test_render_card_running_no_text_is_thinking_only():
     from priva_channel_connector.sse import StreamState
     c = render_card(StreamState(), final=False)
     els = c["body"]["elements"]
-    # nothing streamed yet → the card is just the "Thinking…" footer
-    assert "header" not in c
-    assert len(els) == 1 and els[0]["tag"] == "note"
-    assert els[0]["elements"][0]["content"] == "Thinking…"
+    # nothing streamed yet → a single markdown element carrying the "Thinking" footer
+    assert c["schema"] == "2.0" and "header" not in c
+    assert len(els) == 1 and els[0]["tag"] == "markdown"
+    assert "Thinking" in els[0]["content"]
+
+
+def test_render_card_dots_cycle():
+    from priva_channel_connector.cards import render_card
+    from priva_channel_connector.sse import StreamState
+    foot = lambda d: render_card(StreamState(), final=False, dots=d)["body"]["elements"][-1]["content"]
+    assert foot(1).count(".") == 1 and foot(2).count(".") == 2 and foot(3).count(".") == 3
 
 
 def test_render_card_final_error():
@@ -423,14 +444,14 @@ def test_render_card_final_error():
     c = render_card(StreamState(is_error=True, error_text="boom"), final=True)
     assert "header" not in c
     assert c["body"]["elements"][0]["content"].startswith("⚠️ boom")
-    assert not any(e.get("tag") == "note" for e in c["body"]["elements"])   # no footer when done
+    assert not any("Thinking" in e.get("content", "") for e in c["body"]["elements"])  # no footer
 
 
 def test_render_card_error_prefix_survives_long_output():
     # #1: a long streamed text must not truncate the error prefix off the card.
     from priva_channel_connector.cards import render_card
     from priva_channel_connector.sse import StreamState
-    c = render_card(StreamState(_texts=["x" * 5000], is_error=True, error_text="upstream 529"),
+    c = render_card(StreamState(timeline=["x" * 5000], is_error=True, error_text="upstream 529"),
                     final=True)
     assert "header" not in c
     assert c["body"]["elements"][0]["content"].startswith("⚠️ upstream 529")
@@ -464,13 +485,13 @@ def test_worker_streaming_card_end_to_end():
                 self.calls = []
 
             async def run(self, account_id, username, *, prompt, session_id=None, model=None,
-                          do_wake=True, on_update=None):
+                          do_wake=True, state=None):
                 self.calls.append({"prompt": prompt})
-                state = StreamState()
+                if state is None:
+                    state = StreamState()
                 for ev, ds in frames:
-                    if step(state, ev, ds) and on_update:
-                        await on_update(state)
-                return state       # dial.run returns the terminal StreamState
+                    step(state, ev, ds)
+                return state       # dial.run folds into the shared state and returns it
 
         worker, created = _worker_with(FramesDialer())
         await worker.start()
@@ -481,11 +502,11 @@ def test_worker_streaming_card_end_to_end():
         assert len(t.cards) == 1
         assert t.patches, "expected card patches"
         final = t.patches[-1][1]
-        assert "header" not in final
+        assert final["schema"] == "2.0" and "header" not in final
         assert "let me look" in final["body"]["elements"][0]["content"]
         steps_md = final["body"]["elements"][1]["elements"][0]["content"]
         assert "Read" in steps_md and "✔" in steps_md
-        assert not any(e.get("tag") == "note" for e in final["body"]["elements"])  # no footer when done
+        assert not any("Thinking" in e.get("content", "") for e in final["body"]["elements"])  # no footer
         # reaction lifecycle still settles to CheckMark alongside the card
         assert t.emojis == [_worker_emoji("TYPING"), _worker_emoji("DONE")]
 
@@ -556,8 +577,9 @@ def test_reduce_sse_relays_assistant_only():
     out = reduce_sse(frames)
     # session id from result (authoritative, for binding — not relayed to the user)
     assert out.session_id == "sdk-sess-9"
-    # relayed text is the ASSISTANT message, NOT result.result
-    assert out.text == "Hello world" and out.is_error is False
+    # relayed text is the ASSISTANT message, NOT result.result; the timeline splits the
+    # text around the interleaved tool_use, so the two runs join with a newline.
+    assert out.text == "Hello \nworld" and out.is_error is False
 
 
 def test_reduce_sse_stream_error():

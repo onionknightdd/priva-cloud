@@ -8,7 +8,6 @@ Inbound pipeline (transport already ack'd the frame <3s, so this runs detached):
 from __future__ import annotations
 
 import asyncio
-import time
 
 from priva_common.logging import get_app_logger
 
@@ -19,10 +18,11 @@ logger = get_app_logger(__name__)
 
 _NEW_ACK = "🆕 已开始新对话 / New conversation started."
 
-# Streaming-card patch throttle: coalesce updates to ≤1 per this interval. Feishu caps a
-# single message's patch at 5 QPS; 250ms sits safely under it. Frames dropped by the
-# throttle are always superseded by the unconditional final patch at run end.
-_PATCH_MIN_INTERVAL = 0.25
+# Streaming-card tick: the worker patches the whole card on this cadence while a run is in
+# flight — this both streams fresh content (the state is folded live by the dialer) and
+# animates the "Thinking" dots (1→2→3). ~1.6 patches/s stays well under Feishu's 5 QPS
+# per-message cap.
+_TICK_INTERVAL = 0.6
 
 # Feishu message-reaction lifecycle stamped on the *inbound* DM (emoji_type keys are a
 # fixed, case-sensitive Feishu enum — see im-v1/message-reaction docs). Typing rides the
@@ -99,9 +99,13 @@ class AppWorker:
             # #0 streaming card: post an initial "running" card up front to get a
             # message_id we can patch as the stream folds in. Best-effort — if the card
             # can't be posted (message_id is None) we fall back to the plain-text reply.
-            message_id = await self._send_card(msg.chat_id, render_card(StreamState(), final=False))
-            on_update = self._make_on_update(message_id) if message_id else None
+            state = StreamState()
+            message_id = await self._send_card(msg.chat_id, render_card(state, final=False, dots=1))
 
+            # A ticker patches the card every _TICK_INTERVAL while the run is in flight: it
+            # both streams the content (dial folds into the SAME `state`) and animates the
+            # Thinking dots. Cancelled the moment the run returns.
+            ticker = asyncio.create_task(self._animate(message_id, state)) if message_id else None
             try:
                 final_state = await self._dialer.run(
                     self.account_id,
@@ -109,17 +113,22 @@ class AppWorker:
                     prompt=decision.prompt,
                     session_id=resume,
                     model=(getattr(self._cfg, "model", None) or None),
-                    on_update=on_update,
+                    state=state,
                 )
             except Exception:
-                # dial maps transport errors to a StreamState, so this only fires on an
-                # unexpected crash — still finalize the card (don't leave it frozen on
-                # "running") and let the finally settle the reaction to CrossMark.
+                # dial maps transport errors into `state`, so this only fires on an
+                # unexpected crash — fold the error in so the final card renders it.
                 logger.exception("feishu run crashed account={}", self.account_id)
-                if message_id:
-                    await self._patch_card(message_id, render_card(
-                        StreamState(is_error=True, error_text="run_failed"), final=True))
-                return
+                state.is_error = True
+                state.error_text = state.error_text or "run_failed"
+                final_state = state
+            finally:
+                if ticker:
+                    ticker.cancel()
+                    try:
+                        await ticker
+                    except asyncio.CancelledError:
+                        pass
 
             outcome = final_state.outcome()
             if outcome.session_id:
@@ -128,8 +137,8 @@ class AppWorker:
                 )
 
             if message_id:
-                # Final patch always lands the terminal snapshot (bypasses the throttle),
-                # rendered from the SAME state dial folded — so card == outcome, always.
+                # Final patch lands the terminal card, rendered from the SAME state dial
+                # folded — so card == outcome on every path.
                 await self._patch_card(message_id, render_card(final_state, final=True))
             else:
                 reply = (outcome.text or "").strip()
@@ -157,21 +166,15 @@ class AppWorker:
         except Exception:
             logger.exception("feishu card patch failed account={}", self.account_id)
 
-    def _make_on_update(self, message_id: str):
-        """Build the throttled patch callback. Fired serially inside the dialer's read
-        loop with the running StreamState — the time debounce alone bounds the patch rate
-        (no in-flight lock needed). Frames it drops are always superseded by the worker's
-        unconditional final patch, which renders the dialer's returned terminal state."""
-        last = [0.0]
-
-        async def _cb(state: StreamState) -> None:
-            now = time.monotonic()
-            if now - last[0] < _PATCH_MIN_INTERVAL:
-                return
-            last[0] = now
-            await self._patch_card(message_id, render_card(state, final=False))
-
-        return _cb
+    async def _animate(self, message_id: str, state: StreamState) -> None:
+        """Patch the running card on a fixed cadence: streams the live-folded `state` and
+        cycles the Thinking dots 1→2→3. Runs until cancelled at run end. Patch failures are
+        swallowed by _patch_card, so a hiccup never kills the ticker."""
+        dots = 1
+        while True:
+            await asyncio.sleep(_TICK_INTERVAL)
+            await self._patch_card(message_id, render_card(state, final=False, dots=dots))
+            dots = dots % 3 + 1
 
     # --- reaction lifecycle -----------------------------------------------
     async def _react(self, message_id: str, emoji_type: str) -> str | None:

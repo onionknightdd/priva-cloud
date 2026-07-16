@@ -9,8 +9,6 @@ so the minted ``X-Priva-Runner-Token`` authenticates the call with no extra lane
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-
 import httpx
 
 from priva_common.config import get_settings
@@ -45,19 +43,18 @@ class RunnerDialer:
         session_id: str | None = None,
         model: str | None = None,
         do_wake: bool = True,
-        on_update: "Callable[[StreamState], Awaitable[None]] | None" = None,
+        state: "StreamState | None" = None,
     ) -> StreamState:
-        """Wake + dial + relay. Returns the terminal ``StreamState`` — the single source
-        of truth the caller renders the final card from; every failure path folds its
-        error into that same state (never a separate object), so the card can't disagree
-        with the outcome. ``session_id=None`` starts a fresh SDK session (the id is
-        captured from the ``result`` event). ``on_update`` (optional) is awaited with the
-        running state on every frame that changes the visible snapshot — the streaming-card
-        worker debounces it; dial fires the raw signal and does NOT throttle (it owns no
-        card / message_id / rate budget). ``enable_permission_feedback`` is left False for
-        the MVP: the run auto-denies gated tools and drops AskUserQuestion so it never
-        blocks on a human the connector can't yet prompt (permission cards are later)."""
-        state = StreamState()
+        """Wake + dial + relay. Folds the stream into ``state`` (the worker passes the same
+        object its card ticker renders, so live content shows up as it patches) and returns
+        it — the single source of truth for the final card; every failure path folds its
+        error into that same state, so the card can't disagree with the outcome.
+        ``session_id=None`` starts a fresh SDK session (the id is captured from the
+        ``result`` event). ``enable_permission_feedback`` is left False for the MVP: the run
+        auto-denies gated tools and drops AskUserQuestion so it never blocks on a human the
+        connector can't yet prompt (permission cards are a later milestone)."""
+        if state is None:
+            state = StreamState()
         if do_wake and not await self._waker(account_id):
             state.is_error = True
             state.error_text = "wake_failed"
@@ -85,8 +82,7 @@ class RunnerDialer:
                         state.error_text = f"dial {resp.status_code}"
                         return state
                     async for event, data_str in iter_sse(resp):
-                        if step(state, event, data_str) and on_update is not None:
-                            await on_update(state)
+                        step(state, event, data_str)   # ticker patches; dial just folds
         except (httpx.ConnectError, httpx.TimeoutException, httpx.TransportError) as exc:
             logger.warning("dial transport error account={}: {}", account_id, exc)
             state.is_error = True
