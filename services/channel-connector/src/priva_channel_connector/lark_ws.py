@@ -86,6 +86,16 @@ class LarkTransport:
     async def send_text(self, chat_id: str, text: str) -> None:
         await asyncio.to_thread(self._send_sync, chat_id, text)
 
+    async def add_reaction(self, message_id: str, emoji_type: str) -> str | None:
+        if not message_id:
+            return None
+        return await asyncio.to_thread(self._add_reaction_sync, message_id, emoji_type)
+
+    async def remove_reaction(self, message_id: str, reaction_id: str) -> None:
+        if not message_id or not reaction_id:
+            return
+        await asyncio.to_thread(self._remove_reaction_sync, message_id, reaction_id)
+
     # --- lark thread ------------------------------------------------------
     def _domain_const(self, lark):
         return lark.LARK_DOMAIN if self._domain == "lark" else lark.FEISHU_DOMAIN
@@ -190,6 +200,55 @@ class LarkTransport:
             logger.warning(
                 "lark send failed account={} code={} msg={}",
                 self.account_id, getattr(resp, "code", "?"), getattr(resp, "msg", "?"),
+            )
+
+    def _add_reaction_sync(self, message_id: str, emoji_type: str) -> str | None:
+        # POST /im/v1/messages/:message_id/reactions {reaction_type:{emoji_type}} → reaction_id.
+        # emoji_type is a fixed Feishu enum key (Typing / CheckMark / CrossMark, case-sensitive).
+        from lark_oapi.api.im.v1 import (
+            CreateMessageReactionRequest,
+            CreateMessageReactionRequestBody,
+            Emoji,
+        )
+
+        if self._rest is None:
+            self._rest = self._build_rest()
+        req = (
+            CreateMessageReactionRequest.builder()
+            .message_id(message_id)
+            .request_body(
+                CreateMessageReactionRequestBody.builder()
+                .reaction_type(Emoji.builder().emoji_type(emoji_type).build())
+                .build()
+            )
+            .build()
+        )
+        resp = self._rest.im.v1.message_reaction.create(req)
+        if not resp.success():
+            logger.warning(
+                "lark reaction add failed account={} emoji={} code={} msg={}",
+                self.account_id, emoji_type, getattr(resp, "code", "?"), getattr(resp, "msg", "?"),
+            )
+            return None
+        return getattr(getattr(resp, "data", None), "reaction_id", None)
+
+    def _remove_reaction_sync(self, message_id: str, reaction_id: str) -> None:
+        # DELETE /im/v1/messages/:message_id/reactions/:reaction_id (removes the bot's own).
+        from lark_oapi.api.im.v1 import DeleteMessageReactionRequest
+
+        if self._rest is None:
+            self._rest = self._build_rest()
+        req = (
+            DeleteMessageReactionRequest.builder()
+            .message_id(message_id)
+            .reaction_id(reaction_id)
+            .build()
+        )
+        resp = self._rest.im.v1.message_reaction.delete(req)
+        if not resp.success():
+            logger.warning(
+                "lark reaction remove failed account={} rid={} code={} msg={}",
+                self.account_id, reaction_id, getattr(resp, "code", "?"), getattr(resp, "msg", "?"),
             )
 
     # --- status bridge (called from the lark thread) ----------------------

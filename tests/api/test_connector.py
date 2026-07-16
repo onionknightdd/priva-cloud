@@ -235,6 +235,81 @@ def test_worker_clear_passes_through_to_sdk():
     asyncio.run(go())
 
 
+# --- message-reaction lifecycle (Typing → CheckMark / CrossMark) -------------
+def _worker_with(dialer, *, account="A"):
+    client = FakeClient()
+    created = []
+    worker = AppWorker(client, dialer, SessionRouter(client), _cfg(account, "d1"),
+                       _secret(account), client.accounts.get(account),
+                       _transport_factory(created))
+    return worker, created
+
+
+def test_worker_reaction_typing_then_checkmark_on_success():
+    async def go():
+        worker, created = _worker_with(FakeDialer(RunOutcome(session_id="s", text="ok")))
+        await worker.start()
+        t = created[0]
+        msg = _msg("A", "hello")
+        await t.inject(msg)
+        # Typing stamped on arrival, then swapped to CheckMark once the reply was sent.
+        assert t.emojis == [_worker_emoji("TYPING"), _worker_emoji("DONE")]
+        assert [m for m, _ in t.reactions] == [msg.message_id, msg.message_id]
+        assert t.removed == ["r1"]  # the transient Typing reaction was removed
+
+    asyncio.run(go())
+
+
+def test_worker_reaction_crossmark_on_error_outcome():
+    async def go():
+        worker, created = _worker_with(
+            FakeDialer(RunOutcome(session_id=None, is_error=True, error_text="dial_failed")))
+        await worker.start()
+        t = created[0]
+        await t.inject(_msg("A", "hello"))
+        # error outcome (an ⚠️ reply is still sent) → terminal CrossMark, Typing removed.
+        assert t.emojis == [_worker_emoji("TYPING"), _worker_emoji("ERROR")]
+        assert t.removed == ["r1"]
+        assert t.sent and t.sent[0][1].startswith("⚠️")
+
+    asyncio.run(go())
+
+
+def test_worker_reaction_crossmark_on_exception():
+    async def go():
+        class BoomDialer:
+            async def run(self, *a, **k):
+                raise RuntimeError("boom")
+
+        worker, created = _worker_with(BoomDialer())
+        await worker.start()
+        t = created[0]
+        # _on_message swallows the exception; the finally still settles to CrossMark.
+        await t.inject(_msg("A", "hello"))
+        assert t.emojis == [_worker_emoji("TYPING"), _worker_emoji("ERROR")]
+        assert t.removed == ["r1"] and t.sent == []
+
+    asyncio.run(go())
+
+
+def test_worker_reaction_checkmark_on_detach():
+    async def go():
+        worker, created = _worker_with(FakeDialer(RunOutcome()))
+        await worker.start()
+        t = created[0]
+        await t.inject(_msg("A", "/new"))
+        # /new is a successful op → CheckMark (no dial happened).
+        assert t.emojis == [_worker_emoji("TYPING"), _worker_emoji("DONE")]
+        assert t.removed == ["r1"]
+
+    asyncio.run(go())
+
+
+def _worker_emoji(name):
+    import priva_channel_connector.worker as w
+    return {"TYPING": w._EMOJI_TYPING, "DONE": w._EMOJI_DONE, "ERROR": w._EMOJI_ERROR}[name]
+
+
 # --- reconcile diff ---------------------------------------------------------
 def test_reconcile_arm_teardown_and_digest_rearm():
     async def go():

@@ -37,6 +37,11 @@ class IMTransport(Protocol):
     async def start(self) -> None: ...
     async def stop(self) -> None: ...
     async def send_text(self, chat_id: str, text: str) -> None: ...
+    # Message-reaction lifecycle (emoji stamped on an *inbound* DM). ``add_reaction``
+    # returns the created reaction_id (None if it failed / no message id) so the caller
+    # can later ``remove_reaction`` it. Best-effort: cosmetic, never fail the run.
+    async def add_reaction(self, message_id: str, emoji_type: str) -> "str | None": ...
+    async def remove_reaction(self, message_id: str, reaction_id: str) -> None: ...
 
 
 @dataclass
@@ -51,6 +56,9 @@ class FakeTransport:
     started: bool = False
     stopped: bool = False
     sent: list[tuple[str, str]] = field(default_factory=list)  # (chat_id, text)
+    reactions: list[tuple[str, str]] = field(default_factory=list)  # (message_id, emoji_type) added
+    removed: list[str] = field(default_factory=list)               # reaction_ids removed
+    _rid_seq: int = 0
 
     async def start(self) -> None:
         self.started = True
@@ -61,6 +69,22 @@ class FakeTransport:
     async def send_text(self, chat_id: str, text: str) -> None:
         self.sent.append((chat_id, text))
 
+    async def add_reaction(self, message_id: str, emoji_type: str) -> "str | None":
+        if not message_id:
+            return None
+        self._rid_seq += 1
+        rid = f"r{self._rid_seq}"
+        self.reactions.append((message_id, emoji_type))
+        return rid
+
+    async def remove_reaction(self, message_id: str, reaction_id: str) -> None:
+        self.removed.append(reaction_id)
+
     # --- test helpers -----------------------------------------------------
     async def inject(self, msg: InboundMessage) -> None:
         await self.on_message(msg)
+
+    @property
+    def emojis(self) -> list[str]:
+        """emoji_types added, in order — handy for asserting the Typing→terminal swap."""
+        return [e for _, e in self.reactions]
