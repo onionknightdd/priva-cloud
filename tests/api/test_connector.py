@@ -466,6 +466,92 @@ def test_clip_body_rebalances_odd_code_fence():
     assert out.count("```") % 2 == 0      # fence rebalanced
 
 
+# --- agent-UI tool-run summary parity (folded panel header) -----------------
+def test_run_summary_groups_in_order():
+    # Grouped counts, in GROUP_ORDER, joined by ", " — matching summarizeRun.
+    from priva_channel_connector.cards import _run_summary
+    from priva_channel_connector.sse import ToolStep
+    steps = [
+        ToolStep("t1", "Read", "done", "a.py"),
+        ToolStep("t2", "Bash", "done", "ls"),
+        ToolStep("t3", "Read", "done", "b.py"),
+        ToolStep("t4", "Grep", "done", "foo"),
+    ]
+    # read before search before bash (GROUP_ORDER), counts aggregated per group
+    assert _run_summary(steps) == "读取了 2 个文件, 搜索了 1 个模式, 执行了 1 条 bash 命令"
+
+
+def test_run_summary_edit_write_deltas_and_success_gate():
+    from priva_channel_connector.cards import _run_summary
+    from priva_channel_connector.sse import ToolStep
+    # a still-running Edit is NOT counted (isSuccessfulFileMutation gate)
+    running_edit = [ToolStep("t1", "Edit", "running", "x.py",
+                             {"old_string": "a", "new_string": "a\nb\nc"})]
+    assert _run_summary(running_edit) == ""      # nothing groups yet → caller falls back
+
+    # done Write + done Edit: wrote is the last-file key, deltas summed (from each step's raw
+    # input, computed in the card layer) and attached to it, +added green / -removed red, then
+    # the read group follows. Edit: old 1 line / new 3 lines → +3 -1; Write: 10 lines → +10.
+    steps = [
+        ToolStep("t1", "Edit", "done", "x.py", {"old_string": "a", "new_string": "a\nb\nc"}),
+        ToolStep("t2", "Write", "done", "y.py",
+                 {"content": "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10"}),
+        ToolStep("t3", "Read", "done", "z.py"),
+    ]
+    out = _run_summary(steps)
+    assert out == ("编辑了 1 个文件, 写入了 1 个文件 "
+                   "<font color='green'>+13</font> <font color='red'>-1</font>, "
+                   "读取了 1 个文件")
+
+
+def test_run_summary_errored_edit_not_counted():
+    # an errored file mutation is excluded from edited/wrote (parity with the web gate)
+    from priva_channel_connector.cards import _run_summary
+    from priva_channel_connector.sse import ToolStep
+    steps = [ToolStep("t1", "Edit", "error", "x.py",
+                      {"old_string": "a", "new_string": "b"})]
+    assert _run_summary(steps) == ""
+
+
+def test_run_summary_unknown_tool_is_other():
+    from priva_channel_connector.cards import _run_summary
+    from priva_channel_connector.sse import ToolStep
+    steps = [ToolStep("t1", "TodoWrite", "done", ""), ToolStep("t2", "SomeMcpTool", "done", "")]
+    assert _run_summary(steps) == "执行了 2 个其他工具"
+
+
+def test_steps_panel_header_uses_summary_with_fallback():
+    from priva_channel_connector.cards import _steps_panel
+    from priva_channel_connector.sse import ToolStep
+    # grouped summary as the folded header
+    panel = _steps_panel([ToolStep("t1", "Read", "done", "a.py")])
+    assert panel["tag"] == "collapsible_panel" and panel["expanded"] is False
+    assert panel["header"]["title"]["content"] == "读取了 1 个文件"
+    # nothing groups yet → plain step-count fallback (never the empty string)
+    lone = _steps_panel([ToolStep("t1", "Edit", "running", "a.py")])
+    assert lone["header"]["title"]["content"] == "1 个工具步骤"
+
+
+def test_fold_carries_raw_tool_input():
+    # the reducer carries the raw input forward (a fact); the card layer derives deltas.
+    from priva_channel_connector.sse import StreamState, step
+    s = StreamState()
+    step(s, "tool_use",
+         '{"content":[{"type":"tool_use","id":"e1","name":"Edit",'
+         '"input":{"file_path":"x.py","old_string":"a\\nb","new_string":"a\\nb\\nc\\nd"}}]}')
+    (edit,) = s.steps
+    assert edit.tool_input == {"file_path": "x.py", "old_string": "a\nb", "new_string": "a\nb\nc\nd"}
+
+
+def test_line_delta_computed_in_card_layer():
+    # cards._line_delta derives (added, removed) from the raw input, web-UI countContentLines.
+    from priva_channel_connector.cards import _line_delta
+    assert _line_delta("Edit", {"old_string": "a\nb", "new_string": "a\nb\nc\nd"}) == (4, 2)
+    assert _line_delta("Write", {"content": "one\ntwo\nthree\n"}) == (3, 0)   # trailing \n stripped
+    assert _line_delta("Read", {"file_path": "x"}) == (0, 0)
+    assert _line_delta("Edit", None) == (0, 0)
+
+
 # --- worker streaming path (initial card -> patches -> terminal card) --------
 def test_worker_streaming_card_end_to_end():
     async def go():

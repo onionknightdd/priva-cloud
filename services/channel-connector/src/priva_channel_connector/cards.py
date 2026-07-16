@@ -35,6 +35,116 @@ _GLYPH = {
     "error": "<font color='red'>✗</font>",
 }
 
+# --- agent-UI tool-run summary parity ---------------------------------------
+# The folded panel header shows the SAME aggregated phrase the agent UI's collapsed tool
+# run shows (web/user/src/utils/toolRunSummary.js `summarizeRun`): grouped counts joined by
+# ", " in GROUP_ORDER, with +added/-removed line deltas appended after the file-op group.
+# zh phrasing mirrors web/shared/locales/zh.json `toolCall.summary.*` (card language is zh,
+# matching the rest of the card). Chinese has no case, so JS `lowercaseFirst` is a no-op here.
+_GROUP_ORDER = ("edited", "wrote", "generated", "read", "search",
+                "bash", "webFetch", "webSearch", "canvas", "other")
+_GROUP_PHRASE = {
+    "edited": "编辑了 {n} 个文件",
+    "wrote": "写入了 {n} 个文件",
+    "generated": "预览了 {n} 个文件",
+    "read": "读取了 {n} 个文件",
+    "search": "搜索了 {n} 个模式",
+    "bash": "执行了 {n} 条 bash 命令",
+    "webFetch": "抓取了 {n} 个 URL",
+    "webSearch": "联网搜索了 {n} 次",
+    "canvas": "在画布中执行了 {n} 个任务",
+    "other": "执行了 {n} 个其他工具",
+}
+# FileCanvas / legacy generated-tool names → the "generated" (预览) group (generatedTool.js).
+_GENERATED_TOOL_NAMES = {
+    "mcp__priva_File__FileCanvas", "FileCanvas",
+    "mcp__priva_generated__Generated", "Generated",
+    "mcp__priva_File__FIleCanvas", "FIleCanvas",
+}
+
+
+def _count_lines(s) -> int:
+    """Line count matching the web UI's ``countContentLines`` (toolRunSummary.js): strip a
+    single trailing newline, then count the remaining lines. Empty/non-string → 0."""
+    if not isinstance(s, str) or not s:
+        return 0
+    normalized = s[:-1] if s.endswith("\n") else s
+    if not normalized:
+        return 0
+    return normalized.count("\n") + 1
+
+
+def _line_delta(name: str, tool_input) -> tuple[int, int]:
+    """``(added, removed)`` for a file-mutation tool, derived here (in the card layer) from
+    the step's raw input — mirroring the web UI's fallback path (no structured patch):
+    Write counts its ``content`` lines added; Edit counts ``new_string`` added and
+    ``old_string`` removed. Other tools / missing input → (0, 0)."""
+    if not isinstance(tool_input, dict):
+        return (0, 0)
+    if name == "Write":
+        return (_count_lines(tool_input.get("content")), 0)
+    if name == "Edit":
+        return (_count_lines(tool_input.get("new_string")), _count_lines(tool_input.get("old_string")))
+    return (0, 0)
+
+
+def _group_of(name: str) -> str:
+    """Non-file-mutation tool → its summary group (Edit/Write handled separately with the
+    success gate). Mirrors the else-chain in `summarizeRun`; unknown tools → 'other'."""
+    if name in _GENERATED_TOOL_NAMES:
+        return "generated"
+    if name in ("Grep", "Glob"):
+        return "search"
+    if name == "Bash":
+        return "bash"
+    if name == "Read":
+        return "read"
+    if name == "WebFetch":
+        return "webFetch"
+    if name == "WebSearch":
+        return "webSearch"
+    return "other"
+
+
+def _run_summary(steps) -> str:
+    """Aggregate a contiguous run of ToolSteps into the agent-UI summary phrase. Edit/Write
+    are counted (and their line deltas summed) only once successful — ``status == 'done'`` —
+    mirroring ``isSuccessfulFileMutation``; every other tool counts as soon as it appears.
+    The delta (green +added / red −removed) attaches after the wrote-or-edited phrase, as in
+    the web UI. Returns '' when nothing groups yet (e.g. a still-running Edit) so the caller
+    can fall back to a plain step count."""
+    counts = {k: 0 for k in _GROUP_ORDER}
+    total_added = total_removed = 0
+    for st in steps:
+        if st.name in ("Edit", "Write"):
+            if st.status != "done":          # successful file mutation only (agent-UI parity)
+                continue
+            counts["edited" if st.name == "Edit" else "wrote"] += 1
+            added, removed = _line_delta(st.name, st.tool_input)
+            total_added += added
+            total_removed += removed
+        else:
+            counts[_group_of(st.name)] += 1
+
+    last_file_key = "wrote" if counts["wrote"] else ("edited" if counts["edited"] else None)
+    has_delta = total_added > 0 or total_removed > 0
+
+    parts: list[str] = []
+    for key in _GROUP_ORDER:
+        n = counts[key]
+        if not n:
+            continue
+        phrase = _GROUP_PHRASE[key].format(n=n)
+        if key == last_file_key and has_delta:
+            delta = []
+            if total_added > 0:
+                delta.append(f"<font color='green'>+{total_added}</font>")
+            if total_removed > 0:
+                delta.append(f"<font color='red'>-{total_removed}</font>")
+            phrase += " " + " ".join(delta)
+        parts.append(phrase)
+    return ", ".join(parts)
+
 
 def _md(content: str) -> dict:
     return {"tag": "markdown", "content": content}
@@ -76,10 +186,11 @@ def _steps_md(steps) -> str:
 
 
 def _steps_panel(steps) -> dict:
-    """A contiguous run of tool steps as an ALWAYS-folded collapsible_panel. The header
-    counts them; the folded body lists ``glyph name summary`` rows."""
-    running = sum(1 for s in steps if s.status == "running")
-    title = f"步骤 ({len(steps)})" if running else f"步骤 ({len(steps)}) · 完成"
+    """A contiguous run of tool steps as an ALWAYS-folded collapsible_panel. The header is
+    the agent-UI aggregated run summary (grouped counts + line deltas); while nothing groups
+    yet (e.g. a lone still-running Edit) it falls back to a plain step count. The folded body
+    lists ``glyph name summary`` rows."""
+    title = _run_summary(steps) or f"{len(steps)} 个工具步骤"
     return {
         "tag": "collapsible_panel",
         "expanded": False,                     # created folded; never patched to expanded

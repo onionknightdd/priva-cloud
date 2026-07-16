@@ -42,6 +42,7 @@ class ToolStep:
     name: str
     status: str = "running"    # running | done | error
     summary: str = ""          # one-line input summary (Bash→command, Read/Edit→file_path, …)
+    tool_input: dict | None = None  # raw input, carried forward so the card layer can derive its own summary/deltas
 
 
 @dataclass
@@ -154,8 +155,10 @@ def step(state: StreamState, event: str, data_str: str) -> bool:
                     state.timeline.append("".join(buf))
                     buf = []
                 tid = b.get("id") or ""
-                st = ToolStep(tid, b.get("name") or "tool", "running",
-                              _summarize_input(b.get("name") or "", b.get("input")))
+                name = b.get("name") or "tool"
+                inp = b.get("input")
+                st = ToolStep(tid, name, "running", _summarize_input(name, inp),
+                              inp if isinstance(inp, dict) else None)
                 state.timeline.append(st)
                 if tid:
                     state._by_id[tid] = st
