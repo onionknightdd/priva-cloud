@@ -950,11 +950,12 @@ async def get_system_health():
                             "running": float(fleet_snap["running_sessions"]),
                             "total": float(fleet_snap["total_accounts"])},
                    deps=ar_deps),
-        # feishu: the external IM (self-built app). Not our infra — modeled like
-        # `browser`, an always-present external entry point. Its edges to the
-        # connector go ✕ automatically when the connector is down.
-        SystemNode(id="feishu", label="feishu", sub="external IM · WS/REST",
-                   plane="edge", status="up", detail="self-built app"),
+        # 飞书DM: the external IM (self-built app). NOT our infra and NOT in any
+        # cluster plane — the frontend draws it OUTSIDE the cluster boundary (public
+        # internet). Modeled like `browser`, an always-present external entry point;
+        # its edges to the connector go ✕ automatically when the connector is down.
+        SystemNode(id="feishu", label="飞书DM", sub="外部 IM",
+                   plane="external", status="up"),
         SystemNode(id="channel-connector", label="channel-connector",
                    sub=":8083 · Feishu WS fan-out", plane="tenant", status=conn_status,
                    detail="IM ⇄ runtime bridge", replicas=_reps(connector_dep)),
@@ -1004,7 +1005,10 @@ async def get_system_health():
         # relaying the assistant text back. control-panel pushes a targeted reconcile
         # on config edit. gRPC to the data-spine for bindings/secret/status. All
         # animated when the connector is up.
-        _edge("feishu", "channel-connector", kind="byte", bytepath=True),
+        # These two cross the cluster boundary (drawn in the frontend) — the ONLY hop
+        # that leaves k8s — so the inbound one is labeled egress to mark the whole link
+        # as outbound-initiated (the WS long-connection the connector dialed out).
+        _edge("feishu", "channel-connector", label="egress · 出站", kind="byte", bytepath=True),
         _edge("channel-connector", "feishu", kind="byte", bytepath=True),
         _edge("channel-connector", "agent-runner", label="/run/stream", kind="byte", bytepath=True),
         _edge("channel-connector", "operator", label="wake", kind="control"),

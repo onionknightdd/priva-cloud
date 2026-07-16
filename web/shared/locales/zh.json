@@ -870,6 +870,7 @@
     "planeData": "数据",
     "topologyPlanned": "规划中",
     "topologyPhase": "阶段",
+    "topologyClusterBoundary": "PRIVA-CLOUD 集群",
     "metricConnections": "{{count}} 连接",
     "metricReady": "{{ready}}/{{desired}} 就绪",
     "metricAccounts": "{{count}} 账号",

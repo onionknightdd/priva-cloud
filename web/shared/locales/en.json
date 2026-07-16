@@ -885,6 +885,7 @@
     "planeData": "DATA",
     "topologyPlanned": "planned",
     "topologyPhase": "phase",
+    "topologyClusterBoundary": "PRIVA-CLOUD CLUSTER",
     "metricConnections": "{{count}} conns",
     "metricReady": "{{ready}}/{{desired}} ready",
     "metricAccounts": "{{count}} acct",

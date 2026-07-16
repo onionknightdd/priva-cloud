@@ -15,8 +15,9 @@ import { traceSvgStrokes } from '@shared/motion/traceSvg'
 // SANCTIONED continuous-animation exception (CLAUDE.md + design-spec §8): the
 // system-map path particle flow. Everything else obeys the no-continuous-motion rule.
 
-const VIEW_W = 1000
+const VIEW_W = 1140   // 1000 cluster + a right margin for the external (public-net) 飞书DM node
 const VIEW_H = 700
+const CLUSTER_R = 997 // cluster boundary right edge; the feishu ⇄ connector edges cross it (= egress)
 const DIAGRAM_SCALE = 0.92
 const PARTICLE_MS = 2600       // constant per-edge traversal time (NOT req/s-scaled)
 const PARTICLES_PER_EDGE = 3
@@ -32,7 +33,7 @@ const NODE_BOX = {
   operator: { x: 96, y: 416, w: 180, h: 76 },
   scheduler: { x: 300, y: 422, w: 164, h: 80 },
   'agent-runner': { x: 630, y: 238, w: 300, h: 88 },
-  feishu: { x: 508, y: 374, w: 164, h: 68 },
+  feishu: { x: 1004, y: 372, w: 132, h: 70 },   // OUTSIDE the cluster boundary (public internet)
   'channel-connector': { x: 700, y: 374, w: 210, h: 68 },
   'state-reader': { x: 700, y: 452, w: 210, h: 68 },
   'data-spine': { x: 70, y: 584, w: 580, h: 88 },
@@ -80,13 +81,15 @@ const EDGE_ROUTE = {
   'control-panel|data-spine|grpc': { pts: [[70, 326], [70, 584]], mid: [70, 470], lab: [58, 470, 'end'] },
   'operator|data-spine|grpc': { pts: [[196, 492], [196, 584]], mid: [196, 538], lab: [204, 538, 'start'] },
   'agent-runner|data-spine|grpc': { pts: [[645, 326], [645, 584]], mid: [645, 456], lab: [653, 452, 'start'] },
-  // channel-connector (Phase 4b) lanes. feishu ⇄ connector: two short unlabeled
-  // byte edges (particle direction shows the WS-in / REST-out duplex). connector →
-  // agent-runner: the /run/stream dial (byte). The wake / reconcile / gRPC control
-  // lanes reach across the walled middle band, so they cross the operator/scheduler
-  // → agent-runner risers near-perpendicular — thin control/grpc lines, acceptable.
-  'feishu|channel-connector|byte': { pts: [[672, 392], [700, 392]], mid: [686, 392] },
-  'channel-connector|feishu|byte': { pts: [[700, 424], [672, 424]], mid: [686, 424] },
+  // channel-connector (Phase 4b) lanes. 飞书DM ⇄ connector: two byte edges to the
+  // EXTERNAL node past the cluster boundary (x=CLUSTER_R) — the crossing IS the egress
+  // hop, so the inbound one carries the "egress · 出站" label at the boundary. Both run
+  // above the gRPC riser (y<414) so they don't clip it. connector → agent-runner: the
+  // /run/stream dial (byte). The wake / reconcile / gRPC control lanes reach across the
+  // walled middle band, so they cross the operator/scheduler → agent-runner risers
+  // near-perpendicular — thin control/grpc lines, acceptable.
+  'feishu|channel-connector|byte': { pts: [[1004, 392], [910, 392]], mid: [957, 392], lab: [994, 382, 'end'] },
+  'channel-connector|feishu|byte': { pts: [[910, 404], [1004, 404]], mid: [957, 404] },
   'channel-connector|agent-runner|byte': { pts: [[805, 374], [805, 326]], mid: [805, 350], lab: [813, 350, 'start'] },
   'channel-connector|operator|control': { pts: [[720, 374], [720, 356], [180, 356], [180, 416]], mid: [450, 356], lab: [450, 348, 'middle'] },
   'channel-connector|data-spine|grpc': { pts: [[910, 414], [930, 414], [930, 548], [600, 548], [600, 584]], mid: [765, 548], lab: [765, 540, 'middle'] },
@@ -401,6 +404,16 @@ export default function SystemTopologyDiagram({ data, reducedMotion }) {
             </text>
           </g>
         ))}
+
+        {/* Cluster boundary — everything inside is the priva-cloud k8s cluster; the
+            external 飞书DM node sits OUTSIDE it (public internet), so the feishu ⇄
+            connector edges cross this line = the egress hop that leaves k8s. */}
+        <rect x={3} y={3} width={CLUSTER_R - 3} height={694} rx={5} fill="none"
+          stroke="var(--border-strong)" strokeWidth={1.5} opacity={0.8} />
+        <text x={14} y={17} fontSize={10} fill="var(--text-secondary)"
+          style={{ letterSpacing: '0.12em', fontWeight: 600 }}>
+          {t('admin.topologyClusterBoundary')}
+        </text>
 
         {/* Edges */}
         {routedEdges.map((e) => {
