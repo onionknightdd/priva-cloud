@@ -42,6 +42,11 @@ class IMTransport(Protocol):
     # can later ``remove_reaction`` it. Best-effort: cosmetic, never fail the run.
     async def add_reaction(self, message_id: str, emoji_type: str) -> "str | None": ...
     async def remove_reaction(self, message_id: str, reaction_id: str) -> None: ...
+    # Interactive-card streaming. ``send_card`` posts a card and returns its message_id
+    # (None on failure); ``patch_card`` replaces that card in place (Feishu patch is a
+    # wholesale replace). Both best-effort — a card failure falls back to send_text.
+    async def send_card(self, chat_id: str, card: dict) -> "str | None": ...
+    async def patch_card(self, message_id: str, card: dict) -> None: ...
 
 
 @dataclass
@@ -58,7 +63,10 @@ class FakeTransport:
     sent: list[tuple[str, str]] = field(default_factory=list)  # (chat_id, text)
     reactions: list[tuple[str, str]] = field(default_factory=list)  # (message_id, emoji_type) added
     removed: list[str] = field(default_factory=list)               # reaction_ids removed
+    cards: list[tuple[str, dict]] = field(default_factory=list)    # (chat_id, card) sent
+    patches: list[tuple[str, dict]] = field(default_factory=list)  # (message_id, card) patched
     _rid_seq: int = 0
+    _mid_seq: int = 0
 
     async def start(self) -> None:
         self.started = True
@@ -79,6 +87,15 @@ class FakeTransport:
 
     async def remove_reaction(self, message_id: str, reaction_id: str) -> None:
         self.removed.append(reaction_id)
+
+    async def send_card(self, chat_id: str, card: dict) -> "str | None":
+        self._mid_seq += 1
+        mid = f"m{self._mid_seq}"
+        self.cards.append((chat_id, card))
+        return mid
+
+    async def patch_card(self, message_id: str, card: dict) -> None:
+        self.patches.append((message_id, card))
 
     # --- test helpers -----------------------------------------------------
     async def inject(self, msg: InboundMessage) -> None:

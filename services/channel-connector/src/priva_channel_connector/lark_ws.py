@@ -96,6 +96,16 @@ class LarkTransport:
             return
         await asyncio.to_thread(self._remove_reaction_sync, message_id, reaction_id)
 
+    async def send_card(self, chat_id: str, card: dict) -> str | None:
+        if not chat_id:
+            return None
+        return await asyncio.to_thread(self._send_card_sync, chat_id, card)
+
+    async def patch_card(self, message_id: str, card: dict) -> None:
+        if not message_id:
+            return
+        await asyncio.to_thread(self._patch_card_sync, message_id, card)
+
     # --- lark thread ------------------------------------------------------
     def _domain_const(self, lark):
         return lark.LARK_DOMAIN if self._domain == "lark" else lark.FEISHU_DOMAIN
@@ -249,6 +259,57 @@ class LarkTransport:
             logger.warning(
                 "lark reaction remove failed account={} rid={} code={} msg={}",
                 self.account_id, reaction_id, getattr(resp, "code", "?"), getattr(resp, "msg", "?"),
+            )
+
+    def _send_card_sync(self, chat_id: str, card: dict) -> str | None:
+        # POST /im/v1/messages msg_type="interactive", content=<card json string> → message_id.
+        import lark_oapi as lark  # noqa: F401  (kept lazy like the rest of this module)
+        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+
+        if self._rest is None:
+            self._rest = self._build_rest()
+        req = (
+            CreateMessageRequest.builder()
+            .receive_id_type("chat_id")
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .msg_type("interactive")
+                .content(json.dumps(card))
+                .build()
+            )
+            .build()
+        )
+        resp = self._rest.im.v1.message.create(req)
+        if not resp.success():
+            logger.warning(
+                "lark card send failed account={} code={} msg={}",
+                self.account_id, getattr(resp, "code", "?"), getattr(resp, "msg", "?"),
+            )
+            return None
+        return getattr(getattr(resp, "data", None), "message_id", None)
+
+    def _patch_card_sync(self, message_id: str, card: dict) -> None:
+        # PATCH /im/v1/messages/:message_id — wholesale replace of the interactive card.
+        from lark_oapi.api.im.v1 import PatchMessageRequest, PatchMessageRequestBody
+
+        if self._rest is None:
+            self._rest = self._build_rest()
+        req = (
+            PatchMessageRequest.builder()
+            .message_id(message_id)
+            .request_body(
+                PatchMessageRequestBody.builder()
+                .content(json.dumps(card))
+                .build()
+            )
+            .build()
+        )
+        resp = self._rest.im.v1.message.patch(req)
+        if not resp.success():
+            logger.warning(
+                "lark card patch failed account={} mid={} code={} msg={}",
+                self.account_id, message_id, getattr(resp, "code", "?"), getattr(resp, "msg", "?"),
             )
 
     # --- status bridge (called from the lark thread) ----------------------
