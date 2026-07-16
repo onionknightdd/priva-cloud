@@ -1006,9 +1006,9 @@ async def get_system_health():
         # on config edit. gRPC to the data-spine for bindings/secret/status. All
         # animated when the connector is up.
         # These two cross the cluster boundary (drawn in the frontend) — the ONLY hop
-        # that leaves k8s — so the inbound one is labeled egress to mark the whole link
-        # as outbound-initiated (the WS long-connection the connector dialed out).
-        _edge("feishu", "channel-connector", label="egress · 出站", kind="byte", bytepath=True),
+        # that leaves k8s (the WS long-connection the connector dialed out). Unlabeled;
+        # the boundary crossing itself conveys the egress.
+        _edge("feishu", "channel-connector", kind="byte", bytepath=True),
         _edge("channel-connector", "feishu", kind="byte", bytepath=True),
         _edge("channel-connector", "agent-runner", label="/run/stream", kind="byte", bytepath=True),
         _edge("channel-connector", "operator", label="wake", kind="control"),

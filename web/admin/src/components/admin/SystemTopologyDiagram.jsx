@@ -32,7 +32,7 @@ const NODE_BOX = {
   'control-panel': { x: 60, y: 210, w: 340, h: 116 },
   operator: { x: 96, y: 416, w: 180, h: 76 },
   scheduler: { x: 300, y: 422, w: 164, h: 80 },
-  'agent-runner': { x: 630, y: 238, w: 300, h: 88 },
+  'agent-runner': { x: 600, y: 238, w: 300, h: 88 },
   feishu: { x: 1004, y: 372, w: 132, h: 70 },   // OUTSIDE the cluster boundary (public internet)
   'channel-connector': { x: 700, y: 374, w: 210, h: 68 },
   'state-reader': { x: 700, y: 452, w: 210, h: 68 },
@@ -77,25 +77,24 @@ const EDGE_ROUTE = {
   'agentgateway|control-panel|decision': { pts: [[330, 166], [330, 210]], mid: [330, 188], lab: [338, 188, 'start'] },
   'agentgateway|agent-runner|byte': { pts: [[720, 166], [720, 238]], mid: [720, 204], lab: [728, 204, 'start'] },
   'control-panel|operator|control': { pts: [[162, 326], [162, 416]], mid: [162, 374], lab: [170, 376, 'start'] },
-  'operator|agent-runner|control': { pts: [[276, 416], [276, 400], [560, 400], [560, 290], [630, 290]], mid: [418, 400], lab: [418, 392, 'middle'] },
+  'operator|agent-runner|control': { pts: [[276, 416], [276, 400], [560, 400], [560, 290], [600, 290]], mid: [418, 400], lab: [418, 392, 'middle'] },
   'control-panel|data-spine|grpc': { pts: [[70, 326], [70, 584]], mid: [70, 470], lab: [58, 470, 'end'] },
   'operator|data-spine|grpc': { pts: [[196, 492], [196, 584]], mid: [196, 538], lab: [204, 538, 'start'] },
   'agent-runner|data-spine|grpc': { pts: [[645, 326], [645, 584]], mid: [645, 456], lab: [653, 452, 'start'] },
   // channel-connector (Phase 4b) lanes. 飞书DM ⇄ connector: two byte edges to the
-  // EXTERNAL node past the cluster boundary (x=CLUSTER_R) — the crossing IS the egress
-  // hop, so the inbound one carries the "egress · 出站" label at the boundary. Both run
-  // above the gRPC riser (y<414) so they don't clip it. connector → agent-runner: the
-  // /run/stream dial (byte). The wake / reconcile / gRPC control lanes reach across the
-  // walled middle band, so they cross the operator/scheduler → agent-runner risers
-  // near-perpendicular — thin control/grpc lines, acceptable.
-  'feishu|channel-connector|byte': { pts: [[1004, 392], [910, 392]], mid: [957, 392], lab: [994, 382, 'end'] },
+  // EXTERNAL node past the cluster boundary (x=CLUSTER_R) — the crossing itself is the
+  // egress hop (unlabeled). Both run above the gRPC riser (y<414) so they don't clip it.
+  // connector → agent-runner: the /run/stream dial (byte). The wake / reconcile / gRPC
+  // control lanes reach across the walled middle band, so they cross the operator/
+  // scheduler → agent-runner risers near-perpendicular — thin control/grpc lines, ok.
+  'feishu|channel-connector|byte': { pts: [[1004, 392], [910, 392]], mid: [957, 392] },
   'channel-connector|feishu|byte': { pts: [[910, 404], [1004, 404]], mid: [957, 404] },
   'channel-connector|agent-runner|byte': { pts: [[805, 374], [805, 326]], mid: [805, 350], lab: [813, 350, 'start'] },
   'channel-connector|operator|control': { pts: [[720, 374], [720, 356], [180, 356], [180, 416]], mid: [450, 356], lab: [450, 348, 'middle'] },
   'channel-connector|data-spine|grpc': { pts: [[910, 414], [930, 414], [930, 548], [600, 548], [600, 584]], mid: [765, 548], lab: [765, 540, 'middle'] },
   'control-panel|channel-connector|control': { pts: [[380, 326], [380, 344], [758, 344], [758, 374]], mid: [569, 344], lab: [569, 336, 'middle'] },
   'scheduler|operator|control': { pts: [[300, 462], [276, 462]], mid: [288, 462] },
-  'scheduler|agent-runner|control': { pts: [[464, 462], [600, 462], [600, 300], [630, 300]], mid: [600, 382] },
+  'scheduler|agent-runner|control': { pts: [[464, 462], [600, 462], [600, 300]], mid: [600, 382] },
   'scheduler|data-spine|grpc': { pts: [[382, 502], [382, 584]], mid: [382, 543], lab: [390, 542, 'start'] },
   'data-spine|redis|grpc': { pts: [[650, 628], [690, 628]], mid: [670, 628] },
 }
