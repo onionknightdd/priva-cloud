@@ -31,6 +31,11 @@ services:
     repository: priva/operator
     tag: ""
     replicas: 1
+  # replicas pinned to 1 in the template (one Feishu app = ONE active WS) — see
+  # the channelConnector block below for the on/off switch and resources.
+  channelConnector:
+    repository: priva/channel-connector
+    tag: ""
   # agent-runner is launched per-account BY THE OPERATOR, not deployed by this chart.
   # Its image ref is published to the operator via the ConfigMap (RUNNER_IMAGE).
   agentRunner:
@@ -92,6 +97,15 @@ config:
 # ---------------------------------------------------------------------------
 controlPanel:
   workDir: /tmp/cp-workspace
+  resources: {}
+
+# ---------------------------------------------------------------------------
+# channel-connector — always-on Feishu WS byte-path (DM ⇄ ar pod relay).
+# Hard single replica (one Feishu app = ONE active WS; HA needs a Redis lease).
+# Disable on installs that don't use the Feishu bot channel.
+# ---------------------------------------------------------------------------
+channelConnector:
+  enabled: true
   resources: {}
 
 dataSpine:

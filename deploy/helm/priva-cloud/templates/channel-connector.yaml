@@ -1,0 +1,119 @@
+{{- if .Values.channelConnector.enabled }}
+{{- $ns := include "priva-cloud.namespace" . -}}
+# channel-connector — always-on Feishu WS byte-path. Holds one lark_oapi
+# long-connection per effective account (thread-per-app) and relays DM ⇄ ar pod.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: channel-connector
+  namespace: {{ $ns }}
+  labels:
+    app: channel-connector
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  # replicas is deliberately NOT a values knob: the same Feishu app must hold
+  # exactly ONE active WS — a second connection single-casts and splits events.
+  # Hard single replica with maxSurge=0 (never two connectors overlapping);
+  # HA needs a Redis lease before N>1.
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 0, maxUnavailable: 1}   # never two connectors at once (single-cast)
+  selector:
+    matchLabels: {app: channel-connector}
+  template:
+    metadata:
+      labels: {app: channel-connector}
+    spec:
+      {{- include "priva-cloud.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: priva-channel-connector
+      terminationGracePeriodSeconds: 40   # let SIGTERM close all WS before the kill
+      containers:
+        - name: channel-connector
+          image: {{ include "priva-cloud.image" (dict "svc" .Values.services.channelConnector "root" .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "priva_channel_connector"]
+          ports: [{containerPort: 8083, name: http}]
+          env:
+            - {name: CONNECTOR_HOST, value: "0.0.0.0"}
+            - {name: CONNECTOR_PORT, value: "8083"}
+            - {name: CONNECTOR_POLL_SECONDS, value: "10"}
+            - {name: PRIVA_LOG_DIR, value: {{ .Values.config.logDir | quote }}}
+            # data-plane CLIENT only — gRPC to data-spine, never a repo/DSN here.
+            - {name: PRIVA_DATASPINE__TRANSPORT, value: "grpc"}
+            - {name: PRIVA_DATASPINE__GRPC_DSN, value: "data-spine:50051"}
+          envFrom:
+            - configMapRef: {name: {{ .Values.config.name }}}
+            # jwt_secret / api_key_hmac_secret: mint runner tokens to dial ar pods AND
+            # verify the control-panel's push nudge. (No PRIVA_FERNET_KEY — the connector
+            # never decrypts; data-spine returns the plaintext app_secret over gRPC.)
+            - secretRef: {name: {{ .Values.sharedSecret.name }}}
+          {{- with .Values.channelConnector.resources }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8083}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8083}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: channel-connector
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  selector: {app: channel-connector}
+  ports: [{port: 8083, targetPort: 8083, name: http}]
+---
+# Egress: Feishu/Lark 443 (external), data-spine gRPC, tenant ar pods (dial), DNS.
+# Ingress: the control-panel push + probes/scrape.
+# NOTE: vanilla NetworkPolicy can't match the Feishu FQDNs (open.feishu.cn /
+# open.larksuite.com) — only ports/CIDRs — so external egress is opened by port 443.
+# A Cilium/Calico FQDN policy can tighten this to the two hostnames later.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: channel-connector
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app: channel-connector}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # 8083 open to all sources on purpose: the /internal/reconcile push is gated at the
+    # APP layer by the runner-token (so an open port is safe), and a namespace-only rule
+    # would block the NODE-originated kubelet liveness/readiness probes → the pod would
+    # never go Ready. Egress (below) is where the real restriction lives.
+    - ports:
+        - {protocol: TCP, port: 8083}
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # data-spine gRPC
+    - to:
+        - podSelector: {matchLabels: {app: data-spine}}
+      ports:
+        - {protocol: TCP, port: 50051}
+    # tenant ar-{account} pods: dial /run/stream (runner_service_port) + wake API
+    - to:
+        - podSelector: {matchLabels: {app: agent-runner}}
+      ports:
+        - {protocol: TCP, port: {{ .Values.gateway.runnerTargetPort }}}
+    # kube-apiserver (waker: patch AgentTenant CR) + Feishu/Lark 443 (external).
+    - to:
+        - ipBlock: {cidr: 0.0.0.0/0}
+      ports:
+        - {protocol: TCP, port: 443}
+{{- end }}

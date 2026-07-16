@@ -17,7 +17,7 @@ REGISTRY="${1:?usage: build-push.sh <registry> <tag> [--with-dev-storage]}"
 TAG="${2:?usage: build-push.sh <registry> <tag> [--with-dev-storage]}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 
-IMAGES=(control-panel agent-runner data-spine operator)
+IMAGES=(control-panel agent-runner data-spine operator channel-connector)
 if [[ "${3:-}" == "--with-dev-storage" ]]; then
   IMAGES+=(nfs-xfs)
 fi

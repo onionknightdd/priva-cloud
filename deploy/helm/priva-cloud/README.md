@@ -11,6 +11,7 @@ A full Helm chart for the Priva Cloud control plane, templated from the raw mani
 | CRD | `AgentTenant` (`crds.install`, kept on uninstall) |
 | Config | `priva-config` ConfigMap, `priva-shared-secret` Secret (random, preserved across upgrades) |
 | Control plane | `data-spine` (Deployment+PVC+Service), `control-panel` (Deployment+Service), `operator` (Deployment) |
+| Feishu channel (`channelConnector.enabled`) | `channel-connector` Deployment+Service+NetworkPolicy+RBAC — always-on WS relay, replicas pinned to 1 |
 | RBAC | ServiceAccounts + Roles/Bindings for operator (incl. discovery ClusterRole) and control-panel |
 | Edge (`gateway.enabled`) | `Gateway`, `InferencePool`, `HTTPRoute` (+ `AgentgatewayParameters` when `gateway.serviceType` set) |
 | LB front (`ingress.enabled`) | `Ingress` — "/" catch-all to the gateway Service, for an external cloud LB (e.g. Volcengine ALB) |

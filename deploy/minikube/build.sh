@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build the four service images on the host docker, then load them into minikube
+# Build the service images on the host docker, then load them into minikube
 # (runtime=containerd, so `minikube image load` imports the docker-built image).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
-SERVICES=("${@:-data-spine agent-runner control-panel operator}")
+SERVICES=("${@:-data-spine agent-runner control-panel operator channel-connector}")
 # allow: build.sh                  -> all
 #        build.sh data-spine ...   -> subset
 read -r -a LIST <<< "${SERVICES[*]}"

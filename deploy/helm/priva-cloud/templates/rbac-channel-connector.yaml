@@ -1,0 +1,45 @@
+{{- if .Values.channelConnector.enabled }}
+{{- $ns := include "priva-cloud.namespace" . -}}
+# RBAC for the channel-connector: a WAKER only (same posture as the scheduler).
+# It patches AgentTenant spec.wake to bring a sleeping pod up before dialing the DM
+# to /run/stream, and reads the CR status to know it's Ready. Nothing else: no pods,
+# no exec, no deployments, never a scaler.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: priva-channel-connector
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: priva-channel-connector
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["priva.io"]
+    resources: ["agenttenants"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["priva.io"]
+    resources: ["agenttenants/status"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: priva-channel-connector
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: priva-channel-connector
+subjects:
+  - kind: ServiceAccount
+    name: priva-channel-connector
+    namespace: {{ $ns }}
+{{- end }}
