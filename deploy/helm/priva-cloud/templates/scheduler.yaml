@@ -1,0 +1,62 @@
+{{- $ns := include "priva-cloud.namespace" . -}}
+# scheduler — leaderless firing engine. replicas is a KNOB, not a code change:
+# every replica arms the same job set; the Postgres job_fire claim dedupes
+# fires, so N>1 is pure availability. No PVC — the DB is the only state.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scheduler
+  namespace: {{ $ns }}
+  labels:
+    app: scheduler
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.services.scheduler.replicas }}
+  selector:
+    matchLabels: {app: scheduler}
+  template:
+    metadata:
+      labels: {app: scheduler}
+    spec:
+      {{- include "priva-cloud.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: priva-scheduler
+      containers:
+        - name: scheduler
+          image: {{ include "priva-cloud.image" (dict "svc" .Values.services.scheduler "root" .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "priva_scheduler"]
+          ports: [{containerPort: 8082, name: http}]
+          env:
+            - {name: SCHEDULER_HOST, value: "0.0.0.0"}
+            - {name: SCHEDULER_PORT, value: "8082"}
+            - {name: PRIVA_LOG_DIR, value: {{ .Values.config.logDir | quote }}}
+            # data-plane CLIENT only — gRPC to data-spine, never a repo/DSN here.
+            - {name: PRIVA_DATASPINE__TRANSPORT, value: "grpc"}
+            - {name: PRIVA_DATASPINE__GRPC_DSN, value: "data-spine:50051"}
+          envFrom:
+            - configMapRef: {name: {{ .Values.config.name }}}
+            # jwt_secret / api_key_hmac_secret: mint the same runner tokens the
+            # control-panel edge mints (the pod pins them to its account).
+            - secretRef: {name: {{ .Values.sharedSecret.name }}}
+          {{- with .Values.scheduler.resources }}
+          resources: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8082}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8082}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scheduler
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  selector: {app: scheduler}
+  ports: [{port: 8082, targetPort: 8082, name: http}]

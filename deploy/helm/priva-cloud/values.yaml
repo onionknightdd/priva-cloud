@@ -31,6 +31,12 @@ services:
     repository: priva/operator
     tag: ""
     replicas: 1
+  # leaderless firing engine — replicas is a pure-availability knob (the Postgres
+  # job_fire claim dedupes fires across replicas).
+  scheduler:
+    repository: priva/scheduler
+    tag: ""
+    replicas: 1
   # replicas pinned to 1 in the template (one Feishu app = ONE active WS) — see
   # the channelConnector block below for the on/off switch and resources.
   channelConnector:
@@ -138,6 +144,9 @@ postgres:
   resources: {}
 
 operator:
+  resources: {}
+
+scheduler:
   resources: {}
 
 # ---------------------------------------------------------------------------

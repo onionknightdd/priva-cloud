@@ -10,9 +10,9 @@ A full Helm chart for the Priva Cloud control plane, templated from the raw mani
 |-------|-----------|
 | CRD | `AgentTenant` (`crds.install`, kept on uninstall) |
 | Config | `priva-config` ConfigMap, `priva-shared-secret` Secret (random, preserved across upgrades) |
-| Control plane | `data-spine` (Deployment+PVC+Service), `control-panel` (Deployment+Service), `operator` (Deployment) |
-| Feishu channel (`channelConnector.enabled`) | `channel-connector` Deployment+Service+NetworkPolicy+RBAC — always-on WS relay, replicas pinned to 1 |
-| RBAC | ServiceAccounts + Roles/Bindings for operator (incl. discovery ClusterRole) and control-panel |
+| Control plane | `data-spine` (Deployment+PVC+Service), `control-panel` (Deployment+Service), `operator` (Deployment), `scheduler` (Deployment+Service — leaderless firing engine, replicas = availability knob) |
+| Feishu channel (`channelConnector.enabled`) | `channel-connector` Deployment+Service+RBAC — always-on WS relay, replicas pinned to 1 (no NetworkPolicy — unlike the raw dev manifest; egress governed by VPC policy) |
+| RBAC | ServiceAccounts + Roles/Bindings for operator (incl. discovery ClusterRole), control-panel and scheduler |
 | Edge (`gateway.enabled`) | `Gateway`, `InferencePool`, `HTTPRoute` (+ `AgentgatewayParameters` when `gateway.serviceType` set) |
 | LB front (`ingress.enabled`) | `Ingress` — "/" catch-all to the gateway Service, for an external cloud LB (e.g. Volcengine ALB) |
 | Dev storage (`devStorage.enabled`) | `priva-nfs` StatefulSet, `priva-nfs`/`priva-quota` Services, `priva-export` PV+PVC |
