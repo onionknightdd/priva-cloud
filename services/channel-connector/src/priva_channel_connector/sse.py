@@ -37,12 +37,13 @@ class RunOutcome:
 @dataclass
 class ToolStep:
     """One tool invocation shown as a step row; a ``tool_use`` frame creates it, the
-    matching ``tool_result`` (same id) flips its status."""
+    matching ``tool_result`` (same id) flips its status and captures its output."""
     tool_use_id: str
     name: str
     status: str = "running"    # running | done | error
     summary: str = ""          # one-line input summary (Bash→command, Read/Edit→file_path, …)
     tool_input: dict | None = None  # raw input, carried forward so the card layer can derive its own summary/deltas
+    result_text: str | None = None  # tool_result output text (fact) — the card fold shows it, capped for display
 
 
 @dataclass
@@ -57,6 +58,12 @@ class StreamState:
     error_text: str | None = None
     duration_ms: int | None = None
     num_turns: int | None = None
+    # Active embedded AskUserQuestion / permission prompt (a pending.PendingPrompt), or None.
+    # While set, the card renders the interactive prompt inline INSTEAD of the Thinking footer
+    # and the worker's ticker pauses (a Feishu patch would wipe the user's in-progress input).
+    # Set by the worker on `permission_request`; cleared by dial when the run resumes (any
+    # content event) or by card_actions on answer. Kept here so the pure renderer can see it.
+    pending_prompt: object | None = None
 
     @property
     def text(self) -> str:
@@ -128,6 +135,29 @@ def _summarize_input(name: str, tool_input) -> str:
     return _one_line(val)[:_SUMMARY_MAX]
 
 
+_RESULT_CAP = 40000    # hard memory bound on captured output; the card's display caps (with a
+                       # "内容过长" hint) bite first, so this only guards against pathological sizes
+
+
+def _result_text(content) -> str | None:
+    """Extract a tool_result's output as plain text — a fact carried on the ToolStep so the
+    card fold can show it. Feishu-shaped tool_result ``content`` is either a string or a list
+    of blocks (``{type:'text', text}`` / bare strings); other block kinds (images) are skipped.
+    Capped at ``_RESULT_CAP`` purely to bound memory — display truncation lives in the card."""
+    if isinstance(content, str):
+        return content[:_RESULT_CAP] or None
+    if isinstance(content, list):
+        parts: list[str] = []
+        for b in content:
+            if isinstance(b, str):
+                parts.append(b)
+            elif isinstance(b, dict) and isinstance(b.get("text"), str):
+                parts.append(b["text"])
+        txt = "\n".join(p for p in parts if p)
+        return txt[:_RESULT_CAP] or None
+    return None
+
+
 def step(state: StreamState, event: str, data_str: str) -> bool:
     """Fold ONE ``(event, data_json_str)`` frame into ``state`` (pure + sync). Returns
     True when the *visible* snapshot changed (a text run or a step was appended / a step
@@ -179,6 +209,7 @@ def step(state: StreamState, event: str, data_str: str) -> bool:
             st = state._by_id.get(b.get("tool_use_id"))
             if st is not None:
                 st.status = "error" if b.get("is_error") else "done"
+                st.result_text = _result_text(b.get("content"))
                 changed = True
         return changed
 

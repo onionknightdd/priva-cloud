@@ -114,6 +114,7 @@ class AppWorker:
                     session_id=resume,
                     model=(getattr(self._cfg, "model", None) or None),
                     state=state,
+                    on_permission=self._permission_handler(msg, state, message_id),
                 )
             except Exception:
                 # dial maps transport errors into `state`, so this only fires on an
@@ -173,8 +174,77 @@ class AppWorker:
         dots = 1
         while True:
             await asyncio.sleep(_TICK_INTERVAL)
+            if state.pending_prompt is not None:
+                # An interactive prompt is embedded in the card and the user may be mid-input;
+                # a patch would wipe it. Pause here — the run is blocked server-side anyway, so
+                # there's no fresh content to stream — until dial clears pending on resume.
+                continue
             await self._patch_card(message_id, render_card(state, final=False, dots=dots))
             dots = dots % 3 + 1
+
+    # --- interactive permission / AskUserQuestion cards -------------------
+    def _permission_handler(self, msg, state, message_id):
+        """The async ``on_permission`` callback dial invokes per permission event. Embeds the
+        prompt INTO the streaming card (``message_id``) so it stays one card; closed over this
+        DM's context (chat + sender) and the run's ``state``. The card-action handler resolves
+        the tap out-of-band (``card_actions`` → ``resolve``)."""
+        async def _on_permission(event: str, data: dict) -> None:
+            if event == "permission_request":
+                await self._embed_permission(msg, state, message_id, data or {})
+            elif event == "permission_timeout":
+                self._clear_permission(state, data or {})
+        return _on_permission
+
+    async def _embed_permission(self, msg, state, message_id, data: dict) -> None:
+        from . import permission_cards
+        from .pending import PendingPrompt, register
+        tool_input = data.get("input") if isinstance(data.get("input"), dict) else {}
+        questions = tool_input.get("questions")
+        prompt = PendingPrompt(
+            request_id=data.get("request_id") or "",
+            session_id=data.get("session_id") or "",
+            account_id=self.account_id,
+            username=self._username,
+            chat_id=msg.chat_id,
+            kind=data.get("kind") or "ask_user",
+            questions=questions if isinstance(questions, list) else [],
+            tool_name=data.get("tool_name") or "",
+            tool_input=tool_input or None,
+            reason=data.get("reason") or "",
+            sender_open_id=msg.sender_open_id or "",
+            message_id=message_id or "",
+            state=state,
+        )
+        if not message_id:
+            # No streaming card to embed into (its post failed) → standalone-card fallback.
+            mid = await self._send_card(msg.chat_id, permission_cards.permission_card(prompt))
+            if not mid:
+                logger.warning("feishu permission card send failed account={} rid={}",
+                               self.account_id, prompt.request_id)
+                return
+            prompt.message_id, prompt.state = mid, None
+            register(prompt)
+            return
+        # Embed: flip pending on the shared state (the ticker pauses so the interactive card
+        # isn't wiped), register by the streaming card's id, patch it once to show the prompt.
+        state.pending_prompt = prompt
+        register(prompt)
+        await self._patch_card(message_id, render_card(state, final=False))
+        logger.info("feishu permission embedded account={} rid={} kind={} q={} mid={}",
+                    self.account_id, prompt.request_id, prompt.kind, len(prompt.questions), message_id)
+
+    def _clear_permission(self, state, data: dict) -> None:
+        """Timeout: drop the embed so the ticker resumes (the pod already denied the tool; its
+        errored tool_result renders in the process on the next tick)."""
+        from .pending import discard, get_by_request
+        prompt = get_by_request(data.get("request_id") or "")
+        if prompt is None or prompt.status != "pending":
+            return
+        prompt.status = "timeout"
+        discard(prompt)
+        if state.pending_prompt is prompt:
+            state.pending_prompt = None
+        logger.info("feishu permission timeout account={} rid={}", self.account_id, prompt.request_id)
 
     # --- reaction lifecycle -----------------------------------------------
     async def _react(self, message_id: str, emoji_type: str) -> str | None:

@@ -98,7 +98,7 @@ class FakeDialer:
         self.calls: list[dict] = []
 
     async def run(self, account_id, username, *, prompt, session_id=None, model=None,
-                  do_wake=True, state=None):
+                  do_wake=True, state=None, on_permission=None):
         self.calls.append({"account_id": account_id, "prompt": prompt, "session_id": session_id})
         # dial.run folds into the worker's shared state and returns it.
         if state is None:
@@ -396,28 +396,46 @@ def test_stream_state_stream_error():
 
 
 # --- card renderer (cards.render_card) --------------------------------------
-def test_render_card_no_header_and_running_footer():
+def test_render_card_streaming_inline_then_final_folds_process():
     from priva_channel_connector.cards import render_card
     from priva_channel_connector.sse import StreamState, ToolStep
 
-    s = StreamState(timeline=["working", ToolStep("t1", "Bash", "running", "ls")])
+    # --- streaming: the whole process shown EXPANDED inline, nothing folded, Thinking footer ---
+    s = StreamState(timeline=["let me look", ToolStep("t1", "Bash", "running", "ls")])
     running = render_card(s, final=False)
     assert running["schema"] == "2.0" and "header" not in running          # card-json-v2, no header
     els = running["body"]["elements"]
-    assert els[0]["tag"] == "markdown" and "working" in els[0]["content"]   # text in message order
-    panel = els[1]
-    assert panel["tag"] == "collapsible_panel" and panel["expanded"] is False  # always folded
-    step_md = panel["elements"][0]["content"]
-    assert "⟳" in step_md and "Bash" in step_md
+    assert not any(e.get("tag") == "collapsible_panel" for e in els)       # nothing folds while streaming
+    assert els[0]["tag"] == "markdown" and "let me look" in els[0]["content"]
+    assert "⟳" in els[1]["content"] and "Bash" in els[1]["content"]        # tool step inline, expanded
     assert els[-1]["tag"] == "markdown" and "Thinking" in els[-1]["content"]  # animated footer
 
+    # --- final: process folds ON TOP (each tool its OWN sub-fold), only the answer expanded ---
     s.steps[0].status = "done"
+    s.timeline.append("all done")
     final = render_card(s, final=True)
     assert "header" not in final
-    assert final["body"]["elements"][1]["expanded"] is False                # folded on the final card too
-    assert not any("Thinking" in e.get("content", "") for e in final["body"]["elements"])  # no footer
-    done_md = final["body"]["elements"][1]["elements"][0]["content"]
-    assert "green" in done_md and "✔" in done_md                            # completed tool = green check
+    fels = final["body"]["elements"]
+    assert not any("Thinking" in e.get("content", "") for e in fels)       # no footer on the final card
+    outer = fels[0]
+    assert outer["tag"] == "collapsible_panel" and outer["expanded"] is False   # process folded, on top
+    assert "执行了 1 条 bash 命令" in outer["header"]["title"]["content"]  # aggregate summary in header
+    assert outer["elements"][0]["content"] == "let me look"               # intermediate text folded in
+    sub = outer["elements"][1]
+    assert sub["tag"] == "collapsible_panel" and sub["expanded"] is False  # the tool is INDIVIDUALLY foldable
+    assert "Bash" in sub["header"]["title"]["content"] and "green" in sub["header"]["title"]["content"]
+    assert fels[1]["tag"] == "markdown" and fels[1]["content"] == "all done"    # only the answer expanded
+
+
+def test_render_card_final_no_trailing_text_note():
+    # a run that ends on a tool (no closing assistant text) → process folded + a plain note
+    from priva_channel_connector.cards import render_card
+    from priva_channel_connector.sse import StreamState, ToolStep
+    s = StreamState(timeline=["step one", ToolStep("t1", "Read", "done", "a.py")])
+    final = render_card(s, final=True)
+    els = final["body"]["elements"]
+    assert els[0]["tag"] == "collapsible_panel" and els[0]["expanded"] is False
+    assert els[1]["content"] == "(无文本回复)"
 
 
 def test_render_card_running_no_text_is_thinking_only():
@@ -520,16 +538,128 @@ def test_run_summary_unknown_tool_is_other():
     assert _run_summary(steps) == "执行了 2 个其他工具"
 
 
-def test_steps_panel_header_uses_summary_with_fallback():
-    from priva_channel_connector.cards import _steps_panel
+def test_process_panel_header_uses_summary_with_fallback():
+    from priva_channel_connector.cards import _process_panel
     from priva_channel_connector.sse import ToolStep
-    # grouped summary as the folded header
-    panel = _steps_panel([ToolStep("t1", "Read", "done", "a.py")])
+    # grouped summary as the folded header, prefixed with 过程 ·
+    panel = _process_panel([ToolStep("t1", "Read", "done", "a.py")])
     assert panel["tag"] == "collapsible_panel" and panel["expanded"] is False
-    assert panel["header"]["title"]["content"] == "读取了 1 个文件"
-    # nothing groups yet → plain step-count fallback (never the empty string)
-    lone = _steps_panel([ToolStep("t1", "Edit", "running", "a.py")])
-    assert lone["header"]["title"]["content"] == "1 个工具步骤"
+    assert panel["header"]["title"]["content"] == "过程 · 读取了 1 个文件"
+    # nothing groups yet (lone running Edit) → plain step-count fallback, never empty
+    lone = _process_panel([ToolStep("t1", "Edit", "running", "a.py")])
+    assert lone["header"]["title"]["content"] == "过程 · 1 个工具步骤"
+    # only intermediate text, no tools → a bare 过程 header
+    text_only = _process_panel(["some thinking"])
+    assert text_only["header"]["title"]["content"] == "过程"
+    # nothing to fold → None
+    assert _process_panel([]) is None
+
+
+# --- per-tool fold, duration header, native table, truncation hints ---------
+def test_fmt_duration():
+    from priva_channel_connector.cards import _fmt_duration
+    assert _fmt_duration(45000) == "45s"
+    assert _fmt_duration(72000) == "1m 12s"
+    assert _fmt_duration(600) == "0s"                 # sub-second → 0s
+    assert _fmt_duration(None) == "" and _fmt_duration(-1) == ""
+
+
+def test_process_panel_duration_header():
+    from priva_channel_connector.cards import _process_panel
+    from priva_channel_connector.sse import ToolStep
+    steps = [ToolStep("t1", "Read", "done", "a.py")]
+    assert _process_panel(steps, 72000)["header"]["title"]["content"] == "已运行:1m 12s, 读取了 1 个文件"
+    assert _process_panel(steps, None)["header"]["title"]["content"] == "过程 · 读取了 1 个文件"  # no dur → fallback
+
+
+def test_tool_panel_bash_input_and_title():
+    from priva_channel_connector.cards import _tool_panel
+    from priva_channel_connector.sse import ToolStep
+    st = ToolStep("t1", "Bash", "done", "pytest -q", {"command": "pytest -q"})
+    p = _tool_panel(st)
+    assert p["tag"] == "collapsible_panel" and p["expanded"] is False       # each tool individually foldable
+    title = p["header"]["title"]["content"]
+    assert "Bash" in title and "green" in title and "pytest -q" in title    # glyph + name + summary
+    assert any("```bash" in e.get("content", "") and "pytest -q" in e["content"] for e in p["elements"])  # full cmd
+
+
+def test_tool_panel_edit_diff_and_delta_in_header():
+    from priva_channel_connector.cards import _tool_panel
+    from priva_channel_connector.sse import ToolStep
+    st = ToolStep("t1", "Edit", "done", "dial.py",
+                  {"file_path": "dial.py", "old_string": "a", "new_string": "a\nb\nc\nd"})
+    p = _tool_panel(st)
+    title = p["header"]["title"]["content"]
+    assert "Edit" in title and "<font color='green'>+4</font>" in title and "<font color='red'>-1</font>" in title
+    diff = "\n".join(e.get("content", "") for e in p["elements"])
+    assert "```diff" in diff and "- a" in diff and "+ d" in diff            # old/new rendered as a diff
+
+
+def test_tool_output_single_code_block_native_collapse():
+    # output is ONE code block; Feishu natively collapses long code — no hand-rolled fold
+    from priva_channel_connector.cards import _tool_panel
+    from priva_channel_connector.sse import ToolStep
+    out = "\n".join(f"line {i}" for i in range(1, 41))                       # 40 lines
+    st = ToolStep("t1", "Read", "done", "big.log", {"file_path": "big.log"}, result_text=out)
+    p = _tool_panel(st)
+    assert not any(e.get("tag") == "collapsible_panel" for e in p["elements"])   # no nested fold in the body
+    body = "\n".join(e.get("content", "") for e in p["elements"])
+    assert "```" in body and "line 1" in body and "line 40" in body         # full output in one code block
+
+
+def test_tool_output_truncation_hint():
+    from priva_channel_connector.cards import _tool_panel, _OUTPUT_MAX_LINES, _TRUNC_HINT
+    from priva_channel_connector.sse import ToolStep
+    out = "\n".join(f"L{i}" for i in range(_OUTPUT_MAX_LINES + 50))
+    st = ToolStep("t1", "Bash", "done", "dump", {"command": "dump"}, result_text=out)
+    els = _tool_panel(st)["elements"]                                       # [input, output, hint]
+    assert els[-1]["content"] == _TRUNC_HINT                                 # capped → grey size hint appended
+    assert f"L{_OUTPUT_MAX_LINES - 1}" in els[-2]["content"] and f"L{_OUTPUT_MAX_LINES}" not in els[-2]["content"]
+
+
+def test_answer_native_table_and_prose():
+    from priva_channel_connector.cards import _answer_elements
+    text = ("结果如下:\n\n"
+            "| 文件 | 增删 |\n| --- | --- |\n| dial.py | +4 -1 |\n| cards.py | +40 |\n\n"
+            "完成。")
+    els = _answer_elements(text)
+    table = next(e for e in els if e["tag"] == "table")                    # GFM table → native table element
+    assert [c["display_name"] for c in table["columns"]] == ["文件", "增删"]
+    assert table["rows"][0]["c0"] == "dial.py" and table["rows"][1]["c1"] == "+40"
+    assert any(e["tag"] == "markdown" and "结果如下" in e["content"] for e in els)   # prose stays markdown
+    assert any(e["tag"] == "markdown" and "完成。" in e["content"] for e in els)
+
+
+def test_answer_without_table_is_plain_markdown():
+    from priva_channel_connector.cards import _answer_elements
+    els = _answer_elements("就一句话,没有表格。")
+    assert len(els) == 1 and els[0]["tag"] == "markdown"
+
+
+def test_result_text_captured_from_tool_result():
+    # sse carries the tool_result output text forward as a fact (string form)
+    from priva_channel_connector.sse import StreamState, step
+    s = StreamState()
+    step(s, "tool_use", '{"content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"echo hi"}}]}')
+    step(s, "tool_result",
+         '{"content":[{"type":"tool_result","tool_use_id":"b1","is_error":false,"content":"hi\\nthere"}]}')
+    (bash,) = s.steps
+    assert bash.status == "done" and bash.result_text == "hi\nthere"
+
+
+def test_result_text_from_block_list():
+    # tool_result content as a list of {type:text} blocks → joined text
+    from priva_channel_connector.sse import StreamState, step
+    s = StreamState()
+    step(s, "tool_use", '{"content":[{"type":"tool_use","id":"r1","name":"Read","input":{"file_path":"a"}}]}')
+    step(s, "tool_result",
+         '{"content":[{"type":"tool_result","tool_use_id":"r1","content":[{"type":"text","text":"file body"}]}]}')
+    assert s.steps[0].result_text == "file body"
+
+
+def test_clip_body_truncation_hint():
+    from priva_channel_connector.cards import _clip_body, _BODY_MAX, _TRUNC_HINT
+    assert _TRUNC_HINT in _clip_body("x\n" * _BODY_MAX)      # tail-capped text run carries the hint
 
 
 def test_fold_carries_raw_tool_input():
@@ -563,6 +693,7 @@ def test_worker_streaming_card_end_to_end():
              '{"content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"x.py"}}]}'),
             ("tool_result",
              '{"content":[{"type":"tool_result","tool_use_id":"t1","is_error":false}]}'),
+            ("assistant", '{"content":[{"type":"text","text":"here is the summary"}]}'),
             ("result", '{"session_id":"sess-9","is_error":false,"duration_ms":1500,"num_turns":1}'),
         ]
 
@@ -571,7 +702,7 @@ def test_worker_streaming_card_end_to_end():
                 self.calls = []
 
             async def run(self, account_id, username, *, prompt, session_id=None, model=None,
-                          do_wake=True, state=None):
+                          do_wake=True, state=None, on_permission=None):
                 self.calls.append({"prompt": prompt})
                 if state is None:
                     state = StreamState()
@@ -584,14 +715,20 @@ def test_worker_streaming_card_end_to_end():
         t = created[0]
         await t.inject(_msg("A", "hi"))
 
-        # one initial running card, at least one patch, terminal card has the text + step
+        # one initial running card, at least one patch, terminal card folds the process on top
+        # (intro text + Read sub-fold) with only the closing answer left expanded below.
         assert len(t.cards) == 1
         assert t.patches, "expected card patches"
         final = t.patches[-1][1]
         assert final["schema"] == "2.0" and "header" not in final
-        assert "let me look" in final["body"]["elements"][0]["content"]
-        steps_md = final["body"]["elements"][1]["elements"][0]["content"]
-        assert "Read" in steps_md and "✔" in steps_md
+        outer = final["body"]["elements"][0]
+        assert outer["tag"] == "collapsible_panel" and outer["expanded"] is False
+        assert outer["header"]["title"]["content"].startswith("已运行:")     # duration header (duration_ms=1500)
+        assert "读取了 1 个文件" in outer["header"]["title"]["content"]
+        assert outer["elements"][0]["content"] == "let me look"             # intermediate text folded in
+        sub = outer["elements"][1]
+        assert sub["tag"] == "collapsible_panel" and "Read" in sub["header"]["title"]["content"]  # per-tool fold
+        assert final["body"]["elements"][1]["content"] == "here is the summary"   # only the answer expanded
         assert not any("Thinking" in e.get("content", "") for e in final["body"]["elements"])  # no footer
         # reaction lifecycle still settles to CheckMark alongside the card
         assert t.emojis == [_worker_emoji("TYPING"), _worker_emoji("DONE")]

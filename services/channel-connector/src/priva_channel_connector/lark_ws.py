@@ -9,9 +9,11 @@ thread. ``lark_oapi`` is imported lazily so the package (and its unit tests) imp
 without the dependency.
 
 NOTE: written against the lark_oapi v1 Python SDK surface documented in the design
-(register_p2_im_message_receive_v1 over a long-connection). The exact stop() API and the
-card.action.trigger payload need a live validation pass before production — see
-`feishu-bot-bytepath.md` §9.
+(register_p2_im_message_receive_v1 over a long-connection). The stop() API is probed by
+name across versions. card.action.trigger is delivered over the SAME long-connection via
+``register_p2_card_action_trigger`` — its handler returns a ``P2CardActionTriggerResponse``
+(toast + optional card replace) that the SDK sends back synchronously; the interactive-card
+(AskUserQuestion / permission) reply pipeline builds on ``_dispatch_card_action``.
 """
 
 from __future__ import annotations
@@ -122,17 +124,71 @@ class LarkTransport:
 
     def _run_ws(self) -> None:
         import lark_oapi as lark
+        from lark_oapi.ws import client as wsc
+
+        account_id = self.account_id
+
+        class _CardAwareClient(wsc.Client):
+            """lark_oapi's ws client DROPS ``MessageType.CARD`` frames in every version
+            (``_handle_data_frame``: ``elif message_type == MessageType.CARD: return``),
+            so ``card.action.trigger`` never reaches the handler over the long-connection —
+            even though the dispatcher already has a callback processor for it. This routes
+            CARD frames through that same ``_do_without_validation`` callback path (and logs
+            the raw payload) so interactive-card replies work without an HTTP callback URL."""
+
+            async def _handle_data_frame(self, frame):
+                hs = frame.headers
+                type_ = wsc._get_by_key(hs, wsc.HEADER_TYPE)
+                try:
+                    mt = wsc.MessageType(type_)
+                except ValueError:
+                    mt = None
+                if mt is not wsc.MessageType.CARD:
+                    return await super()._handle_data_frame(frame)
+
+                import base64
+                pl = frame.payload
+                msg_id = wsc._get_by_key(hs, wsc.HEADER_MESSAGE_ID)
+                sum_ = wsc._get_by_key(hs, wsc.HEADER_SUM)
+                seq = wsc._get_by_key(hs, wsc.HEADER_SEQ)
+                try:
+                    if int(sum_) > 1:  # multi-packet payload — reassemble like the base impl
+                        pl = self._combine(msg_id, int(sum_), int(seq), pl)
+                        if pl is None:
+                            return
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    logger.info("feishu CARD frame account={} payload={}",
+                                account_id, pl.decode(wsc.UTF_8, "replace")[:2000])
+                except Exception:
+                    pass
+                resp = wsc.Response(code=200)
+                try:
+                    result = self._event_handler._do_without_validation(pl)
+                    if result is not None:
+                        resp.data = base64.b64encode(wsc.JSON.marshal(result).encode(wsc.UTF_8))
+                except Exception:
+                    logger.exception("feishu CARD dispatch failed account={}", account_id)
+                    resp = wsc.Response(code=500)
+                frame.payload = wsc.JSON.marshal(resp).encode(wsc.UTF_8)
+                await self._write_message(frame.SerializeToString())
 
         def _on_p2_message(data) -> None:
             self._dispatch(data)
 
+        def _on_p2_card_action(data):
+            # Card-action handler must RETURN a response (toast/card) the SDK sends back.
+            return self._dispatch_card_action(data)
+
         handler = (
             lark.EventDispatcherHandler.builder("", "")
             .register_p2_im_message_receive_v1(_on_p2_message)
+            .register_p2_card_action_trigger(_on_p2_card_action)
             .build()
         )
         try:
-            self._ws = lark.ws.Client(
+            self._ws = _CardAwareClient(
                 self._app_id, self._app_secret,
                 event_handler=handler,
                 domain=self._domain_const(lark),
@@ -186,6 +242,54 @@ class LarkTransport:
                     self.account_id, inbound.chat_id, open_id[:14], preview)
         if self._loop is not None and not self._loop.is_closed():
             asyncio.run_coroutine_threadsafe(self._on_message(inbound), self._loop)
+
+    def _dispatch_card_action(self, data):
+        """Feishu ``card.action.trigger`` over the long-connection. Runs on the lark thread
+        and MUST return a ``P2CardActionTriggerResponse`` synchronously (the SDK sends it back
+        to the tapper). Parses the action, hands it to ``card_actions.handle`` (pure decision →
+        response card + optional resolve coroutine), and schedules the resolve POST on the
+        connector loop. The synchronous response updates the card in place (reveal / terminal)."""
+        from lark_oapi.event.callback.model.p2_card_action_trigger import (
+            P2CardActionTriggerResponse,
+        )
+        _fail = P2CardActionTriggerResponse({"toast": {"type": "error", "content": "处理失败"}})
+        try:
+            ev = getattr(data, "event", None)
+            action = getattr(ev, "action", None)
+            operator = getattr(ev, "operator", None)
+            context = getattr(ev, "context", None)
+            parsed = {
+                "open_id": getattr(operator, "open_id", None) if operator else None,
+                "tag": getattr(action, "tag", None) if action else None,
+                "name": getattr(action, "name", None) if action else None,
+                "value": getattr(action, "value", None) if action else None,
+                "option": getattr(action, "option", None) if action else None,
+                "options": getattr(action, "options", None) if action else None,
+                "checked": getattr(action, "checked", None) if action else None,
+                "input_value": getattr(action, "input_value", None) if action else None,
+                "form_value": getattr(action, "form_value", None) if action else None,
+                "message_id": getattr(context, "open_message_id", None) if context else None,
+                "chat_id": getattr(context, "open_chat_id", None) if context else None,
+            }
+        except Exception:
+            logger.exception("feishu card action parse failed account={}", self.account_id)
+            return _fail
+
+        logger.info("feishu CARD ACTION account={} tag={} name={} option={} msg={}",
+                    self.account_id, parsed.get("tag"), parsed.get("name"),
+                    parsed.get("option"), parsed.get("message_id"))
+        try:
+            from . import card_actions
+            response, coro = card_actions.handle(self.account_id, parsed)
+            if coro is not None:
+                if self._loop is not None and not self._loop.is_closed():
+                    asyncio.run_coroutine_threadsafe(coro, self._loop)
+                else:
+                    coro.close()
+            return P2CardActionTriggerResponse(response)
+        except Exception:
+            logger.exception("feishu card action handle failed account={}", self.account_id)
+            return _fail
 
     def _send_sync(self, chat_id: str, text: str) -> None:
         import lark_oapi as lark
