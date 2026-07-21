@@ -1,8 +1,8 @@
 """Admin control-plane console — a web terminal INTO a control-plane pod
 (control-panel / operator / data-spine), served by the control-panel itself.
 
-This is NOT the per-account agent-runner terminal (that rides ``/api/pty/ws`` and
-is steered to the account's pod by the EPP). Control-plane pods don't run the pty
+This is NOT the per-account Terminal pod (that rides ``/api/terminal/ws`` and
+is steered to the independent pod by the EPP). Control-plane pods don't run the terminal
 router and aren't on the InferencePool, so the control-panel bridges a **Kubernetes
 exec** PTY (``connect_get_namespaced_pod_exec``) to the browser WebSocket here.
 
@@ -36,7 +36,7 @@ WS_TOKEN_PREFIX = "priva.token."
 WS_TARGET_PREFIX = "priva.target."
 
 # Allowlisted control-plane targets -> pod ``app`` label. The agent-runner accounts
-# are deliberately NOT here (they use /api/pty/ws via the EPP).
+# are deliberately NOT here (they use /api/terminal/ws via the EPP).
 CONTROL_PLANE_TARGETS = {
     "control-panel": "control-panel",
     "operator": "operator",

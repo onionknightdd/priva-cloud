@@ -8,6 +8,8 @@
 # tools/* holds the `priva-cloud` launcher (tools/cli); members are created lazily
 # per phase, so these globs may match nothing yet (uv tolerates empty globs).
 members = ["libs/*", "services/*", "tools/*"]
+# terminald is a Go module compiled into the shared runner image, not a Python package.
+exclude = ["services/terminald"]
 
 [tool.uv]
 # The root is a workspace anchor only — not an installable package.

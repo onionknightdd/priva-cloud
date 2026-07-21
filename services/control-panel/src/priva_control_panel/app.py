@@ -280,6 +280,7 @@ def create_app() -> FastAPI:
     from .routers.hook_policy import router as hook_policy_router
     from .routers.metrics import router as metrics_router
     from .routers.console import router as console_router
+    from .routers.terminal import router as terminal_router
 
     # Per-user agent-runtime state (usage overview/stats/analytics + agent audit)
     # is served by the agent-runner from its /workspace PVC, not here. The CP only
@@ -288,10 +289,10 @@ def create_app() -> FastAPI:
     # (The old /api/resource/models proxy is gone — the model-list connection test
     # is served pod-side at /api/sandbox/credentials/models, alongside the creds.)
     for r in (auth_router, admin_router, admin_files_router, admin_scheduler_router,
-              hook_policy_router, metrics_router, console_router):
+              hook_policy_router, metrics_router, console_router, terminal_router):
         app.include_router(r)
 
-    # Runtime routes (/api/agent, /api/files, /api/pty, ...) are NOT served by CP:
+    # Runtime routes (/api/sandbox/* and /api/terminal/ws) are NOT served by CP:
     # agentgateway routes them to the per-account pod via the InferencePool, steered
     # by CP's ext_proc EPP (extproc.py).
 

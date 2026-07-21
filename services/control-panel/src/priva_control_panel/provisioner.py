@@ -26,6 +26,7 @@ logger = get_app_logger(__name__)
 # their own. In-process / per-replica only: prod runs N EPP replicas, so this dedupes
 # within a replica — the operator's idempotent on_wake is the real cross-replica safety net.
 _wake_tasks: dict[str, "asyncio.Task[str | None]"] = {}
+_terminal_wake_tasks: dict[str, "asyncio.Task[str | None]"] = {}
 
 GROUP = "priva.io"
 VERSION = "v1alpha1"
@@ -537,6 +538,53 @@ async def wake_and_wait(account_id: str) -> str | None:
     return await asyncio.shield(task)
 
 
+def _patch_terminal_wake(account_id: str) -> None:
+    s = get_settings()
+    ns = s.kubernetes.namespace_tenants
+    _custom().patch_namespaced_custom_object(
+        GROUP, VERSION, ns, PLURAL, account_id,
+        {"spec": {"terminalWake": {"requestedAt": _now_iso()}}})
+
+
+async def _drive_terminal_wake(account_id: str) -> str | None:
+    s = get_settings()
+    port = s.kubernetes.terminal_service_port
+    try:
+        await asyncio.to_thread(_patch_terminal_wake, account_id)
+    except client.ApiException as exc:
+        logger.warning("terminal wake patch failed account={}: {}", account_id, exc)
+        return None
+    deadline = time.monotonic() + float(s.kubernetes.wake_hold_seconds)
+    while time.monotonic() < deadline:
+        terminal = (await asyncio.to_thread(_status, account_id)).get("terminal") or {}
+        if terminal.get("phase") == "Running" and terminal.get("podIP"):
+            return f"{terminal['podIP']}:{port}"
+        await asyncio.sleep(0.5)
+    return None
+
+
+async def wake_terminal_and_wait(account_id: str) -> str | None:
+    """Wake/resolve only the account's independent Terminal pod."""
+    s = get_settings()
+    port = s.kubernetes.terminal_service_port
+    terminal = (await asyncio.to_thread(_status, account_id)).get("terminal") or {}
+    if terminal.get("phase") == "Running" and terminal.get("podIP"):
+        if await _alive(terminal["podIP"], port):
+            return f"{terminal['podIP']}:{port}"
+
+    task = _terminal_wake_tasks.get(account_id)
+    if task is None or task.done():
+        task = asyncio.ensure_future(_drive_terminal_wake(account_id))
+        _terminal_wake_tasks[account_id] = task
+
+        def _cleanup(t: "asyncio.Task[str | None]", aid: str = account_id) -> None:
+            if _terminal_wake_tasks.get(aid) is t:
+                _terminal_wake_tasks.pop(aid, None)
+
+        task.add_done_callback(_cleanup)
+    return await asyncio.shield(task)
+
+
 async def push_account_credentials(
     account_id: str, username: str, env: dict, *, wake_attempts: int = 6
 ) -> None:
@@ -617,28 +665,65 @@ def shutdown_runner(account_id: str) -> int:
 
 
 def force_restart_pod(account_id: str) -> int:
-    """Admin: force-restart the account's runner by deleting its running pod(s);
-    the Deployment's ReplicaSet recreates one at once. Replica count is untouched,
-    so this never fights the operator (the sole scaler). No-op (returns 0) when the
-    runner is scaled to zero — there is no pod to restart. Returns the number of
-    pods deleted."""
+    """Admin: force a *converging* restart of an awake account runner.
+
+    Deleting a Pod alone only recreates it from the Deployment's existing template.
+    That is insufficient after an admin changes inherited image/resources or the
+    Runner/Terminal allocation percentage: the replacement would still use the old
+    template. Use the same safe lifecycle as a cold wake instead:
+
+    1. mark the CR not-routable;
+    2. scale the Deployment to zero and wait for the old Pod to leave;
+    3. patch ``spec.wake`` so the operator converges the full dormant template before
+       scaling it back to one.
+
+    The admin action is already protected by a destructive confirmation dialog and
+    may terminate an in-flight run. No-op (returns 0) when the runner is already
+    dormant or absent. Returns the number of old, non-terminating Pods observed.
+    """
     s = get_settings()
     ns = s.kubernetes.namespace_tenants
+    name = f"ar-{account_id}"
     try:
-        pods = _core().list_namespaced_pod(
-            ns, label_selector=f"priva.io/account-id={account_id}")
+        dep = _apps().read_namespaced_deployment(name, ns)
     except client.ApiException as exc:
         if exc.status == 404:
             return 0
         raise
-    deleted = 0
-    for pod in pods.items:
-        if pod.metadata.deletion_timestamp is not None:
-            continue  # already terminating
+
+    if int(getattr(dep.spec, "replicas", 0) or 0) <= 0:
+        return 0
+
+    selector = f"app=agent-runner,priva.io/account-id={account_id}"
+    pods = _core().list_namespaced_pod(ns, label_selector=selector)
+    old_pods = sum(
+        1 for pod in pods.items if pod.metadata.deletion_timestamp is None)
+
+    _mark_status_zero(account_id)
+    _apps().patch_namespaced_deployment_scale(
+        name, ns, {"spec": {"replicas": 0}})
+
+    # Do not fire wake while the old Pod is still present: waiting makes the
+    # zero-to-one boundary explicit and prevents a new allocation from overlapping
+    # the old 100%-Runner cgroup during percentage changes.
+    deadline = time.monotonic() + 60.0
+    while time.monotonic() < deadline:
         try:
-            _core().delete_namespaced_pod(pod.metadata.name, ns)
-            deleted += 1
+            remaining = _core().list_namespaced_pod(
+                ns, label_selector=selector).items
         except client.ApiException as exc:
-            if exc.status != 404:
+            if exc.status == 404:
+                remaining = []
+            else:
                 raise
-    return deleted
+        if not remaining:
+            break
+        time.sleep(0.25)
+    else:
+        raise RuntimeError(
+            f"timed out waiting for old agent-runner Pod to stop: {account_id}")
+
+    _custom().patch_namespaced_custom_object(
+        GROUP, VERSION, ns, PLURAL, account_id,
+        {"spec": {"wake": {"requestedAt": _now_iso()}}})
+    return old_pods

@@ -166,6 +166,11 @@ DDL: tuple[str, ...] = (
       memory_mb                    INTEGER NOT NULL,
       storage_gb                   INTEGER NOT NULL,
       runner_image                 TEXT    NOT NULL,
+      terminal_resource_percent    INTEGER NOT NULL DEFAULT 0,
+      terminal_max_sessions        INTEGER NOT NULL DEFAULT 2,
+      terminal_idle_timeout_seconds INTEGER NOT NULL DEFAULT 1800,
+      terminal_max_lifetime_seconds INTEGER NOT NULL DEFAULT 14400,
+      terminal_scale_down_grace_seconds INTEGER NOT NULL DEFAULT 120,
       updated_at                   TEXT    NOT NULL DEFAULT {NOW}
     ) STRICT
     """,
@@ -272,6 +277,16 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
      "ALTER TABLE hook_policy ADD COLUMN enforced_events TEXT NOT NULL DEFAULT '[]'"),
     ("account", "feishu_open_id",
      "ALTER TABLE account ADD COLUMN feishu_open_id TEXT"),
+    ("runner_defaults", "terminal_resource_percent",
+     "ALTER TABLE runner_defaults ADD COLUMN terminal_resource_percent INTEGER NOT NULL DEFAULT 0"),
+    ("runner_defaults", "terminal_max_sessions",
+     "ALTER TABLE runner_defaults ADD COLUMN terminal_max_sessions INTEGER NOT NULL DEFAULT 2"),
+    ("runner_defaults", "terminal_idle_timeout_seconds",
+     "ALTER TABLE runner_defaults ADD COLUMN terminal_idle_timeout_seconds INTEGER NOT NULL DEFAULT 1800"),
+    ("runner_defaults", "terminal_max_lifetime_seconds",
+     "ALTER TABLE runner_defaults ADD COLUMN terminal_max_lifetime_seconds INTEGER NOT NULL DEFAULT 14400"),
+    ("runner_defaults", "terminal_scale_down_grace_seconds",
+     "ALTER TABLE runner_defaults ADD COLUMN terminal_scale_down_grace_seconds INTEGER NOT NULL DEFAULT 120"),
 )
 
 # One-time backfills, safe to run every boot. Pre-migration rows carry

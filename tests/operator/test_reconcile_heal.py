@@ -20,6 +20,10 @@ class _Resp:
 
 def _run_reconcile(monkeypatch, patch_obj, stub_logger, *, replicas, real_ip,
                    status, spec=None, health=None):
+    # This suite isolates pod-IP/idle behavior; quota reconciliation belongs to
+    # storage tests and must not reach a developer's live quota-manager.
+    status = {"storageGb": 1, **status}
+    monkeypatch.setattr(R.kube, "resolve_storage_gb", lambda *a, **k: 1)
     monkeypatch.setattr(R.kube, "get_replicas", lambda ns, aid: replicas)
     monkeypatch.setattr(R.kube, "current_ready_pod_ip", lambda ns, aid: real_ip)
     monkeypatch.setattr(R.kube, "scale", lambda *a, **k: None)

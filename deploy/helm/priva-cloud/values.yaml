@@ -87,6 +87,18 @@ config:
     runnerCpuCores: "1.0"
     runnerMemoryMb: 2048
     runnerStorageGb: 1
+    terminalServicePort: 8092
+    # 0 = disabled and hidden in Agent UI. Admin changes are persisted in
+    # data-spine; these are upgrade-safe seeds/fail-soft fallbacks.
+    terminalResourcePercent: 0
+    terminalMaxSessions: 2
+    terminalIdleTimeoutSeconds: 1800
+    terminalMaxLifetimeSeconds: 14400
+    terminalScaleDownGraceSeconds: 120
+    terminalOutputRateBytesPerSec: 262144
+    terminalOutputBurstBytes: 1048576
+    terminalOutputBufferBytes: 1048576
+    terminalTmpSizeLimit: 256Mi
     # Shared-RWX-export storage model. dev=nfs_xfs, prod=cephfs.
     storageBackend: nfs_xfs
     exportClaimName: priva-export
@@ -159,12 +171,19 @@ gateway:
   name: priva-gateway
   listenerPort: 80
   inferencePoolName: agent-runners
+  terminalInferencePoolName: terminals
   runnerTargetPort: 8091         # the port the EPP routes to on each runner pod
+  terminalTargetPort: 8092
   # Type of the Service agentgateway provisions for the Gateway. "" keeps the
   # agentgateway default (LoadBalancer — fine on minikube, pending forever).
   # Set ClusterIP/NodePort when an external LB/Ingress fronts the gateway,
   # otherwise the cloud CCM provisions a second, unwanted LB for it.
   serviceType: ""
+
+# Destination-side isolation for tenant Terminal traffic. Keep enabled outside
+# explicitly insecure, single-user development clusters.
+terminalNetworkPolicy:
+  enabled: true
 
 # ---------------------------------------------------------------------------
 # Optional cloud Ingress in front of the gateway (TLS at the external LB, all

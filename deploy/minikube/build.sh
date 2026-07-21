@@ -21,6 +21,9 @@ for svc in "${LIST[@]}"; do
     docker build -t "priva/${svc}:dev" -f "deploy/docker/${svc}.Dockerfile" .
   fi
   echo ">>> minikube image load priva/${svc}:dev"
+  # IfNotPresent + a mutable :dev tag otherwise leaves the node's previous image
+  # cached, so a successful rebuild may still restart onto old code.
+  minikube image rm "priva/${svc}:dev" >/dev/null 2>&1 || true
   minikube image load "priva/${svc}:dev"
 done
 echo ">>> images in minikube:"

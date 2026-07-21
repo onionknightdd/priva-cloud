@@ -120,3 +120,22 @@ def test_admin_health_and_stats(client, backend):
     stats = client.admin.stats()
     assert stats["accounts"] >= 1
     assert stats["backend"] == backend  # self-reported truthfully (System Map label)
+
+
+def test_runner_defaults_terminal_policy_round_trip(client):
+    seeded = client.runner_defaults.get()
+    assert seeded.terminal_resource_percent == 0
+    assert seeded.terminal_max_sessions == 2
+
+    updated = client.runner_defaults.set(
+        terminal_resource_percent=25,
+        terminal_max_sessions=4,
+        terminal_idle_timeout_seconds=900,
+        terminal_max_lifetime_seconds=7200,
+        terminal_scale_down_grace_seconds=60,
+    )
+    assert updated.terminal_resource_percent == 25
+    assert updated.terminal_max_sessions == 4
+    assert updated.terminal_idle_timeout_seconds == 900
+    assert updated.terminal_max_lifetime_seconds == 7200
+    assert updated.terminal_scale_down_grace_seconds == 60

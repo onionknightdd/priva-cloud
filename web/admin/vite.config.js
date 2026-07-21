@@ -33,7 +33,8 @@ export default defineConfig({
     port: 5174,
     proxy: {
       // Admin Console terminal — WS upgrade must proxy with ws:true (see ConsoleView).
-      '/api/sandbox/pty/ws': { target: API_TARGET, changeOrigin: true, ws: true },
+      '/api/admin/console/ws': { target: API_TARGET, changeOrigin: true, ws: true },
+      '/api/terminal/ws': { target: API_TARGET, changeOrigin: true, ws: true },
       '/api': { target: API_TARGET, changeOrigin: true },
     },
   },

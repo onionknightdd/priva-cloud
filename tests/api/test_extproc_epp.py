@@ -8,11 +8,13 @@ liveness probe + per-account coalescing are exercised against the provisioner di
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from envoy.config.core.v3.base_pb2 import HeaderMap, HeaderValue
 from envoy.service.ext_proc.v3 import external_processor_pb2 as ep
 
 import priva_control_panel.extproc as X
+import priva_common.dataplane as dataplane
 
 
 def _hh(d: dict[str, str]):
@@ -92,6 +94,57 @@ def test_epp_503_when_waking(monkeypatch):
     resp = _run(X.handle_request_headers(_hh({"authorization": "Bearer t"})))
     assert resp.WhichOneof("response") == "immediate_response"
     assert resp.immediate_response.status.code == 503
+
+
+def _terminal_policy(monkeypatch, percent):
+    defaults = SimpleNamespace(terminal_resource_percent=percent)
+    client = SimpleNamespace(runner_defaults=SimpleNamespace(get=lambda: defaults))
+    monkeypatch.setattr(dataplane, "get_client", lambda: client)
+
+
+def test_terminal_epp_steers_to_terminal_without_runner_secret(monkeypatch):
+    async def fake_auth(token, xuser):
+        return _User()
+
+    monkeypatch.setattr(X, "authenticate_raw_token", fake_auth)
+    _terminal_policy(monkeypatch, 25)
+    monkeypatch.setattr(
+        X.provisioner, "wake_terminal_and_wait", _awake("10.2.3.4:8092"))
+
+    resp = _run(X.handle_request_headers(_hh({
+        ":path": "/api/terminal/ws",
+        "sec-websocket-protocol": "priva.ws.v1, priva.token.jwt.payload.sig",
+        # A client-provided value must be overwritten by the EPP.
+        "x-priva-terminal-authorized": "attacker-value",
+    })))
+    assert resp.WhichOneof("response") == "request_headers"
+    headers = {h.header.key: h.header.raw_value.decode()
+               for h in resp.request_headers.response.header_mutation.set_headers}
+    assert headers["x-gateway-destination-endpoint"] == "10.2.3.4:8092"
+    assert headers["x-priva-terminal-authorized"] == "1"
+    assert "x-priva-runner-token" not in headers
+
+
+def test_terminal_epp_fails_closed_when_disabled(monkeypatch):
+    async def fake_auth(token, xuser):
+        return _User()
+
+    monkeypatch.setattr(X, "authenticate_raw_token", fake_auth)
+    _terminal_policy(monkeypatch, 0)
+    woke = {"n": 0}
+
+    async def fake_wake(account_id):
+        woke["n"] += 1
+        return "10.2.3.4:8092"
+
+    monkeypatch.setattr(X.provisioner, "wake_terminal_and_wait", fake_wake)
+    resp = _run(X.handle_request_headers(_hh({
+        ":path": "/api/terminal/ws",
+        "authorization": "Bearer t",
+    })))
+    assert resp.WhichOneof("response") == "immediate_response"
+    assert resp.immediate_response.status.code == 403
+    assert woke["n"] == 0
 
 
 def test_epp_reads_token_from_query(monkeypatch):

@@ -19,3 +19,22 @@ spec:
     port:
       number: 9000
     failureMode: FailClose
+---
+apiVersion: inference.networking.k8s.io/v1
+kind: InferencePool
+metadata:
+  name: terminals
+  namespace: priva-cloud
+spec:
+  selector:
+    matchLabels:
+      app: terminal
+  targetPorts:
+    - number: 8092
+  endpointPickerRef:
+    group: ""
+    kind: Service
+    name: control-panel
+    port:
+      number: 9000
+    failureMode: FailClose

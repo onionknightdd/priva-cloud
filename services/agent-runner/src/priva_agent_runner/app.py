@@ -246,7 +246,6 @@ def create_app() -> FastAPI:
     from .routers.agent import router as agent_router
     from .routers.scheduled_runs import router as scheduled_runs_router
     from .routers.scheduler_jobs import router as scheduler_jobs_router
-    from .routers.pty import router as pty_router
     from .routers.files import router as files_router
     from .routers.user_files import router as user_files_router
     from .routers.hooks import router as hooks_router
@@ -262,7 +261,7 @@ def create_app() -> FastAPI:
 
     for r in (
         agent_router, scheduled_runs_router, scheduler_jobs_router,
-        pty_router, files_router, user_files_router,
+        files_router, user_files_router,
         hooks_router, mcp_router, skills_router, skill_hub_router, subagents_router,
         commands_router, memory_router,
         user_config_router, user_data_router, credentials_router,

@@ -85,8 +85,9 @@ credentials are entered in the SPA Settings after login.
 
 - **Edge TLS**: the Gateway listens on plain :80. Put your LB/ingress TLS in front, or
   accept HTTP for internal UAT.
-- **Web terminal**: `docs/webterminal-blind-spot.md` Tier-0 items are still open (shared
-  signing secrets visible in terminal env; no NetworkPolicies). Do not give terminal
-  access to untrusted testers until those land.
+- **Web terminal prerequisites**: use a CNI that enforces Kubernetes NetworkPolicy and
+  set kubelet `podPidsLimit` to `1..512` on every node (verify with
+  `deploy/checks/pod-pids-limit.sh`). Terminal is disabled by default (`0%`); enable it
+  from Admin only after both checks pass.
 - The chart intentionally does NOT install Gateway API CRDs / agentgateway (step 2) —
   they're cluster-level and shared.

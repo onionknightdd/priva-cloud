@@ -65,6 +65,7 @@ only decides.
 | **operator** (kopf) | — | `AgentTenant` CRD reconcile; **sole scaler 0↔1**; injects per-pod creds Secret at wake | (K) watch/patch | idle sweep scales back to 0 |
 | **data-spine** | `:50051` gRPC | accounts / quota / **secrets (Fernet)** + SQLite (RWO PVC) | (G) plaintext | single writer (`replicas:1`, `Recreate`) |
 | **agent-runner** `ar-<account>` | `:8091` HTTP | one scale-to-zero runtime pod per account; spawns the `claude` CLI | (P) from gateway **and channel-connector**, (G) to data-spine | trusts the EPP-injected HS256 signed `account_id`; creds from the mounted Secret |
+| **terminal** `term-<account>` | `:8092` WS/HTTP | independent scale-to-zero Web Terminal; same image/workspace/uid as Runner, separate env/process/net/cgroup | (P) from gateway | Go `terminald`; no Runner `envFrom` or SA token; EPP-overwritten internal auth header |
 | **channel-connector** | `:8083` HTTP (internal) | IM byte path: holds one Feishu/Lark **WS long-connection per account** (thread-per-app), relays DM ⇄ ar pod | (P) `:8083` internal only — control-panel reconcile push + probes, **no gateway route**; the Feishu messages are **not** inbound (see below) | data-plane client; single replica `maxSurge:0` (same app ⇒ exactly one WS); **no Fernet key** (data-spine returns the secret) |
 
 ## Transport (alpha)
@@ -74,13 +75,13 @@ EndpointPicker (`control-panel:9000`) over **TLS** (GIE convention; it skip-veri
 serves TLS (self-signed, ALPN `h2`). This is forced by agentgateway, not a choice — a plaintext EPP fails
 with `InvalidContentType`. Real HTTPS / mTLS / JWKS / edge-TLS are **deferred** (plan §L).
 
-## WebSocket auth (chat `/api/agent/ws/run`, terminal `/api/pty/ws`)
+## WebSocket auth (chat `/api/sandbox/agent/ws/run`, terminal `/api/terminal/ws`)
 
 The edge authenticates a WS on the **upgrade** request, which has no body and no
 `Authorization` header. The SPA passes the JWT as a **subprotocol**:
 `new WebSocket(url, ['priva.ws.v1', 'priva.token.<jwt>'])`. The EPP reads the
 `priva.token.` entry off `Sec-WebSocket-Protocol`; the agent-runner echoes back
-only `priva.ws.v1` in `accept()` so the browser handshake completes. This keeps
+only `priva.ws.v1` in the upstream handshake so the browser connection completes. This keeps
 the token out of the URL and gateway access logs. (The EPP still accepts a legacy
 `?token=` query param as a fallback for stale cached bundles.)
 
@@ -264,12 +265,15 @@ reaches only their **own** pod, and any `..` in the path is rejected (400) so th
 above `/api/sandbox/`.
 
 **Never rerouted** — these stay on the `/api/sandbox` InferencePool lane and are never truncated:
-all **writes** (POST/PUT/DELETE/PATCH); all **streams** (the agent-run WS, run/stream SSE, the
-terminal pty WS — the EPP is consulted only at WS *setup* for steering, not in the byte path, so
-frames tunnel through intact); **blob downloads** (`.blob()`, streamed); the control-plane reads
+all **writes** (POST/PUT/DELETE/PATCH); all **Runner streams** (the agent-run WS and run/stream
+SSE); **blob downloads** (`.blob()`, streamed); the control-plane reads
 (`/api/auth/audit`) and the `/health` readiness poll (must hit the pod directly); and always-tiny
 configs. The truncation is a *buffered-body* defect, not a per-frame one, which is why streaming
 responses are exempt.
+
+The Web Terminal is not a Runner read or proxy exception. `/api/terminal/ws` has its own
+InferencePool; the EPP authenticates and wakes `term-<account>` at upgrade time, then
+agentgateway tunnels frames directly to the Go daemon.
 
 On the client (`web/shared/api/client.js`), `sandboxRead(path)` tries `/api/cp-proxy` + path and
 falls back to the direct `/api/sandbox` lane on a 404 (route not deployed) or a network error, so it

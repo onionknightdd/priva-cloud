@@ -517,7 +517,10 @@ class SqliteRepo(Repository):
 
     # runner_defaults (single row id=1) --------------------------------------
     _RDEFAULTS_COLS = ("idle_grace_seconds", "min_alive_after_wake_seconds",
-                       "cpu_cores", "memory_mb", "storage_gb", "runner_image")
+                       "cpu_cores", "memory_mb", "storage_gb", "runner_image",
+                       "terminal_resource_percent", "terminal_max_sessions",
+                       "terminal_idle_timeout_seconds", "terminal_max_lifetime_seconds",
+                       "terminal_scale_down_grace_seconds")
 
     def runner_defaults_get(self):
         return self._one("SELECT * FROM runner_defaults WHERE id = 1")

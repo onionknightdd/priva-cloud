@@ -203,7 +203,7 @@ export default function DirectoryPicker({
           border: '1px solid var(--border-strong)',
           borderRadius: 4,
           width: 'min(560px, 92vw)',
-          maxHeight: '80vh',
+          height: '80vh',
         }}
       >
         {/* Header */}

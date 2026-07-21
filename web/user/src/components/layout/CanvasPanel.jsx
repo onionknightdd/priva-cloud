@@ -5,6 +5,7 @@ import { useResizable } from '@shared/hooks/useResizable'
 import useCollapseWidth from '@shared/motion/useCollapseWidth'
 import ErrorBoundary from '../shared/ErrorBoundary'
 import CanvasHeader from '../canvas/CanvasHeader'
+import CanvasTabMenu from '../canvas/CanvasTabMenu'
 import SubagentInspector from '../canvas/SubagentInspector'
 import WorkflowTree from '../canvas/WorkflowTree'
 import FileOpsPanel from '../canvas/FileOpsPanel'
@@ -125,7 +126,9 @@ export default function CanvasPanel() {
       <CanvasHeader />
 
       <ErrorBoundary resetKey={activeCanvasTab} compact>
-        {activeCanvasTab === 'file-browser' ? (
+        {activeCanvasTab === 'menu' ? (
+          <CanvasTabMenu />
+        ) : activeCanvasTab === 'file-browser' ? (
           <FileBrowserPanel />
         ) : activeCanvasTab === 'changes' || activeCanvasTab === 'files' ? (
           <FileOpsPanel />

@@ -1,46 +1,24 @@
-import { Minus, X, GripVertical } from 'lucide-react'
+import { PanelRight, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useUiStore from '@shared/stores/uiStore'
-import useFileOpsStore from '../../stores/fileOpsStore'
-import useFileBrowserStore from '../../stores/fileBrowserStore'
-import { RollingInteger } from '../shared/Odometer'
 import { useSlidingUnderline } from '@shared/motion/useSlidingUnderline'
+import { useCanvasTabItems } from './CanvasTabMenu'
 
 const MAIN_AREA_HEADER_HEIGHT = 30
 
 function CountedTabLabel({ label, count }) {
   if (!count) return label
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, lineHeight: '16px' }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 16, lineHeight: '16px' }}>
       <span>{label}</span>
       <span
         aria-label={`(${count})`}
         style={{
-          display: 'inline-grid',
-          gridTemplateColumns: '4px 8px 4px',
-          alignItems: 'center',
-          justifyItems: 'center',
-          height: 16,
-          fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-          fontSize: 11,
-          fontWeight: 600,
-          lineHeight: '16px',
-          fontVariantNumeric: 'tabular-nums',
-          color: 'currentColor',
+          font: 'inherit',
+          lineHeight: 'inherit',
         }}
       >
-        <span aria-hidden="true" style={{ lineHeight: '16px' }}>(</span>
-        <RollingInteger
-          value={count}
-          minDigits={1}
-          height={11}
-          width={7}
-          color="currentColor"
-          fontSize={11}
-          fontWeight={600}
-          verticalAlign="baseline"
-        />
-        <span aria-hidden="true" style={{ lineHeight: '16px' }}>)</span>
+        ({count})
       </span>
     </span>
   )
@@ -50,34 +28,25 @@ export default function CanvasHeader() {
   const { t } = useTranslation()
   const canvasWidth = useUiStore((s) => s.canvasWidth)
   const compact = canvasWidth < 380
-  const toggleCanvasMinimized = useUiStore((s) => s.toggleCanvasMinimized)
-  const hideCanvas = useUiStore((s) => s.hideCanvas)
   const activeCanvasTab = useUiStore((s) => s.activeCanvasTab)
   const setActiveCanvasTab = useUiStore((s) => s.setActiveCanvasTab)
-  const fileBrowserCount = useFileBrowserStore((s) => s.tabs.length)
-  const changeOpsCount = useFileOpsStore((s) => s.fileOps.filter((op) => op.type === 'write' || op.type === 'edit').length)
-  const hasPlan = useUiStore((s) => !!s.planContent)
-  const tabItems = [
-    { id: 'tasks', label: t('canvas.inspector', 'INSPECTOR') },
-    { id: 'file-browser', label: <CountedTabLabel label={t('canvas.fileBrowser', 'File Browser')} count={fileBrowserCount} /> },
-    { id: 'changes', label: <CountedTabLabel label={t('canvas.changeReview', 'Change Review')} count={changeOpsCount} /> },
-    ...(hasPlan ? [{ id: 'plan', label: t('canvas.plan') }] : []),
-    { id: 'browser', label: t('canvas.browserTab', 'BROWSER') },
-  ]
+  const hideCanvas = useUiStore((s) => s.hideCanvas)
+  const showCanvasMenu = useUiStore((s) => s.showCanvasMenu)
+  const canvasOpenTabs = useUiStore((s) => s.canvasOpenTabs)
+  const tabItems = useCanvasTabItems().filter((tab) => !tab.action && canvasOpenTabs.includes(tab.id))
   const activeTabKey = activeCanvasTab === 'files' ? 'changes' : activeCanvasTab
   const headerUnderline = useSlidingUnderline(activeTabKey)
 
   return (
     <div
-      className={`flex items-center justify-between flex-shrink-0 ${compact ? 'px-2' : 'px-3'}`}
+      className={`flex items-center gap-1 flex-shrink-0 ${compact ? 'px-2' : 'px-3'}`}
       style={{
         height: MAIN_AREA_HEADER_HEIGHT,
         borderBottom: '1px solid var(--border)',
         background: 'var(--bg-surface)',
       }}
     >
-      <div className={`flex items-center min-w-0 flex-1 overflow-x-auto scrollbar-hidden ${compact ? 'gap-2' : 'gap-4'}`}>
-        <GripVertical size={12} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
+      <div className="flex items-center min-w-0 flex-1 overflow-x-auto scrollbar-hidden">
         <div
           className={`flex items-center ${compact ? 'gap-2' : 'gap-4'}`}
           style={{ height: '100%', position: 'relative' }}
@@ -127,46 +96,65 @@ export default function CanvasHeader() {
                   transition: 'color 150ms ease',
                 }}
               >
-                {tab.label}
+                <CountedTabLabel label={tab.label} count={tab.count} />
               </button>
             )
           })}
+          <button
+            type="button"
+            onClick={showCanvasMenu}
+            title={t('canvas.openPanel')}
+            className="inline-flex items-center justify-center flex-shrink-0"
+            style={{
+              width: 24,
+              height: MAIN_AREA_HEADER_HEIGHT,
+              padding: 0,
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--text-dim)',
+              cursor: 'pointer',
+              transition: 'color 150ms ease, background 150ms ease',
+            }}
+            onMouseEnter={(event) => {
+              event.currentTarget.style.color = 'var(--text-secondary)'
+              event.currentTarget.style.background = 'var(--bg-elevated)'
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.color = 'var(--text-dim)'
+              event.currentTarget.style.background = 'transparent'
+            }}
+          >
+            <Plus size={14} strokeWidth={1.5} />
+          </button>
         </div>
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <button
-          style={{
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--text-dim)',
-            padding: 4,
-            transition: 'color 150ms ease',
-          }}
-          onClick={toggleCanvasMinimized}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-          title={t('canvas.minimize')}
-        >
-          <Minus size={14} strokeWidth={1.5} />
-        </button>
-        <button
-          style={{
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--text-dim)',
-            padding: 4,
-            transition: 'color 150ms ease',
-          }}
-          onClick={hideCanvas}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-          title={t('canvas.close')}
-        >
-          <X size={14} strokeWidth={1.5} />
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={hideCanvas}
+        title={t('canvas.close')}
+        className="inline-flex items-center justify-center flex-shrink-0"
+        style={{
+          minWidth: 26,
+          width: 26,
+          height: 26,
+          padding: 0,
+          border: 'none',
+          background: 'transparent',
+          color: 'var(--text-dim)',
+          cursor: 'pointer',
+          transition: 'color 150ms ease, background 150ms ease',
+        }}
+        onMouseEnter={(event) => {
+          event.currentTarget.style.color = 'var(--text-secondary)'
+          event.currentTarget.style.background = 'var(--bg-elevated)'
+        }}
+        onMouseLeave={(event) => {
+          event.currentTarget.style.color = 'var(--text-dim)'
+          event.currentTarget.style.background = 'transparent'
+        }}
+      >
+        <PanelRight size={16} strokeWidth={1.5} />
+      </button>
     </div>
   )
 }

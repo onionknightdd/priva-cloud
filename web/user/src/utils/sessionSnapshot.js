@@ -59,6 +59,7 @@ function pickUiState(s) {
     canvasVisible: s.canvasVisible,
     canvasMinimized: s.canvasMinimized,
     activeCanvasTab: s.activeCanvasTab,
+    canvasOpenTabs: s.canvasOpenTabs,
     planContent: s.planContent,
     planFilePath: s.planFilePath,
   }
@@ -97,7 +98,12 @@ export function applySessionSnapshot(data) {
   if (data.fileOps) useFileOpsStore.setState(data.fileOps)
   if (data.fileBrowser) useFileBrowserStore.setState(data.fileBrowser)
   if (data.workflow) useWorkflowStore.setState(data.workflow)
-  if (data.ui) useUiStore.setState(data.ui)
+  if (data.ui) {
+    useUiStore.setState({ canvasOpenTabs: [], ...data.ui })
+    if (data.ui.canvasVisible && data.ui.activeCanvasTab !== 'menu') {
+      useUiStore.getState().setActiveCanvasTab(data.ui.activeCanvasTab)
+    }
+  }
 }
 
 export function subscribeSessionSnapshot(publish) {
@@ -110,4 +116,3 @@ export function subscribeSessionSnapshot(publish) {
     useUiStore.subscribe(publish),
   ]
 }
-

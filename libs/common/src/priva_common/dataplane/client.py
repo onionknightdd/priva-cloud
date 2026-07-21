@@ -132,6 +132,13 @@ class RunnerDefaultsRecord(BaseModel):
     memory_mb: int = 2048
     storage_gb: int = 1
     runner_image: str = "priva/agent-runner:dev"
+    # 0 disables Web Terminal platform-wide. Non-zero values are fixed 5% steps
+    # and may reserve at most half of each tenant's CPU and memory allocation.
+    terminal_resource_percent: int = 0
+    terminal_max_sessions: int = 2
+    terminal_idle_timeout_seconds: int = 1800
+    terminal_max_lifetime_seconds: int = 14400
+    terminal_scale_down_grace_seconds: int = 120
     updated_at: str | None = None
 
 
@@ -345,6 +352,11 @@ class RunnerDefaultsClient(Protocol):
         memory_mb: int | None = None,
         storage_gb: int | None = None,
         runner_image: str | None = None,
+        terminal_resource_percent: int | None = None,
+        terminal_max_sessions: int | None = None,
+        terminal_idle_timeout_seconds: int | None = None,
+        terminal_max_lifetime_seconds: int | None = None,
+        terminal_scale_down_grace_seconds: int | None = None,
     ) -> RunnerDefaultsRecord: ...
 
 

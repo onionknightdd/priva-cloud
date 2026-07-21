@@ -132,6 +132,11 @@ def runner_defaults_from_pb(m) -> RunnerDefaultsRecord:
         memory_mb=m.memory_mb,
         storage_gb=m.storage_gb,
         runner_image=m.runner_image,
+        terminal_resource_percent=m.terminal_resource_percent,
+        terminal_max_sessions=m.terminal_max_sessions,
+        terminal_idle_timeout_seconds=m.terminal_idle_timeout_seconds,
+        terminal_max_lifetime_seconds=m.terminal_max_lifetime_seconds,
+        terminal_scale_down_grace_seconds=m.terminal_scale_down_grace_seconds,
         updated_at=m.updated_at or None,
     )
 

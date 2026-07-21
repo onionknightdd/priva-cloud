@@ -25,6 +25,16 @@ data:
   PRIVA_KUBERNETES__RUNNER_CPU_CORES: {{ .Values.config.kubernetes.runnerCpuCores | quote }}
   PRIVA_KUBERNETES__RUNNER_MEMORY_MB: {{ .Values.config.kubernetes.runnerMemoryMb | quote }}
   PRIVA_KUBERNETES__RUNNER_STORAGE_GB: {{ .Values.config.kubernetes.runnerStorageGb | quote }}
+  PRIVA_KUBERNETES__TERMINAL_SERVICE_PORT: {{ .Values.config.kubernetes.terminalServicePort | quote }}
+  PRIVA_KUBERNETES__TERMINAL_RESOURCE_PERCENT: {{ .Values.config.kubernetes.terminalResourcePercent | quote }}
+  PRIVA_KUBERNETES__TERMINAL_MAX_SESSIONS: {{ .Values.config.kubernetes.terminalMaxSessions | quote }}
+  PRIVA_KUBERNETES__TERMINAL_IDLE_TIMEOUT_SECONDS: {{ .Values.config.kubernetes.terminalIdleTimeoutSeconds | quote }}
+  PRIVA_KUBERNETES__TERMINAL_MAX_LIFETIME_SECONDS: {{ .Values.config.kubernetes.terminalMaxLifetimeSeconds | quote }}
+  PRIVA_KUBERNETES__TERMINAL_SCALE_DOWN_GRACE_SECONDS: {{ .Values.config.kubernetes.terminalScaleDownGraceSeconds | quote }}
+  PRIVA_KUBERNETES__TERMINAL_OUTPUT_RATE_LIMIT_BYTES_PER_SEC: {{ .Values.config.kubernetes.terminalOutputRateBytesPerSec | quote }}
+  PRIVA_KUBERNETES__TERMINAL_OUTPUT_BURST_BYTES: {{ .Values.config.kubernetes.terminalOutputBurstBytes | quote }}
+  PRIVA_KUBERNETES__TERMINAL_OUTPUT_BUFFER_BYTES: {{ .Values.config.kubernetes.terminalOutputBufferBytes | quote }}
+  PRIVA_KUBERNETES__TERMINAL_TMP_SIZE_LIMIT: {{ .Values.config.kubernetes.terminalTmpSizeLimit | quote }}
   # Shared-RWX-export storage model: each runner subPaths into one RWX export; the
   # per-account volume quota is enforced by the backend. dev=nfs_xfs, prod=cephfs.
   PRIVA_KUBERNETES__STORAGE_BACKEND: {{ .Values.config.kubernetes.storageBackend | quote }}

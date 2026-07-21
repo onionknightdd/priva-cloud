@@ -150,6 +150,11 @@ def _rdefaults_pb(r) -> runner_defaults_pb2.RunnerDefaults:
         memory_mb=r.memory_mb,
         storage_gb=r.storage_gb,
         runner_image=r.runner_image,
+        terminal_resource_percent=r.terminal_resource_percent,
+        terminal_max_sessions=r.terminal_max_sessions,
+        terminal_idle_timeout_seconds=r.terminal_idle_timeout_seconds,
+        terminal_max_lifetime_seconds=r.terminal_max_lifetime_seconds,
+        terminal_scale_down_grace_seconds=r.terminal_scale_down_grace_seconds,
         updated_at=r.updated_at or "",
     )
 
@@ -453,6 +458,16 @@ class _RunnerDefaultsServicer(runner_defaults_pb2_grpc.RunnerDefaultsServiceServ
             kw["storage_gb"] = request.storage_gb
         if "runner_image" in mask:
             kw["runner_image"] = request.runner_image
+        if "terminal_resource_percent" in mask:
+            kw["terminal_resource_percent"] = request.terminal_resource_percent
+        if "terminal_max_sessions" in mask:
+            kw["terminal_max_sessions"] = request.terminal_max_sessions
+        if "terminal_idle_timeout_seconds" in mask:
+            kw["terminal_idle_timeout_seconds"] = request.terminal_idle_timeout_seconds
+        if "terminal_max_lifetime_seconds" in mask:
+            kw["terminal_max_lifetime_seconds"] = request.terminal_max_lifetime_seconds
+        if "terminal_scale_down_grace_seconds" in mask:
+            kw["terminal_scale_down_grace_seconds"] = request.terminal_scale_down_grace_seconds
         return _rdefaults_pb(self.svc.set(**kw))
 
 

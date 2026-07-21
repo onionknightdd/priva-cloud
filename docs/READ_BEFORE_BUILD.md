@@ -89,7 +89,7 @@ There are **no secrets to bake into images**. If you find one in an image, that'
 
 ## 6. Dev (minikube) pre-flight
 
-- `minikube start --driver=docker` (containerd runtime — `minikube image load` imports the
+- `minikube start --driver=docker --cni=calico --extra-config=kubelet.pod-pids-limit=512` (containerd runtime — `minikube image load` imports the
   host-docker-built image).
 - **Reloading the same `:dev` tag won't replace the image** under `imagePullPolicy:
   IfNotPresent`. Either `minikube image rm priva/<svc>:dev` first, or use a fresh tag.
@@ -115,6 +115,8 @@ Full steps: **`deploy/uat/README.md`**. Confirm these before you start:
 | Pod **egress to `api.anthropic.com`** (or your `ANTHROPIC_BASE_URL` relay) | runners call the Claude API |
 | Install-time egress to `cr.agentgateway.dev` + GitHub releases | edge prerequisites |
 | **Edge prereqs installed** (Gateway API v1.5 CRDs + GIE CRDs + agentgateway controller) | the chart does **not** install these — they're cluster-level |
+| **NetworkPolicy-enforcing CNI** | Terminal isolation is destination-side policy; a CNI that ignores NetworkPolicy provides no boundary |
+| kubelet **`podPidsLimit` = 1..512** on every node | bounds a fork bomb at the Pod cgroup; verify with `deploy/checks/pod-pids-limit.sh` |
 
 Storage backend switches to `cephfs` in `values-uat.yaml` (one RWX PVC per account, size =
 hard quota). The dev NFS pod is disabled there (`devStorage.enabled=false`).
@@ -126,9 +128,12 @@ hard quota). The dev NFS pod is disabled there (`devStorage.enabled=false`).
 - **Runner runs non-root (uid/gid 10001).** It owns its `/workspace`; `readOnlyRootFilesystem`
   is on. No `IS_SANDBOX` root hack — the CLI accepts `--dangerously-skip-permissions` as
   non-root.
-- **Never cap `RLIMIT_AS` around the `claude` CLI.** Its bun/JSC binary reserves >3 GiB of
-  address space at startup and **SIGTRAPs** under any realistic AS cap. The PTY default is
-  `rlimit_as_bytes = 0` (uncapped) on purpose; real memory is bounded by the pod cgroup.
+- **Terminal is a separate Pod, not an agent-runner route.** It uses the same image,
+  uid/gid and workspace, but no Runner `envFrom`, process namespace or cgroup. Its Go
+  daemon and shells inherit `NOFILE=4096`, `NPROC=256`, `CORE=0`; memory is bounded by
+  the Terminal container limit. Do not re-enable the removed Python PTY router.
+- **Never add `RLIMIT_AS` around the `claude` CLI.** Its bun/JSC binary reserves >3 GiB
+  of address space at startup and SIGTRAPs under any realistic AS cap.
 
 ---
 
@@ -146,6 +151,6 @@ and minikube's VM access. Read-only `kubectl`/`helm` calls run fine sandboxed.
 □ npm run build (web/) BEFORE building control-panel image
 □ .venv via `uv pip install -r requirements.txt`  (never `uv sync`)
 □ dev: `minikube image rm` before reloading the same :dev tag
-□ UAT: amd64 + CephFS RWX SC (allowVolumeExpansion) + registry/pull-secret + anthropic egress + edge CRDs
+□ UAT: amd64 + CephFS RWX SC + registry/pull-secret + anthropic egress + edge CRDs + NetworkPolicy CNI + podPidsLimit≤512
 □ shared secret auto-generated (don't commit); anthropic creds entered in the SPA
 ```

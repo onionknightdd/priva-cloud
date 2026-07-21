@@ -38,7 +38,9 @@ class _FakeCore:
 def _existing(replicas: int):
     return SimpleNamespace(
         spec=SimpleNamespace(replicas=replicas),
-        metadata=SimpleNamespace(resource_version="42"),
+        metadata=SimpleNamespace(resource_version="42", annotations={
+            "priva.io/terminal-resource-percent": "0",
+        }),
     )
 
 
@@ -83,3 +85,28 @@ def test_never_touches_a_running_deployment(monkeypatch):
     # replicas 1 = a live (possibly mid-session) pod — reconcile must not restart it.
     apps = _run(monkeypatch, _FakeApps(existing=_existing(replicas=1)))
     assert not apps.created and not apps.replaced
+
+
+class _RunnerDormantTerminalRunningApps(_FakeApps):
+    def __init__(self, *, mismatch=False):
+        super().__init__(_existing(replicas=0))
+        self.terminal = _existing(replicas=1)
+        self.existing.metadata.annotations["priva.io/terminal-resource-percent"] = "25"
+        self.terminal.metadata.annotations["priva.io/terminal-resource-percent"] = (
+            "50" if mismatch else "25")
+
+    def read_namespaced_deployment(self, name, namespace):
+        return self.terminal if name.startswith("term-") else self.existing
+
+
+def test_dormant_runner_keeps_matching_allocation_while_terminal_runs(monkeypatch):
+    apps = _run(monkeypatch, _RunnerDormantTerminalRunningApps())
+    assert not apps.created and not apps.replaced
+
+
+def test_mismatched_live_allocation_fails_instead_of_overcommitting(monkeypatch):
+    import pytest
+
+    apps = _RunnerDormantTerminalRunningApps(mismatch=True)
+    with pytest.raises(RuntimeError, match="allocation generation mismatch"):
+        _run(monkeypatch, apps)

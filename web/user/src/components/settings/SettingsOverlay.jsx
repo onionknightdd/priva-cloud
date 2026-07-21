@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useCallback } from 'react'
-import { Key, Cpu, Zap, Settings2, User, X, Terminal, Archive, MessageSquare } from 'lucide-react'
+import { Key, Cpu, Zap, Settings2, User, X, Archive, MessageSquare } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useUiStore from '@shared/stores/uiStore'
 import useSidebarStore from '../../stores/sidebarStore'
@@ -8,8 +8,7 @@ import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 
 const SettingsPanel = lazyWithChunkReload(() => import('./SettingsPanel'))
 
-// The agent-runner SPA is per-account, so every tab here is the user's OWN config
-// (no cross-account/admin settings). Web Terminal configures this account's own pod.
+// Terminal policy is platform-admin controlled, so it is intentionally absent here.
 const TABS = [
   { id: 'account', labelKey: 'settings.account', icon: User },
   { id: 'api', labelKey: 'settings.apiKey', icon: Key },
@@ -17,7 +16,6 @@ const TABS = [
   { id: 'channels', labelKey: 'settings.channels', icon: MessageSquare },
   { id: 'quickactions', labelKey: 'settings.quickActions', icon: Zap },
   { id: 'advanced', labelKey: 'settings.advanced', icon: Settings2 },
-  { id: 'webterminal', labelKey: 'settings.webTerminal.title', icon: Terminal },
   { id: 'archived', labelKey: 'settings.archived', icon: Archive },
 ]
 

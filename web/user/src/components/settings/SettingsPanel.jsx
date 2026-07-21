@@ -19,7 +19,6 @@ import {
 } from '@shared/api/admin'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { getLucideIcon, ICON_NAMES } from '../../utils/lucideIconMap'
-import WebTerminalTab from './WebTerminalTab'
 import Toggle from '@shared/components/shared/Toggle'
 import Dropdown from '@shared/components/shared/Dropdown'
 import DrawIcon from '@shared/components/shared/DrawIcon'
@@ -1879,7 +1878,6 @@ export default function SettingsPanel({ activeTabOverride }) {
       {activeTab === 'channels' && <ChannelsTab />}
       {activeTab === 'quickactions' && <QuickActionsTab />}
       {activeTab === 'advanced' && <AdvancedTab />}
-      {activeTab === 'webterminal' && <WebTerminalTab />}
       {activeTab === 'archived' && <ArchivedTab />}
     </>
   )

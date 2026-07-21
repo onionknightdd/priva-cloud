@@ -2,13 +2,26 @@
 
 | | |
 |---|---|
-| **Scope** | The tenant-facing web terminal: xterm.js SPA → WebSocket → agent-runner PTY (`/api/sandbox/pty/ws`), the PTY session lifecycle, its auth/routing, and the pod it runs in. |
+| **Scope** | Historical review of the retired in-Runner Python PTY (`/api/sandbox/pty/ws`); current path is xterm.js → agentgateway/EPP → independent `term-<account>` Pod (`/api/terminal/ws`). |
 | **Audience decision** | **Tenant-facing (untrusted users).** This reframes the findings below from "hardening" to "launch blockers." |
 | **Method** | Code read end-to-end **plus verification against the live minikube cluster** (`priva-cloud` namespace). Every "Evidence" line was observed, not inferred. |
 | **Date** | 2026-07-07 |
-| **Status** | Findings open. Nothing in the register has been remediated yet. The four session bugs in Appendix A are already fixed. |
+| **Status** | **Remediated in the independent Terminal-Pod implementation (2026-07-21).** The register below is retained as the threat-model record for the removed design. |
 
-> ⚠️ **One-line verdict:** a single tenant with terminal access can extract the platform's shared token-signing secret, forge a runner token for any account or admin, and — because there is no NetworkPolicy — reach any other tenant's pod directly and open a shell in it. **The terminal must not reach real tenants until Tier 0 below is done.**
+> Historical verdict for the removed co-located PTY: a tenant could read Runner secrets and move laterally. The current implementation removes that route: Terminal has its own process/network/cgroup boundary, no `envFrom` or ServiceAccount token, a small allowlisted shell environment, and destination-side NetworkPolicies protecting data-spine, PostgreSQL, Redis, Runner Pods and Terminal Pods.
+
+### Implemented replacement
+
+- One `term-<account-id>` Deployment and Service per tenant, managed by the existing Operator and scaled `0↔1`; Runner and Terminal use the same immutable image, uid/gid and workspace mount.
+- `terminald` is a compiled Go WebSocket/PTTY server. The Python PTY router/session implementation was removed from agent-runner.
+- agentgateway carries WebSocket bytes. Control Panel's EPP authenticates, wakes, selects the account endpoint, and overwrites the internal authorization header.
+- Global Admin policy reserves 0–50% in fixed 5% steps from both CPU and memory. `0` disables Terminal and hides the Agent UI entry. Runner+Terminal requests/limits remain equal to the tenant commitment.
+- Per-tenant session/time controls plus `RLIMIT_NOFILE=4096`, `RLIMIT_NPROC=256`, `RLIMIT_CORE=0`, 256 KiB/s output rate, 1 MiB burst/buffer, and a memory-backed `/tmp` capped at 256 MiB.
+- Terminal has `automountServiceAccountToken: false`, non-root 10001:10001, `RuntimeDefault` seccomp, read-only root filesystem, no privilege escalation, all capabilities dropped, and no host/shared process namespace.
+- Node prerequisite: kubelet `podPidsLimit <= 512`. The minikube bring-up fails closed when it is missing.
+- Terminal egress to unrelated services and external sites remains open by product decision. Isolation is enforced at protected destinations, not by a general Terminal egress allowlist.
+
+Everything below describes the old design and should not be read as the current byte path.
 
 ---
 

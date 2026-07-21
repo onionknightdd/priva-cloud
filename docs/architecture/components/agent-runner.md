@@ -952,8 +952,10 @@ The body above (esp. §1.2) describes the router census by *disposition* ("KEEP 
 **Subagents** — `routers/subagents.py` `/api/sandbox/subagents` → `services/subagents.py`
 `GET /catalog` · `GET /list` · `GET /{name}` · `POST /` · `PUT /{name}` · `DELETE /{name}` · `POST /{name}/test/stream` — picker-catalog / list / detail / create / update / delete / stream-test.
 
-**PTY / web terminal** — `routers/pty.py` → `services/pty_session.py`
-`GET /api/sandbox/pty/feature` · `GET /api/sandbox/pty/config` · `PUT /api/sandbox/pty/config` · `WS /api/sandbox/pty/ws` — feature-flag / read-config / write-config / interactive shell.
+**Web terminal removed from Runner (2026-07-21).** The Python `routers/pty.py` and
+`services/pty_session.py` implementation was deleted. Tenant shells now use the same immutable
+image and workspace through an independent `term-<account>` Pod running the Go `terminald`
+binary at `WS /api/terminal/ws`; agent-runner exposes no shell route.
 
 **User dashboard data** — `routers/user_data.py` `/api/sandbox/user` → `services/compute_user_stats.py`, `priva_common.audit_log`
 `GET /overview` · `GET /stats` · `GET /audit` · `GET /analytics` — usage-overview / counts+storage / audit feed / activity timeline.

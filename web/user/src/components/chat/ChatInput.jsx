@@ -19,6 +19,7 @@ import FileReferenceCard from '../shared/FileReferenceCard'
 import SelectedXlsxCard from '../shared/SelectedXlsxCard'
 import SelectedFileCard from '../shared/SelectedFileCard'
 import CwdIndicator from './CwdIndicator'
+import CheckpointToggle from './CheckpointToggle'
 import DirectoryPicker from '../shared/DirectoryPicker'
 import { setSessionAddDirs } from '../../api/sessions'
 import QueuedMessagesStack from './QueuedMessagesStack'
@@ -599,7 +600,8 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
 
   // Permission mode button (toolbar left, after + button)
   const toolbarLeftContent = (
-    <div className="relative" ref={permMenuRef}>
+    <div className="flex items-center gap-1">
+      <div className="relative" ref={permMenuRef}>
       <button
         className="flex items-center gap-1 px-2"
         style={{
@@ -664,6 +666,8 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
           })}
         </div>
       )}
+      </div>
+      <CheckpointToggle />
     </div>
   )
 

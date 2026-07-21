@@ -170,6 +170,11 @@ DDL: tuple[str, ...] = (
       memory_mb                    BIGINT NOT NULL,
       storage_gb                   BIGINT NOT NULL,
       runner_image                 TEXT   NOT NULL,
+      terminal_resource_percent    BIGINT NOT NULL DEFAULT 0,
+      terminal_max_sessions        BIGINT NOT NULL DEFAULT 2,
+      terminal_idle_timeout_seconds BIGINT NOT NULL DEFAULT 1800,
+      terminal_max_lifetime_seconds BIGINT NOT NULL DEFAULT 14400,
+      terminal_scale_down_grace_seconds BIGINT NOT NULL DEFAULT 120,
       updated_at                   TEXT   NOT NULL DEFAULT {NOW}
     )
     """,
@@ -246,6 +251,11 @@ _MIGRATIONS: tuple[str, ...] = (
     "DEFAULT 'auto_scale' CHECK (agent_runner_type IN ('auto_scale','persistent'))",
     "ALTER TABLE hook_policy ADD COLUMN IF NOT EXISTS enforced_events TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE account ADD COLUMN IF NOT EXISTS feishu_open_id TEXT",
+    "ALTER TABLE runner_defaults ADD COLUMN IF NOT EXISTS terminal_resource_percent BIGINT NOT NULL DEFAULT 0",
+    "ALTER TABLE runner_defaults ADD COLUMN IF NOT EXISTS terminal_max_sessions BIGINT NOT NULL DEFAULT 2",
+    "ALTER TABLE runner_defaults ADD COLUMN IF NOT EXISTS terminal_idle_timeout_seconds BIGINT NOT NULL DEFAULT 1800",
+    "ALTER TABLE runner_defaults ADD COLUMN IF NOT EXISTS terminal_max_lifetime_seconds BIGINT NOT NULL DEFAULT 14400",
+    "ALTER TABLE runner_defaults ADD COLUMN IF NOT EXISTS terminal_scale_down_grace_seconds BIGINT NOT NULL DEFAULT 120",
     # session_uuid: drop NOT NULL for the "/new" detach flow, and retire the old
     # non-partial index in favour of the partial ux_binding_session_active (created
     # by the DDL above). All idempotent — safe to run every boot.

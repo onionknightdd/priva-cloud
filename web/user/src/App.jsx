@@ -10,7 +10,7 @@ import useUiStore, { THEME_CHANNEL } from '@shared/stores/uiStore'
 import SettingsOverlay from './components/settings/SettingsOverlay'
 import ToastStack from './components/ui/ToastStack'
 import ConnectionBanner from './components/ui/ConnectionBanner'
-import { getPtyFeature } from '@shared/api/admin'
+import { getTerminalCapability } from '@shared/api/admin'
 import safeStorage from '@shared/utils/safeStorage'
 import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 import { restoreRunningSessions } from './session/attachBoot'
@@ -38,6 +38,8 @@ export default function App() {
   const introOpen = useUiStore((s) => s.introOpen)
   const setTheme = useUiStore((s) => s.setTheme)
   const setTerminalFeatureEnabled = useUiStore((s) => s.setTerminalFeatureEnabled)
+  const setTerminalMaxSessions = useUiStore((s) => s.setTerminalMaxSessions)
+  const setTerminalOpen = useUiStore((s) => s.setTerminalOpen)
   const [showSetupWizard, setShowSetupWizard] = useState(false)
   // Sticky latch: once the wizard has been shown, keep its (lazy) chunk
   // mounted so the modal can play its exit animation after close — the
@@ -98,14 +100,48 @@ export default function App() {
         }
       })
       fetchVisionModel()
-      getPtyFeature()
-        .then((data) => setTerminalFeatureEnabled(!!data?.enabled))
-        .catch(() => setTerminalFeatureEnabled(false))
       // Re-attach to runs that survived a refresh in the backend RunRegistry
       // (no-op on registry-less backends).
       restoreRunningSessions()
     }
-  }, [user, fetchEnvStatus, fetchEnv, fetchVisionModel, setTerminalFeatureEnabled])
+  }, [user, fetchEnvStatus, fetchEnv, fetchVisionModel])
+
+  // Keep the platform switch live: 0% removes the Agent UI affordance and closes
+  // an open drawer without requiring the user to sign out and back in.
+  useEffect(() => {
+    if (!user) {
+      setTerminalFeatureEnabled(false)
+      setTerminalOpen(false)
+      return undefined
+    }
+    let active = true
+    let firstLoad = true
+    const refresh = async () => {
+      try {
+        const data = await getTerminalCapability()
+        if (!active) return
+        const enabled = !!data?.enabled
+        setTerminalFeatureEnabled(enabled)
+        setTerminalMaxSessions(data?.max_sessions || 2)
+        if (!enabled) setTerminalOpen(false)
+      } catch {
+        // Initial discovery fails closed. A later transient poll failure keeps the
+        // last known policy so an active session does not flap on a network blip.
+        if (active && firstLoad) {
+          setTerminalFeatureEnabled(false)
+          setTerminalOpen(false)
+        }
+      } finally {
+        firstLoad = false
+      }
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 30_000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [user, setTerminalFeatureEnabled, setTerminalMaxSessions, setTerminalOpen])
 
   const maybeAutoOpenIntro = useCallback((currentUser) => {
     const key = getIntroSeenKey(currentUser)

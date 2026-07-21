@@ -131,6 +131,7 @@ priva-cloud/
 ├── services/
 │   ├── control-panel/      # brain + EPP + auth/admin API + SPA host + provisioner
 │   ├── agent-runner/       # per-tenant Claude Agent SDK runtime
+│   ├── terminald/          # Go WebSocket/PTTY daemon for independent Terminal pods
 │   ├── data-spine/         # gRPC state + secret store (Postgres; legacy sqlite)
 │   └── operator/           # kopf AgentTenant controller (sole scaler)
 ├── libs/
@@ -171,7 +172,7 @@ The **provisioner** creates/updates `AgentTenant` CRs, polls status, introspects
 
 A single-account service (one pod per tenant, pinned by `entry.py` via `ACCOUNT_ID`/`USERNAME`) that wraps **claude-agent-sdk 0.1.81** and serves `/api/sandbox/*`:
 
-- **Endpoints:** `POST /api/sandbox/agent/run` (one-shot), `POST …/run/stream` (SSE), `WS …/agent/ws/run` (bidirectional, subprotocol `priva.ws.v1`), session CRUD (list/get/delete/pin/archive), fork/rewind, permission responses, plus **PTY** (`WS /api/sandbox/pty/ws`, xterm.js) and **file-ops** endpoints (backing the console's Web Terminal and File Explorer).
+- **Endpoints:** `POST /api/sandbox/agent/run` (one-shot), `POST …/run/stream` (SSE), `WS …/agent/ws/run` (bidirectional, subprotocol `priva.ws.v1`), session CRUD (list/get/delete/pin/archive), fork/rewind, permission responses, and file-ops endpoints. The legacy Python PTY route has been removed.
 - **Claude SDK service:** builds `ClaudeAgentOptions` (model, cwd, `add_dirs`, permission mode, hooks, MCP servers, skills allowlist); `agent_run()` / `agent_run_events()`; session healing of orphan tool-use blocks on resume; retry with exponential backoff (`MAX_ATTEMPTS=10`).
 - **Permission coordinator:** bridges SDK `can_use_tool` callbacks to the SSE/WS stream — emits `permission_request`, waits on an `asyncio.Future`, resolves on `POST …/agent/permission/respond`.
 - **Skills:** enumerates global (`~/.claude/skills`) + project (`.claude/skills`) directories, applies a `skill_exclude` denylist, returns the allowlist for `options.skills`.
@@ -199,22 +200,23 @@ Services exposed over gRPC (`:50051`): **Account**, **Binding**, **Quota**, **Ad
 
 ### operator — the AgentTenant controller
 
-A standalone kopf operator (no `KopfPeering` CRD; one instance per cluster) that reconciles the **`AgentTenant`** CRD (`priva.io/v1alpha1`, plural `agenttenants`, short name `at`) and is the sole scaler. Only four triggers:
+A standalone kopf operator (no `KopfPeering` CRD; one instance per cluster) that reconciles the **`AgentTenant`** CRD (`priva.io/v1alpha1`, plural `agenttenants`, short name `at`) and is the sole runtime scaler. Main triggers:
 
-1. **CR create/resume** → ensure Deployment (`ar-<account_id>`, `replicas=0`, `strategy=Recreate`), Service, PVC subPath mount.
-2. **`spec.wake.requestedAt` patch** → scale `0→1`, fetch the credential bundle from data-spine, materialize the `ar-<account_id>-creds` Secret (mounted via `envFrom`).
-3. **10s timer** → idle sweep, pod-IP self-heal (real Ready pods are source of truth; flips status to not-routable *before* teardown to shrink the EPP race window), and quota reconcile.
-4. **field edits** (`agentRunnerType`, `resources`, `storageGb`).
+1. **CR create/resume** → ensure Runner Deployment/Service and, when globally enabled, an independent Terminal Deployment/Service; both start at `replicas=0`.
+2. **`spec.wake.requestedAt` patch** → converge and wake only `ar-<account>`.
+3. **`spec.terminalWake.requestedAt` patch** → converge and wake only `term-<account>`; allocation-generation checks prevent partially applying a new resource split.
+4. **10s timers** → Runner idle sweep/status healing/quota reconcile plus Terminal session health and `1→0` scale-down after its grace period.
+5. **field edits** (`agentRunnerType`, `resources`, `storageGb`).
 
-Scale model: `auto_scale` (default, scale-to-zero after a configurable idle grace) or `persistent` (always-on, exempt from idle sweep). Storage uses one shared RWX export (`priva-export`) that every runner `subPath`s into by `account_id`, with per-account quota enforced by the backend. In dev the `NfsXfsBackend` provisions a **fixed-size ext4 loop image per account** via the quota-manager HTTP API — **grow is supported; live shrink of a mounted image is unsupported** (the quota-manager returns `409 "shrink not supported on the dev loop backend"`). A `CephFsBackend` stub is provided for prod. Inheritance cascade: CR spec override → data-spine global defaults (fail-soft) → env seeds.
+Runner scale model: `auto_scale` (default, scale-to-zero after a configurable idle grace) or `persistent` (always-on, exempt from idle sweep). Terminal always scales `0↔1` independently. Storage uses the same per-account workspace mount and existing backend-enforced disk quota. Global Admin policy reserves a fixed 0–50% CPU/memory share for Terminal; 0 disables it. Inheritance cascade: CR spec override → data-spine global defaults (fail-soft) → env seeds.
 
 ### Web console (user + admin SPAs)
 
 Two independent React 18 + Vite SPAs sharing one design system and a `web/shared` infra layer (auth, API client with REST + WebSocket, Zustand stores, i18n `en`/`zh`, fonts).
 
-- **User SPA (`/`):** chat-driven agent console. Sidebar groups sessions by working directory (search/filter, create/archive/fork/pin); `ChatPanel` streams from `/api/sandbox/agent/ws/run` (tool-call cards, subagent frames, permission/plan approvals); `CanvasPanel` (right, 380px, resizable 280–60vw) shows the task tree, progress, and file-ops browser, auto-showing when tasks appear; **Data & Usage** view (usage, analytics, audit log, file explorer); a bottom **Web Terminal** drawer over `/api/sandbox/pty/ws` (xterm.js, into the tenant pod).
+- **User SPA (`/`):** chat-driven agent console. Sidebar groups sessions by working directory (search/filter, create/archive/fork/pin); `ChatPanel` streams from `/api/sandbox/agent/ws/run` (tool-call cards, subagent frames, permission/plan approvals); `CanvasPanel` (right, 380px, resizable 280–60vw) shows the task tree, progress, and file-ops browser, auto-showing when tasks appear; **Data & Usage** view (usage, analytics, audit log, file explorer); a bottom **Web Terminal** drawer over `/api/terminal/ws` into an independent per-account Terminal Pod.
 - **Plugins / Customize hub:** five subsections. **Skills is live** (list + editor + Skills hub modal). **MCP, Hooks, SubAgents, and Memory all render "coming soon" placeholders** — full panel components for MCP/Hooks/SubAgents exist in the tree but are not wired into the hub.
-- **Admin SPA (`/admin`):** operations dashboard with 7 nav items — **Fleet, Resource Quota, System Topology, Console, Users, Audit, Sandbox** (operational); a Configurations tab is a placeholder. Role-gated: non-admins are redirected to `/`. The admin **Console** terminal is a Kubernetes-exec bridge into *control-plane* pods (`/api/admin/console/ws`) — distinct from the user SPA's sandbox PTY (`/api/sandbox/pty/ws`), which streams into the tenant's own agent-runner pod.
+- **Admin SPA (`/admin`):** operations dashboard with 7 nav items — **Fleet, Resource Quota, System Topology, Console, Users, Audit, Sandbox** (operational); a Configurations tab is a placeholder. Role-gated: non-admins are redirected to `/`. The admin **Console** terminal is a Kubernetes-exec bridge into *control-plane* pods (`/api/admin/console/ws`) — distinct from the tenant Terminal Pod path (`/api/terminal/ws`).
 - **Design system:** GitHub Dark palette via CSS variables only (no hardcoded hex, no color Tailwind classes), Noto Sans (UI) / JetBrains Mono (code), no shadows, ≤4px radius, status shown as a 2px left border, skeleton-shimmer loading. Tailwind is layout-only. Cold-start UX: `fetchWithWake()` detects a `503` early (`WAKE_SLOW_MS=900ms`), toasts "Agent sandbox is waking…", and retries up to 6 times with backoff `[1, 2, 4, 8, 16]`s. WebSocket auth carries the JWT in the `Sec-WebSocket-Protocol` subprotocol. See `web/design-spec.md`.
 
 Stack highlights: Tailwind 3.4, Zustand 5, lucide-react, react-markdown + remark-gfm + rehype-highlight, Recharts, xterm.js, CodeMirror 6, i18next.

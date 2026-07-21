@@ -73,16 +73,18 @@ export function SlidingTabIndicator({
       const dw = prev.width - cur.width
       const dh = prev.height - cur.height
       if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5 || Math.abs(dw) > 0.5 || Math.abs(dh) > 0.5) {
-        // Invert (pre-paint): jump to the previous tab's rect…
-        el.style.transform = `translateX(${dx}px) translateY(${dy}px)`
+        const horizontalOnly = variant === 'underline'
+        // Underlines stay at a fixed 2px height. Animating the vertical axis
+        // or height creates a visible handoff jolt as the active button remounts.
+        el.style.transform = horizontalOnly
+          ? `translateX(${dx}px)`
+          : `translateX(${dx}px) translateY(${dy}px)`
         el.style.width = `${prev.width}px`
-        el.style.height = `${prev.height}px`
-        // …then play to identity + natural size.
-        animate(el, {
+        if (!horizontalOnly) el.style.height = `${prev.height}px`
+
+        const animation = {
           translateX: 0,
-          translateY: 0,
           width: `${cur.width}px`,
-          height: `${cur.height}px`,
           duration: DUR_MIGRATION.tabSlide,
           ease: EASE_TAB,
           onComplete: () => {
@@ -90,9 +92,19 @@ export function SlidingTabIndicator({
             // keeps tracking its button through resizes.
             el.style.transform = ''
             el.style.width = ''
-            el.style.height = ''
+            // anime.js owns the inline height while animating. Clearing it
+            // after an underline transition removes React's original 2px
+            // style without a subsequent render to restore it.
+            el.style.height = variant === 'underline' ? '2px' : ''
+            if (variant === 'left-border') el.style.width = '2px'
           },
-        })
+        }
+        if (!horizontalOnly) {
+          animation.translateY = 0
+          animation.height = `${cur.height}px`
+        }
+        // …then play to the new tab's anchored position.
+        animate(el, animation)
       }
     }
 

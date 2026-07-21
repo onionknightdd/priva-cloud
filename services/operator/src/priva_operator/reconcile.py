@@ -93,6 +93,31 @@ def ensure(spec, name, namespace, uid, status, patch, logger, **_):
     kube.ensure_runtime_objects(
         namespace, account_id, username, image, s.kubernetes.runner_image_pull_policy, s, owner, spec, defaults)
 
+    terminal_percent = kube.resolve_terminal_percent(s, defaults)
+    if terminal_percent > 0:
+        kube.ensure_terminal_objects(
+            namespace, account_id, username, image, s.kubernetes.runner_image_pull_policy,
+            s, owner, spec, defaults)
+        if kube.get_terminal_replicas(namespace, account_id) <= 0:
+            patch.status["terminal"] = {
+                **(status.get("terminal") or {}),
+                "phase": "Zero",
+                "readyReplicas": 0,
+                "resourcePercent": terminal_percent,
+            }
+    else:
+        terminal_replicas = kube.get_terminal_replicas(namespace, account_id)
+        if terminal_replicas > 0:
+            kube.scale_terminal(namespace, account_id, 0)
+        patch.status["terminal"] = {
+            **(status.get("terminal") or {}),
+            "phase": "Disabled",
+            "podIP": None,
+            "readyReplicas": 0,
+            "activeSessions": 0,
+            "resourcePercent": 0,
+        }
+
     replicas = kube.get_replicas(namespace, account_id)
 
     # Persistent runners are always-on: bring them to 1 here (the reconcile-to-desired
@@ -169,6 +194,158 @@ def on_wake(spec, name, namespace, uid, status, patch, logger, **_):
     patch.status["startedAt"] = time.time()
     patch.status["idleSince"] = None
     logger.info("woke account=%s pod=%s", account_id, pod_ip)
+
+
+@kopf.on.field(GROUP, VERSION, PLURAL, field="spec.terminalWake.requestedAt")
+def on_terminal_wake(spec, name, namespace, uid, status, patch, logger, **_):
+    """Wake only the independent Terminal Deployment. Runner state is untouched."""
+    s = get_settings()
+    account_id, username = _ids(spec, name)
+    defaults = _runner_defaults()
+    percent = kube.resolve_terminal_percent(s, defaults)
+    current = status.get("terminal") or {}
+    if percent <= 0 or spec.get("desiredState", "active") != "active":
+        patch.status["terminal"] = {
+            **current, "phase": "Disabled", "podIP": None, "readyReplicas": 0,
+            "activeSessions": 0, "resourcePercent": 0,
+        }
+        return
+
+    # Never let a newly-enabled Terminal overlap a still-running Runner that has
+    # the old, unsplit resource template. Dormant runners are converged without a
+    # restart; active runners keep running and Terminal reports pending until their
+    # next zero-to-one convergence (for example, Admin shutdown followed by the
+    # next request).  We intentionally do not mutate a live Runner's cgroup budget.
+    runner_replicas = kube.get_replicas(namespace, account_id)
+    if runner_replicas == 0:
+        kube.ensure_runtime_objects(
+            namespace, account_id, username, kube.resolve_image(spec, s, defaults),
+            s.kubernetes.runner_image_pull_policy, s, names.owner_ref(name, uid), spec, defaults)
+    elif kube.applied_terminal_percent(namespace, account_id) != percent:
+        patch.status["terminal"] = {
+            **current, "phase": "PendingRunnerRestart", "podIP": None,
+            "readyReplicas": 0, "resourcePercent": percent,
+        }
+        logger.info("terminal wake deferred until runner restart account=%s", account_id)
+        return
+
+    replicas = kube.get_terminal_replicas(namespace, account_id)
+    if replicas == 1:
+        pod_ip = (kube.current_ready_terminal_pod_ip(namespace, account_id)
+                  or kube.wait_terminal_pod_ready(
+                      namespace, account_id, timeout=float(s.kubernetes.wake_timeout_seconds)))
+        if pod_ip is None:
+            patch.status["terminal"] = {
+                **current, "phase": "Waking", "podIP": None, "readyReplicas": 0,
+                "resourcePercent": percent,
+            }
+            return
+        patch.status["terminal"] = {
+            **current, "phase": "Running", "podIP": pod_ip, "readyReplicas": 1,
+            "resourcePercent": percent,
+            "startedAt": (time.time() if pod_ip != current.get("podIP")
+                          else current.get("startedAt") or time.time()),
+        }
+        return
+
+    image = kube.resolve_image(spec, s, defaults)
+    kube.ensure_terminal_objects(
+        namespace, account_id, username, image, s.kubernetes.runner_image_pull_policy,
+        s, names.owner_ref(name, uid), spec, defaults)
+    kube.scale_terminal(namespace, account_id, 1)
+    patch.status["terminal"] = {
+        **current, "phase": "Waking", "podIP": None, "readyReplicas": 0,
+        "resourcePercent": percent,
+    }
+    pod_ip = kube.wait_terminal_pod_ready(
+        namespace, account_id, timeout=float(s.kubernetes.wake_timeout_seconds))
+    if pod_ip is None:
+        logger.warning("terminal wake timed out account=%s", account_id)
+        return
+    patch.status["terminal"] = {
+        **current, "phase": "Running", "podIP": pod_ip, "readyReplicas": 1,
+        "resourcePercent": percent, "startedAt": time.time(), "activeSessions": 0,
+    }
+    logger.info("woke terminal account=%s pod=%s", account_id, pod_ip)
+
+
+@kopf.timer(GROUP, VERSION, PLURAL, interval=10.0, sharp=False)
+def reconcile_terminal(spec, name, namespace, uid, status, patch, logger, **_):
+    """Derive Terminal status and scale 1->0 after its last session plus grace."""
+    s = get_settings()
+    account_id, username = _ids(spec, name)
+    defaults = _runner_defaults()
+    percent = kube.resolve_terminal_percent(s, defaults)
+    current = status.get("terminal") or {}
+    replicas = kube.get_terminal_replicas(namespace, account_id)
+
+    if percent <= 0 or spec.get("desiredState", "active") != "active":
+        if replicas > 0:
+            kube.set_cr_status(namespace, account_id, terminal={
+                **current, "phase": "Disabled", "podIP": None, "readyReplicas": 0,
+                "activeSessions": 0, "resourcePercent": 0,
+            })
+            kube.scale_terminal(namespace, account_id, 0)
+        patch.status["terminal"] = {
+            **current, "phase": "Disabled", "podIP": None, "readyReplicas": 0,
+            "activeSessions": 0, "resourcePercent": 0,
+        }
+        return
+
+    if replicas < 0:
+        kube.ensure_terminal_objects(
+            namespace, account_id, username, kube.resolve_image(spec, s, defaults),
+            s.kubernetes.runner_image_pull_policy, s, names.owner_ref(name, uid), spec, defaults)
+        patch.status["terminal"] = {
+            **current, "phase": "Zero", "readyReplicas": 0,
+            "resourcePercent": percent,
+        }
+        return
+    if replicas == 0:
+        if current.get("phase") != "Zero" or current.get("resourcePercent") != percent:
+            patch.status["terminal"] = {
+                **current, "phase": "Zero", "podIP": None, "readyReplicas": 0,
+                "activeSessions": 0, "resourcePercent": percent,
+            }
+        return
+    if replicas != 1:
+        return
+
+    real_ip = kube.current_ready_terminal_pod_ip(namespace, account_id)
+    if real_ip is None:
+        patch.status["terminal"] = {
+            **current, "phase": "Waking", "podIP": None, "readyReplicas": 0,
+            "resourcePercent": percent,
+        }
+        return
+
+    try:
+        port = s.kubernetes.terminal_service_port
+        health = httpx.get(f"http://{real_ip}:{port}/health", timeout=2.0, trust_env=False).json()
+    except Exception as exc:
+        logger.debug("terminal health probe failed account=%s: %s", account_id, exc)
+        return
+    active = int(health.get("active_sessions", 0))
+    last_activity = float(health.get("last_activity_ts", time.time()))
+    now = time.time()
+    desired_status = {
+        **current, "phase": "Running", "podIP": real_ip, "readyReplicas": 1,
+        "activeSessions": active, "lastActivityTs": last_activity,
+        "resourcePercent": percent,
+    }
+    grace = int(getattr(defaults, "terminal_scale_down_grace_seconds",
+                        s.kubernetes.terminal_scale_down_grace_seconds))
+    if active == 0 and now - last_activity >= grace:
+        zero = {
+            **desired_status, "phase": "Zero", "podIP": None, "readyReplicas": 0,
+            "activeSessions": 0, "idleSince": last_activity,
+        }
+        kube.set_cr_status(namespace, account_id, terminal=zero)
+        kube.scale_terminal(namespace, account_id, 0)
+        patch.status["terminal"] = zero
+        logger.info("slept idle terminal account=%s", account_id)
+        return
+    patch.status["terminal"] = desired_status
 
 
 @kopf.timer(GROUP, VERSION, PLURAL, interval=10.0, sharp=False)
@@ -292,7 +469,6 @@ def reconcile_runtime(spec, name, namespace, status, patch, logger, **_):
 def on_runner_type_change(spec, name, namespace, uid, old, new, patch, logger, **_):
     if old is None:
         return
-    s = get_settings()
     account_id, _ = _ids(spec, name)
     if new == "persistent" and spec.get("desiredState", "active") == "active":
         if kube.get_replicas(namespace, account_id) != 1:
@@ -318,13 +494,18 @@ def on_resources_change(spec, name, namespace, old, new, logger, **_):
     # on_wake's pre-scale refresh after it next sleeps/restarts. Resolving with defaults
     # so an override cleared back to inherit re-resolves correctly.
     replicas = kube.get_replicas(namespace, account_id)
-    if replicas != 0:
-        logger.info("resources change deferred (replicas=%s, applies on next restart) account=%s",
-                    replicas, account_id)
+    terminal_replicas = kube.get_terminal_replicas(namespace, account_id)
+    if replicas != 0 or terminal_replicas > 0:
+        logger.info(
+            "resources change deferred (runner=%s terminal=%s, applies when both are dormant) account=%s",
+            replicas, terminal_replicas, account_id)
         return
     resources = kube.resolve_resources(spec, s, _runner_defaults())
     try:
         kube.patch_deployment_resources(namespace, account_id, resources)
+        if kube.get_terminal_replicas(namespace, account_id) == 0:
+            kube.patch_terminal_resources(
+                namespace, account_id, kube.resolve_terminal_resources(spec, s, _runner_defaults()))
         logger.info("resources updated (dormant) account=%s -> %s", account_id, resources)
     except kube.client.ApiException as exc:
         if exc.status == 404:

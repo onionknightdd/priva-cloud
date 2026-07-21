@@ -599,7 +599,11 @@ export default function UserManagement() {
       {/* Header — spans full width */}
       <div
         className="flex items-center justify-between flex-shrink-0"
-        style={{ padding: '20px var(--admin-section-x) 0 var(--admin-section-x)' }}
+        style={{
+          boxSizing: 'border-box',
+          minHeight: 46,
+          padding: '20px var(--admin-section-x) 0 var(--admin-section-x)',
+        }}
       >
         <h2 className="font-semibold text-lg" style={{ color: 'var(--text-primary)', margin: 0 }}>
           {t('admin.userManagement')}

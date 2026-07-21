@@ -1,4 +1,4 @@
-import { getJSON, postJSON, putJSON, deleteJSON, sandboxGet, sandboxPut } from './client'
+import { getJSON, postJSON, putJSON, deleteJSON } from './client'
 
 export const listUsers = () => getJSON('/admin/users')
 export const createUser = (data) => postJSON('/admin/users', data)
@@ -71,11 +71,9 @@ export const deleteHookPolicy = (id) => deleteJSON(`/admin/hook-policy/${encodeU
 export const validateHookPolicy = (data) => postJSON('/admin/hook-policy/validate', data)
 export const getHookPolicySeed = (id) => getJSON(`/admin/hook-policy/${encodeURIComponent(id)}/seed`)
 
-// Per-account: served by the account's own agent-runner pod (gateway routes the
-// /api/sandbox/pty prefix to it). Not admin-gated — each user configures their own pod.
-export const getPtyConfig = () => sandboxGet('/pty/config')
-export const updatePtyConfig = (data) => sandboxPut('/pty/config', data)
-export const getPtyFeature = () => sandboxGet('/pty/feature')
+// Wake-free control-plane capability. The exact HTTPRoute stays on Control Panel;
+// only /api/terminal/ws enters the independent Terminal InferencePool.
+export const getTerminalCapability = () => getJSON('/terminal/capability')
 
 // --- Scheduler oversight (D12: per-account drill-down) ---
 export const getSchedulerJobs = (accountId) =>

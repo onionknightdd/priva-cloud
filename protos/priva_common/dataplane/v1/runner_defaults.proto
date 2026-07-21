@@ -17,6 +17,11 @@ message RunnerDefaults {
   int32 storage_gb = 5;
   string runner_image = 6;
   string updated_at = 7;
+  int32 terminal_resource_percent = 8;
+  int32 terminal_max_sessions = 9;
+  int32 terminal_idle_timeout_seconds = 10;
+  int32 terminal_max_lifetime_seconds = 11;
+  int32 terminal_scale_down_grace_seconds = 12;
 }
 
 // Partial update: only fields named in update_mask are applied.
@@ -28,6 +33,11 @@ message SetRunnerDefaultsRequest {
   int32 storage_gb = 5;
   string runner_image = 6;
   repeated string update_mask = 7;
+  int32 terminal_resource_percent = 8;
+  int32 terminal_max_sessions = 9;
+  int32 terminal_idle_timeout_seconds = 10;
+  int32 terminal_max_lifetime_seconds = 11;
+  int32 terminal_scale_down_grace_seconds = 12;
 }
 
 service RunnerDefaultsService {

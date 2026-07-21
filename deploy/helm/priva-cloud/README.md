@@ -13,20 +13,23 @@ A full Helm chart for the Priva Cloud control plane, templated from the raw mani
 | Control plane | `data-spine` (Deployment+PVC+Service), `control-panel` (Deployment+Service), `operator` (Deployment), `scheduler` (Deployment+Service — leaderless firing engine, replicas = availability knob) |
 | Feishu channel (`channelConnector.enabled`) | `channel-connector` Deployment+Service+RBAC — always-on WS relay, replicas pinned to 1 (no NetworkPolicy — unlike the raw dev manifest; egress governed by VPC policy) |
 | RBAC | ServiceAccounts + Roles/Bindings for operator (incl. discovery ClusterRole), control-panel and scheduler |
-| Edge (`gateway.enabled`) | `Gateway`, `InferencePool`, `HTTPRoute` (+ `AgentgatewayParameters` when `gateway.serviceType` set) |
+| Edge (`gateway.enabled`) | `Gateway`, Runner + Terminal `InferencePool`s, `HTTPRoute` (+ `AgentgatewayParameters` when `gateway.serviceType` set) |
+| Terminal isolation | Optional destination-side `NetworkPolicy` (`terminalNetworkPolicy.enabled`) for data-spine, Redis, Runner and Terminal Pods (PostgreSQL already admits only data-spine) |
 | LB front (`ingress.enabled`) | `Ingress` — "/" catch-all to the gateway Service, for an external cloud LB (e.g. Volcengine ALB) |
 | Dev storage (`devStorage.enabled`) | `priva-nfs` StatefulSet, `priva-nfs`/`priva-quota` Services, `priva-export` PV+PVC |
 
-Per-account **agent-runner** pods are created by the operator at wake — not by this chart.
-The chart only publishes the runner image ref to the operator via the ConfigMap.
+Per-account **agent-runner** and independent **Terminal** pods are created by the operator,
+not by this chart. The same immutable image is used for both; Terminal defaults to disabled.
 
 ## Prerequisites (NOT installed by this chart)
 
-The chart manages only Priva's own resources. The edge depends on three things you install once:
+The chart manages only Priva's own resources. The deployment depends on:
 
 1. **Gateway API CRDs** (v1.5) — `kubectl apply --server-side -f .../gateway-api/.../standard-install.yaml`
 2. **Gateway-API-Inference-Extension CRDs** (v1.5) — `kubectl apply -f .../gateway-api-inference-extension/.../manifests.yaml`
 3. **agentgateway controller** — the OCI Helm charts `agentgateway-crds` + `agentgateway` (`inferenceExtension.enabled=true`)
+4. When `terminalNetworkPolicy.enabled=true`, a **CNI that enforces NetworkPolicy** — rendering policies is insufficient if the CNI ignores them.
+5. kubelet **`podPidsLimit` in `1..512` on every node** — verify with `deploy/checks/pod-pids-limit.sh`.
 
 The exact commands are printed in the post-install NOTES (and live in `deploy/minikube/up.sh`).
 If you only want the control plane, install with `--set gateway.enabled=false` and skip them.
@@ -79,6 +82,8 @@ You can still `--set key=value` on top for one-off tweaks.
 | `crds.install` / `crds.keep` | `true` / `true` | templated CRD (upgrades apply schema changes), kept on uninstall |
 | `sharedSecret.create` | `true` | random jwt+hmac, preserved across upgrades via `lookup`; set values to pin |
 | `config.kubernetes.storageBackend` | `nfs_xfs` | `nfs_xfs` (dev) or `cephfs` (prod) |
+| `config.kubernetes.terminalResourcePercent` | `0` | Upgrade-safe seed: `0` disables/hides Terminal; Admin may set fixed 5% steps through 50% |
+| `terminalNetworkPolicy.enabled` | `true` | Set `false` only for an explicitly insecure, single-user dev cluster; never for multi-tenant UAT/prod |
 | `gateway.enabled` | `true` | the `Gateway`/`HTTPRoute`/`InferencePool` trio |
 | `gateway.serviceType` | `""` | override the agentgateway-provisioned Service type (default LoadBalancer); set `ClusterIP`/`NodePort` when an external LB fronts the gateway |
 | `ingress.enabled` | `false` | "/" catch-all Ingress to the gateway Service; `className`/`host`/`annotations` are controller-specific (see `values-volcengine.yaml`) |
@@ -98,3 +103,6 @@ See `values.yaml` for the full set (replicas, resources, idle/wake timings, stor
   so the chart never templates selector labels — only additive `app.kubernetes.io/*` metadata labels.
 - **clusterIP pin:** dev only. In prod the export is a real CSI volume; `devStorage.enabled=false`
   drops the PV/StatefulSet entirely.
+- **Terminal resource accounting is fixed, not borrowed dynamically.** When enabled,
+  Runner + Terminal CPU/memory requests and limits sum to the tenant commitment. A policy
+  generation is not partially applied while its sibling runtime is live.

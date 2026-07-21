@@ -14,6 +14,14 @@ def svc_name(account_id: str) -> str:
     return f"ar-{account_id}"
 
 
+def terminal_deploy_name(account_id: str) -> str:
+    return f"term-{account_id}"
+
+
+def terminal_svc_name(account_id: str) -> str:
+    return f"term-{account_id}"
+
+
 def account_subpath(account_id: str) -> str:
     """The per-account subdir within the shared export = the subPath the runner mounts."""
     return account_id
@@ -27,7 +35,18 @@ def export_claim(account_id: str) -> str:
 def labels(account_id: str) -> dict[str, str]:
     # app=agent-runner is the InferencePool selector; the account label lets the
     # operator/EPP find the one pod for an account.
-    return {"app": "agent-runner", "priva.io/account-id": account_id}
+    return {
+        "app": "agent-runner",
+        "priva.io/account-id": account_id,
+    }
+
+
+def terminal_labels(account_id: str) -> dict[str, str]:
+    return {
+        "app": "terminal",
+        "priva.io/account-id": account_id,
+        "priva.io/runtime": "terminal",
+    }
 
 
 def owner_ref(name: str, uid: str) -> dict:

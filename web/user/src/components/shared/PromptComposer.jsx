@@ -1365,7 +1365,7 @@ export default function PromptComposer({
         />
 
         {/* Toolbar row */}
-        <div className="flex items-center justify-between px-2 pb-2" style={{ paddingTop: 2 }}>
+        <div className="flex items-center justify-between px-2 pb-1" style={{ paddingTop: 2 }}>
           {/* Left: + button + optional extra */}
           <div className="flex items-center gap-1">
             <div className="relative">

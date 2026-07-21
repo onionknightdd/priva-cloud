@@ -1,0 +1,49 @@
+# Selective Terminal isolation. Outbound internet and unrelated destinations stay
+# open; protected internal destinations reject traffic from Terminal pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: data-spine-deny-terminal, namespace: priva-cloud}
+spec:
+  podSelector: {matchLabels: {app: data-spine}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchExpressions: [{key: app, operator: NotIn, values: [terminal]}]}
+        - podSelector: {matchExpressions: [{key: app, operator: DoesNotExist}]}
+      ports: [{port: 50051, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: redis-deny-terminal, namespace: priva-cloud}
+spec:
+  podSelector: {matchLabels: {app: redis}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchExpressions: [{key: app, operator: NotIn, values: [terminal]}]}
+        - podSelector: {matchExpressions: [{key: app, operator: DoesNotExist}]}
+      ports: [{port: 6379, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: runner-deny-tenant-peers, namespace: priva-cloud}
+spec:
+  podSelector: {matchLabels: {app: agent-runner}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchExpressions: [{key: app, operator: NotIn, values: [agent-runner, terminal]}]}
+        - podSelector: {matchExpressions: [{key: app, operator: DoesNotExist}]}
+      ports: [{port: 8091, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: terminal-deny-tenant-peers, namespace: priva-cloud}
+spec:
+  podSelector: {matchLabels: {app: terminal}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchExpressions: [{key: app, operator: NotIn, values: [agent-runner, terminal]}]}
+        - podSelector: {matchExpressions: [{key: app, operator: DoesNotExist}]}
+      ports: [{port: 8092, protocol: TCP}]

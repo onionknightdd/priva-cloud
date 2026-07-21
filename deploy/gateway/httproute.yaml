@@ -12,6 +12,17 @@ spec:
     - name: priva-gateway
   rules:
     - matches:
+        - path: {type: Exact, value: /api/terminal/capability}
+      backendRefs:
+        - name: control-panel
+          port: 8080
+    - matches:
+        - path: {type: PathPrefix, value: /api/terminal}
+      backendRefs:
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          name: terminals
+    - matches:
         # All agent-runner runtime API lives under one namespace, so a single prefix
         # steers it to the account's pod (the EPP picks the endpoint). /api/resource/models
         # is NOT here — it's a pure control-plane proxy that stays on the "/" catch-all.

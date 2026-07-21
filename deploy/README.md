@@ -12,7 +12,7 @@ for the as-built design and the agentgateway-EPP-over-TLS gotcha.
 
 | Path | What |
 |------|------|
-| `docker/` | Dockerfiles for the 4 services (`data-spine`, `agent-runner`, `control-panel`, `operator`). The agent-runner image bakes the native `claude` CLI. |
+| `docker/` | Service Dockerfiles. The agent-runner image also contains the Go `terminald` binary and native `claude` CLI. |
 | `config/` | Slim per-service example configs (everything is also settable as `PRIVA_*` env). |
 | `crds/agenttenant.yaml` | The `AgentTenant` CRD (one record per account). |
 | `rbac/` | ServiceAccounts + Roles for the operator and control-panel. |
@@ -43,6 +43,17 @@ kubectl -n priva-cloud get pods                 # control-panel/data-spine/opera
 kubectl -n priva-cloud port-forward svc/priva-gateway 8080:80   # then open http://127.0.0.1:8080/
 ```
 
+For an explicitly insecure, single-user local cluster whose CNI does not enforce
+NetworkPolicy, the Terminal policies can be omitted. The kubelet PID limit remains a
+mandatory preflight:
+
+```bash
+PRIVA_TERMINAL_NETWORK_POLICY_ENABLED=0 deploy/minikube/up.sh
+```
+
+Do not use this override for UAT or production. Without the policies, the fixed
+agentgateway-to-Terminal trust assertion is not a cross-tenant security boundary.
+
 The shared secret (`priva-shared-secret`: jwt/hmac) is generated at bring-up and is
 **not** committed. Per-account credentials (`ANTHROPIC_*`) are set via the SPA Settings,
 stored Fernet-encrypted in data-spine, and injected into each pod by the operator at wake.
@@ -69,13 +80,17 @@ default `standard` SC is **not** expandable.
 ## Request paths
 
 - **Control / SPAs / admin / auth / config** → agentgateway → `control-panel:8080` (plain HTTP).
-- **Runtime** (`/api/agent`, `/api/files`, `/api/pty`, `/api/hooks`, `/api/subagents`) →
+- **Runner runtime** (`/api/sandbox/*`) →
   agentgateway → `InferencePool` → per-request **ext_proc EPP** (`control-panel:9000`, **TLS**)
   resolves the account + wakes its pod (operator scales 0→1) + returns the pod endpoint →
   agentgateway streams to the woken per-account `agent-runner` pod.
+- **Web Terminal** (`/api/terminal/ws`) → agentgateway → Terminal `InferencePool` → the
+  same EPP authenticates and wakes `term-<account>` → agentgateway carries WebSocket bytes
+  directly to the independent Terminal Pod. `/api/terminal/capability` stays on Control Panel.
 
 ## Deferred (prod hardening)
-NetworkPolicies, mTLS/JWKS pod trust (alpha uses an HS256 signed header), per-account
+Broader default-deny egress, mTLS/JWKS pod trust (alpha uses an EPP-overwritten internal
+Terminal assertion and an HS256 Runner header), per-account
 DEK/KMS, edge TLS, Redis-based wake/idle coordination, separate audit PVC. See plan §L.
 Scaling control-panel: bump `replicas` only — never `uvicorn --workers` (the same process
 binds the `:9000` EPP) — and move its control-plane audit (per-pod local JSONL under

@@ -43,7 +43,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api/sandbox/agent/ws': { target: API_TARGET, changeOrigin: true, ws: true },
-      '/api/sandbox/pty/ws': { target: API_TARGET, changeOrigin: true, ws: true },
+      '/api/terminal/ws': { target: API_TARGET, changeOrigin: true, ws: true },
       '/api': { target: API_TARGET, changeOrigin: true },
     },
   },

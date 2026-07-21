@@ -1,18 +1,18 @@
 /**
  * WebSocket-based PTY terminal client.
  *
- * One connection = one shell session (the server caps users at 1 concurrent).
+ * One connection = one shell session (the server enforces the admin policy limit).
  * No auto-reconnect — if the WS drops or the server kills the session,
  * the user must manually reopen.
  */
 import { getToken } from '@shared/api/tokenStore'
 import { wsProtocols } from './wsAuth'
 
-export function connectTerminal({ cols, rows, targetUsername, wsPath = '/api/sandbox/pty/ws', onReady, onOutput, onClosed, onError, onPong }) {
+export function connectTerminal({ cols, rows, targetUsername, wsPath = '/api/terminal/ws', onReady, onOutput, onClosed, onError, onPong }) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   // Token rides the `Sec-WebSocket-Protocol` handshake header (the edge auths
   // the upgrade, which carries no init frame yet). See wsAuth.js. `targetUsername`
-  // rides the subprotocol too: on /api/sandbox/pty/ws the EPP steers to that account's pod;
+  // rides the subprotocol too: on /api/terminal/ws the EPP steers to that account's Terminal pod;
   // on /api/admin/console/ws (wsPath) the control-panel reads it as a control-plane
   // pod selector (control-panel / operator / data-spine).
   const wsUrl = `${protocol}//${window.location.host}${wsPath}`

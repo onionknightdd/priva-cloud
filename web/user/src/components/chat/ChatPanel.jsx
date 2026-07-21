@@ -1,5 +1,5 @@
-import { Suspense, useEffect, useRef, useState } from 'react'
-import { FileDiff, FolderTree, MoreVertical, PanelRight, SquareTerminal, X } from 'lucide-react'
+import { Suspense, useEffect } from 'react'
+import { FileDiff, FolderTree, PanelRight, SquareTerminal, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
 import useSidebarStore from '../../stores/sidebarStore'
@@ -16,7 +16,6 @@ import ChatInput from './ChatInput'
 import { UsageStatsOverviewTitle } from './UsageStatsOverview'
 import RecentActivities from './RecentActivities'
 import QuickActionChips from './QuickActionChips'
-import CheckpointToggle from './CheckpointToggle'
 import RewindBanner from './RewindBanner'
 import { getSplitParams, isSplitPane } from '../../utils/splitMode'
 import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
@@ -285,8 +284,6 @@ function formatTrackingTitle(label, counts) {
 
 export default function ChatPanel() {
   const { t } = useTranslation()
-  const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
-  const headerMenuRef = useRef(null)
   const embeddedPane = isSplitPane()
   const { paneId } = getSplitParams()
   const sessionId = useChatStore((s) => s.sessionId)
@@ -299,10 +296,11 @@ export default function ChatPanel() {
   const canvasMinimized = useUiStore((s) => s.canvasMinimized)
   const activeCanvasTab = useUiStore((s) => s.activeCanvasTab)
   const showCanvas = useUiStore((s) => s.showCanvas)
+  const hideCanvas = useUiStore((s) => s.hideCanvas)
+  const showCanvasMenu = useUiStore((s) => s.showCanvasMenu)
   const setCanvasMinimized = useUiStore((s) => s.setCanvasMinimized)
   const setActiveCanvasTab = useUiStore((s) => s.setActiveCanvasTab)
   // Terminal toggle — relocated from the (removed) NavBar into the session header.
-  const terminalOpen = useUiStore((s) => s.terminalOpen)
   const toggleTerminal = useUiStore((s) => s.toggleTerminal)
   const terminalFeatureEnabled = useUiStore((s) => s.terminalFeatureEnabled)
   const terminalMinimized = useUiStore((s) => s.terminalMinimized)
@@ -326,21 +324,6 @@ export default function ChatPanel() {
   // First-page bootstrap: wake the sandbox and learn the workspace via the
   // agent-runner's /api/health (drives the waking/ready toasts in client.js).
   useEffect(() => { fetchHealth() }, [fetchHealth])
-  useEffect(() => {
-    if (!headerMenuOpen) return undefined
-    const handlePointerDown = (event) => {
-      if (!headerMenuRef.current?.contains(event.target)) setHeaderMenuOpen(false)
-    }
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') setHeaderMenuOpen(false)
-    }
-    document.addEventListener('pointerdown', handlePointerDown)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [headerMenuOpen])
   // cwd comes entirely from the agent-runner: the active session's cwd, else the
   // /api/health workspace. Empty until one resolves — CwdIndicator then shows '~'.
   const activeCwd = activeSidebarSession?.cwd || agentWorkspace || ''
@@ -348,6 +331,13 @@ export default function ChatPanel() {
     setActiveCanvasTab(tab)
     setCanvasMinimized(false)
     showCanvas()
+  }
+  const toggleCanvasMenu = () => {
+    if (canvasVisible && !canvasMinimized) {
+      hideCanvas()
+      return
+    }
+    showCanvasMenu()
   }
   const isCanvasTabVisible = (tab) => {
     if (!canvasVisible || canvasMinimized) return false
@@ -393,45 +383,6 @@ export default function ChatPanel() {
       closePane(activePaneId)
     }
   }
-  const headerMenuItems = [
-    ...(!showTasksShortcut ? [{
-      id: 'tasks',
-      label: t('canvas.tasks'),
-      icon: PanelRight,
-      active: isCanvasTabVisible('tasks'),
-      onClick: () => activateCanvasTab('tasks'),
-    }] : []),
-    ...(!showFilesShortcut ? [{
-      id: 'file-browser',
-      label: t('canvas.fileBrowser'),
-      icon: FolderTree,
-      active: isCanvasTabVisible('file-browser'),
-      onClick: () => activateCanvasTab('file-browser'),
-    }] : []),
-    ...(!showChangesShortcut ? [{
-      id: 'changes',
-      label: t('canvas.changeReview'),
-      icon: FileDiff,
-      active: isCanvasTabVisible('changes'),
-      onClick: () => activateCanvasTab('changes'),
-    }] : []),
-    ...(!embeddedPane && terminalFeatureEnabled && !showTerminalShortcut ? [{
-      id: 'terminal',
-      label: terminalActiveCount > 0
-        ? t('terminal.openWithCount', { count: terminalActiveCount })
-        : t('terminal.open'),
-      icon: SquareTerminal,
-      active: terminalOpen || terminalActiveCount > 0,
-      danger: terminalOpen || terminalActiveCount > 0,
-      onClick: toggleTerminal,
-    }] : []),
-  ]
-  const runHeaderMenuItem = (item) => {
-    item.onClick()
-    setHeaderMenuOpen(false)
-  }
-  const showHeaderMenu = headerMenuItems.length > 0
-
   // The chat header is a permanent fixture — rendered in both the empty/welcome
   // state and the active conversation. The session name is simply empty when no
   // session is active.
@@ -459,7 +410,6 @@ export default function ChatPanel() {
         )}
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
-        <CheckpointToggle />
         {showTasksShortcut && (
           <HeaderBadgeShortcut
             icon={PanelRight}
@@ -492,67 +442,12 @@ export default function ChatPanel() {
             onClick={restoreTerminalFromShortcut}
           />
         )}
-        <div ref={headerMenuRef} className="relative">
-          <CanvasShortcut
-            icon={MoreVertical}
-            title={t('common.more', { defaultValue: '更多' })}
-            hidden={!showHeaderMenu}
-            onClick={() => setHeaderMenuOpen((open) => !open)}
-          />
-          {showHeaderMenu && headerMenuOpen && (
-            <div
-              className="absolute"
-              style={{
-                top: '100%',
-                right: 0,
-                zIndex: 80,
-                width: 196,
-                marginTop: 4,
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border)',
-                borderRadius: 4,
-                padding: 4,
-              }}
-            >
-              {headerMenuItems.map((item) => {
-                const Icon = item.icon
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => runHeaderMenuItem(item)}
-                    className="flex items-center gap-2 w-full"
-                    style={{
-                      minWidth: 0,
-                      height: 30,
-                      padding: '0 8px',
-                      background: item.active ? 'var(--bg-elevated)' : 'transparent',
-                      border: 'none',
-                      borderLeft: `2px solid ${item.active ? (item.danger ? 'var(--red)' : 'var(--blue)') : 'transparent'}`,
-                      borderRadius: 2,
-                      color: item.danger ? 'var(--red)' : item.active ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      cursor: 'pointer',
-                      fontSize: 12,
-                      textAlign: 'left',
-                      transition: 'background 150ms ease, color 150ms ease',
-                    }}
-                    onMouseEnter={(event) => {
-                      event.currentTarget.style.background = 'var(--bg-elevated)'
-                      event.currentTarget.style.color = item.danger ? 'var(--red)' : 'var(--text-primary)'
-                    }}
-                    onMouseLeave={(event) => {
-                      event.currentTarget.style.background = item.active ? 'var(--bg-elevated)' : 'transparent'
-                      event.currentTarget.style.color = item.danger ? 'var(--red)' : item.active ? 'var(--text-primary)' : 'var(--text-secondary)'
-                    }}
-                  >
-                    <Icon size={14} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-                    <span className="truncate" style={{ minWidth: 0 }}>{item.label}</span>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </div>
+        <CanvasShortcut
+          icon={PanelRight}
+          title={canvasVisible && !canvasMinimized ? t('canvas.close') : t('canvas.expand')}
+          hidden={canvasVisible && !canvasMinimized}
+          onClick={toggleCanvasMenu}
+        />
         <CanvasShortcut
           icon={X}
           title={t('split.closePane', { defaultValue: '关闭窗格' })}

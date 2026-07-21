@@ -67,6 +67,29 @@ spec:
       number: 9000
     failureMode: FailClose
 ---
+# Independent per-account Terminal pods. The same EPP authenticates and wakes
+# term-<account>, but WebSocket bytes never traverse Control Panel.
+apiVersion: inference.networking.k8s.io/v1
+kind: InferencePool
+metadata:
+  name: {{ .Values.gateway.terminalInferencePoolName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "priva-cloud.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: terminal
+  targetPorts:
+    - number: {{ .Values.gateway.terminalTargetPort }}
+  endpointPickerRef:
+    group: ""
+    kind: Service
+    name: control-panel
+    port:
+      number: 9000
+    failureMode: FailClose
+---
 # /api/sandbox/* -> InferencePool (EPP steers to the account's pod);
 # everything else (SPAs at / and /sandbox, /admin, /api/auth, /api/admin,
 # /api/resource/models) -> control-panel HTTP face. Most-specific path wins.
@@ -81,6 +104,19 @@ spec:
   parentRefs:
     - name: {{ .Values.gateway.name }}
   rules:
+    # Wake-free capability lookup stays on Control Panel. Exact beats the
+    # broader /api/terminal prefix below.
+    - matches:
+        - path: {type: Exact, value: /api/terminal/capability}
+      backendRefs:
+        - name: control-panel
+          port: 8080
+    - matches:
+        - path: {type: PathPrefix, value: /api/terminal}
+      backendRefs:
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          name: {{ .Values.gateway.terminalInferencePoolName }}
     - matches:
         # All agent-runner runtime API under one namespace -> one prefix to the pool
         # (the EPP picks the endpoint; /api/sandbox/health drives the cold-start toasts).

@@ -63,6 +63,13 @@ router = APIRouter(
 # is forced here. CPU crosses the API as millicores for the digit-only UI.
 
 def _runner_defaults_response(d) -> RunnerDefaultsResponse:
+    total_cpu_m = int(round(d.cpu_cores * 1000))
+    percent = int(d.terminal_resource_percent)
+    terminal_cpu_m = 0
+    terminal_memory_mb = 0
+    if percent > 0:
+        terminal_cpu_m = min(total_cpu_m - 1, max(1, total_cpu_m * percent // 100))
+        terminal_memory_mb = min(d.memory_mb - 1, max(1, d.memory_mb * percent // 100))
     return RunnerDefaultsResponse(
         idle_grace_seconds=d.idle_grace_seconds,
         min_alive_after_wake_seconds=d.min_alive_after_wake_seconds,
@@ -70,6 +77,16 @@ def _runner_defaults_response(d) -> RunnerDefaultsResponse:
         memory_mb=d.memory_mb,
         storage_gb=d.storage_gb,
         runner_image=d.runner_image,
+        terminal_resource_percent=d.terminal_resource_percent,
+        terminal_max_sessions=d.terminal_max_sessions,
+        terminal_idle_timeout_seconds=d.terminal_idle_timeout_seconds,
+        terminal_max_lifetime_seconds=d.terminal_max_lifetime_seconds,
+        terminal_scale_down_grace_seconds=d.terminal_scale_down_grace_seconds,
+        terminal_enabled=d.terminal_resource_percent > 0,
+        runner_cpu_millicores=total_cpu_m - terminal_cpu_m,
+        terminal_cpu_millicores=terminal_cpu_m,
+        runner_memory_mb=d.memory_mb - terminal_memory_mb,
+        terminal_memory_mb=terminal_memory_mb,
         updated_at=d.updated_at,
     )
 
@@ -113,10 +130,38 @@ async def update_runner_defaults(
         if not img:
             raise HTTPException(400, "runner_image must not be empty")
         kw["runner_image"] = img
+    if request.terminal_resource_percent is not None:
+        percent = int(request.terminal_resource_percent)
+        if percent < 0 or percent > 50 or percent % 5:
+            raise HTTPException(400, "terminal_resource_percent must be 0..50 in 5% steps")
+        kw["terminal_resource_percent"] = percent
+    if request.terminal_max_sessions is not None:
+        if request.terminal_max_sessions < 1 or request.terminal_max_sessions > 20:
+            raise HTTPException(400, "terminal_max_sessions must be 1..20")
+        kw["terminal_max_sessions"] = int(request.terminal_max_sessions)
+    if request.terminal_idle_timeout_seconds is not None:
+        if request.terminal_idle_timeout_seconds < 60 or request.terminal_idle_timeout_seconds > 86400:
+            raise HTTPException(400, "terminal_idle_timeout_seconds must be 60..86400")
+        kw["terminal_idle_timeout_seconds"] = int(request.terminal_idle_timeout_seconds)
+    if request.terminal_max_lifetime_seconds is not None:
+        if request.terminal_max_lifetime_seconds < 60 or request.terminal_max_lifetime_seconds > 86400:
+            raise HTTPException(400, "terminal_max_lifetime_seconds must be 60..86400")
+        kw["terminal_max_lifetime_seconds"] = int(request.terminal_max_lifetime_seconds)
+    if request.terminal_scale_down_grace_seconds is not None:
+        if request.terminal_scale_down_grace_seconds < 0 or request.terminal_scale_down_grace_seconds > 3600:
+            raise HTTPException(400, "terminal_scale_down_grace_seconds must be 0..3600")
+        kw["terminal_scale_down_grace_seconds"] = int(request.terminal_scale_down_grace_seconds)
 
     client = get_client()
     if not kw:
         return _runner_defaults_response(client.runner_defaults.get())
+    current = client.runner_defaults.get()
+    candidate_percent = int(kw.get("terminal_resource_percent", current.terminal_resource_percent))
+    candidate_cpu_m = int(round(float(kw.get("cpu_cores", current.cpu_cores)) * 1000))
+    candidate_memory_mb = int(kw.get("memory_mb", current.memory_mb))
+    if candidate_percent > 0 and (candidate_cpu_m < 2 or candidate_memory_mb < 2):
+        raise HTTPException(
+            400, "enabled Terminal requires at least 2 millicores CPU and 2Mi memory")
     d = client.runner_defaults.set(**kw)
     get_audit_logger().append(AuditEntry(
         actor=current_user.username,
@@ -658,9 +703,12 @@ async def restart_account_pod(
     account_id: str,
     current_user: UserRecord = Depends(require_admin),
 ):
-    """Admin: force-restart an account's agent-runner pod by deleting it — the
-    Deployment's ReplicaSet recreates one at once. Replica count is untouched, so
-    the operator (sole scaler) is not fought. No-op if the runner is asleep."""
+    """Admin: force-restart an awake account runner through a controlled 1→0→1.
+
+    The zero boundary lets the operator converge the full Deployment template before
+    wake, so inherited resource/image and Runner/Terminal allocation changes actually
+    reach the replacement Pod. No-op if the runner is asleep.
+    """
     from ..provisioner import force_restart_pod
 
     try:

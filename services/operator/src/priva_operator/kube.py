@@ -25,6 +25,7 @@ MANAGED_POLICY_CM = "claude-managed-policy"
 MANAGED_POLICY_MOUNT = "/etc/claude-code"
 MANAGED_POLICY_VOLUME = "claude-policy"
 _POLICY_DIGEST_ANNOTATION = "priva.io/policy-digest"
+_TERMINAL_PERCENT_ANNOTATION = "priva.io/terminal-resource-percent"
 
 
 def _load() -> None:
@@ -77,6 +78,49 @@ def mem_quantity(mb: int) -> str:
     return f"{int(mb)}Mi"
 
 
+def resolve_terminal_percent(settings, defaults=None) -> int:
+    value = (getattr(defaults, "terminal_resource_percent", None)
+             if defaults is not None else None)
+    if value is None:
+        value = getattr(settings.kubernetes, "terminal_resource_percent", 0)
+    value = int(value)
+    if value < 0 or value > 50 or value % 5:
+        logger.warning("invalid terminal_resource_percent=%s; disabling Terminal", value)
+        return 0
+    return value
+
+
+def _resource_totals(spec: dict, settings, defaults=None) -> tuple[int, int]:
+    """Return the tenant's committed total as integer millicores + MiB."""
+    r = spec.get("resources") or {}
+    cores = r.get("cpu")
+    if cores is None:
+        cores = defaults.cpu_cores if defaults else settings.kubernetes.runner_cpu_cores
+    memory_mb = r.get("memoryMb")
+    if memory_mb is None:
+        memory_mb = defaults.memory_mb if defaults else settings.kubernetes.runner_memory_mb
+    return int(round(float(cores) * 1000)), int(memory_mb)
+
+
+def _resource_block(cpu_m: int, memory_mb: int) -> dict:
+    cpu = f"{int(cpu_m)}m" if int(cpu_m) % 1000 else str(int(cpu_m) // 1000)
+    q = {"cpu": cpu, "memory": mem_quantity(memory_mb)}
+    return {"requests": dict(q), "limits": dict(q)}
+
+
+def _split_resources(spec: dict, settings, defaults=None) -> tuple[tuple[int, int], tuple[int, int]]:
+    total_cpu_m, total_memory_mb = _resource_totals(spec, settings, defaults)
+    percent = resolve_terminal_percent(settings, defaults)
+    if percent <= 0:
+        return (total_cpu_m, total_memory_mb), (0, 0)
+    if total_cpu_m < 2 or total_memory_mb < 2:
+        raise ValueError("terminal requires at least 2m CPU and 2Mi memory total")
+    terminal_cpu_m = min(total_cpu_m - 1, max(1, total_cpu_m * percent // 100))
+    terminal_memory_mb = min(total_memory_mb - 1, max(1, total_memory_mb * percent // 100))
+    return ((total_cpu_m - terminal_cpu_m, total_memory_mb - terminal_memory_mb),
+            (terminal_cpu_m, terminal_memory_mb))
+
+
 # --- the inherit cascade: CR spec field (per-account override) > global runner_defaults
 # (the admin "Agent Runner Sandbox" panel) > static env settings (the ultimate seed/
 # fail-soft when data-spine is unreachable). `defaults` is a RunnerDefaultsRecord or None.
@@ -84,15 +128,16 @@ def mem_quantity(mb: int) -> str:
 def resolve_resources(spec: dict, settings, defaults=None) -> dict:
     """CR spec.resources -> container `resources` (requests==limits = Guaranteed QoS),
     inheriting the global default then the env seed when a field is omitted."""
-    r = (spec.get("resources") or {})
-    cores = r.get("cpu")
-    if cores is None:
-        cores = defaults.cpu_cores if defaults else settings.kubernetes.runner_cpu_cores
-    mb = r.get("memoryMb")
-    if mb is None:
-        mb = defaults.memory_mb if defaults else settings.kubernetes.runner_memory_mb
-    q = {"cpu": cpu_quantity(float(cores)), "memory": mem_quantity(int(mb))}
-    return {"requests": dict(q), "limits": dict(q)}
+    runner, _ = _split_resources(spec, settings, defaults)
+    return _resource_block(*runner)
+
+
+def resolve_terminal_resources(spec: dict, settings, defaults=None) -> dict:
+    """The fixed Terminal share. Runner + Terminal always equals the committed total."""
+    _, terminal = _split_resources(spec, settings, defaults)
+    if terminal == (0, 0):
+        return _resource_block(0, 0)
+    return _resource_block(*terminal)
 
 
 def resolve_storage_gb(spec: dict, settings, defaults=None) -> int:
@@ -128,19 +173,22 @@ def _data_volume_mount(mount_info: MountInfo) -> dict:
 def _deployment_body(namespace, account_id, username, image, pull_policy, settings, owner, spec,
                      mount_info: MountInfo, defaults=None) -> dict:
     lbl = names.labels(account_id)
+    terminal_percent = resolve_terminal_percent(settings, defaults)
     uid = int(settings.kubernetes.runner_uid)
     gid = int(settings.kubernetes.runner_gid)
     return {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
         "metadata": {"name": names.deploy_name(account_id), "namespace": namespace,
-                     "labels": lbl, "ownerReferences": [owner]},
+                     "labels": lbl, "ownerReferences": [owner],
+                     "annotations": {_TERMINAL_PERCENT_ANNOTATION: str(terminal_percent)}},
         "spec": {
             "replicas": 0,  # scale-to-zero from birth; the operator is the sole scaler
             "strategy": {"type": "Recreate"},  # one pod per subPath; clean cutover on restart
             "selector": {"matchLabels": lbl},
             "template": {
-                "metadata": {"labels": lbl},
+                "metadata": {"labels": lbl,
+                             "annotations": {_TERMINAL_PERCENT_ANNOTATION: str(terminal_percent)}},
                 "spec": {
                     **({"imagePullSecrets": [{"name": settings.kubernetes.runner_image_pull_secret}]}
                        if settings.kubernetes.runner_image_pull_secret else {}),
@@ -152,6 +200,11 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                         "fsGroup": gid, "fsGroupChangePolicy": "OnRootMismatch",
                         "seccompProfile": {"type": "RuntimeDefault"},
                     },
+                    "automountServiceAccountToken": False,
+                    "enableServiceLinks": False,
+                    "hostPID": False,
+                    "hostIPC": False,
+                    "hostNetwork": False,
                     "containers": [{
                         "name": "agent-runner",
                         "image": image,
@@ -160,6 +213,7 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                         "ports": [{"containerPort": settings.kubernetes.runner_service_port}],
                         "securityContext": {
                             "allowPrivilegeEscalation": False,
+                            "privileged": False,
                             "readOnlyRootFilesystem": True,
                             "capabilities": {"drop": ["ALL"]},
                         },
@@ -283,11 +337,152 @@ def _service_body(namespace, account_id, port, owner) -> dict:
     }
 
 
+def _terminal_service_body(namespace, account_id, port, owner) -> dict:
+    lbl = names.terminal_labels(account_id)
+    return {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {"name": names.terminal_svc_name(account_id), "namespace": namespace,
+                     "labels": lbl, "ownerReferences": [owner]},
+        "spec": {"selector": lbl, "ports": [{"port": port, "targetPort": port, "name": "http"}]},
+    }
+
+
+def _terminal_deployment_body(namespace, account_id, username, image, pull_policy, settings,
+                              owner, spec, mount_info: MountInfo, defaults=None) -> dict:
+    """Independent terminal runtime: same image/files/uid as Runner, but no Runner
+    secrets, config-map environment, process namespace, or cgroup."""
+    lbl = names.terminal_labels(account_id)
+    k = settings.kubernetes
+    uid = int(k.runner_uid)
+    gid = int(k.runner_gid)
+    port = int(k.terminal_service_port)
+    max_sessions = int(getattr(defaults, "terminal_max_sessions",
+                               getattr(k, "terminal_max_sessions", 2)))
+    idle_timeout = int(getattr(defaults, "terminal_idle_timeout_seconds",
+                               getattr(k, "terminal_idle_timeout_seconds", 1800)))
+    max_lifetime = int(getattr(defaults, "terminal_max_lifetime_seconds",
+                               getattr(k, "terminal_max_lifetime_seconds", 14400)))
+    terminal_percent = resolve_terminal_percent(settings, defaults)
+    return {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": names.terminal_deploy_name(account_id), "namespace": namespace,
+                     "labels": lbl, "ownerReferences": [owner],
+                     "annotations": {_TERMINAL_PERCENT_ANNOTATION: str(terminal_percent)}},
+        "spec": {
+            "replicas": 0,
+            "strategy": {"type": "Recreate"},
+            "selector": {"matchLabels": lbl},
+            "template": {
+                "metadata": {"labels": lbl,
+                             "annotations": {_TERMINAL_PERCENT_ANNOTATION: str(terminal_percent)}},
+                "spec": {
+                    **({"imagePullSecrets": [{"name": k.runner_image_pull_secret}]}
+                       if k.runner_image_pull_secret else {}),
+                    "automountServiceAccountToken": False,
+                    "enableServiceLinks": False,
+                    "hostPID": False,
+                    "hostIPC": False,
+                    "hostNetwork": False,
+                    "shareProcessNamespace": False,
+                    "terminationGracePeriodSeconds": 10,
+                    "securityContext": {
+                        "runAsNonRoot": True,
+                        "runAsUser": uid,
+                        "runAsGroup": gid,
+                        "fsGroup": gid,
+                        "fsGroupChangePolicy": "OnRootMismatch",
+                        "seccompProfile": {"type": "RuntimeDefault"},
+                    },
+                    "containers": [{
+                        "name": "terminal",
+                        "image": image,
+                        "imagePullPolicy": pull_policy,
+                        # Apply the process limits to terminald itself as well as
+                        # every PTY child. The child shell re-asserts the same limits.
+                        "command": [
+                            "/usr/bin/prlimit", "--nofile=4096:4096", "--nproc=256:256",
+                            "--core=0:0", "--", "/usr/local/bin/priva-terminald",
+                        ],
+                        "resources": resolve_terminal_resources(spec, settings, defaults),
+                        "ports": [{"containerPort": port, "name": "http"}],
+                        "securityContext": {
+                            "allowPrivilegeEscalation": False,
+                            "privileged": False,
+                            "readOnlyRootFilesystem": True,
+                            "capabilities": {"drop": ["ALL"]},
+                        },
+                        # Deliberately no envFrom: terminal users must never inherit
+                        # data-spine/JWT/runtime secrets from the Runner control process.
+                        "env": [
+                            {"name": "PRIVA_TERMINAL_LISTEN", "value": f"0.0.0.0:{port}"},
+                            {"name": "PRIVA_TERMINAL_MAX_SESSIONS", "value": str(max_sessions)},
+                            {"name": "PRIVA_TERMINAL_IDLE_TIMEOUT_SECONDS", "value": str(idle_timeout)},
+                            {"name": "PRIVA_TERMINAL_MAX_LIFETIME_SECONDS", "value": str(max_lifetime)},
+                            {"name": "PRIVA_TERMINAL_OUTPUT_RATE", "value": str(getattr(k, "terminal_output_rate_limit_bytes_per_sec", 256 * 1024))},
+                            {"name": "PRIVA_TERMINAL_OUTPUT_BURST", "value": str(getattr(k, "terminal_output_burst_bytes", 1024 * 1024))},
+                            {"name": "PRIVA_TERMINAL_OUTPUT_BUFFER", "value": str(getattr(k, "terminal_output_buffer_bytes", 1024 * 1024))},
+                            {"name": "PRIVA_TERMINAL_CWD", "value": "/workspace"},
+                            {"name": "PRIVA_TERMINAL_SHELL", "value": "/bin/bash"},
+                            {"name": "HOME", "value": "/workspace/.home"},
+                            {"name": "WORKSPACE_DIR", "value": "/workspace"},
+                            {"name": "PRIVA_HOME", "value": "/workspace/.priva"},
+                            {"name": "CLAUDE_CONFIG_DIR", "value": "/workspace/.claude"},
+                            {"name": "PRIVA_HOOK_DIR", "value": "/workspace/.priva/hook-context"},
+                            {"name": "USER", "value": "app"},
+                            {"name": "LOGNAME", "value": "app"},
+                            {"name": "SHELL", "value": "/bin/bash"},
+                            {"name": "LANG", "value": "C.UTF-8"},
+                        ],
+                        "volumeMounts": [
+                            _data_volume_mount(mount_info),
+                            {"name": "tmp", "mountPath": "/tmp"},
+                            {"name": MANAGED_POLICY_VOLUME, "mountPath": MANAGED_POLICY_MOUNT,
+                             "readOnly": True},
+                        ],
+                        "readinessProbe": {
+                            "httpGet": {"path": "/health", "port": port},
+                            "initialDelaySeconds": 1,
+                            "periodSeconds": 3,
+                            "failureThreshold": 20,
+                        },
+                        "livenessProbe": {
+                            "httpGet": {"path": "/health", "port": port},
+                            "initialDelaySeconds": 5,
+                            "periodSeconds": 10,
+                            "failureThreshold": 3,
+                        },
+                    }],
+                    "volumes": [
+                        _data_volume(mount_info),
+                        {"name": "tmp", "emptyDir": {
+                            "medium": "Memory",
+                            "sizeLimit": getattr(k, "terminal_tmp_size_limit", "256Mi"),
+                        }},
+                        {"name": MANAGED_POLICY_VOLUME,
+                         "configMap": {"name": MANAGED_POLICY_CM, "optional": True}},
+                    ],
+                },
+            },
+        },
+    }
+
+
 # --- reconcile primitives ---------------------------------------------------
 
 def _read_deployment(namespace, account_id):
     try:
         return apps().read_namespaced_deployment(names.deploy_name(account_id), namespace)
+    except client.ApiException as exc:
+        if exc.status == 404:
+            return None
+        raise
+
+
+def _read_terminal_deployment(namespace, account_id):
+    try:
+        return apps().read_namespaced_deployment(names.terminal_deploy_name(account_id), namespace)
     except client.ApiException as exc:
         if exc.status == 404:
             return None
@@ -315,11 +510,51 @@ def ensure_runtime_objects(namespace, account_id, username, image, pull_policy, 
     # apply-on-next-restart (reconcile must never kill a running session).
     if (existing.spec.replicas or 0) > 0:
         return
+    # A live Terminal must keep the Runner template from the same allocation
+    # generation. Re-templating just the dormant Runner after a percentage/total
+    # change could make old-Terminal + new-Runner exceed the tenant commitment.
+    terminal = _read_terminal_deployment(namespace, account_id)
+    if terminal is not None and (terminal.spec.replicas or 0) > 0:
+        runner_percent = _deployment_terminal_percent(existing)
+        terminal_percent = _deployment_terminal_percent(terminal)
+        if runner_percent != terminal_percent:
+            raise RuntimeError(
+                f"runner/terminal allocation generation mismatch for {account_id}: "
+                f"{runner_percent}% != {terminal_percent}%")
+        return
     body["spec"]["replicas"] = existing.spec.replicas or 0
     body["metadata"]["resourceVersion"] = existing.metadata.resource_version
     # 409 = a concurrent writer (wake/scale) won the race; the next ensure converges.
     _ignore_conflict(apps().replace_namespaced_deployment,
                      names.deploy_name(account_id), namespace, body)
+
+
+def ensure_terminal_objects(namespace, account_id, username, image, pull_policy, settings, owner,
+                            spec, defaults=None) -> None:
+    """Create/converge the independent Terminal Deployment+Service while dormant.
+
+    Disabled policy (0%) creates nothing. Existing objects are retained at replicas=0
+    so re-enabling is migration-free and the next wake is fast.
+    """
+    if resolve_terminal_percent(settings, defaults) <= 0:
+        return
+    mount_info = get_backend(settings).provision(
+        account_id, resolve_storage_gb(spec, settings, defaults))
+    port = settings.kubernetes.terminal_service_port
+    _ignore_conflict(core().create_namespaced_service, namespace,
+                     _terminal_service_body(namespace, account_id, port, owner))
+    body = _terminal_deployment_body(namespace, account_id, username, image, pull_policy,
+                                     settings, owner, spec, mount_info, defaults)
+    existing = _read_terminal_deployment(namespace, account_id)
+    if existing is None:
+        _ignore_conflict(apps().create_namespaced_deployment, namespace, body)
+        return
+    if (existing.spec.replicas or 0) > 0:
+        return
+    body["spec"]["replicas"] = existing.spec.replicas or 0
+    body["metadata"]["resourceVersion"] = existing.metadata.resource_version
+    _ignore_conflict(apps().replace_namespaced_deployment,
+                     names.terminal_deploy_name(account_id), namespace, body)
 
 
 def patch_deployment_resources(namespace, account_id, resources: dict) -> None:
@@ -328,6 +563,12 @@ def patch_deployment_resources(namespace, account_id, resources: dict) -> None:
     body = {"spec": {"template": {"spec": {"containers": [
         {"name": "agent-runner", "resources": resources}]}}}}
     apps().patch_namespaced_deployment(names.deploy_name(account_id), namespace, body)
+
+
+def patch_terminal_resources(namespace, account_id, resources: dict) -> None:
+    body = {"spec": {"template": {"spec": {"containers": [
+        {"name": "terminal", "resources": resources}]}}}}
+    apps().patch_namespaced_deployment(names.terminal_deploy_name(account_id), namespace, body)
 
 
 def get_replicas(namespace, account_id) -> int:
@@ -340,12 +581,41 @@ def get_replicas(namespace, account_id) -> int:
         raise
 
 
+def get_terminal_replicas(namespace, account_id) -> int:
+    try:
+        d = apps().read_namespaced_deployment(names.terminal_deploy_name(account_id), namespace)
+        return d.spec.replicas or 0
+    except client.ApiException as exc:
+        if exc.status == 404:
+            return -1
+        raise
+
+
+def _deployment_terminal_percent(deployment) -> int:
+    annotations = getattr(deployment.metadata, "annotations", None) or {}
+    try:
+        return int(annotations.get(_TERMINAL_PERCENT_ANNOTATION, "0"))
+    except (TypeError, ValueError):
+        return 0
+
+
+def applied_terminal_percent(namespace, account_id) -> int | None:
+    """Percent baked into the current Runner Deployment template."""
+    deployment = _read_deployment(namespace, account_id)
+    return None if deployment is None else _deployment_terminal_percent(deployment)
+
+
 def scale(namespace, account_id, replicas: int) -> None:
     apps().patch_namespaced_deployment_scale(
         names.deploy_name(account_id), namespace, {"spec": {"replicas": replicas}})
 
 
-def current_ready_pod_ip(namespace, account_id) -> str | None:
+def scale_terminal(namespace, account_id, replicas: int) -> None:
+    apps().patch_namespaced_deployment_scale(
+        names.terminal_deploy_name(account_id), namespace, {"spec": {"replicas": replicas}})
+
+
+def _current_ready_pod_ip(namespace, account_id, app: str) -> str | None:
     """IP of the *one* pod for this account that is Ready **and** not terminating, else None.
 
     Pure pod query — the single source of truth for "is there a live pod and where".
@@ -354,7 +624,7 @@ def current_ready_pod_ip(namespace, account_id) -> str | None:
     pod that is mid-termination (its IP is about to disappear) so callers never hand out
     or probe a doomed endpoint.
     """
-    selector = f"priva.io/account-id={account_id}"
+    selector = f"app={app},priva.io/account-id={account_id}"
     pods = core().list_namespaced_pod(namespace, label_selector=selector).items
     for p in pods:
         if p.metadata.deletion_timestamp is not None:
@@ -365,11 +635,29 @@ def current_ready_pod_ip(namespace, account_id) -> str | None:
     return None
 
 
+def current_ready_pod_ip(namespace, account_id) -> str | None:
+    return _current_ready_pod_ip(namespace, account_id, "agent-runner")
+
+
+def current_ready_terminal_pod_ip(namespace, account_id) -> str | None:
+    return _current_ready_pod_ip(namespace, account_id, "terminal")
+
+
 def wait_pod_ready(namespace, account_id, timeout: float = 60.0) -> str | None:
     """Poll until a Ready, non-terminating pod for this account appears; return its podIP."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         ip = current_ready_pod_ip(namespace, account_id)
+        if ip:
+            return ip
+        time.sleep(1.5)
+    return None
+
+
+def wait_terminal_pod_ready(namespace, account_id, timeout: float = 60.0) -> str | None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        ip = current_ready_terminal_pod_ip(namespace, account_id)
         if ip:
             return ip
         time.sleep(1.5)

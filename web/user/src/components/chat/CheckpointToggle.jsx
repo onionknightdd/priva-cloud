@@ -1,6 +1,5 @@
-import { useState } from 'react'
-import { Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { Zap } from 'lucide-react'
 import useChatStore from '../../stores/chatStore'
 
 export default function CheckpointToggle() {
@@ -8,38 +7,34 @@ export default function CheckpointToggle() {
   const enabled = useChatStore((s) => s.enableFileCheckpointing)
   const setEnabled = useChatStore((s) => s.setCheckpointingEnabled)
   const isStreaming = useChatStore((s) => s.isStreaming)
-  const [hovered, setHovered] = useState(false)
 
   const disabled = isStreaming
-  const color = enabled ? 'var(--blue)' : (hovered ? 'var(--text-secondary)' : 'var(--text-dim)')
 
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={() => setEnabled(!enabled)}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      className="inline-flex items-center gap-1 flex-shrink-0"
       title={t('checkpoint.tooltip')}
-      className="inline-flex items-center gap-1 uppercase"
       style={{
-        height: 20,
-        padding: '0 5px',
-        background: enabled ? 'var(--bg-elevated)' : 'transparent',
-        border: '1px solid var(--border-subtle)',
-        borderLeft: enabled ? '2px solid var(--blue)' : '2px solid transparent',
-        borderRadius: 2,
-        color,
-        cursor: disabled ? 'default' : 'pointer',
-        fontSize: 9,
-        lineHeight: '12px',
-        letterSpacing: '0.06em',
+        height: 28,
+        padding: '0 6px',
+        background: 'transparent',
+        border: '1px solid transparent',
+        borderRadius: 3,
+        color: enabled ? 'var(--blue)' : 'var(--text-dim)',
+        fontSize: 12,
         fontWeight: 600,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.45 : 1,
         transition: 'color 150ms ease, background 150ms ease',
       }}
+      onMouseEnter={(event) => { if (!disabled) event.currentTarget.style.background = 'var(--bg-elevated)' }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent' }}
     >
-      <Zap size={10} strokeWidth={1.5} />
-      <span>{enabled ? t('checkpoint.labelOn') : t('checkpoint.label')}</span>
+      <Zap size={12} strokeWidth={1.5} fill={enabled ? 'currentColor' : 'none'} />
+      <span>{enabled ? t('checkpoint.labelOn') : t('checkpoint.labelOff')}</span>
     </button>
   )
 }

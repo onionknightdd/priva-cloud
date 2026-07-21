@@ -331,7 +331,10 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
             return cv.runner_defaults_from_pb(self._s.Get(common_pb2.Empty()))
 
         def set(self, *, idle_grace_seconds=None, min_alive_after_wake_seconds=None,
-                cpu_cores=None, memory_mb=None, storage_gb=None, runner_image=None):
+                cpu_cores=None, memory_mb=None, storage_gb=None, runner_image=None,
+                terminal_resource_percent=None, terminal_max_sessions=None,
+                terminal_idle_timeout_seconds=None, terminal_max_lifetime_seconds=None,
+                terminal_scale_down_grace_seconds=None):
             req = runner_defaults_pb2.SetRunnerDefaultsRequest()
             mask: list[str] = []
             if idle_grace_seconds is not None:
@@ -352,6 +355,21 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
             if runner_image is not None:
                 req.runner_image = runner_image
                 mask.append("runner_image")
+            if terminal_resource_percent is not None:
+                req.terminal_resource_percent = terminal_resource_percent
+                mask.append("terminal_resource_percent")
+            if terminal_max_sessions is not None:
+                req.terminal_max_sessions = terminal_max_sessions
+                mask.append("terminal_max_sessions")
+            if terminal_idle_timeout_seconds is not None:
+                req.terminal_idle_timeout_seconds = terminal_idle_timeout_seconds
+                mask.append("terminal_idle_timeout_seconds")
+            if terminal_max_lifetime_seconds is not None:
+                req.terminal_max_lifetime_seconds = terminal_max_lifetime_seconds
+                mask.append("terminal_max_lifetime_seconds")
+            if terminal_scale_down_grace_seconds is not None:
+                req.terminal_scale_down_grace_seconds = terminal_scale_down_grace_seconds
+                mask.append("terminal_scale_down_grace_seconds")
             req.update_mask.extend(mask)
             return cv.runner_defaults_from_pb(self._s.Set(req))
 

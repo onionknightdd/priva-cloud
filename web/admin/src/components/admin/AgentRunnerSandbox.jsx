@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Clock, Cpu, ShieldCheck, Package, Check, Loader, Settings2 } from 'lucide-react'
+import { Clock, Cpu, ShieldCheck, Package, Check, Loader, Settings2, SquareTerminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
 import Dropdown from '@shared/components/shared/Dropdown'
@@ -60,6 +60,18 @@ const GROUPS = [
     ],
   },
   {
+    id: 'terminal',
+    labelKey: 'admin.sandboxTerminal',
+    icon: SquareTerminal,
+    fields: [
+      { id: 'terminal_resource_percent', labelKey: 'admin.terminalResourcePercent', type: 'percentage', hintKey: 'admin.terminalResourcePercentHint' },
+      { id: 'terminal_max_sessions', labelKey: 'admin.terminalMaxSessions', type: 'int', hintKey: 'admin.terminalMaxSessionsHint' },
+      { id: 'terminal_idle_timeout_seconds', labelKey: 'admin.terminalIdleTimeout', type: 'int', unit: 's', hintKey: 'admin.terminalIdleTimeoutHint' },
+      { id: 'terminal_max_lifetime_seconds', labelKey: 'admin.terminalMaxLifetime', type: 'int', unit: 's', hintKey: 'admin.terminalMaxLifetimeHint' },
+      { id: 'terminal_scale_down_grace_seconds', labelKey: 'admin.terminalScaleDownGrace', type: 'int', unit: 's', hintKey: 'admin.terminalScaleDownGraceHint' },
+    ],
+  },
+  {
     id: 'isolation',
     labelKey: 'admin.sandboxIsolation',
     icon: ShieldCheck,
@@ -91,6 +103,7 @@ const GROUPS = [
 const GROUP_KEYS = {
   lifecycle: ['idle_grace_seconds', 'min_alive_after_wake_seconds'],
   resources: ['cpu_millicores', 'memory_mb', 'storage_gb'],
+  terminal: ['terminal_resource_percent', 'terminal_max_sessions', 'terminal_idle_timeout_seconds', 'terminal_max_lifetime_seconds', 'terminal_scale_down_grace_seconds'],
   isolation: [],
   image: ['runner_image'],
   runtime: [],
@@ -125,6 +138,11 @@ export default function AgentRunnerSandbox() {
         memory_mb: d.memory_mb,
         storage_gb: d.storage_gb,
         runner_image: d.runner_image,
+        terminal_resource_percent: d.terminal_resource_percent,
+        terminal_max_sessions: d.terminal_max_sessions,
+        terminal_idle_timeout_seconds: d.terminal_idle_timeout_seconds,
+        terminal_max_lifetime_seconds: d.terminal_max_lifetime_seconds,
+        terminal_scale_down_grace_seconds: d.terminal_scale_down_grace_seconds,
         egress: 'allow',
       }
       setValues(v)
@@ -260,6 +278,19 @@ export default function AgentRunnerSandbox() {
           placeholder={t('admin.sandboxSelectImage')}
         />
       )
+    } else if (f.type === 'percentage') {
+      control = (
+        <Dropdown
+          size="sm"
+          mono
+          value={Number(val) || 0}
+          onChange={(v) => setField(f.id, Number(v))}
+          options={Array.from({ length: 11 }, (_, i) => ({
+            value: i * 5,
+            label: i === 0 ? t('admin.terminalDisabledOption') : `${i * 5}%`,
+          }))}
+        />
+      )
     } else {
       control = (
         <div className="flex items-center gap-2">
@@ -285,6 +316,58 @@ export default function AgentRunnerSandbox() {
         <div style={{ width: FIELD_BOX_WIDTH, flexShrink: 0 }}>
           {control}
         </div>
+      </div>
+    )
+  }
+
+  const allocation = (source) => {
+    const percent = Math.max(0, Math.min(50, parseInt(source.terminal_resource_percent, 10) || 0))
+    const cpu = Math.max(0, parseInt(source.cpu_millicores, 10) || 0)
+    const memory = Math.max(0, parseInt(source.memory_mb, 10) || 0)
+    const terminalCpu = percent > 0 && cpu >= 2
+      ? Math.min(cpu - 1, Math.max(1, Math.floor(cpu * percent / 100)))
+      : 0
+    const terminalMemory = percent > 0 && memory >= 2
+      ? Math.min(memory - 1, Math.max(1, Math.floor(memory * percent / 100)))
+      : 0
+    return {
+      percent,
+      runnerCpu: cpu - terminalCpu,
+      terminalCpu,
+      runnerMemory: memory - terminalMemory,
+      terminalMemory,
+    }
+  }
+
+  const desiredAllocation = allocation(values)
+  const effectiveAllocation = allocation(baseline)
+
+  const renderAllocationPreview = () => {
+    const columns = [
+      { key: 'desired', label: t('admin.terminalDesiredAllocation'), value: desiredAllocation },
+      { key: 'effective', label: t('admin.terminalEffectiveAllocation'), value: effectiveAllocation },
+    ]
+    return (
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: '1fr 1fr', gap: 1, background: 'var(--border)', border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden' }}
+      >
+        {columns.map(({ key, label, value }) => (
+          <div key={key} className="flex flex-col gap-2" style={{ padding: 12, background: 'var(--bg-surface)', minWidth: 0 }}>
+            <div className="uppercase text-xs" style={{ color: 'var(--text-dim)', letterSpacing: '0.06em', fontWeight: 600 }}>{label}</div>
+            <div style={{ borderLeft: `2px solid ${value.percent > 0 ? 'var(--green)' : 'var(--border)'}`, paddingLeft: 10 }}>
+              <div className="text-xs" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                {value.percent > 0 ? t('admin.terminalEnabledStatus') : t('admin.terminalDisabledStatus')}
+              </div>
+              <div className="text-xs" style={{ color: 'var(--text-secondary)', marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>
+                Runner {value.runnerCpu}m · {value.runnerMemory}Mi
+              </div>
+              <div className="text-xs" style={{ color: 'var(--text-secondary)', marginTop: 2, fontFamily: "'JetBrains Mono', monospace" }}>
+                Terminal {value.terminalCpu}m · {value.terminalMemory}Mi
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     )
   }
@@ -406,6 +489,7 @@ export default function AgentRunnerSandbox() {
                     </div>
                     <div className="flex flex-col gap-4">
                       {g.fields.map((f) => renderField(f))}
+                      {g.id === 'terminal' && renderAllocationPreview()}
                     </div>
                     {keys.length > 0 && (
                       <div className="flex items-center justify-end gap-3" style={{ marginTop: 14 }}>

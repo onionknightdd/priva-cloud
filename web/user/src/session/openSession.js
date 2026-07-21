@@ -28,6 +28,7 @@ export const DEFAULT_UI_SNAPSHOT = {
   canvasVisible: false,
   canvasMinimized: false,
   activeCanvasTab: 'tasks',
+  canvasOpenTabs: [],
   planContent: null,
   planFilePath: null,
 }
@@ -38,6 +39,7 @@ export function pickUiSnapshot() {
     canvasVisible: s.canvasVisible,
     canvasMinimized: s.canvasMinimized,
     activeCanvasTab: s.activeCanvasTab,
+    canvasOpenTabs: s.canvasOpenTabs,
     planContent: s.planContent,
     planFilePath: s.planFilePath,
   }
@@ -51,7 +53,11 @@ function snapshotActiveUi() {
 }
 
 function applyUiSnapshot(ui) {
-  useUiStore.setState({ ...DEFAULT_UI_SNAPSHOT, ...(ui || {}) })
+  const next = { ...DEFAULT_UI_SNAPSHOT, ...(ui || {}) }
+  useUiStore.setState(next)
+  if (next.canvasVisible && next.activeCanvasTab !== 'menu') {
+    useUiStore.getState().setActiveCanvasTab(next.activeCanvasTab)
+  }
 }
 
 function canvasTabFor({ fileBrowserTabs, fileOps, messages }) {
@@ -132,7 +138,7 @@ export async function openSession(sessionOrId, opts = {}) {
     snapshotActiveUi()
     setActiveKey(sessionId)
     const tab = canvasTabFor({ fileBrowserTabs, fileOps, messages })
-    applyUiSnapshot(tab ? { canvasVisible: true, activeCanvasTab: tab } : null)
+    applyUiSnapshot(tab ? { canvasVisible: true, activeCanvasTab: tab, canvasOpenTabs: [tab] } : null)
     useSidebarStore.getState().setActiveSessionId(rowId)
     statusStore.markSeen(sessionId)
     evictIfNeeded()

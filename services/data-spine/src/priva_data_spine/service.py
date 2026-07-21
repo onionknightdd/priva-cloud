@@ -30,7 +30,7 @@ from priva_common.dataplane import (
     set_inprocess_handlers,
 )
 from priva_common.hook_seeds import HOOK_SEEDS, content_hash as hook_content_hash
-from priva_common._pagination import compute_cursors, decode_cursor, encode_cursor
+from priva_common._pagination import compute_cursors, decode_cursor
 from priva_common.models.auth import UserRecord
 from priva_common.models.scheduler import JobRunRecord, ScheduledJobDefinition
 
@@ -676,6 +676,11 @@ class RunnerDefaultsService:
             "memory_mb": int(k.runner_memory_mb),
             "storage_gb": int(k.runner_storage_gb),
             "runner_image": str(k.runner_image),
+            "terminal_resource_percent": int(k.terminal_resource_percent),
+            "terminal_max_sessions": int(k.terminal_max_sessions),
+            "terminal_idle_timeout_seconds": int(k.terminal_idle_timeout_seconds),
+            "terminal_max_lifetime_seconds": int(k.terminal_max_lifetime_seconds),
+            "terminal_scale_down_grace_seconds": int(k.terminal_scale_down_grace_seconds),
         }
 
     @staticmethod
@@ -687,6 +692,11 @@ class RunnerDefaultsService:
             memory_mb=int(row["memory_mb"]),
             storage_gb=int(row["storage_gb"]),
             runner_image=row["runner_image"],
+            terminal_resource_percent=int(row["terminal_resource_percent"]),
+            terminal_max_sessions=int(row["terminal_max_sessions"]),
+            terminal_idle_timeout_seconds=int(row["terminal_idle_timeout_seconds"]),
+            terminal_max_lifetime_seconds=int(row["terminal_max_lifetime_seconds"]),
+            terminal_scale_down_grace_seconds=int(row["terminal_scale_down_grace_seconds"]),
             updated_at=row.get("updated_at"),
         )
 
@@ -698,7 +708,9 @@ class RunnerDefaultsService:
 
     def set(self, *, idle_grace_seconds=None, min_alive_after_wake_seconds=None,
             cpu_cores=None, memory_mb=None, storage_gb=None,
-            runner_image=None) -> RunnerDefaultsRecord:
+            runner_image=None, terminal_resource_percent=None, terminal_max_sessions=None,
+            terminal_idle_timeout_seconds=None, terminal_max_lifetime_seconds=None,
+            terminal_scale_down_grace_seconds=None) -> RunnerDefaultsRecord:
         if self.repo.runner_defaults_get() is None:  # ensure the single row exists
             self.repo.runner_defaults_seed(self._seed_values())
         fields: dict = {}
@@ -714,6 +726,16 @@ class RunnerDefaultsService:
             fields["storage_gb"] = int(storage_gb)
         if runner_image is not None:
             fields["runner_image"] = str(runner_image)
+        if terminal_resource_percent is not None:
+            fields["terminal_resource_percent"] = int(terminal_resource_percent)
+        if terminal_max_sessions is not None:
+            fields["terminal_max_sessions"] = int(terminal_max_sessions)
+        if terminal_idle_timeout_seconds is not None:
+            fields["terminal_idle_timeout_seconds"] = int(terminal_idle_timeout_seconds)
+        if terminal_max_lifetime_seconds is not None:
+            fields["terminal_max_lifetime_seconds"] = int(terminal_max_lifetime_seconds)
+        if terminal_scale_down_grace_seconds is not None:
+            fields["terminal_scale_down_grace_seconds"] = int(terminal_scale_down_grace_seconds)
         return self._to_record(self.repo.runner_defaults_upsert(fields))
 
 

@@ -177,6 +177,16 @@ class RunnerDefaultsResponse(BaseModel):
     memory_mb: int = 2048
     storage_gb: int = 1
     runner_image: str = "priva/agent-runner:dev"
+    terminal_resource_percent: int = 0
+    terminal_max_sessions: int = 2
+    terminal_idle_timeout_seconds: int = 1800
+    terminal_max_lifetime_seconds: int = 14400
+    terminal_scale_down_grace_seconds: int = 120
+    terminal_enabled: bool = False
+    runner_cpu_millicores: int = 1000
+    terminal_cpu_millicores: int = 0
+    runner_memory_mb: int = 2048
+    terminal_memory_mb: int = 0
     updated_at: str | None = None
 
 
@@ -189,6 +199,11 @@ class RunnerDefaultsUpdate(BaseModel):
     memory_mb: int | None = None
     storage_gb: int | None = None
     runner_image: str | None = None
+    terminal_resource_percent: int | None = None
+    terminal_max_sessions: int | None = None
+    terminal_idle_timeout_seconds: int | None = None
+    terminal_max_lifetime_seconds: int | None = None
+    terminal_scale_down_grace_seconds: int | None = None
 
 
 class RunnerImagesResponse(BaseModel):

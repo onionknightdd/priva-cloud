@@ -8,6 +8,7 @@ const STORAGE_KEY_TERMINAL_HEIGHT = 'terminal-height'
 const STORAGE_KEY_TERMINAL_MODE = 'terminal-mode'
 const STORAGE_KEY_TERMINAL_BOUNDS = 'terminal-bounds'
 const CANVAS_MAX_PANE_RATIO = 2 / 3
+const CANVAS_TAB_IDS = new Set(['tasks', 'file-browser', 'changes', 'plan', 'browser'])
 export const THEME_CHANNEL = 'priva-theme'
 
 const TERMINAL_MIN_WIDTH = 320
@@ -106,6 +107,15 @@ const _persistTerminalBounds = (value) => {
 const getStoredTheme = () => normalizeTheme(safeStorage.getItem(STORAGE_KEY_THEME))
 const getStoredLanguage = () => safeStorage.getItem('language') || 'zh'
 
+function normalizeCanvasTab(tab) {
+  return tab === 'files' ? 'changes' : tab
+}
+
+function appendCanvasTab(tabs, tab) {
+  if (!CANVAS_TAB_IDS.has(tab) || tabs.includes(tab)) return tabs
+  return [...tabs, tab]
+}
+
 const useUiStore = create((set, get) => ({
   activeNavTab: 'priva',
   activePluginSection: 'skills', // 'skills' | 'mcp' | 'hooks' | 'subagents' | 'commands' | 'memory'
@@ -113,6 +123,7 @@ const useUiStore = create((set, get) => ({
   canvasWidth: getStoredCanvasWidth(),
   canvasMinimized: false,
   activeCanvasTab: 'tasks',
+  canvasOpenTabs: [],
   confirmDialog: null,
   lastResult: null,
   planContent: null,
@@ -130,6 +141,7 @@ const useUiStore = create((set, get) => ({
   terminalBounds: getStoredTerminalBounds(),
   terminalConfirmAcked: false,
   terminalFeatureEnabled: false,
+  terminalMaxSessions: 2,
   terminalSessionActive: false,
   terminalActiveCount: 0,
   terminalMotionAnchorRect: null,
@@ -137,12 +149,12 @@ const useUiStore = create((set, get) => ({
 
   reset: () => set({
     activeNavTab: 'priva', activePluginSection: 'skills', canvasVisible: false, canvasMinimized: false,
-    activeCanvasTab: 'tasks', confirmDialog: null, lastResult: null,
+    activeCanvasTab: 'tasks', canvasOpenTabs: [], confirmDialog: null, lastResult: null,
     planContent: null, planFilePath: null,
     settingsOpen: false, settingsActiveTab: 'api', settingsPopoverOpen: false,
     introOpen: false,
     terminalOpen: false, terminalMinimized: false,
-    terminalConfirmAcked: false, terminalFeatureEnabled: false,
+    terminalConfirmAcked: false, terminalFeatureEnabled: false, terminalMaxSessions: 2,
     terminalSessionActive: false, terminalActiveCount: 0,
     terminalMotionAnchorRect: null,
     terminalMotionActive: false,
@@ -163,6 +175,17 @@ const useUiStore = create((set, get) => ({
   showCanvas: () => set({ canvasVisible: true }),
   hideCanvas: () => set({ canvasVisible: false }),
   toggleCanvas: () => set((s) => ({ canvasVisible: !s.canvasVisible })),
+  showCanvasMenu: () => set({ canvasVisible: true, canvasMinimized: false, activeCanvasTab: 'menu' }),
+  openCanvasTab: (tab) => set((s) => {
+    const nextTab = normalizeCanvasTab(tab)
+    if (!CANVAS_TAB_IDS.has(nextTab)) return {}
+    return {
+      canvasVisible: true,
+      canvasMinimized: false,
+      activeCanvasTab: nextTab,
+      canvasOpenTabs: appendCanvasTab(s.canvasOpenTabs, nextTab),
+    }
+  }),
 
   setCanvasWidth: (width) => {
     set({ canvasWidth: width })
@@ -172,7 +195,13 @@ const useUiStore = create((set, get) => ({
   setCanvasMinimized: (minimized) => set({ canvasMinimized: minimized }),
   toggleCanvasMinimized: () => set((s) => ({ canvasMinimized: !s.canvasMinimized })),
 
-  setActiveCanvasTab: (tab) => set({ activeCanvasTab: tab }),
+  setActiveCanvasTab: (tab) => set((s) => {
+    const nextTab = normalizeCanvasTab(tab)
+    return {
+      activeCanvasTab: nextTab,
+      canvasOpenTabs: appendCanvasTab(s.canvasOpenTabs, nextTab),
+    }
+  }),
 
   showConfirmDialog: (dialog) => set({ confirmDialog: dialog }),
   hideConfirmDialog: () => set({ confirmDialog: null }),
@@ -228,6 +257,7 @@ const useUiStore = create((set, get) => ({
   },
   setTerminalConfirmAcked: (v) => set({ terminalConfirmAcked: !!v }),
   setTerminalFeatureEnabled: (v) => set({ terminalFeatureEnabled: !!v }),
+  setTerminalMaxSessions: (v) => set({ terminalMaxSessions: Math.max(1, Number(v) || 2) }),
   setTerminalSessionActive: (v) => set({ terminalSessionActive: !!v }),
   setTerminalActiveCount: (n) => set({ terminalActiveCount: Math.max(0, Number(n) || 0) }),
   setTerminalMotionAnchorRect: (rect) => set({ terminalMotionAnchorRect: rect || null }),

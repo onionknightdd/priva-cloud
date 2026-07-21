@@ -7,8 +7,8 @@ import { useStatusColorTween } from '@shared/motion/useStatusSettle'
 import useAdminStore from '../../stores/adminStore'
 
 // Admin console: open a live shell into either
-//   • an AGENT-RUNNER pod (a selected account) — WS rides /api/sandbox/pty/ws and the EPP
-//     steers it to that account's pod (targetUsername), or
+//   • an independent TERMINAL pod (a selected account) — WS rides /api/terminal/ws and
+//     the EPP steers it to that account's Terminal pod (targetUsername), or
 //   • a CONTROL-PLANE pod (control-panel / operator / data-spine) — WS rides
 //     /api/admin/console/ws and the control-panel k8s-execs into the target pod.
 // See extproc.py + routers/console.py (both audit-log admin.console_open).
@@ -16,7 +16,7 @@ import useAdminStore from '../../stores/adminStore'
 // Static control-plane targets (resolved server-side by `app` label).
 const CONTROL_PLANE = ['control-panel', 'operator', 'data-spine']
 const CP_PATH = '/api/admin/console/ws'
-const AR_PATH = '/api/sandbox/pty/ws'
+const AR_PATH = '/api/terminal/ws'
 
 function StatusLabel({ meta, ready, closed }) {
   const { t } = useTranslation()

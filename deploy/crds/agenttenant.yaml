@@ -67,6 +67,10 @@ spec:
                   type: object
                   properties:
                     requestedAt: {type: string}
+                terminalWake:
+                  type: object
+                  properties:
+                    requestedAt: {type: string}
             status:
               type: object
               x-kubernetes-preserve-unknown-fields: true

@@ -5,6 +5,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 NS=priva-cloud
+TERMINAL_NETWORK_POLICY_ENABLED="${PRIVA_TERMINAL_NETWORK_POLICY_ENABLED:-1}"
+
+echo "==> 0. Terminal isolation preflight"
+bash "$ROOT/deploy/checks/pod-pids-limit.sh"
+if [[ "$TERMINAL_NETWORK_POLICY_ENABLED" == "1" ]]; then
+  bash "$ROOT/deploy/checks/networkpolicy-cni.sh"
+else
+  echo "    WARN: Terminal NetworkPolicy disabled; tenant lateral-network isolation is NOT enforced"
+fi
 
 echo "==> 1. build + load images"
 "$ROOT/deploy/minikube/build.sh"
@@ -33,6 +42,7 @@ echo "==> 2b. dev storage: in-cluster NFS + XFS project quota (the shared RWX ex
 # project quota (set by the operator via the quota-manager). Prod swaps this for Ceph/NFS.
 "$ROOT/deploy/minikube/build.sh" nfs-xfs
 kubectl apply -f deploy/dev-storage/nfs-xfs.yaml
+kubectl -n "$NS" rollout restart statefulset/priva-nfs
 kubectl -n "$NS" rollout status statefulset/priva-nfs --timeout=180s
 kubectl apply -f deploy/dev-storage/export-pv.yaml
 
@@ -53,20 +63,32 @@ kubectl apply -f deploy/rbac/operator-rbac.yaml -f deploy/rbac/control-panel-rba
 
 echo "==> 6. config + shared secret (generated; not committed)"
 kubectl apply -f deploy/k8s/configmap.yaml
-kubectl -n "$NS" create secret generic priva-shared-secret \
-  --from-literal=PRIVA_AUTH__JWT_SECRET="$(openssl rand -hex 32)" \
-  --from-literal=PRIVA_DATASPINE__API_KEY_HMAC_SECRET="$(openssl rand -hex 32)" \
-  --dry-run=client -o yaml | kubectl apply -f -
+if kubectl -n "$NS" get secret priva-shared-secret >/dev/null 2>&1; then
+  echo "    priva-shared-secret exists: preserving JWT/HMAC values"
+else
+  kubectl -n "$NS" create secret generic priva-shared-secret \
+    --from-literal=PRIVA_AUTH__JWT_SECRET="$(openssl rand -hex 32)" \
+    --from-literal=PRIVA_DATASPINE__API_KEY_HMAC_SECRET="$(openssl rand -hex 32)"
+fi
 
 echo "==> 7. control-plane"
 kubectl apply -f deploy/k8s/data-spine.yaml -f deploy/k8s/control-panel.yaml -f deploy/k8s/operator.yaml
+kubectl -n "$NS" rollout restart deployment/data-spine deployment/control-panel deployment/operator
 kubectl -n "$NS" rollout status deploy/data-spine --timeout=120s
 kubectl -n "$NS" rollout status deploy/control-panel --timeout=120s
 kubectl -n "$NS" rollout status deploy/operator --timeout=120s
 
 echo "==> 7b. channel-connector (Feishu WS byte-path)"
 kubectl apply -f deploy/k8s/channel-connector.yaml
+kubectl -n "$NS" rollout restart deployment/channel-connector
 kubectl -n "$NS" rollout status deploy/channel-connector --timeout=120s
+
+echo "==> 7c. selective Terminal NetworkPolicy"
+if [[ "$TERMINAL_NETWORK_POLICY_ENABLED" == "1" ]]; then
+  kubectl apply -f deploy/k8s/terminal-networkpolicy.yaml
+else
+  kubectl delete -f deploy/k8s/terminal-networkpolicy.yaml --ignore-not-found
+fi
 
 echo "==> 8. edge: Gateway + InferencePool + HTTPRoute"
 kubectl apply -f deploy/gateway/gateway.yaml -f deploy/gateway/inferencepool.yaml -f deploy/gateway/httproute.yaml

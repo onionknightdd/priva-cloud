@@ -28,6 +28,8 @@ from envoy.config.core.v3.base_pb2 import HeaderValue, HeaderValueOption
 from envoy.extensions.filters.http.ext_proc.v3 import processing_mode_pb2 as pm
 from envoy.service.ext_proc.v3 import external_processor_pb2 as ep
 from envoy.type.v3 import http_status_pb2
+from grpclib.const import Cardinality, Handler
+from grpclib.server import Server
 
 # Tell agentgateway, in our headers response, to stop sending us the body/trailers
 # (the GIE EPP path buffers the request body for ext_proc; we only need headers, and
@@ -41,8 +43,6 @@ _MODE_OVERRIDE = pm.ProcessingMode(
     request_trailer_mode=pm.ProcessingMode.SKIP,
     response_trailer_mode=pm.ProcessingMode.SKIP,
 )
-from grpclib.const import Cardinality, Handler
-from grpclib.server import Server
 
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from priva_common.logging import get_app_logger
@@ -56,6 +56,7 @@ logger = get_app_logger(__name__)
 
 DEST_HEADER = "x-gateway-destination-endpoint"
 RUNNER_TOKEN_HEADER = "x-priva-runner-token"
+TERMINAL_AUTH_HEADER = "x-priva-terminal-authorized"
 PROCESS_PATH = "/envoy.service.ext_proc.v3.ExternalProcessor/Process"
 
 
@@ -122,8 +123,24 @@ def _steer(endpoint: str, runner_token: str) -> "ep.ProcessingResponse":
         mode_override=_MODE_OVERRIDE,  # stop the gateway from routing the body through us
         request_headers=ep.HeadersResponse(response=ep.CommonResponse(
             header_mutation=ep.HeaderMutation(set_headers=[
-                HeaderValueOption(header=HeaderValue(key=DEST_HEADER, raw_value=endpoint.encode())),
-                HeaderValueOption(header=HeaderValue(key=RUNNER_TOKEN_HEADER, raw_value=runner_token.encode())),
+                HeaderValueOption(header=HeaderValue(key=DEST_HEADER, raw_value=endpoint.encode()),
+                                  append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD),
+                HeaderValueOption(header=HeaderValue(key=RUNNER_TOKEN_HEADER, raw_value=runner_token.encode()),
+                                  append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD),
+            ]))))
+
+
+def _steer_terminal(endpoint: str) -> "ep.ProcessingResponse":
+    return ep.ProcessingResponse(
+        mode_override=_MODE_OVERRIDE,
+        request_headers=ep.HeadersResponse(response=ep.CommonResponse(
+            header_mutation=ep.HeaderMutation(set_headers=[
+                HeaderValueOption(header=HeaderValue(key=DEST_HEADER, raw_value=endpoint.encode()),
+                                  append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD),
+                # Fixed trust assertion: only the EPP can add it on the gateway
+                # byte path; destination NetworkPolicy blocks direct tenant access.
+                HeaderValueOption(header=HeaderValue(key=TERMINAL_AUTH_HEADER, raw_value=b"1"),
+                                  append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD),
             ]))))
 
 
@@ -147,6 +164,8 @@ def _passthrough_body(field: str, http_body) -> "ep.ProcessingResponse":
 async def handle_request_headers(http_headers) -> "ep.ProcessingResponse":
     """Pure-ish EPP decision for one request's headers (unit-testable)."""
     headers = _headers_to_dict(http_headers)
+    request_path = urlparse(headers.get(":path", "")).path
+    is_terminal = request_path == "/api/terminal" or request_path.startswith("/api/terminal/")
     auth = headers.get("authorization", "")
     token = auth[7:] if auth.lower().startswith("bearer ") else None
     if not token:  # WS upgrade: token rides the Sec-WebSocket-Protocol header
@@ -192,13 +211,26 @@ async def handle_request_headers(http_headers) -> "ep.ProcessingResponse":
             ))
         except Exception:  # pragma: no cover - audit must never block the console
             pass
+    if is_terminal:
+        try:
+            from priva_common.dataplane import get_client
+            terminal_enabled = get_client().runner_defaults.get().terminal_resource_percent > 0
+        except Exception:
+            terminal_enabled = False  # capability checks fail closed
+        if not terminal_enabled:
+            return _immediate(403, "web terminal is disabled")
     try:
-        endpoint = await provisioner.wake_and_wait(acct_id)
+        endpoint = (await provisioner.wake_terminal_and_wait(acct_id) if is_terminal
+                    else await provisioner.wake_and_wait(acct_id))
     except Exception as exc:
         logger.warning("wake failed account={}: {}", acct_id, exc)
-        return _immediate(503, "agent sandbox unavailable, retry shortly")
+        service = "web terminal" if is_terminal else "agent sandbox"
+        return _immediate(503, f"{service} unavailable, retry shortly")
     if not endpoint:
-        return _immediate(503, "agent sandbox is waking, retry in a moment")
+        service = "web terminal" if is_terminal else "agent sandbox"
+        return _immediate(503, f"{service} is waking, retry in a moment")
+    if is_terminal:
+        return _steer_terminal(endpoint)
     return _steer(endpoint, mint(acct_id, acct_username))
 
 

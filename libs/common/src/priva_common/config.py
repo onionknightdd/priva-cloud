@@ -193,6 +193,7 @@ class KubernetesSettings(BaseModel):
     # rendered as imagePullSecrets on every runner pod. "" = none (public/local images).
     runner_image_pull_secret: str = ""
     runner_service_port: int = 8091  # per-account Service / pod runtime port
+    terminal_service_port: int = 8092  # independent per-account Web Terminal pod
     idle_grace_seconds: int = 1800  # default spec.idle.graceSeconds (scale-to-zero)
     min_alive_after_wake_seconds: int = 1800  # anti-thrash floor
     max_concurrent_sessions: int = 3  # default spec.concurrency.maxConcurrentSessions
@@ -225,6 +226,17 @@ class KubernetesSettings(BaseModel):
     cephfs_storage_class: str = ""
     runner_uid: int = 10001  # non-root sandbox uid the runner runs as / owns its subdir
     runner_gid: int = 10001
+    # Terminal is disabled by default for an upgrade-safe rollout. Enabling it
+    # reserves one fixed percentage of each tenant's total CPU and memory.
+    terminal_resource_percent: int = 0
+    terminal_max_sessions: int = 2
+    terminal_idle_timeout_seconds: int = 1800
+    terminal_max_lifetime_seconds: int = 14400
+    terminal_scale_down_grace_seconds: int = 120
+    terminal_output_rate_limit_bytes_per_sec: int = 256 * 1024
+    terminal_output_burst_bytes: int = 1024 * 1024
+    terminal_output_buffer_bytes: int = 1024 * 1024
+    terminal_tmp_size_limit: str = "256Mi"
     # Data-plane gateway observability: the admin scrapes the agentgateway pod's
     # Prometheus endpoint for live HTTP request counts. The metrics port is NOT on
     # the Service, so the scrape targets the pod IP directly (label-selected).

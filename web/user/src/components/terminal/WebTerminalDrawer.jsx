@@ -47,6 +47,7 @@ export default function WebTerminalDrawer() {
   const motionAnchorRect = useUiStore((s) => s.terminalMotionAnchorRect)
   const setMotionAnchorRect = useUiStore((s) => s.setTerminalMotionAnchorRect)
   const setMotionActive = useUiStore((s) => s.setTerminalMotionActive)
+  const maxSessions = useUiStore((s) => s.terminalMaxSessions)
   const user = useAuthStore((s) => s.user)
 
   // Each tab: { id, ready, cwd, customLabel? }
@@ -159,10 +160,13 @@ export default function WebTerminalDrawer() {
 
   const addTab = useCallback(() => {
     const id = newTabId()
-    setTabs((prev) => [...prev, { id, ready: false, cwd: '' }])
-    setActiveId(id)
+    setTabs((prev) => {
+      if (prev.length >= maxSessions) return prev
+      setActiveId(id)
+      return [...prev, { id, ready: false, cwd: '' }]
+    })
     if (minimized) restore()
-  }, [minimized, restore])
+  }, [maxSessions, minimized, restore])
 
   const closeTab = useCallback((id) => {
     setTabs((prev) => {
@@ -341,6 +345,7 @@ export default function WebTerminalDrawer() {
             e.stopPropagation()
             addTab()
           }}
+          disabled={tabs.length >= maxSessions}
           title={t('terminal.newTab')}
           style={{
             flexShrink: 0,
@@ -351,7 +356,8 @@ export default function WebTerminalDrawer() {
             background: 'transparent',
             border: 'none',
             color: 'var(--text-dim)',
-            cursor: 'pointer',
+            cursor: tabs.length >= maxSessions ? 'not-allowed' : 'pointer',
+            opacity: tabs.length >= maxSessions ? 0.4 : 1,
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
