@@ -143,6 +143,17 @@ export async function getJSON(path) {
   return handleAPIResponse(res)
 }
 
+// Wake-free control-plane GET. Use this only for endpoints that are guaranteed to
+// stay on Control Panel rather than an InferencePool. A 503 here is a real control-
+// plane dependency failure, not the EPP's "pod is waking" signal, so it must neither
+// retry nor display the Agent-sandbox waking/ready notices.
+export async function controlPlaneGet(path) {
+  const url = `${BASE_URL}${path}`
+  debugLog('send', `GET ${url}`)
+  const res = await fetch(url, { headers: { ...getAuthHeaders() } })
+  return handleAPIResponse(res)
+}
+
 export async function putJSON(path, body) {
   const res = await fetchWithWake(`${BASE_URL}${path}`, {
     method: 'PUT',

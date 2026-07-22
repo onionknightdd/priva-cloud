@@ -58,9 +58,9 @@ router = APIRouter(
 
 # --- Agent Runner Sandbox: global runner defaults --------------------------------
 # Platform-wide defaults every account inherits unless it carries a per-account CR
-# override. Stored in data-spine (runner_defaults); the operator resolves the live
-# cascade (CR > these defaults > env seed) and applies them lazily — no pod restart
-# is forced here. CPU crosses the API as millicores for the digit-only UI.
+# override. Stored in data-spine (runner_defaults), then materialized as a complete
+# runtimeDefaults snapshot on each AgentTenant CR. Running pods still apply resource
+# changes at their safe zero boundary. CPU crosses the API as millicores for the UI.
 
 def _runner_defaults_response(d) -> RunnerDefaultsResponse:
     total_cpu_m = int(round(d.cpu_cores * 1000))
@@ -163,6 +163,20 @@ async def update_runner_defaults(
         raise HTTPException(
             400, "enabled Terminal requires at least 2 millicores CPU and 2Mi memory")
     d = client.runner_defaults.set(**kw)
+    # Materialize the resolved policy into every AgentTenant CR once. The operator then
+    # consumes CR-local desired state instead of N per-tenant data-spine reads per timer.
+    from ..provisioner import sync_all_tenants
+    try:
+        await asyncio.to_thread(sync_all_tenants, defaults=d)
+    except Exception as exc:
+        # The periodic account sync is the retry backstop. The defaults write itself is
+        # already committed, so surface drift in logs without returning a false failure.
+        logger.warning("runner-default AgentTenant propagation deferred: {}", exc)
+    # Capability discovery is cached because every Agent UI polls it. Make this
+    # replica reflect an admin policy edit immediately; other replicas expire within
+    # the short TTL in routers.terminal.
+    from .terminal import clear_terminal_capability_cache
+    clear_terminal_capability_cache()
     get_audit_logger().append(AuditEntry(
         actor=current_user.username,
         action="admin.runner_defaults_changed",

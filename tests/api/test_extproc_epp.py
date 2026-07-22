@@ -147,6 +147,24 @@ def test_terminal_epp_fails_closed_when_disabled(monkeypatch):
     assert woke["n"] == 0
 
 
+def test_terminal_blocked_phases_do_not_patch_wake(monkeypatch):
+    """Allocation waits and both drain paths close admission before any wake patch."""
+    provisioner = X.provisioner
+    provisioner._terminal_wake_tasks.clear()
+
+    def unexpected_patch(_account_id):
+        raise AssertionError("blocked phase must not patch terminalWake")
+
+    monkeypatch.setattr(provisioner, "_patch_terminal_wake", unexpected_patch)
+    for phase in ("PendingRunnerRestart", "Draining", "DrainingLegacy"):
+        monkeypatch.setattr(
+            provisioner,
+            "_status",
+            lambda account_id, phase=phase: {"terminal": {"phase": phase}},
+        )
+        assert _run(provisioner.wake_terminal_and_wait("acct-1")) is None
+
+
 def test_epp_reads_token_from_query(monkeypatch):
     seen = {}
 

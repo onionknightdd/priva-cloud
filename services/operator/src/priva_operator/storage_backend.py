@@ -35,6 +35,10 @@ logger = get_app_logger(__name__)
 _HTTP_TIMEOUT = 5.0
 
 
+class QuotaRejectedError(RuntimeError):
+    """The requested quota cannot converge without a different desired value."""
+
+
 @dataclass(frozen=True)
 class MountInfo:
     """How ``kube._deployment_body`` should render the runner's ``/workspace`` volume.
@@ -90,7 +94,11 @@ class NfsXfsBackend(StorageBackend):
     def set_quota(self, account_id: str, volume_gb: int) -> None:
         try:
             with self._client() as c:
-                c.put(f"/accounts/{account_id}/quota", json={"volume_gb": int(volume_gb)}).raise_for_status()
+                response = c.put(
+                    f"/accounts/{account_id}/quota", json={"volume_gb": int(volume_gb)})
+                if response.status_code == 409:
+                    raise QuotaRejectedError(response.text or "quota update rejected")
+                response.raise_for_status()
             logger.info("set quota account={} -> {}Gi", account_id, volume_gb)
         except Exception as exc:
             logger.warning("quota-manager set_quota failed account={}: {}", account_id, exc)
@@ -152,7 +160,7 @@ class CephFsBackend(StorageBackend):
                 {"spec": {"resources": {"requests": {"storage": f"{volume_gb}Gi"}}}})
             logger.info("grew export PVC {} {}Gi -> {}Gi", name, current, volume_gb)
         elif volume_gb < current and strict:
-            raise ValueError(
+            raise QuotaRejectedError(
                 f"shrink not supported: PVC {name} is {current}Gi, requested {volume_gb}Gi")
 
     def provision(self, account_id: str, volume_gb: int) -> MountInfo:

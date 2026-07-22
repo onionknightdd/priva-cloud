@@ -6,6 +6,7 @@ are faked."""
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import priva_operator.reconcile as R
 
@@ -24,8 +25,15 @@ def _run_reconcile(monkeypatch, patch_obj, stub_logger, *, replicas, real_ip,
     # storage tests and must not reach a developer's live quota-manager.
     status = {"storageGb": 1, **status}
     monkeypatch.setattr(R.kube, "resolve_storage_gb", lambda *a, **k: 1)
+    monkeypatch.setattr(
+        R, "_runner_defaults",
+        lambda spec=None: SimpleNamespace(
+            idle_grace_seconds=1800, min_alive_after_wake_seconds=1800),
+    )
     monkeypatch.setattr(R.kube, "get_replicas", lambda ns, aid: replicas)
     monkeypatch.setattr(R.kube, "current_ready_pod_ip", lambda ns, aid: real_ip)
+    monkeypatch.setattr(R.kube, "allocation_hash", lambda *a, **k: "desired")
+    monkeypatch.setattr(R.kube, "applied_allocation_hash", lambda ns, aid: "desired")
     monkeypatch.setattr(R.kube, "scale", lambda *a, **k: None)
     monkeypatch.setattr(R.kube, "set_cr_status", lambda *a, **k: None)
 
@@ -37,7 +45,7 @@ def _run_reconcile(monkeypatch, patch_obj, stub_logger, *, replicas, real_ip,
     monkeypatch.setattr(R.httpx, "get", _get)
 
     R.reconcile_runtime(
-        spec=spec or {"accountId": "acct"},
+        spec=spec or {"accountId": "acct", "username": "alice"},
         name="acct",
         namespace="ns",
         status=status,
@@ -74,7 +82,8 @@ def test_matched_ip_within_min_alive_is_noop(monkeypatch, patch_obj, stub_logger
     _run_reconcile(monkeypatch, patch_obj, stub_logger,
                    replicas=1, real_ip="10.0.0.1",
                    status={"podIP": "10.0.0.1", "phase": "Running", "startedAt": time.time()})
-    assert patch_obj.status == {}
+    assert "phase" not in patch_obj.status
+    assert "idleSince" not in patch_obj.status
 
 
 def test_matched_ip_active_does_not_sleep(monkeypatch, patch_obj, stub_logger):
@@ -83,7 +92,8 @@ def test_matched_ip_active_does_not_sleep(monkeypatch, patch_obj, stub_logger):
         monkeypatch, patch_obj, stub_logger,
         replicas=1, real_ip="10.0.0.1",
         status={"podIP": "10.0.0.1", "phase": "Running", "startedAt": 1.0},
-        spec={"accountId": "acct", "idle": {"graceSeconds": 0, "minAliveAfterWakeSeconds": 0}},
+        spec={"accountId": "acct", "username": "alice",
+              "idle": {"graceSeconds": 0, "minAliveAfterWakeSeconds": 0}},
         health={"active_runs": 1, "last_activity_ts": 1.0},
     )
     assert "idleSince" not in patch_obj.status

@@ -123,6 +123,23 @@ async def require_user(
     return user
 
 
+async def require_active_account(
+    user: UserRecord = Depends(require_user),
+) -> UserRecord:
+    """Require a provisioned account that is still allowed to use runtimes.
+
+    Control-plane profile endpoints intentionally continue to use ``require_user``
+    so an offboarded user can still be identified. Runtime discovery must match the
+    EPP's fail-closed gate: a disabled/offboarding account cannot discover or wake a
+    Runner or Terminal pod.
+    """
+    if user.status != "active":
+        raise HTTPException(403, "Account access revoked")
+    if not user.account_id:
+        raise HTTPException(403, "Account is not provisioned")
+    return user
+
+
 async def require_admin(
     user: UserRecord = Depends(require_user),
 ) -> UserRecord:

@@ -6,6 +6,8 @@ Bodies are plain dicts (the client serializes them). All create_* are idempotent
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 
 from kubernetes import client, config
@@ -26,6 +28,8 @@ MANAGED_POLICY_MOUNT = "/etc/claude-code"
 MANAGED_POLICY_VOLUME = "claude-policy"
 _POLICY_DIGEST_ANNOTATION = "priva.io/policy-digest"
 _TERMINAL_PERCENT_ANNOTATION = "priva.io/terminal-resource-percent"
+_ALLOCATION_HASH_ANNOTATION = "priva.io/allocation-hash"
+_TERMINAL_TEMPLATE_HASH_ANNOTATION = "priva.io/terminal-template-hash"
 
 
 def _load() -> None:
@@ -154,6 +158,66 @@ def resolve_image(spec: dict, settings, defaults=None) -> str:
     return defaults.runner_image if defaults else settings.kubernetes.runner_image
 
 
+def allocation_hash(
+    spec: dict,
+    settings,
+    defaults,
+    username: str = "",
+    *,
+    image: str | None = None,
+    pull_policy: str | None = None,
+) -> str:
+    """Fingerprint every value that can change the shared runtime allocation.
+
+    Percentage alone is not an allocation generation: total CPU/memory, image and
+    identity can change while it remains constant. Both Deployments carry this hash so
+    the operator never starts a mixed generation that can overcommit a tenant. Terminal-
+    only session/output policy has a separate template hash and does not restart Runner.
+    """
+    k = settings.kubernetes
+    payload = {
+        "version": 1,
+        "username": username,
+        "image": image or resolve_image(spec, settings, defaults),
+        "pullPolicy": pull_policy or getattr(k, "runner_image_pull_policy", "IfNotPresent"),
+        "runnerResources": resolve_resources(spec, settings, defaults),
+        "terminalResources": resolve_terminal_resources(spec, settings, defaults),
+        "terminalPercent": resolve_terminal_percent(settings, defaults),
+        "security": {
+            "uid": int(getattr(k, "runner_uid", 10001)),
+            "gid": int(getattr(k, "runner_gid", 10001)),
+        },
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return "v1:" + hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def terminal_template_hash(
+    spec: dict, settings, defaults, username: str = "", *, image: str | None = None,
+    pull_policy: str | None = None,
+) -> str:
+    """Fingerprint Terminal-only policy without forcing a Runner allocation restart."""
+    k = settings.kubernetes
+    payload = {
+        "allocation": allocation_hash(
+            spec, settings, defaults, username, image=image, pull_policy=pull_policy),
+        "maxSessions": int(getattr(defaults, "terminal_max_sessions",
+                                   getattr(k, "terminal_max_sessions", 2))),
+        "idleTimeoutSeconds": int(getattr(
+            defaults, "terminal_idle_timeout_seconds",
+            getattr(k, "terminal_idle_timeout_seconds", 1800))),
+        "maxLifetimeSeconds": int(getattr(
+            defaults, "terminal_max_lifetime_seconds",
+            getattr(k, "terminal_max_lifetime_seconds", 14400))),
+        "outputRate": int(getattr(k, "terminal_output_rate_limit_bytes_per_sec", 256 * 1024)),
+        "outputBurst": int(getattr(k, "terminal_output_burst_bytes", 1024 * 1024)),
+        "outputBuffer": int(getattr(k, "terminal_output_buffer_bytes", 1024 * 1024)),
+        "tmpSizeLimit": str(getattr(k, "terminal_tmp_size_limit", "256Mi")),
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return "v1:" + hashlib.sha256(canonical.encode()).hexdigest()
+
+
 # --- manifest builders ------------------------------------------------------
 
 def _data_volume(mount_info: MountInfo) -> dict:
@@ -174,6 +238,8 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                      mount_info: MountInfo, defaults=None) -> dict:
     lbl = names.labels(account_id)
     terminal_percent = resolve_terminal_percent(settings, defaults)
+    generation = allocation_hash(
+        spec, settings, defaults, username, image=image, pull_policy=pull_policy)
     uid = int(settings.kubernetes.runner_uid)
     gid = int(settings.kubernetes.runner_gid)
     return {
@@ -181,14 +247,19 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
         "kind": "Deployment",
         "metadata": {"name": names.deploy_name(account_id), "namespace": namespace,
                      "labels": lbl, "ownerReferences": [owner],
-                     "annotations": {_TERMINAL_PERCENT_ANNOTATION: str(terminal_percent)}},
+                     "annotations": {
+                         _TERMINAL_PERCENT_ANNOTATION: str(terminal_percent),
+                         _ALLOCATION_HASH_ANNOTATION: generation,
+                     }},
         "spec": {
             "replicas": 0,  # scale-to-zero from birth; the operator is the sole scaler
             "strategy": {"type": "Recreate"},  # one pod per subPath; clean cutover on restart
             "selector": {"matchLabels": lbl},
             "template": {
-                "metadata": {"labels": lbl,
-                             "annotations": {_TERMINAL_PERCENT_ANNOTATION: str(terminal_percent)}},
+                "metadata": {"labels": lbl, "annotations": {
+                    _TERMINAL_PERCENT_ANNOTATION: str(terminal_percent),
+                    _ALLOCATION_HASH_ANNOTATION: generation,
+                }},
                 "spec": {
                     **({"imagePullSecrets": [{"name": settings.kubernetes.runner_image_pull_secret}]}
                        if settings.kubernetes.runner_image_pull_secret else {}),
@@ -364,19 +435,30 @@ def _terminal_deployment_body(namespace, account_id, username, image, pull_polic
     max_lifetime = int(getattr(defaults, "terminal_max_lifetime_seconds",
                                getattr(k, "terminal_max_lifetime_seconds", 14400)))
     terminal_percent = resolve_terminal_percent(settings, defaults)
+    generation = allocation_hash(
+        spec, settings, defaults, username, image=image, pull_policy=pull_policy)
+    template_generation = terminal_template_hash(
+        spec, settings, defaults, username, image=image, pull_policy=pull_policy)
     return {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
         "metadata": {"name": names.terminal_deploy_name(account_id), "namespace": namespace,
                      "labels": lbl, "ownerReferences": [owner],
-                     "annotations": {_TERMINAL_PERCENT_ANNOTATION: str(terminal_percent)}},
+                     "annotations": {
+                         _TERMINAL_PERCENT_ANNOTATION: str(terminal_percent),
+                         _ALLOCATION_HASH_ANNOTATION: generation,
+                         _TERMINAL_TEMPLATE_HASH_ANNOTATION: template_generation,
+                     }},
         "spec": {
             "replicas": 0,
             "strategy": {"type": "Recreate"},
             "selector": {"matchLabels": lbl},
             "template": {
-                "metadata": {"labels": lbl,
-                             "annotations": {_TERMINAL_PERCENT_ANNOTATION: str(terminal_percent)}},
+                "metadata": {"labels": lbl, "annotations": {
+                    _TERMINAL_PERCENT_ANNOTATION: str(terminal_percent),
+                    _ALLOCATION_HASH_ANNOTATION: generation,
+                    _TERMINAL_TEMPLATE_HASH_ANNOTATION: template_generation,
+                }},
                 "spec": {
                     **({"imagePullSecrets": [{"name": k.runner_image_pull_secret}]}
                        if k.runner_image_pull_secret else {}),
@@ -501,6 +583,18 @@ def ensure_runtime_objects(namespace, account_id, username, image, pull_policy, 
                             settings, owner, spec, mount_info, defaults)
     existing = _read_deployment(namespace, account_id)
     if existing is None:
+        # A live Terminal may still carry an older resource split. Creating a new
+        # Runner template from the new split beside it could exceed the tenant's fixed
+        # commitment. Wait for the Terminal zero boundary unless generations match.
+        terminal = _read_terminal_deployment(namespace, account_id)
+        if terminal is not None and (terminal.spec.replicas or 0) > 0:
+            desired_generation = body["metadata"]["annotations"][_ALLOCATION_HASH_ANNOTATION]
+            terminal_generation = _deployment_allocation_generation(terminal)
+            if desired_generation != terminal_generation:
+                logger.warning(
+                    "runner create deferred for %s: live Terminal generation %s != %s",
+                    account_id, terminal_generation, desired_generation)
+                return
         _ignore_conflict(apps().create_namespaced_deployment, namespace, body)
         return
     # Converge an existing Deployment to the current template. Create-only (the old
@@ -515,12 +609,12 @@ def ensure_runtime_objects(namespace, account_id, username, image, pull_policy, 
     # change could make old-Terminal + new-Runner exceed the tenant commitment.
     terminal = _read_terminal_deployment(namespace, account_id)
     if terminal is not None and (terminal.spec.replicas or 0) > 0:
-        runner_percent = _deployment_terminal_percent(existing)
-        terminal_percent = _deployment_terminal_percent(terminal)
-        if runner_percent != terminal_percent:
+        runner_generation = _deployment_allocation_generation(existing)
+        terminal_generation = _deployment_allocation_generation(terminal)
+        if runner_generation != terminal_generation:
             raise RuntimeError(
                 f"runner/terminal allocation generation mismatch for {account_id}: "
-                f"{runner_percent}% != {terminal_percent}%")
+                f"{runner_generation} != {terminal_generation}")
         return
     body["spec"]["replicas"] = existing.spec.replicas or 0
     body["metadata"]["resourceVersion"] = existing.metadata.resource_version
@@ -599,10 +693,24 @@ def _deployment_terminal_percent(deployment) -> int:
         return 0
 
 
+def _deployment_allocation_generation(deployment) -> str:
+    annotations = getattr(deployment.metadata, "annotations", None) or {}
+    value = annotations.get(_ALLOCATION_HASH_ANNOTATION)
+    if value:
+        return str(value)
+    return f"legacy-percent:{_deployment_terminal_percent(deployment)}"
+
+
 def applied_terminal_percent(namespace, account_id) -> int | None:
     """Percent baked into the current Runner Deployment template."""
     deployment = _read_deployment(namespace, account_id)
     return None if deployment is None else _deployment_terminal_percent(deployment)
+
+
+def applied_allocation_hash(namespace, account_id) -> str | None:
+    """Allocation generation baked into the current Runner Deployment template."""
+    deployment = _read_deployment(namespace, account_id)
+    return None if deployment is None else _deployment_allocation_generation(deployment)
 
 
 def scale(namespace, account_id, replicas: int) -> None:

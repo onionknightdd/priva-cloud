@@ -83,6 +83,8 @@ type server struct {
 	cfg          config
 	mu           sync.Mutex
 	sessions     map[string]struct{}
+	revision     uint64
+	drainUntil   time.Time
 	lastActivity atomic.Int64
 }
 
@@ -97,6 +99,13 @@ func (s *server) touch() { s.lastActivity.Store(time.Now().Unix()) }
 func (s *server) reserve() (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	now := time.Now()
+	if !s.drainUntil.IsZero() && now.Before(s.drainUntil) {
+		return "", false
+	}
+	if !s.drainUntil.IsZero() {
+		s.drainUntil = time.Time{}
+	}
 	if len(s.sessions) >= s.cfg.maxSessions {
 		return "", false
 	}
@@ -106,29 +115,64 @@ func (s *server) reserve() (string, bool) {
 	}
 	id := hex.EncodeToString(b)
 	s.sessions[id] = struct{}{}
+	s.revision++
 	s.touch()
 	return id, true
 }
 
 func (s *server) release(id string) {
 	s.mu.Lock()
-	delete(s.sessions, id)
+	if _, ok := s.sessions[id]; ok {
+		delete(s.sessions, id)
+		s.revision++
+	}
 	s.mu.Unlock()
 	s.touch()
 }
 
-func (s *server) active() int {
+func (s *server) state() (active int, revision uint64, draining bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return len(s.sessions)
+	if !s.drainUntil.IsZero() && !time.Now().Before(s.drainUntil) {
+		s.drainUntil = time.Time{}
+	}
+	return len(s.sessions), s.revision, !s.drainUntil.IsZero()
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
+	active, revision, draining := s.state()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":           "ok",
-		"active_sessions":  s.active(),
+		"active_sessions":  active,
 		"last_activity_ts": s.lastActivity.Load(),
+		"session_revision": revision,
+		"draining":         draining,
+	})
+}
+
+func (s *server) drain(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	expected, err := strconv.ParseUint(r.URL.Query().Get("revision"), 10, 64)
+	if err != nil {
+		http.Error(w, "valid revision is required", http.StatusBadRequest)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if expected != s.revision || len(s.sessions) != 0 {
+		http.Error(w, "terminal session state changed", http.StatusConflict)
+		return
+	}
+	// A lease prevents an operator crash between drain and Deployment scale from
+	// permanently wedging the still-running pod. reserve() automatically re-opens it.
+	s.drainUntil = time.Now().Add(30 * time.Second)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"draining": true, "session_revision": s.revision,
 	})
 }
 
@@ -428,6 +472,7 @@ func main() {
 	s := newServer(cfg)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.health)
+	mux.HandleFunc("/internal/drain", s.drain)
 	mux.HandleFunc("/api/terminal/ws", s.terminal)
 	server := &http.Server{
 		Addr:              cfg.listen,

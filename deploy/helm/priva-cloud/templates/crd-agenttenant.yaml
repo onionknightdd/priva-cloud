@@ -43,10 +43,13 @@ spec:
           properties:
             spec:
               type: object
-              required: [accountId]
+              required: [accountId, username]
+              x-kubernetes-validations:
+                - rule: self.accountId == oldSelf.accountId
+                  message: spec.accountId is immutable
               properties:
-                accountId: {type: string}
-                username: {type: string}
+                accountId: {type: string, minLength: 1}
+                username: {type: string, minLength: 1}
                 desiredState:
                   type: string
                   enum: [active, offboarding, purge]
@@ -71,6 +74,23 @@ spec:
                   type: object
                   properties:
                     maxConcurrentSessions: {type: integer}
+                runtimeDefaults:
+                  type: object
+                  properties:
+                    idleGraceSeconds: {type: integer, minimum: 0}
+                    minAliveAfterWakeSeconds: {type: integer, minimum: 0}
+                    cpuCores: {type: number, exclusiveMinimum: true, minimum: 0}
+                    memoryMb: {type: integer, minimum: 1}
+                    storageGb: {type: integer, minimum: 1}
+                    runnerImage: {type: string, minLength: 1}
+                    terminal:
+                      type: object
+                      properties:
+                        resourcePercent: {type: integer, minimum: 0, maximum: 50, multipleOf: 5}
+                        maxSessions: {type: integer, minimum: 1, maximum: 20}
+                        idleTimeoutSeconds: {type: integer, minimum: 60}
+                        maxLifetimeSeconds: {type: integer, minimum: 60}
+                        scaleDownGraceSeconds: {type: integer, minimum: 0}
                 wake:
                   type: object
                   properties:

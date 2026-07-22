@@ -4,6 +4,8 @@ does NOT re-scale — it resolves the real Ready pod IP and writes it. The cold 
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import priva_operator.reconcile as R
 
 
@@ -14,7 +16,7 @@ def test_warm_wake_skips_scale(monkeypatch, patch_obj, stub_logger):
     monkeypatch.setattr(R.kube, "scale",
                         lambda *a, **k: called.__setitem__("scale", called["scale"] + 1))
 
-    R.on_wake(spec={"accountId": "acct"}, name="acct", namespace="ns", uid="u1",
+    R.on_wake(spec={"accountId": "acct", "username": "alice"}, name="acct", namespace="ns", uid="u1",
               status={"podIP": "10.0.0.7", "phase": "Running"}, patch=patch_obj, logger=stub_logger)
 
     assert called == {"scale": 0}
@@ -29,7 +31,7 @@ def test_warm_wake_changed_ip_resets_started_at(monkeypatch, patch_obj, stub_log
     monkeypatch.setattr(R.kube, "current_ready_pod_ip", lambda ns, aid: "10.0.0.9")
     monkeypatch.setattr(R.kube, "scale", lambda *a, **k: None)
 
-    R.on_wake(spec={"accountId": "acct"}, name="acct", namespace="ns", uid="u1",
+    R.on_wake(spec={"accountId": "acct", "username": "alice"}, name="acct", namespace="ns", uid="u1",
               status={"podIP": "10.0.0.1"}, patch=patch_obj, logger=stub_logger)
 
     assert patch_obj.status["podIP"] == "10.0.0.9"
@@ -41,6 +43,10 @@ def test_cold_wake_converges_template_then_scales(monkeypatch, patch_obj, stub_l
     # scaling, so a tenant born under an older operator picks up template additions
     # (e.g. the managed-policy mount) on wake.
     called = {"scale": 0, "converge": 0}
+    monkeypatch.setattr(
+        R, "_runner_defaults",
+        lambda spec=None: SimpleNamespace(runner_image="img:test"),
+    )
     monkeypatch.setattr(R.kube, "get_replicas", lambda ns, aid: 0)
     monkeypatch.setattr(R.kube, "ensure_runtime_objects",
                         lambda *a, **k: called.__setitem__("converge", called["converge"] + 1))
@@ -48,7 +54,7 @@ def test_cold_wake_converges_template_then_scales(monkeypatch, patch_obj, stub_l
                         lambda *a, **k: called.__setitem__("scale", called["scale"] + 1))
     monkeypatch.setattr(R.kube, "wait_pod_ready", lambda ns, aid, timeout=0: "10.0.0.2")
 
-    R.on_wake(spec={"accountId": "acct"}, name="acct", namespace="ns", uid="u1",
+    R.on_wake(spec={"accountId": "acct", "username": "alice"}, name="acct", namespace="ns", uid="u1",
               status={}, patch=patch_obj, logger=stub_logger)
 
     assert called == {"scale": 1, "converge": 1}

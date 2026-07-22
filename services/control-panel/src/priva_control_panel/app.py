@@ -34,6 +34,26 @@ logger = get_app_logger(__name__)
 
 SPA_SHELL_CACHE_CONTROL = "no-cache"
 SPA_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
+TENANT_SYNC_INTERVAL_SECONDS = 60.0
+
+
+async def _tenant_sync_loop() -> None:
+    """Idempotent account -> AgentTenant repair backstop.
+
+    A user can delete/re-apply a CR outside Control Panel. Re-reading the authoritative
+    account/default records keeps identity and desired runtime snapshots complete without
+    generating writes when nothing changed.
+    """
+    from .provisioner import sync_all_tenants
+
+    while True:
+        try:
+            await asyncio.to_thread(sync_all_tenants)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("AgentTenant account sync failed: {}", exc)
+        await asyncio.sleep(TENANT_SYNC_INTERVAL_SECONDS)
 
 
 class SpaStaticFiles(StaticFiles):
@@ -111,6 +131,8 @@ def create_app() -> FastAPI:
         # Start the ext_proc EPP server (the routing brain agentgateway calls).
         from .extproc import start_extproc_server
         extproc_server = await start_extproc_server(settings)
+        tenant_sync_task = asyncio.create_task(
+            _tenant_sync_loop(), name="agenttenant-account-sync")
 
         from priva_common.user_store import get_user_store
         try:
@@ -122,6 +144,11 @@ def create_app() -> FastAPI:
         try:
             yield
         finally:
+            tenant_sync_task.cancel()
+            try:
+                await tenant_sync_task
+            except asyncio.CancelledError:
+                pass
             try:
                 extproc_server.close()
                 await extproc_server.wait_closed()

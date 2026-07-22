@@ -64,6 +64,25 @@ def test_fixed_allocation_sums_to_tenant_commitment():
     assert tr["requests"] == tr["limits"] == {"cpu": "500m", "memory": "512Mi"}
 
 
+def test_allocation_hash_changes_when_total_changes_at_same_percent():
+    settings = _settings(25)
+    defaults = _defaults(25)
+    before = kube.allocation_hash(
+        {"resources": {"cpu": 1.0, "memoryMb": 1024}}, settings, defaults, "alice")
+    after = kube.allocation_hash(
+        {"resources": {"cpu": 2.0, "memoryMb": 2048}}, settings, defaults, "alice")
+    assert before != after
+
+
+def test_runner_and_terminal_share_full_allocation_generation():
+    runner, terminal = _containers()
+    key = "priva.io/allocation-hash"
+    assert runner["metadata"]["annotations"][key]
+    assert runner["metadata"]["annotations"][key] == terminal["metadata"]["annotations"][key]
+    assert "priva.io/terminal-template-hash" not in runner["metadata"]["annotations"]
+    assert terminal["metadata"]["annotations"]["priva.io/terminal-template-hash"]
+
+
 def test_terminal_manifest_has_independent_security_and_scratch_boundary():
     runner, terminal = _containers()
     runner_spec = runner["spec"]["template"]["spec"]

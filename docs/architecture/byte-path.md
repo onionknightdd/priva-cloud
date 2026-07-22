@@ -273,7 +273,13 @@ responses are exempt.
 
 The Web Terminal is not a Runner read or proxy exception. `/api/terminal/ws` has its own
 InferencePool; the EPP authenticates and wakes `term-<account>` at upgrade time, then
-agentgateway tunnels frames directly to the Go daemon.
+agentgateway tunnels frames directly to the Go daemon. The exact
+`GET /api/terminal/capability` path is the wake-free exception: it stays on Control Panel,
+uses a non-retrying control-plane fetch in the Agent UI, and never enters either InferencePool.
+It reports `enabled=true` only for an effective `Zero`/`Waking`/`Running` Terminal allocation;
+`PendingRunnerRestart`, missing Operator status, disabled policy, and non-active accounts fail
+closed. Global policy and per-account CR reads have short in-process TTLs, and the 0% path skips
+the Kubernetes lookup entirely, so the 30-second UI poll does not become a data-plane wake loop.
 
 On the client (`web/shared/api/client.js`), `sandboxRead(path)` tries `/api/cp-proxy` + path and
 falls back to the direct `/api/sandbox` lane on a 404 (route not deployed) or a network error, so it

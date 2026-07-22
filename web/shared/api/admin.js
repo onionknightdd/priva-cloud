@@ -1,4 +1,4 @@
-import { getJSON, postJSON, putJSON, deleteJSON } from './client'
+import { controlPlaneGet, getJSON, postJSON, putJSON, deleteJSON } from './client'
 
 export const listUsers = () => getJSON('/admin/users')
 export const createUser = (data) => postJSON('/admin/users', data)
@@ -73,7 +73,7 @@ export const getHookPolicySeed = (id) => getJSON(`/admin/hook-policy/${encodeURI
 
 // Wake-free control-plane capability. The exact HTTPRoute stays on Control Panel;
 // only /api/terminal/ws enters the independent Terminal InferencePool.
-export const getTerminalCapability = () => getJSON('/terminal/capability')
+export const getTerminalCapability = () => controlPlaneGet('/terminal/capability')
 
 // --- Scheduler oversight (D12: per-account drill-down) ---
 export const getSchedulerJobs = (accountId) =>

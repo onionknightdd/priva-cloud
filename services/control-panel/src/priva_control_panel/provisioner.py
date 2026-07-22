@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime, timezone
+from typing import Any
 
 import httpx
 from kubernetes import client, config
@@ -69,26 +70,52 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def ensure_tenant(account_id: str, username: str, *, runner_type: str | None = None,
-                  cpu: float | None = None, memory_mb: int | None = None,
-                  storage_gb: int | None = None) -> None:
-    """Create the AgentTenant CR for a new account (idempotent).
+def _runtime_defaults_spec(defaults: Any | None = None) -> dict:
+    """Serialize the platform defaults into the AgentTenant desired-state snapshot.
 
-    Inheritable fields (image, resources, storageGb, idle) are written ONLY when an
-    explicit per-account value is passed — otherwise they are OMITTED so the field is
-    absent on the CR, which the operator reads as "inherit the global runner default"
-    (the admin Sandbox panel). A present field = a per-account override that wins and
-    stops following the default. The admin create-user path passes nothing (full
-    inherit); the self-registration approval path passes the user-requested specs
-    (= overrides)."""
+    The operator must not reinterpret a data-spine outage as a zero/disabled policy.
+    Control Panel therefore resolves the global record once and stores the complete,
+    non-sensitive result on each CR.  Per-account override fields remain separate and
+    continue to win in the operator's resolver cascade.
+    """
+    if defaults is None:
+        from priva_common.dataplane import get_client
+        defaults = get_client().runner_defaults.get()
+    return {
+        "idleGraceSeconds": int(defaults.idle_grace_seconds),
+        "minAliveAfterWakeSeconds": int(defaults.min_alive_after_wake_seconds),
+        "cpuCores": float(defaults.cpu_cores),
+        "memoryMb": int(defaults.memory_mb),
+        "storageGb": int(defaults.storage_gb),
+        "runnerImage": str(defaults.runner_image),
+        "terminal": {
+            "resourcePercent": int(defaults.terminal_resource_percent),
+            "maxSessions": int(defaults.terminal_max_sessions),
+            "idleTimeoutSeconds": int(defaults.terminal_idle_timeout_seconds),
+            "maxLifetimeSeconds": int(defaults.terminal_max_lifetime_seconds),
+            "scaleDownGraceSeconds": int(defaults.terminal_scale_down_grace_seconds),
+        },
+    }
+
+
+def _tenant_spec(
+    account_id: str,
+    username: str,
+    *,
+    runner_type: str | None = None,
+    cpu: float | None = None,
+    memory_mb: int | None = None,
+    storage_gb: int | None = None,
+    runtime_defaults: dict | None = None,
+) -> dict:
     s = get_settings()
-    ns = s.kubernetes.namespace_tenants
     spec: dict = {
         "accountId": account_id,
         "username": username,
         "desiredState": "active",
         "agentRunnerType": runner_type or "auto_scale",
         "concurrency": {"maxConcurrentSessions": s.kubernetes.max_concurrent_sessions},
+        "runtimeDefaults": runtime_defaults or _runtime_defaults_spec(),
     }
     res: dict = {}
     if cpu is not None:
@@ -99,6 +126,54 @@ def ensure_tenant(account_id: str, username: str, *, runner_type: str | None = N
         spec["resources"] = res
     if storage_gb is not None:
         spec["storageGb"] = int(storage_gb)
+    return spec
+
+
+def _repair_existing_tenant(account_id: str, username: str, runtime_defaults: dict) -> bool:
+    """Repair authoritative identity/default fields without overwriting overrides."""
+    s = get_settings()
+    ns = s.kubernetes.namespace_tenants
+    obj = _custom().get_namespaced_custom_object(GROUP, VERSION, ns, PLURAL, account_id)
+    current = obj.get("spec") or {}
+    existing_account_id = current.get("accountId")
+    if existing_account_id and existing_account_id != account_id:
+        raise ValueError(
+            f"AgentTenant {account_id!r} contains mismatched accountId "
+            f"{existing_account_id!r}")
+    wanted = {
+        "accountId": account_id,
+        "username": username,
+        "runtimeDefaults": runtime_defaults,
+    }
+    if all(current.get(key) == value for key, value in wanted.items()):
+        return False
+    _custom().patch_namespaced_custom_object(
+        GROUP, VERSION, ns, PLURAL, account_id, {"spec": wanted})
+    logger.info("repaired AgentTenant identity/defaults account={} username={}", account_id, username)
+    return True
+
+
+def ensure_tenant(account_id: str, username: str, *, runner_type: str | None = None,
+                  cpu: float | None = None, memory_mb: int | None = None,
+                  storage_gb: int | None = None,
+                  runtime_defaults: dict | None = None) -> None:
+    """Create or repair the AgentTenant CR for an account (idempotent).
+
+    Inheritable fields (image, resources, storageGb, idle) are written ONLY when an
+    explicit per-account value is passed — otherwise they are OMITTED so the field is
+    absent on the CR, which the operator reads as "inherit the global runner default"
+    (the admin Sandbox panel). A present field = a per-account override that wins and
+    stops following the default. The admin create-user path passes nothing (full
+    inherit); the self-registration approval path passes the user-requested specs
+    (= overrides)."""
+    s = get_settings()
+    ns = s.kubernetes.namespace_tenants
+    resolved_defaults = runtime_defaults or _runtime_defaults_spec()
+    spec = _tenant_spec(
+        account_id, username, runner_type=runner_type, cpu=cpu,
+        memory_mb=memory_mb, storage_gb=storage_gb,
+        runtime_defaults=resolved_defaults,
+    )
     body = {
         "apiVersion": f"{GROUP}/{VERSION}",
         "kind": "AgentTenant",
@@ -109,8 +184,63 @@ def ensure_tenant(account_id: str, username: str, *, runner_type: str | None = N
         _custom().create_namespaced_custom_object(GROUP, VERSION, ns, PLURAL, body)
         logger.info("provisioned AgentTenant account={}", account_id)
     except client.ApiException as exc:
-        if exc.status != 409:  # AlreadyExists is fine (re-provision)
+        if exc.status != 409:
             raise
+        # AlreadyExists is not sufficient: a manually re-applied CR may be missing
+        # username/runtimeDefaults. Repair only authoritative fields and preserve all
+        # per-account overrides and lifecycle state.
+        _repair_existing_tenant(account_id, username, resolved_defaults)
+
+
+def sync_all_tenants(*, defaults: Any | None = None) -> dict[str, int]:
+    """Reconcile active data-spine accounts into complete AgentTenant CRs.
+
+    One account/default/resource list is used for the whole pass. Existing objects are
+    patched only on drift, so the periodic backstop creates no steady-state CR events.
+    """
+    from priva_common.dataplane import get_client
+    from priva_common.user_store import get_user_store
+
+    dp = get_client()
+    runtime_defaults = _runtime_defaults_spec(defaults or dp.runner_defaults.get())
+    resources = {row.account_id: row for row in dp.resource_specs.list()}
+    existing = {item.get("metadata", {}).get("name"): item for item in list_tenants()}
+    counts = {"created": 0, "repaired": 0, "unchanged": 0, "skipped": 0}
+    for user in get_user_store().list_users():
+        account_id = user.account_id
+        if not account_id:
+            counts["skipped"] += 1
+            continue
+        obj = existing.get(account_id)
+        if obj is not None:
+            current = obj.get("spec") or {}
+            wanted = {
+                "accountId": account_id,
+                "username": user.username,
+                "runtimeDefaults": runtime_defaults,
+            }
+            if all(current.get(key) == value for key, value in wanted.items()):
+                counts["unchanged"] += 1
+            else:
+                _repair_existing_tenant(account_id, user.username, runtime_defaults)
+                counts["repaired"] += 1
+            continue
+        if user.status != "active":
+            counts["skipped"] += 1
+            continue
+        resource = resources.get(account_id)
+        ensure_tenant(
+            account_id,
+            user.username,
+            runner_type=user.agent_runner_type,
+            cpu=(resource.cpu_cores if resource else None),
+            memory_mb=(resource.memory_mb if resource else None),
+            storage_gb=(resource.volume_gb if resource else None),
+            runtime_defaults=runtime_defaults,
+        )
+        counts["created"] += 1
+    logger.info("AgentTenant account sync complete {}", counts)
+    return counts
 
 
 def update_tenant_runtime(account_id: str, *, runner_type: str | None = None,
@@ -568,6 +698,13 @@ async def wake_terminal_and_wait(account_id: str) -> str | None:
     s = get_settings()
     port = s.kubernetes.terminal_service_port
     terminal = (await asyncio.to_thread(_status, account_id)).get("terminal") or {}
+    # The Operator has intentionally deferred this allocation until the live Runner
+    # restarts with the split cgroup budget. Do not patch terminalWake and spend the
+    # full EPP hold polling a state that cannot converge yet.
+    if terminal.get("phase") in {
+        "PendingRunnerRestart", "Draining", "DrainingLegacy",
+    }:
+        return None
     if terminal.get("phase") == "Running" and terminal.get("podIP"):
         if await _alive(terminal["podIP"], port):
             return f"{terminal['podIP']}:{port}"

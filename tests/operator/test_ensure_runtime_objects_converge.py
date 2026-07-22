@@ -57,6 +57,7 @@ def _run(monkeypatch, apps: _FakeApps):
         provision=lambda aid, gb: kube.MountInfo(
             kind="shared_pvc_subpath", claim="data", sub_path=aid)))
     monkeypatch.setattr(kube, "resolve_resources", lambda spec, s, d=None: {})
+    monkeypatch.setattr(kube, "allocation_hash", lambda *a, **k: "v1:test")
     owner = {"apiVersion": "v1", "kind": "T", "name": "acct", "uid": "u1"}
     kube.ensure_runtime_objects("ns", "acct", "user", "img:dev", "IfNotPresent",
                                 _settings(), owner, spec={})

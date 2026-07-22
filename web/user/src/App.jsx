@@ -19,6 +19,7 @@ const IntroPanel = lazyWithChunkReload(() => import('./components/intro/IntroPan
 const SetupWizardModal = lazyWithChunkReload(() => import('./components/chat/SetupWizardModal'))
 
 const INTRO_SEEN_KEY_PREFIX = 'priva-intro-seen'
+const TERMINAL_CONNECTABLE_PHASES = new Set(['Zero', 'Waking', 'Running'])
 
 function getIntroSeenKey(user) {
   return user?.username ? `${INTRO_SEEN_KEY_PREFIX}:${user.username}` : null
@@ -120,7 +121,10 @@ export default function App() {
       try {
         const data = await getTerminalCapability()
         if (!active) return
-        const enabled = !!data?.enabled
+        // Defense in depth for rolling deploys: an older Control Panel may report the
+        // desired Terminal policy as enabled while the Operator says the Runner still
+        // needs a restart. Never render an affordance whose WS upgrade must 503.
+        const enabled = data?.enabled === true && TERMINAL_CONNECTABLE_PHASES.has(data?.phase)
         setTerminalFeatureEnabled(enabled)
         setTerminalMaxSessions(data?.max_sessions || 2)
         if (!enabled) setTerminalOpen(false)
