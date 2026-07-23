@@ -22,7 +22,7 @@ import { getLucideIcon, ICON_NAMES } from '../../utils/lucideIconMap'
 import Toggle from '@shared/components/shared/Toggle'
 import Dropdown from '@shared/components/shared/Dropdown'
 import DrawIcon from '@shared/components/shared/DrawIcon'
-import { createFeishuLinkCode, getFeishuConfig, unbindFeishuOwner, updateFeishuConfig } from '../../api/channels'
+import { createFeishuLinkCode, getFeishuConfig, getFeishuSessions, unbindFeishuOwner, updateFeishuConfig } from '../../api/channels'
 
 function FilterableModelSelect({ models, value, onChange, label, labelStyle, inputStyle, placeholder, filterPlaceholder, noMatchesText }) {
   const [open, setOpen] = useState(false)
@@ -1690,6 +1690,8 @@ function ChannelsTab() {
   const [codeCopied, setCodeCopied] = useState(false)
   const [nowTick, setNowTick] = useState(() => Date.now())
   const [pendingUnbind, setPendingUnbind] = useState(false)
+  const [sessions, setSessions] = useState([])        // per-chat bindings (session list)
+  const [copiedSession, setCopiedSession] = useState(null)
   const initedRef = useRef(false)
   const mountedRef = useRef(true)
 
@@ -1705,6 +1707,11 @@ function ChannelsTab() {
     } finally {
       if (mountedRef.current) { setLoading(false); setRefreshing(false) }
     }
+    // Session list rides the same cadence; fail-soft (keeps the last good list).
+    try {
+      const s = await getFeishuSessions()
+      if (mountedRef.current) setSessions(s.sessions || [])
+    } catch { /* ignore */ }
   }, [])
 
   useEffect(() => {
@@ -2004,6 +2011,57 @@ function ChannelsTab() {
         {cfg?.group_chat_globally_disabled && (
           <div className="px-3 py-2 text-xs" style={{ borderLeft: '2px solid var(--yellow)', background: 'var(--bg-elevated)', borderRadius: 4, color: 'var(--yellow)' }}>
             {t('settings.feishu.groupChatGloballyDisabled')}
+          </div>
+        )}
+      </div>
+
+      {/* Session list — every chat the bot has been talked to in (per-chat bindings).
+          Reset chats (/new) are greyed; names are stamped by the connector. */}
+      <div className="flex flex-col gap-2">
+        <label style={labelStyle}>{t('settings.feishu.sessions')}</label>
+        {sessions.length === 0 ? (
+          <span className="text-xs" style={{ color: 'var(--text-dim)' }}>{t('settings.feishu.sessionsEmpty')}</span>
+        ) : (
+          <div className="flex flex-col" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 4 }}>
+            {sessions.map((s, i) => {
+              const active = !!s.session_id
+              const isGroup = s.chat_type === 'group'
+              const label = s.chat_name || (s.chat_id ? `${s.chat_id.slice(0, 10)}…` : '—')
+              return (
+                <div key={s.chat_id || i} className="flex items-center gap-3 px-3 py-2 min-w-0"
+                  style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border-subtle)', opacity: active ? 1 : 0.55 }}>
+                  <span className="text-xs px-2 py-1 flex-shrink-0 whitespace-nowrap" style={{
+                    borderLeft: `2px solid ${isGroup ? 'var(--purple)' : 'var(--cyan)'}`,
+                    background: 'var(--bg-elevated)', borderRadius: 4,
+                    color: isGroup ? 'var(--purple)' : 'var(--cyan)',
+                  }}>
+                    {isGroup ? t('settings.feishu.typeGroup') : t('settings.feishu.typeP2p')}
+                  </span>
+                  <span className="text-sm truncate flex-1 min-w-0" style={{ color: 'var(--text-primary)' }} title={s.chat_id}>
+                    {label}
+                  </span>
+                  {active ? (
+                    <span className="flex items-center gap-1 flex-shrink-0 copyable">
+                      <span className="text-xs" style={{ color: 'var(--text-secondary)', fontFamily: FEISHU_MONO }} title={s.session_id}>
+                        {s.session_id.slice(0, 8)}…{s.session_id.slice(-4)}
+                      </span>
+                      <button type="button" onClick={() => {
+                        navigator.clipboard.writeText(s.session_id)
+                        setCopiedSession(s.chat_id)
+                        setTimeout(() => setCopiedSession(null), 800)
+                      }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 2,
+                        color: copiedSession === s.chat_id ? 'var(--green)' : 'var(--text-dim)', transition: 'color 150ms ease' }}>
+                        {copiedSession === s.chat_id ? <Check size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-dim)' }}>
+                      {t('settings.feishu.sessionReset')}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>

@@ -71,6 +71,8 @@ class Repository(ABC):
     # Keyed by (account_id, feishu_chat_id) — per-chat sessions (feat_feishu_DM.md §5.2).
     @abstractmethod
     def binding_rebind(self, account_id: str, session_uuid: str, feishu_chat_id: str | None, rebound_at: str) -> None: ...
+    @abstractmethod
+    def binding_set_display(self, account_id: str, feishu_chat_id: str | None, chat_type: str, chat_name: str) -> None: ...
     # quota
     @abstractmethod
     def quota_get(self, account_id: str) -> dict | None: ...
@@ -254,10 +256,11 @@ class SqliteRepo(Repository):
     # binding ---------------------------------------------------------------
     def binding_insert(self, row):
         self._write(
-            "INSERT INTO channel_binding (binding_id, account_id, session_uuid, first_run_done, feishu_chat_id) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO channel_binding (binding_id, account_id, session_uuid, first_run_done, "
+            "feishu_chat_id, chat_type, chat_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (row["binding_id"], row["account_id"], row["session_uuid"],
-             int(row.get("first_run_done", 0)), row.get("feishu_chat_id")),
+             int(row.get("first_run_done", 0)), row.get("feishu_chat_id"),
+             row.get("chat_type") or "", row.get("chat_name") or ""),
         )
 
     def binding_get(self, binding_id):
@@ -288,6 +291,13 @@ class SqliteRepo(Repository):
             "UPDATE channel_binding SET session_uuid = ?, first_run_done = 0, rebound_at = ? "
             "WHERE account_id = ? AND feishu_chat_id IS ?",
             (session_uuid, rebound_at, account_id, feishu_chat_id),
+        )
+
+    def binding_set_display(self, account_id, feishu_chat_id, chat_type, chat_name):
+        self._write(
+            "UPDATE channel_binding SET chat_type = ?, chat_name = ? "
+            "WHERE account_id = ? AND feishu_chat_id IS ?",
+            (chat_type or "", chat_name or "", account_id, feishu_chat_id),
         )
 
     # quota -----------------------------------------------------------------
@@ -755,10 +765,11 @@ class PgRepo(Repository):
     # binding ---------------------------------------------------------------
     def binding_insert(self, row):
         self._write(
-            "INSERT INTO channel_binding (binding_id, account_id, session_uuid, first_run_done, feishu_chat_id) "
-            "VALUES (%s, %s, %s, %s, %s)",
+            "INSERT INTO channel_binding (binding_id, account_id, session_uuid, first_run_done, "
+            "feishu_chat_id, chat_type, chat_name) VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (row["binding_id"], row["account_id"], row["session_uuid"],
-             int(row.get("first_run_done", 0)), row.get("feishu_chat_id")),
+             int(row.get("first_run_done", 0)), row.get("feishu_chat_id"),
+             row.get("chat_type") or "", row.get("chat_name") or ""),
         )
 
     def binding_get(self, binding_id):
@@ -788,6 +799,13 @@ class PgRepo(Repository):
             "UPDATE channel_binding SET session_uuid = %s, first_run_done = 0, rebound_at = %s "
             "WHERE account_id = %s AND feishu_chat_id IS NOT DISTINCT FROM %s",
             (session_uuid, rebound_at, account_id, feishu_chat_id),
+        )
+
+    def binding_set_display(self, account_id, feishu_chat_id, chat_type, chat_name):
+        self._write(
+            "UPDATE channel_binding SET chat_type = %s, chat_name = %s "
+            "WHERE account_id = %s AND feishu_chat_id IS NOT DISTINCT FROM %s",
+            (chat_type or "", chat_name or "", account_id, feishu_chat_id),
         )
 
     # quota -----------------------------------------------------------------

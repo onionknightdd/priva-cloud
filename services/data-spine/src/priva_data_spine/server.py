@@ -94,6 +94,8 @@ def _binding_pb(b) -> binding_pb2.Binding:
         session_uuid=b.session_uuid or "",  # NULL (detached) → "" on the wire
         first_run_done=b.first_run_done,
         feishu_chat_id=b.feishu_chat_id or "",
+        chat_type=b.chat_type or "",
+        chat_name=b.chat_name or "",
         bound_at=b.bound_at or "",
         rebound_at=b.rebound_at or "",
     )
@@ -302,6 +304,11 @@ class _BindingServicer(binding_pb2_grpc.BindingServiceServicer):
     def Rebind(self, request, context):
         return _binding_pb(self.svc.rebind(
             request.account_id, request.session_uuid or None, request.feishu_chat_id or None))
+
+    def SetDisplay(self, request, context):
+        return _binding_pb(self.svc.set_display(
+            request.account_id, request.feishu_chat_id or None,
+            chat_type=request.chat_type or "", chat_name=request.chat_name or ""))
 
     def ClaimFirstRunIM(self, request, context):
         return common_pb2.BoolValue(value=self.svc.claim_first_run_im(request.binding_id))

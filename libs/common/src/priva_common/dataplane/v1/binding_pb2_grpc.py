@@ -60,6 +60,11 @@ class BindingServiceStub:
                 request_serializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.AccountRef.SerializeToString,
                 response_deserializer=priva__common_dot_dataplane_dot_v1_dot_binding__pb2.BindingList.FromString,
                 _registered_method=True)
+        self.SetDisplay = channel.unary_unary(
+                '/priva.dataplane.v1.BindingService/SetDisplay',
+                request_serializer=priva__common_dot_dataplane_dot_v1_dot_binding__pb2.SetBindingDisplayRequest.SerializeToString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_binding__pb2.Binding.FromString,
+                _registered_method=True)
 
 
 class BindingServiceServicer:
@@ -96,6 +101,12 @@ class BindingServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SetDisplay(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_BindingServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -123,6 +134,11 @@ def add_BindingServiceServicer_to_server(servicer, server):
                     servicer.ListBindings,
                     request_deserializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.AccountRef.FromString,
                     response_serializer=priva__common_dot_dataplane_dot_v1_dot_binding__pb2.BindingList.SerializeToString,
+            ),
+            'SetDisplay': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetDisplay,
+                    request_deserializer=priva__common_dot_dataplane_dot_v1_dot_binding__pb2.SetBindingDisplayRequest.FromString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_binding__pb2.Binding.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -260,6 +276,33 @@ class BindingService:
             '/priva.dataplane.v1.BindingService/ListBindings',
             priva__common_dot_dataplane_dot_v1_dot_common__pb2.AccountRef.SerializeToString,
             priva__common_dot_dataplane_dot_v1_dot_binding__pb2.BindingList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetDisplay(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/priva.dataplane.v1.BindingService/SetDisplay',
+            priva__common_dot_dataplane_dot_v1_dot_binding__pb2.SetBindingDisplayRequest.SerializeToString,
+            priva__common_dot_dataplane_dot_v1_dot_binding__pb2.Binding.FromString,
             options,
             channel_credentials,
             insecure,

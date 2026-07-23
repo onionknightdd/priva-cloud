@@ -10,3 +10,6 @@ export const updateFeishuConfig = (data) => putJSON('/auth/me/feishu-config', da
 // only appearance; the user DMs it to the bot (/link CODE) to bind themselves owner.
 export const createFeishuLinkCode = () => postJSON('/auth/me/feishu-link-code', {})
 export const unbindFeishuOwner = () => deleteJSON('/auth/me/feishu-owner')
+// Per-chat session list (channel_binding rows): active sessions first; display
+// names are stamped by the connector (p2p → peer name, group → group name).
+export const getFeishuSessions = () => getJSON('/auth/me/feishu-sessions')

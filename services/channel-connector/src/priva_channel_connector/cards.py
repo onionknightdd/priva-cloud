@@ -55,7 +55,7 @@ _GLYPH = {
 # zh phrasing mirrors web/shared/locales/zh.json `toolCall.summary.*` (card language is zh,
 # matching the rest of the card). Chinese has no case, so JS `lowercaseFirst` is a no-op here.
 _GROUP_ORDER = ("edited", "wrote", "generated", "read", "search",
-                "bash", "webFetch", "webSearch", "canvas", "other")
+                "bash", "webFetch", "webSearch", "canvas", "asked", "other")
 _GROUP_PHRASE = {
     "edited": "编辑了 {n} 个文件",
     "wrote": "写入了 {n} 个文件",
@@ -66,6 +66,7 @@ _GROUP_PHRASE = {
     "webFetch": "抓取了 {n} 个 URL",
     "webSearch": "联网搜索了 {n} 次",
     "canvas": "在画布中执行了 {n} 个任务",
+    "asked": "提出了 {n} 个问题",
     "other": "执行了 {n} 个其他工具",
 }
 # FileCanvas / legacy generated-tool names → the "generated" (预览) group (generatedTool.js).
@@ -136,6 +137,11 @@ def _run_summary(steps) -> str:
             added, removed = _line_delta(st.name, st.tool_input)
             total_added += added
             total_removed += removed
+        elif st.name == "AskUserQuestion":
+            # counted in QUESTIONS (one call may carry several), phrased 提出了 N 个问题
+            inp = st.tool_input if isinstance(st.tool_input, dict) else {}
+            qs = inp.get("questions")
+            counts["asked"] += len(qs) if isinstance(qs, list) and qs else 1
         else:
             counts[_group_of(st.name)] += 1
 
@@ -372,13 +378,28 @@ def _askuser_output_elements(st) -> list[dict]:
     return [_md("\n".join(rows))]
 
 
+def _askuser_question_elements(st) -> list[dict]:
+    """AskUserQuestion → ONLY the question texts (one ❓ line each). The options/config
+    dump is deliberately never shown — the interactive card already presented them."""
+    inp = st.tool_input if isinstance(st.tool_input, dict) else {}
+    qs = [q.get("question") for q in (inp.get("questions") or []) if isinstance(q, dict)]
+    qs = [q for q in qs if q]
+    if not qs:
+        return []
+    return [_md("\n".join(f"❓ {q}" for q in qs))]
+
+
 def _tool_panel(st) -> dict:
     """One tool as its own folded panel: header = glyph/name/summary, body = full input then
-    output, each a code block (Feishu natively collapses long code blocks in place). A resolved
-    AskUserQuestion is special-cased to the clean answer style (no input dump, no raw result)."""
-    if st.name == "AskUserQuestion" and st.status == "done":
-        body = _askuser_output_elements(st) or [_md("`(无输入/输出)`")]
-        return _panel(_tool_title(st), body)
+    output, each a code block (Feishu natively collapses long code blocks in place).
+    AskUserQuestion is special-cased: resolved → the clean answer style, otherwise just the
+    question texts — the raw input JSON (options/config) is never dumped."""
+    if st.name == "AskUserQuestion":
+        if st.status == "done":
+            body = _askuser_output_elements(st) or _askuser_question_elements(st)
+        else:
+            body = _askuser_question_elements(st)
+        return _panel(_tool_title(st), body or [_md("`(无输入/输出)`")])
     body = _tool_input_elements(st) + _tool_output_elements(st)
     if not body:
         body.append(_md("`(无输入/输出)`"))

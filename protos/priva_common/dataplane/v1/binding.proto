@@ -13,6 +13,10 @@ message Binding {
   string feishu_chat_id = 5;
   string bound_at = 6;
   string rebound_at = 7;
+  // Display metadata for the settings-page session list, stamped by the
+  // connector from live chat context (refreshed on each inbound message).
+  string chat_type = 8;   // "p2p" | "group" | "" (pre-feature rows)
+  string chat_name = 9;   // p2p: peer's name · group: group name · "" unknown
 }
 
 message BindingRef { string binding_id = 1; }
@@ -30,10 +34,20 @@ message RebindRequest {
   string feishu_chat_id = 3;
 }
 
+// CONNECTOR: stamp/refresh a chat's display metadata (keyed by account+chat).
+// No-op when the row doesn't exist yet — the connector stamps after commit.
+message SetBindingDisplayRequest {
+  string account_id = 1;
+  string feishu_chat_id = 2;
+  string chat_type = 3;
+  string chat_name = 4;
+}
+
 service BindingService {
   rpc Bind(BindRequest) returns (Binding);
   rpc Rebind(RebindRequest) returns (Binding);
   rpc ClaimFirstRunIM(BindingRef) returns (BoolValue); // atomic first_run_done 0→1
   rpc GetBinding(BindingRef) returns (Binding);
   rpc ListBindings(AccountRef) returns (BindingList);
+  rpc SetDisplay(SetBindingDisplayRequest) returns (Binding);
 }

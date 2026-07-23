@@ -708,6 +708,44 @@ class LarkTransport:
             return None
         return getattr(getattr(resp, "data", None), "name", None) or None
 
+    def _get_user_name_sync(self, open_id: str) -> str | None:
+        # GET /contact/v3/users/:user_id — 用户名需要 contact:user.base:readonly 权限；
+        # 未开通时降级（调用方 fallback 到 open_id 缩写），不影响消息处理。
+        from lark_oapi.api.contact.v3 import GetUserRequest
+
+        rest = self._rest_client()
+        req = GetUserRequest.builder().user_id(open_id).user_id_type("open_id").build()
+        resp = rest.contact.v3.user.get(req)
+        if not resp.success():
+            logger.warning(
+                "lark user info fetch failed account={} open_id={} code={} msg={} "
+                "(人名需要 contact:user.base:readonly)",
+                self.account_id, open_id[:14], getattr(resp, "code", "?"), getattr(resp, "msg", "?"),
+            )
+            return None
+        user = getattr(getattr(resp, "data", None), "user", None)
+        return getattr(user, "name", None) or None
+
+    async def fetch_display_name(self, chat_id: str, chat_type: str, sender_open_id: str) -> str:
+        """会话展示名（设置页会话列表用）：群聊 → 群名（im:chat:readonly），私聊 →
+        对方人名（contact:user.base:readonly）。取不到（缺权限/网络）返回 ""，
+        调用方自行降级。群名共用诊断缓存。"""
+        try:
+            if chat_type == "group":
+                name = self._chat_names.get(chat_id)
+                if name is None:
+                    name = await asyncio.to_thread(self._get_chat_name_sync, chat_id)
+                    if name:
+                        if len(self._chat_names) > 256:
+                            self._chat_names.clear()
+                        self._chat_names[chat_id] = name
+                return name or ""
+            if sender_open_id:
+                return (await asyncio.to_thread(self._get_user_name_sync, sender_open_id)) or ""
+        except Exception:
+            logger.exception("display name fetch failed account={} chat={}", self.account_id, chat_id)
+        return ""
+
     def _fetch_image_sync(self, message_id: str, image_key: str) -> tuple[bytes, str] | None:
         # GET /im/v1/messages/:message_id/resources/:file_key?type=image — message-scoped
         # resource fetch with the tenant token. Needs the app to have the im:resource

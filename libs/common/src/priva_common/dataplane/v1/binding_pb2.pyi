@@ -8,7 +8,7 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class Binding(_message.Message):
-    __slots__ = ("binding_id", "account_id", "session_uuid", "first_run_done", "feishu_chat_id", "bound_at", "rebound_at")
+    __slots__ = ("binding_id", "account_id", "session_uuid", "first_run_done", "feishu_chat_id", "bound_at", "rebound_at", "chat_type", "chat_name")
     BINDING_ID_FIELD_NUMBER: _ClassVar[int]
     ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_UUID_FIELD_NUMBER: _ClassVar[int]
@@ -16,6 +16,8 @@ class Binding(_message.Message):
     FEISHU_CHAT_ID_FIELD_NUMBER: _ClassVar[int]
     BOUND_AT_FIELD_NUMBER: _ClassVar[int]
     REBOUND_AT_FIELD_NUMBER: _ClassVar[int]
+    CHAT_TYPE_FIELD_NUMBER: _ClassVar[int]
+    CHAT_NAME_FIELD_NUMBER: _ClassVar[int]
     binding_id: str
     account_id: str
     session_uuid: str
@@ -23,7 +25,9 @@ class Binding(_message.Message):
     feishu_chat_id: str
     bound_at: str
     rebound_at: str
-    def __init__(self, binding_id: _Optional[str] = ..., account_id: _Optional[str] = ..., session_uuid: _Optional[str] = ..., first_run_done: _Optional[bool] = ..., feishu_chat_id: _Optional[str] = ..., bound_at: _Optional[str] = ..., rebound_at: _Optional[str] = ...) -> None: ...
+    chat_type: str
+    chat_name: str
+    def __init__(self, binding_id: _Optional[str] = ..., account_id: _Optional[str] = ..., session_uuid: _Optional[str] = ..., first_run_done: _Optional[bool] = ..., feishu_chat_id: _Optional[str] = ..., bound_at: _Optional[str] = ..., rebound_at: _Optional[str] = ..., chat_type: _Optional[str] = ..., chat_name: _Optional[str] = ...) -> None: ...
 
 class BindingRef(_message.Message):
     __slots__ = ("binding_id",)
@@ -56,3 +60,15 @@ class RebindRequest(_message.Message):
     session_uuid: str
     feishu_chat_id: str
     def __init__(self, account_id: _Optional[str] = ..., session_uuid: _Optional[str] = ..., feishu_chat_id: _Optional[str] = ...) -> None: ...
+
+class SetBindingDisplayRequest(_message.Message):
+    __slots__ = ("account_id", "feishu_chat_id", "chat_type", "chat_name")
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    FEISHU_CHAT_ID_FIELD_NUMBER: _ClassVar[int]
+    CHAT_TYPE_FIELD_NUMBER: _ClassVar[int]
+    CHAT_NAME_FIELD_NUMBER: _ClassVar[int]
+    account_id: str
+    feishu_chat_id: str
+    chat_type: str
+    chat_name: str
+    def __init__(self, account_id: _Optional[str] = ..., feishu_chat_id: _Optional[str] = ..., chat_type: _Optional[str] = ..., chat_name: _Optional[str] = ...) -> None: ...

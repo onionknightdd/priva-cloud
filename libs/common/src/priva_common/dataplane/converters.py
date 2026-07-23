@@ -64,6 +64,8 @@ def binding_from_pb(m) -> BindingRecord | None:
         session_uuid=m.session_uuid or None,  # "" (detached) → None
         first_run_done=m.first_run_done,
         feishu_chat_id=m.feishu_chat_id or None,
+        chat_type=m.chat_type,
+        chat_name=m.chat_name,
         bound_at=m.bound_at or None,
         rebound_at=m.rebound_at or None,
     )

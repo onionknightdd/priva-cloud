@@ -366,3 +366,62 @@ def test_dispatch_group_text_sets_mentioned_and_strips(monkeypatch):
     got = received[0]
     assert got.chat_type == "group" and got.mentioned is True
     assert got.text == "帮我查一下"
+
+
+# =============================================================================
+# session list — display metadata (settings-page 已激活会话)
+# =============================================================================
+
+def test_spine_binding_set_display_roundtrip(app_client):
+    _ = app_client
+    spine = _spine()
+    account_id = spine.accounts.get_by_username("alice").account_id
+    spine.bindings.bind(account_id, "sess-disp", "oc_disp")
+    rec = spine.bindings.set_display(account_id, "oc_disp", chat_type="group", chat_name="产品讨论组")
+    assert rec.chat_type == "group" and rec.chat_name == "产品讨论组"
+    # missing row → no-op, no crash
+    spine.bindings.set_display(account_id, "oc_missing", chat_type="p2p", chat_name="x")
+    got = {b.feishu_chat_id: (b.chat_type, b.chat_name) for b in spine.bindings.list_bindings(account_id)}
+    assert got["oc_disp"] == ("group", "产品讨论组")
+    assert "oc_missing" not in got
+
+
+def test_sessions_endpoint_lists_active_first(app_client):
+    client, _, alice_h = app_client
+    spine = _spine()
+    account_id = spine.accounts.get_by_username("alice").account_id
+    spine.bindings.bind(account_id, "sess-active-1", "oc_s1")
+    spine.bindings.set_display(account_id, "oc_s1", chat_type="p2p", chat_name="Derek")
+    spine.bindings.bind(account_id, None, "oc_s2")  # reset chat (no session)
+    spine.bindings.set_display(account_id, "oc_s2", chat_type="group", chat_name="测试群")
+
+    r = client.get("/api/auth/me/feishu-sessions", headers=alice_h)
+    assert r.status_code == 200, r.text
+    rows = {s["chat_id"]: s for s in r.json()["sessions"]}
+    assert rows["oc_s1"]["session_id"] == "sess-active-1"
+    assert rows["oc_s1"]["chat_type"] == "p2p" and rows["oc_s1"]["chat_name"] == "Derek"
+    assert rows["oc_s2"]["session_id"] is None
+    assert rows["oc_s2"]["chat_type"] == "group" and rows["oc_s2"]["chat_name"] == "测试群"
+    # active rows sort ahead of reset rows
+    order = [s["chat_id"] for s in r.json()["sessions"]]
+    assert order.index("oc_s1") < order.index("oc_s2")
+
+
+def test_worker_stamps_display_after_run():
+    async def go():
+        worker, created, dialer, client = _group_worker(_group_cfg("A"))
+        await worker.start()
+        t = created[0]
+        t.display_names["oc_g1"] = "冲浪群"           # group name resolves via chat_id
+        t.display_names["ou_member"] = "Alice"        # p2p name resolves via sender open_id
+        await t.inject(_group_msg("A", "hi", chat="oc_g1"))
+        p2p = InboundMessage(account_id="A", sender_open_id="ou_member", chat_id="oc_p1",
+                             text="hello", message_id="om_pp", sender_union_id="on_x",
+                             chat_type="p2p")
+        await t.inject(p2p)
+        by_chat = {b.feishu_chat_id: (b.chat_type, b.chat_name, b.session_uuid)
+                   for b in client.bindings.list_bindings("A")}
+        assert by_chat["oc_g1"] == ("group", "冲浪群", "s-g")
+        assert by_chat["oc_p1"][0] == "p2p" and by_chat["oc_p1"][1] == "Alice"
+
+    asyncio.run(go())

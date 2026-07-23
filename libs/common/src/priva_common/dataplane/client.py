@@ -56,6 +56,10 @@ class BindingRecord(BaseModel):
     session_uuid: str | None = None  # None = detached ("/new"); next DM starts fresh
     first_run_done: bool = False
     feishu_chat_id: str | None = None
+    # Display metadata for the settings-page session list, stamped by the
+    # connector from live chat context (p2p → peer name, group → group name).
+    chat_type: str = ""   # "p2p" | "group" | "" (pre-feature rows)
+    chat_name: str = ""
     bound_at: str | None = None
     rebound_at: str | None = None
 
@@ -249,6 +253,9 @@ class AccountClient(Protocol):
 class BindingClient(Protocol):
     def bind(self, account_id: str, session_uuid: str | None, feishu_chat_id: str | None = None) -> BindingRecord: ...
     def rebind(self, account_id: str, session_uuid: str | None, feishu_chat_id: str | None = None) -> BindingRecord: ...
+    def set_display(
+        self, account_id: str, feishu_chat_id: str | None, *, chat_type: str = "", chat_name: str = ""
+    ) -> BindingRecord | None: ...
     def claim_first_run_im(self, binding_id: str) -> bool: ...
     def get_binding(self, binding_id: str) -> BindingRecord | None: ...
     def list_bindings(self, account_id: str) -> list[BindingRecord]: ...

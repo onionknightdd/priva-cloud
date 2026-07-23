@@ -177,6 +177,12 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
                 binding_pb2.RebindRequest(account_id=account_id, session_uuid=session_uuid or "",
                                           feishu_chat_id=feishu_chat_id or "")))
 
+        def set_display(self, account_id, feishu_chat_id, *, chat_type="", chat_name=""):
+            return cv.binding_from_pb(self._s.SetDisplay(
+                binding_pb2.SetBindingDisplayRequest(
+                    account_id=account_id, feishu_chat_id=feishu_chat_id or "",
+                    chat_type=chat_type or "", chat_name=chat_name or "")))
+
         def claim_first_run_im(self, binding_id):
             return self._s.ClaimFirstRunIM(binding_pb2.BindingRef(binding_id=binding_id)).value
 

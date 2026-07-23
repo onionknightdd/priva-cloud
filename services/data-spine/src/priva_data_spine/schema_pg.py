@@ -47,6 +47,8 @@ DDL: tuple[str, ...] = (
       session_uuid   TEXT,
       first_run_done BIGINT NOT NULL DEFAULT 0 CHECK (first_run_done IN (0,1)),
       feishu_chat_id TEXT,
+      chat_type      TEXT NOT NULL DEFAULT '',
+      chat_name      TEXT NOT NULL DEFAULT '',
       bound_at       TEXT NOT NULL DEFAULT {NOW},
       rebound_at     TEXT
     )
@@ -288,6 +290,8 @@ _MIGRATIONS: tuple[str, ...] = (
     # Per-chat sessions (feat_feishu_DM.md §5.2): retire the one-binding-per-account
     # unique index; the composite ux_binding_account_chat comes from the DDL above.
     "DROP INDEX IF EXISTS ux_binding_account",
+    "ALTER TABLE channel_binding ADD COLUMN IF NOT EXISTS chat_type TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE channel_binding ADD COLUMN IF NOT EXISTS chat_name TEXT NOT NULL DEFAULT ''",
     # One-time backfill, safe every boot: pre-migration rows carry enforced=1
     # with an empty enforced_events; the service keeps enforced derived from
     # enforced_events afterwards, so this WHERE never matches again.

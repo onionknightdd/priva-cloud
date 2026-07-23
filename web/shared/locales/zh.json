@@ -1104,7 +1104,12 @@
       "modeAll": "所有人",
       "groupChat": "群聊参与",
       "groupChatHint": "开启后可将机器人拉入群聊，@它 即可对话；每个群独立会话，回复对全群可见",
-      "groupChatGloballyDisabled": "管理员已全局停用群聊参与"
+      "groupChatGloballyDisabled": "管理员已全局停用群聊参与",
+      "sessions": "已激活会话",
+      "sessionsEmpty": "暂无会话——给机器人发条消息后这里会出现对应会话",
+      "typeP2p": "私聊",
+      "typeGroup": "群聊",
+      "sessionReset": "已重置"
     },
     "archived": "已归档",
     "archivedHint": "已归档的会话不会显示在侧边栏。恢复某个会话即可让它（及其工作目录）重新出现。",

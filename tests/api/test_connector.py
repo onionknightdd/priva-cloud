@@ -51,7 +51,18 @@ class FakeBindings:
         cur = self._by_key.get(key)
         bid = cur.binding_id if cur else uuid.uuid4().hex
         rec = BindingRecord(binding_id=bid, account_id=account_id,
-                            session_uuid=session_uuid, feishu_chat_id=feishu_chat_id)
+                            session_uuid=session_uuid, feishu_chat_id=feishu_chat_id,
+                            chat_type=cur.chat_type if cur else "",
+                            chat_name=cur.chat_name if cur else "")
+        self._by_key[key] = rec
+        return rec
+
+    def set_display(self, account_id, feishu_chat_id, *, chat_type="", chat_name=""):
+        key = (account_id, feishu_chat_id or "")
+        cur = self._by_key.get(key)
+        if cur is None:
+            return None  # UPDATE on a missing row is a no-op (real repo semantics)
+        rec = cur.model_copy(update={"chat_type": chat_type, "chat_name": chat_name})
         self._by_key[key] = rec
         return rec
 
@@ -548,6 +559,50 @@ def test_run_summary_unknown_tool_is_other():
     assert _run_summary(steps) == "执行了 2 个其他工具"
 
 
+# --- AskUserQuestion display: question-only, 提出了 N 个问题 -----------------
+_ASK_INPUT = {"questions": [
+    {"question": "选哪个方案？", "header": "方案", "options": [{"label": "A", "description": "aaa"}], "multiSelect": False},
+    {"question": "要部署吗？", "header": "部署", "options": [{"label": "是", "description": "bbb"}], "multiSelect": False},
+]}
+
+
+def test_run_summary_askuser_counts_questions():
+    from priva_channel_connector.cards import _run_summary
+    from priva_channel_connector.sse import ToolStep
+    steps = [
+        ToolStep("t1", "Read", "done", "a.py"),
+        ToolStep("t2", "AskUserQuestion", "done", "", dict(_ASK_INPUT)),  # 2 questions in one call
+    ]
+    assert _run_summary(steps) == "读取了 1 个文件, 提出了 2 个问题"
+    # input-less call still counts as 1 question, not 'other'
+    bare = [ToolStep("t1", "AskUserQuestion", "running", "")]
+    assert _run_summary(bare) == "提出了 1 个问题"
+
+
+def test_askuser_step_summary_is_the_question():
+    from priva_channel_connector.sse import _summarize_input
+    assert _summarize_input("AskUserQuestion", _ASK_INPUT) == "选哪个方案？ (+1)"
+    one = {"questions": [{"question": "只有一个问题", "options": []}]}
+    assert _summarize_input("AskUserQuestion", one) == "只有一个问题"
+    assert _summarize_input("AskUserQuestion", {"questions": []}) == ""
+
+
+def test_askuser_panel_shows_questions_never_input_dump():
+    import json as _json
+    from priva_channel_connector.cards import _tool_panel
+    from priva_channel_connector.sse import ToolStep
+    # unresolved (running/error) → ❓ question lines only, no options/config dump
+    st = ToolStep("t1", "AskUserQuestion", "error", "选哪个方案？ (+1)", dict(_ASK_INPUT))
+    body = _json.dumps(_tool_panel(st), ensure_ascii=False)
+    assert "❓ 选哪个方案？" in body and "❓ 要部署吗？" in body
+    assert "multiSelect" not in body and "aaa" not in body
+    # resolved → the ✅ answer style (existing behaviour preserved)
+    done = ToolStep("t2", "AskUserQuestion", "done", "", dict(_ASK_INPUT),
+                    result_text='Your questions have been answered: "选哪个方案？"="A". "要部署吗？"="是".')
+    body2 = _json.dumps(_tool_panel(done), ensure_ascii=False)
+    assert "已收到你的选择" in body2 and "选哪个方案？ -> A" in body2
+
+
 def test_process_panel_header_uses_summary_with_fallback():
     from priva_channel_connector.cards import _process_panel
     from priva_channel_connector.sse import ToolStep
@@ -818,3 +873,32 @@ def test_reduce_sse_relays_assistant_only():
 def test_reduce_sse_stream_error():
     out = reduce_sse([("stream_error", '{"code": "Boom", "message": "kaboom", "fatal": true}')])
     assert out.is_error is True and out.error_text == "kaboom" and out.session_id is None
+
+
+# --- dial: channel-level tool denylist ---------------------------------------
+def test_dial_sends_dm_disallowed_tools():
+    # Feishu-DM runs carry the channel denylist (Canvas tools — no canvas panel in
+    # DM) so the runner skips injecting the priva_File MCP server for these runs.
+    import json
+
+    import httpx
+    from priva_channel_connector.dial import RunnerDialer, _DM_DISALLOWED_TOOLS
+
+    captured = {}
+
+    def handler(request):
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, text="event: result\ndata: {\"session_id\": \"s1\"}\n\n",
+                              headers={"content-type": "text/event-stream"})
+
+    async def fake_wake(account_id):
+        return True
+
+    async def go():
+        d = RunnerDialer(waker=fake_wake, transport=httpx.MockTransport(handler))
+        return await d.run("A", "user-A", prompt="hi")
+
+    out = asyncio.run(go())
+    assert captured["disallowed_tools"] == list(_DM_DISALLOWED_TOOLS)
+    assert captured["enable_permission_feedback"] is True
+    assert out.session_id == "s1"

@@ -125,9 +125,16 @@ def _one_line(s) -> str:
 
 def _summarize_input(name: str, tool_input) -> str:
     """One-line summary of a tool call's input (Bash→command, file tools→path, …).
-    Falls back to the first non-empty string value. Truncated to keep the card small."""
+    Falls back to the first non-empty string value. Truncated to keep the card small.
+    AskUserQuestion shows the question itself (never the options/config dump)."""
     if not isinstance(tool_input, dict):
         return _one_line(tool_input)[:_SUMMARY_MAX]
+    if name == "AskUserQuestion":
+        qs = tool_input.get("questions")
+        if isinstance(qs, list) and qs and isinstance(qs[0], dict):
+            q0 = _one_line(qs[0].get("question") or "")[:_SUMMARY_MAX]
+            return f"{q0} (+{len(qs) - 1})" if q0 and len(qs) > 1 else q0
+        return ""
     key = _INPUT_KEY.get(name)
     val = tool_input.get(key) if key else None
     if not val:
@@ -225,6 +232,14 @@ def step(state: StreamState, event: str, data_str: str) -> bool:
     if event in ("stream_error", "retry_exhausted"):
         state.is_error = True
         state.error_text = data.get("message") or state.error_text
+        return True
+
+    if event == "session_reset":
+        # Lazy resume guard (runner): the bound session's file was gone (deleted in
+        # the web UI) — the runner warned and reran fresh. Surface the ⚠️ note in
+        # the reply; the fresh run's result then rebinds the chat via commit_session.
+        note = data.get("message") or "原会话已不存在，已自动开启新会话"
+        state.timeline.append(note if note.startswith("⚠️") else f"⚠️ {note}")
         return True
 
     # system / stream_init / keepalive / hook_event / task_* → received, ignored.

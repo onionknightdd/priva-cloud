@@ -20,6 +20,8 @@ from priva_common.models.auth import (
 from priva_common.models.feishu import (
     FeishuConfigResponse,
     FeishuLinkCodeResponse,
+    FeishuSessionEntry,
+    FeishuSessionsResponse,
     FeishuUserConfigUpdate,
 )
 from ..services.feishu_connector import nudge_reconcile
@@ -349,6 +351,29 @@ async def update_my_feishu_config(
     await nudge_reconcile(user.account_id, user.username)  # best-effort; poll is the backstop
     return FeishuConfigResponse.from_record(
         rec, user.account_id, group_chat_globally_disabled=_group_globally_disabled(client))
+
+
+@router.get("/me/feishu-sessions", response_model=FeishuSessionsResponse)
+async def list_my_feishu_sessions(user: UserRecord = Depends(require_user)):
+    """Every chat the bot has been talked to in (per-chat channel_binding rows),
+    active sessions first, most recent first. Display metadata (chat_type/chat_name)
+    is stamped by the connector from live chat context."""
+    from priva_common.dataplane import get_client
+    bindings = get_client().bindings.list_bindings(user.account_id)
+    entries = [
+        FeishuSessionEntry(
+            chat_id=b.feishu_chat_id or "",
+            chat_type=b.chat_type or "",
+            chat_name=b.chat_name or "",
+            session_id=b.session_uuid,
+            updated_at=b.rebound_at or b.bound_at,
+        )
+        for b in bindings
+    ]
+    # Two stable passes: most-recent first, then active (has session) ahead of reset.
+    entries.sort(key=lambda e: e.updated_at or "", reverse=True)
+    entries.sort(key=lambda e: e.session_id is None)
+    return FeishuSessionsResponse(sessions=entries)
 
 
 @router.post("/me/feishu-link-code", response_model=FeishuLinkCodeResponse)

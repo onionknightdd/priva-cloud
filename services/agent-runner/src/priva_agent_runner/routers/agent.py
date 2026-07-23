@@ -598,6 +598,7 @@ async def run_agent_stream(
             enable_file_checkpointing=request.enable_file_checkpointing,
             fork_session=request.fork_session,
             enable_permission_feedback=request.enable_permission_feedback,
+            extra_disallowed_tools=request.disallowed_tools,
         ),
         media_type="text/event-stream",
     )

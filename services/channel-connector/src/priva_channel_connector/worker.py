@@ -53,6 +53,7 @@ class AppWorker:
         self._router = router
         self._cfg = cfg
         self._inflight: set[asyncio.Task] = set()
+        self._displays: set[str] = set()   # chat_ids whose binding display is stamped (per arm)
         self._username = getattr(account, "username", None) if account is not None else None
         self._transport = transport_factory(
             cfg.account_id,
@@ -142,6 +143,7 @@ class AppWorker:
                 await asyncio.to_thread(self._router.detach, self.account_id, msg.chat_id)
                 await self._transport.send_text(msg.chat_id, _NEW_ACK)
                 logger.info("feishu /new detach: account={} chat={}", self.account_id, msg.chat_id)
+                await self._stamp_display(msg)
                 ok = True
                 return
 
@@ -200,6 +202,7 @@ class AppWorker:
                 await asyncio.to_thread(
                     self._router.commit_session, self.account_id, outcome.session_id, msg.chat_id
                 )
+                await self._stamp_display(msg)
 
             if message_id:
                 # Final patch lands the terminal card, rendered from the SAME state dial
@@ -217,6 +220,25 @@ class AppWorker:
         finally:
             self._expire_prompts(issued)
             await self._settle_reaction(msg.message_id, typing_rid, ok)
+
+    # --- session-list display metadata ------------------------------------
+    async def _stamp_display(self, msg) -> None:
+        """会话列表（设置页）展示元数据：群→群名、私聊→对方人名，解析后写到该 chat 的
+        binding 上。每次 arm 每个 chat 只打一次（名字拿不到时也不重试——UI 降级显示
+        chat_id 缩写；群改名/权限补开后，下次 re-arm 刷新）。永不影响消息处理。"""
+        if msg.chat_id in self._displays:
+            return
+        chat_type = (getattr(msg, "chat_type", "") or "") or "p2p"
+        try:
+            name = await self._transport.fetch_display_name(
+                msg.chat_id, chat_type, msg.sender_open_id)
+            await asyncio.to_thread(
+                self._client.bindings.set_display, self.account_id, msg.chat_id,
+                chat_type=chat_type, chat_name=name or "")
+            self._displays.add(msg.chat_id)
+        except Exception:
+            logger.exception("binding display stamp failed account={} chat={}",
+                             self.account_id, msg.chat_id)
 
     # --- owner link-code --------------------------------------------------
     async def _handle_link(self, msg, code: str) -> None:

@@ -41,6 +41,8 @@ DDL: tuple[str, ...] = (
       session_uuid   TEXT,
       first_run_done INTEGER NOT NULL DEFAULT 0 CHECK (first_run_done IN (0,1)),
       feishu_chat_id TEXT,
+      chat_type      TEXT NOT NULL DEFAULT '',
+      chat_name      TEXT NOT NULL DEFAULT '',
       bound_at       TEXT NOT NULL DEFAULT {NOW},
       rebound_at     TEXT
     ) STRICT
@@ -324,6 +326,10 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("feishu_channel_config", "group_chat_enabled",
      "ALTER TABLE feishu_channel_config ADD COLUMN group_chat_enabled INTEGER NOT NULL DEFAULT 0 "
      "CHECK (group_chat_enabled IN (0,1))"),
+    ("channel_binding", "chat_type",
+     "ALTER TABLE channel_binding ADD COLUMN chat_type TEXT NOT NULL DEFAULT ''"),
+    ("channel_binding", "chat_name",
+     "ALTER TABLE channel_binding ADD COLUMN chat_name TEXT NOT NULL DEFAULT ''"),
 )
 
 # One-time backfills, safe to run every boot. Pre-migration rows carry
@@ -368,14 +374,17 @@ def _migrate_binding_session_nullable(conn: sqlite3.Connection) -> None:
       session_uuid   TEXT,
       first_run_done INTEGER NOT NULL DEFAULT 0 CHECK (first_run_done IN (0,1)),
       feishu_chat_id TEXT,
+      chat_type      TEXT NOT NULL DEFAULT '',
+      chat_name      TEXT NOT NULL DEFAULT '',
       bound_at       TEXT NOT NULL DEFAULT {NOW},
       rebound_at     TEXT
     ) STRICT
     """)
+    # chat_type/chat_name exist on the old table here: _apply_migrations runs first.
     conn.execute(
         "INSERT INTO channel_binding "
-        "(binding_id, account_id, session_uuid, first_run_done, feishu_chat_id, bound_at, rebound_at) "
-        "SELECT binding_id, account_id, session_uuid, first_run_done, feishu_chat_id, bound_at, rebound_at "
+        "(binding_id, account_id, session_uuid, first_run_done, feishu_chat_id, chat_type, chat_name, bound_at, rebound_at) "
+        "SELECT binding_id, account_id, session_uuid, first_run_done, feishu_chat_id, chat_type, chat_name, bound_at, rebound_at "
         "FROM _channel_binding_old"
     )
     conn.execute("DROP TABLE _channel_binding_old")

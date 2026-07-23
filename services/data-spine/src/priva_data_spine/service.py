@@ -178,6 +178,8 @@ class BindingService:
             session_uuid=row["session_uuid"],
             first_run_done=bool(row["first_run_done"]),
             feishu_chat_id=row.get("feishu_chat_id"),
+            chat_type=row.get("chat_type") or "",
+            chat_name=row.get("chat_name") or "",
             bound_at=row.get("bound_at"),
             rebound_at=row.get("rebound_at"),
         )
@@ -196,6 +198,13 @@ class BindingService:
     def rebind(self, account_id, session_uuid, feishu_chat_id=None):
         # Keyed by (account, chat) — per-chat sessions (feat_feishu_DM.md §5.2).
         self.repo.binding_rebind(account_id, session_uuid, feishu_chat_id, _now_iso())
+        return self._to_binding(self.repo.binding_get_by_account_chat(account_id, feishu_chat_id))
+
+    def set_display(self, account_id, feishu_chat_id, *, chat_type="", chat_name=""):
+        """Stamp/refresh a chat's display metadata (connector, per inbound message).
+        No-op UPDATE when the row doesn't exist yet — the connector stamps after
+        commit_session created it."""
+        self.repo.binding_set_display(account_id, feishu_chat_id, chat_type, chat_name)
         return self._to_binding(self.repo.binding_get_by_account_chat(account_id, feishu_chat_id))
 
     def claim_first_run_im(self, binding_id):

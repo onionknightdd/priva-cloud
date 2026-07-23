@@ -1119,7 +1119,12 @@
       "modeAll": "Everyone",
       "groupChat": "Group chat",
       "groupChatHint": "Add the bot to group chats and @mention it to talk. Each group keeps its own session; replies are visible to the whole group.",
-      "groupChatGloballyDisabled": "Group chat participation has been disabled platform-wide by the administrator"
+      "groupChatGloballyDisabled": "Group chat participation has been disabled platform-wide by the administrator",
+      "sessions": "Active sessions",
+      "sessionsEmpty": "No sessions yet — message the bot and its chats will appear here",
+      "typeP2p": "DM",
+      "typeGroup": "Group",
+      "sessionReset": "Reset"
     },
     "archived": "Archived",
     "archivedHint": "Archived sessions are hidden from the sidebar. Restore one to bring it (and its workdir) back.",

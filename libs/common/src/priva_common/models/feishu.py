@@ -149,3 +149,17 @@ class FeishuLinkCodeResponse(BaseModel):
     code ever appears (storage keeps its SHA-256 + expiry)."""
     code: str
     expires_at: str
+
+
+class FeishuSessionEntry(BaseModel):
+    """One chat the bot has been talked to in (a channel_binding row). session_id
+    None = the chat was reset with /new (next message starts a fresh session)."""
+    chat_id: str
+    chat_type: str = ""      # "p2p" | "group" | "" (pre-feature rows)
+    chat_name: str = ""      # p2p: peer name · group: group name · "" unresolved
+    session_id: str | None = None
+    updated_at: str | None = None
+
+
+class FeishuSessionsResponse(BaseModel):
+    sessions: list[FeishuSessionEntry]

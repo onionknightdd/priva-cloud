@@ -7,7 +7,15 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
-from claude_agent_sdk import AssistantMessage, ClaudeSDKClient, ResultMessage, SystemMessage, TextBlock, ToolUseBlock
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeSDKClient,
+    ResultMessage,
+    SystemMessage,
+    TextBlock,
+    ToolUseBlock,
+    get_session_info,
+)
 from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 
 from priva_common.models.agent import PermissionMode
@@ -785,6 +793,37 @@ async def _pump_stream_messages(
         await output_queue.put(None)
 
 
+# --- lazy resume guard -------------------------------------------------------
+# The user may delete a session in the web UI while a channel binding (Feishu DM)
+# still points at it — `--resume <dead id>` then exits 1 and, without this guard,
+# the chat is wedged until a manual /new. Lazy by design (user ruling 2026-07-23):
+# run optimistically, and only AFTER a failure check whether the resume target is
+# gone. If it is: warn the user (session_reset event) and rerun the turn fresh —
+# the new session id then rebinds the chat via the caller's commit. Any failure
+# whose resume target still exists surfaces exactly as before, never swallowed.
+
+_SESSION_RESET_NOTE = "原会话已不存在（可能已在网页端删除），已自动开启新会话。"
+
+
+class _ResumeTargetLostError(Exception):
+    """A fatal attempt failure whose resume target no longer exists on disk."""
+
+    def __init__(self, payload: dict):
+        super().__init__(payload.get("message") or "resume target lost")
+        self.payload = payload
+
+
+def _resume_target_missing(resume_id: str | None) -> bool:
+    """True when a resume was requested but no session file exists for it any
+    more. Errs toward False (can't prove it's gone → the failure is genuine)."""
+    if not resume_id:
+        return False
+    try:
+        return get_session_info(resume_id) is None
+    except Exception:
+        return False
+
+
 async def agent_run_events(
     prompt: str,
     session_id: str | None = None,
@@ -809,6 +848,7 @@ async def agent_run_events(
     inject_openclaw_tools: bool = False,
     enable_permission_feedback: bool = False,
     max_turns: int | None = None,
+    extra_disallowed_tools: list[str] | None = None,
 ) -> None:
     """Run agent and push events to emit callback.
 
@@ -885,6 +925,7 @@ async def agent_run_events(
         inject_openclaw_tools=inject_openclaw_tools,
         enable_permission_feedback=enable_permission_feedback,
         max_turns=max_turns,
+        extra_disallowed_tools=extra_disallowed_tools,
     )
 
     if coordinator:
@@ -1088,13 +1129,38 @@ async def agent_run_events(
             payload = retry_signal.get("payload") or {}
             if kind in ("synthetic", "exception"):
                 raise retry.RetryableSyntheticError(payload)
-            # Fatal — surface and stop without retry.
+            # Fatal — but the lazy resume guard gets first look: a fatal failure
+            # while resuming a session whose file is GONE is recoverable by
+            # rerunning fresh; anything else surfaces unchanged.
+            if options.resume and _resume_target_missing(options.resume):
+                raise _ResumeTargetLostError(payload)
             await emit("stream_error", {
                 "code": payload.get("code", "unknown"),
                 "message": payload.get("message", "Stream error"),
                 "fatal": True,
                 "api_error_status": payload.get("api_error_status"),
             })
+
+    resume_fallback_used = False
+
+    async def _reset_to_fresh_session(payload: dict) -> None:
+        """The lazy resume guard's recovery half: warn the user, drop the dead
+        resume target, and let the attempt loop rerun the turn fresh. Fires at
+        most once per run — a second failure surfaces as a genuine error."""
+        nonlocal resume_fallback_used, current_resume_id
+        resume_fallback_used = True
+        logger.warning(
+            "[RESUME-GUARD] resume target %s no longer exists (deleted?); "
+            "rerunning on a fresh session (cause: %s)",
+            options.resume, payload.get("message"),
+        )
+        options.resume = None
+        current_resume_id = None
+        await emit("session_reset", {
+            "old_session_id": session_id,
+            "message": _SESSION_RESET_NOTE,
+            "code": payload.get("code"),
+        })
 
     try:
         last_error: dict | None = None
@@ -1156,9 +1222,30 @@ async def agent_run_events(
                     e.payload.get("code"), e.payload.get("message"),
                 )
                 continue
+            except _ResumeTargetLostError as e:
+                if resume_fallback_used:
+                    # Fresh rerun failed too — genuine error, surface it.
+                    await emit("stream_error", {
+                        "code": e.payload.get("code", "unknown"),
+                        "message": e.payload.get("message", "Stream error"),
+                        "fatal": True,
+                        "api_error_status": e.payload.get("api_error_status"),
+                    })
+                    return
+                await _reset_to_fresh_session(e.payload)
+                last_error = e.payload
+                continue
             except asyncio.CancelledError:
                 raise
             except Exception as e:
+                # Connect-time failures (the CLI exits before streaming) surface
+                # here — same lazy resume guard before the fatal/retry decision.
+                if (not resume_fallback_used and options.resume
+                        and _resume_target_missing(options.resume)):
+                    payload = {"code": type(e).__name__, "message": str(e) or repr(e)}
+                    await _reset_to_fresh_session(payload)
+                    last_error = payload
+                    continue
                 if not retry.should_retry_exception(e):
                     raise
                 last_error = {
@@ -1199,6 +1286,7 @@ async def agent_run_stream(
     enable_file_checkpointing: bool = False,
     fork_session: bool = False,
     enable_permission_feedback: bool = False,
+    extra_disallowed_tools: list[str] | None = None,
 ):
     needs_permissions = True  # streaming runs always need a coordinator
     stream_id = session_id or str(uuid.uuid4())
@@ -1254,6 +1342,7 @@ async def agent_run_stream(
                     enable_file_checkpointing=enable_file_checkpointing,
                     fork_session=fork_session,
                     enable_permission_feedback=enable_permission_feedback,
+                    extra_disallowed_tools=extra_disallowed_tools,
                 )
             except asyncio.CancelledError:
                 raise

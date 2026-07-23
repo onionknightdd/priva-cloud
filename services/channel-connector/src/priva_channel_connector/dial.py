@@ -23,6 +23,12 @@ from .sse import StreamState, iter_sse, step
 
 logger = get_app_logger(__name__)
 
+# Channel-level tool denylist for Feishu-DM-originated runs (user ruling
+# 2026-07-23): the DM surface has no Canvas panel, so the FileCanvas
+# registration tools are pure waste there — the runner skips injecting the
+# priva_File MCP server entirely when it sees this pattern.
+_DM_DISALLOWED_TOOLS = ("mcp__priva_File__*",)
+
 
 class RunnerDialer:
     def __init__(self, *, waker=None, transport: "httpx.AsyncBaseTransport | None" = None):
@@ -76,6 +82,7 @@ class RunnerDialer:
             # validates (count/size/type) and builds the vision content blocks.
             images=[ImageItem(**img) for img in images] if images else None,
             enable_permission_feedback=True,
+            disallowed_tools=list(_DM_DISALLOWED_TOOLS),
         ).model_dump(mode="json", exclude_none=True)
         headers = {"X-Priva-Runner-Token": mint(account_id, username or "")}
 

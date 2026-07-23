@@ -204,5 +204,16 @@ chat_type == "group" → effective_group_enabled?
 | `im:message.p2p_msg:readonly` | 接收单聊消息 | 必需 |
 | `im:message:send_as_bot` | 发送消息/卡片 | 必需 |
 | `im:resource` | 拉取图片/文件资源 | 图片消息必需 |
-| `im:chat:readonly` | 群信息（群名日志） | 诊断可选 |
+| `im:chat:readonly` | 群信息（群名日志 + 会话列表群名） | 诊断/会话列表可选 |
 | `im:message.group_at_msg:readonly` | 群 @ 消息 | Phase 2 |
+| `contact:user.base:readonly` | 私聊对方人名（会话列表） | 会话列表可选，缺失降级为 chat_id |
+
+## 8. 已激活会话列表（2026-07-23）
+
+用户飞书设置页底部列出该账号的全部 `channel_binding` 行：类型 chip（私聊/群聊）·
+对象名 · session_id（mono 缩写 + 复制）；已重置（`/new` 后 session 置空）的行标灰显示
+「已重置」。展示元数据（`chat_type`/`chat_name`）由 connector 在收到该 chat 消息、
+commit/detach 后打点入库（`SetBindingDisplay` RPC）——群→群名（复用诊断缓存）、
+私聊→contact API 人名；**每次 arm 每 chat 只解析一次**，群改名/权限补开后需等
+re-arm 刷新；名字取不到时存空串，UI 降级显示 chat_id 缩写。
+CP 只读接口：`GET /api/auth/me/feishu-sessions`（激活在前、按时间倒序）。

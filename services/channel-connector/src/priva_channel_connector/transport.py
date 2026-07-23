@@ -57,6 +57,8 @@ class IMTransport(Protocol):
     # Download one inbound image (message-scoped resource fetch) → (bytes, media_type),
     # or None on any failure (missing im:resource scope, unknown format, network).
     async def fetch_image(self, message_id: str, image_key: str) -> "tuple[bytes, str] | None": ...
+    # 会话展示名（设置页会话列表）：群 → 群名，私聊 → 对方人名；取不到返回 ""。
+    async def fetch_display_name(self, chat_id: str, chat_type: str, sender_open_id: str) -> str: ...
 
 
 @dataclass
@@ -77,6 +79,7 @@ class FakeTransport:
     patches: list[tuple[str, dict]] = field(default_factory=list)  # (message_id, card) patched
     images: dict = field(default_factory=dict)                     # image_key -> (bytes, media_type)
     fetches: list[tuple[str, str]] = field(default_factory=list)   # (message_id, image_key) requested
+    display_names: dict = field(default_factory=dict)              # chat_id / open_id -> name
     _rid_seq: int = 0
     _mid_seq: int = 0
 
@@ -112,6 +115,11 @@ class FakeTransport:
     async def fetch_image(self, message_id: str, image_key: str) -> "tuple[bytes, str] | None":
         self.fetches.append((message_id, image_key))
         return self.images.get(image_key)
+
+    async def fetch_display_name(self, chat_id: str, chat_type: str, sender_open_id: str) -> str:
+        if chat_type == "group":
+            return self.display_names.get(chat_id, "")
+        return self.display_names.get(sender_open_id, "")
 
     # --- test helpers -----------------------------------------------------
     async def inject(self, msg: InboundMessage) -> None:

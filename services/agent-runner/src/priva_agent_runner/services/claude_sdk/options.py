@@ -141,6 +141,7 @@ async def build_agent_options(
     inject_openclaw_tools: bool = False,
     enable_permission_feedback: bool = True,
     max_turns: int | None = None,
+    extra_disallowed_tools: list[str] | None = None,
 ) -> ClaudeAgentOptions:
     settings = get_settings()
 
@@ -214,6 +215,11 @@ async def build_agent_options(
         # Caller cannot answer prompts — strip AskUserQuestion so the model
         # can't call it and stall the run waiting on a human.
         disallowed_tools.append("AskUserQuestion")
+    for tool in extra_disallowed_tools or []:
+        # Per-run channel denylist (AgentRunRequest.disallowed_tools) — e.g. the
+        # Feishu DM connector blocks the FileCanvas tools (no canvas panel there).
+        if tool and tool not in disallowed_tools:
+            disallowed_tools.append(tool)
 
     options = ClaudeAgentOptions(
         model=model,
@@ -351,7 +357,11 @@ async def build_agent_options(
             _get_logger().warning("Failed to inject scheduler MCP tools", exc_info=True)
 
     # --- Inject FileCanvas file-registration tool for JWT-backed login sessions only ---
-    if username and auth_method == "jwt":
+    # Skipped entirely when the per-run denylist blocks priva_File (e.g. Feishu DM):
+    # not injecting the server is cleaner than disallowing a visible tool — the
+    # model never sees FileCanvas at all.
+    canvas_blocked = any("priva_File" in t for t in (extra_disallowed_tools or []))
+    if username and auth_method == "jwt" and not canvas_blocked:
         try:
             from ..mcp.built_in import build_file_canvas_mcp_server
 
