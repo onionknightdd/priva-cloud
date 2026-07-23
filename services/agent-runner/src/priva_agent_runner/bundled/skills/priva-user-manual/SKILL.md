@@ -225,13 +225,13 @@ JWT 令牌通过登录接口获取，API Key 在设置页面生成。公开端�
 | | GET | /api/auth/me/env | 获取用户环境配置 |
 | | PUT | /api/auth/me/env | 更新用户环境配置 |
 | | GET | /api/auth/me/env/status | 检查环境是否已配置 |
-| **对话** | POST | /api/agent/run | 发送消息（同步） |
-| | POST | /api/agent/run/stream | 发送消息（流式 SSE） |
-| | WS | /api/agent/ws/run | WebSocket 实时对话 |
-| | GET | /api/agent/sessions | 获取会话列表 |
-| | GET | /api/agent/sessions/{id}/messages | 获取会话消息 |
-| | DELETE | /api/agent/sessions/{id} | 删除会话 |
-| | POST | /api/agent/permission/respond | 回应权限请求 |
+| **对话** | POST | /api/sandbox/agent/run | 发送消息（同步） |
+| | POST | /api/sandbox/agent/run/stream | 发送消息（流式 SSE） |
+| | WS | /api/sandbox/agent/ws/run | WebSocket 实时对话 |
+| | GET | /api/sandbox/agent/sessions | 获取会话列表 |
+| | GET | /api/sandbox/agent/sessions/{id}/messages | 获取会话消息 |
+| | DELETE | /api/sandbox/agent/sessions/{id} | 删除会话 |
+| | POST | /api/sandbox/agent/permission/respond | 回应权限请求 |
 | **技能** | GET | /api/resource/skills/ | 获取技能列表 |
 | | GET | /api/resource/skills/{level}/{name} | 获取技能详情 |
 | | GET | /api/resource/skills/{level}/{name}/file | 获取技能文件内容 |

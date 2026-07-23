@@ -27,7 +27,7 @@ import urllib.request
 from pathlib import Path
 from typing import IO
 
-DEFAULT_API_URL = "http://localhost:8080/api/agent/run/stream"
+DEFAULT_API_URL = "http://localhost:8080/api/sandbox/agent/run/stream"
 API_URL = os.environ.get("PRIVA_AGENT_GATEWAY_URL", DEFAULT_API_URL)
 TIMEOUT_SECONDS = 300
 

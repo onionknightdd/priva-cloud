@@ -1,6 +1,6 @@
 # Agent 对话 API 使用指南
 
-所有 Agent 相关端点的前缀为 `/api/agent`。所有端点需要登录鉴权。
+所有 Agent 相关端点的前缀为 `/api/sandbox/agent`。所有端点需要登录鉴权。
 
 ---
 
@@ -8,20 +8,20 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/agent/run | 同步执行 Agent（等待完成后返回） |
-| POST | /api/agent/run/stream | 流式执行 Agent（SSE 实时推送） |
-| WS | /api/agent/ws/run | WebSocket 实时对话（推荐） |
-| GET | /api/agent/sessions | 获取会话列表 |
-| GET | /api/agent/sessions/{session_id}/messages | 获取会话历史消息 |
-| DELETE | /api/agent/sessions/{session_id} | 删除会话 |
-| POST | /api/agent/permission/respond | 回复权限请求 |
+| POST | /api/sandbox/agent/run | 同步执行 Agent（等待完成后返回） |
+| POST | /api/sandbox/agent/run/stream | 流式执行 Agent（SSE 实时推送） |
+| WS | /api/sandbox/agent/ws/run | WebSocket 实时对话（推荐） |
+| GET | /api/sandbox/agent/sessions | 获取会话列表 |
+| GET | /api/sandbox/agent/sessions/{session_id}/messages | 获取会话历史消息 |
+| DELETE | /api/sandbox/agent/sessions/{session_id} | 删除会话 |
+| POST | /api/sandbox/agent/permission/respond | 回复权限请求 |
 
 ---
 
 ## 发送消息（同步）
 
 ```bash
-curl -X POST /api/agent/run \
+curl -X POST /api/sandbox/agent/run \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -75,7 +75,7 @@ curl -X POST /api/agent/run \
 ## 发送消息（流式 SSE）
 
 ```bash
-curl -X POST /api/agent/run/stream \
+curl -X POST /api/sandbox/agent/run/stream \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"message": "帮我分析这段代码"}' \
@@ -115,7 +115,7 @@ JWT 通过 WebSocket 子协议（`Sec-WebSocket-Protocol`）传递，不放在 U
 （边缘网关在握手时鉴权，URL token 会泄漏到访问日志）：
 
 ```js
-new WebSocket("ws://<host>/api/agent/ws/run", ["priva.ws.v1", `priva.token.${jwt_token}`])
+new WebSocket("ws://<host>/api/sandbox/agent/ws/run", ["priva.ws.v1", `priva.token.${jwt_token}`])
 ```
 
 服务端只回显 `priva.ws.v1` 子协议以完成握手。
@@ -181,7 +181,7 @@ new WebSocket("ws://<host>/api/agent/ws/run", ["priva.ws.v1", `priva.token.${jwt
 ### 获取会话列表
 
 ```bash
-curl GET "/api/agent/sessions?scope=project&limit=20&offset=0" \
+curl GET "/api/sandbox/agent/sessions?scope=project&limit=20&offset=0" \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -210,7 +210,7 @@ curl GET "/api/agent/sessions?scope=project&limit=20&offset=0" \
 ### 获取会话消息
 
 ```bash
-curl GET /api/agent/sessions/abc123/messages \
+curl GET /api/sandbox/agent/sessions/abc123/messages \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -219,7 +219,7 @@ curl GET /api/agent/sessions/abc123/messages \
 ### 删除会话
 
 ```bash
-curl -X DELETE /api/agent/sessions/abc123 \
+curl -X DELETE /api/sandbox/agent/sessions/abc123 \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -230,7 +230,7 @@ curl -X DELETE /api/agent/sessions/abc123 \
 如果使用 SSE 模式，可通过此端点回复权限请求：
 
 ```bash
-curl -X POST /api/agent/permission/respond \
+curl -X POST /api/sandbox/agent/permission/respond \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"request_id": "req123", "decision": "allow"}'

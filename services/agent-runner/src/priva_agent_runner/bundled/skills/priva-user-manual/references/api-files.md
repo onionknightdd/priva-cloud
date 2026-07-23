@@ -108,7 +108,7 @@ curl -X DELETE /api/files/a1b2c3d4-e5f6-7890-abcd-ef1234567890 \
    - API：在 `attachments` 字段中传入文件路径
 
 ```bash
-curl -X POST /api/agent/run \
+curl -X POST /api/sandbox/agent/run \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
