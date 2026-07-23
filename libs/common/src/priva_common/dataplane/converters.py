@@ -12,6 +12,7 @@ import json
 
 from priva_common.dataplane.client import (
     BindingRecord,
+    ChannelPlatformConfigRecord,
     FeishuChannelConfigRecord,
     FeishuSecretRecord,
     HookPolicyRecord,
@@ -100,6 +101,11 @@ def feishu_config_from_pb(m) -> FeishuChannelConfigRecord | None:
         enable_permission_feedback=m.enable_permission_feedback,
         feedback_timeout_seconds=m.feedback_timeout_seconds,
         domain=m.domain or "feishu",
+        owner_union_id=m.owner_union_id,
+        owner_open_id=m.owner_open_id,
+        owner_bound_at=m.owner_bound_at or None,
+        group_chat_enabled=m.group_chat_enabled,
+        effective_group_enabled=m.effective_group_enabled,
         conn_status=m.conn_status or "disabled",
         last_error_code=m.last_error_code if m.last_error_code else None,
         last_error_message=m.last_error_message or None,
@@ -120,6 +126,15 @@ def feishu_secret_from_pb(m) -> FeishuSecretRecord | None:
         app_id=m.app_id or None,
         app_secret=m.app_secret or "",
         domain=m.domain or "feishu",
+    )
+
+
+def channel_platform_from_pb(m) -> ChannelPlatformConfigRecord:
+    # Singleton with static defaults — a never-written row reads as all-off.
+    return ChannelPlatformConfigRecord(
+        group_chat_disabled=m.group_chat_disabled,
+        updated_by=m.updated_by,
+        updated_at=m.updated_at or None,
     )
 
 

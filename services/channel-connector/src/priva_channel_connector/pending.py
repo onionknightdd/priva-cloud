@@ -15,6 +15,7 @@ atomic enough under the GIL for this use.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 
@@ -42,17 +43,37 @@ class PendingPrompt:
     state: object | None = None
     reveal: bool = False
     selected: str = ""         # model① dropdown pick held until the user clicks 提交 (no auto-submit)
+    registered_at: float = 0.0  # time.monotonic() at register(); the TTL-sweep key
 
 
 _BY_MESSAGE: dict[str, PendingPrompt] = {}
 _BY_REQUEST: dict[str, PendingPrompt] = {}
 
+# Backstop only: normal removal is resolve / skip / timeout / run-end expiry. A prompt
+# outlives all of those when its run dies without a permission_timeout (crashed dial,
+# severed SSE) — without a sweep the module dicts grow forever, each entry pinning its
+# whole StreamState.
+_TTL_SECONDS = 3600.0
+
 
 def register(prompt: PendingPrompt) -> None:
     """Index a prompt once its card is posted (message_id known)."""
+    prompt.registered_at = time.monotonic()
+    _sweep()
     if prompt.message_id:
         _BY_MESSAGE[prompt.message_id] = prompt
     _BY_REQUEST[prompt.request_id] = prompt
+
+
+def _sweep(now: float | None = None) -> None:
+    """Opportunistic TTL sweep (piggybacks on register — no timer to manage)."""
+    now = time.monotonic() if now is None else now
+    for index in (_BY_MESSAGE, _BY_REQUEST):
+        stale = [k for k, p in index.items() if now - p.registered_at > _TTL_SECONDS]
+        for k in stale:
+            prompt = index.pop(k, None)
+            if prompt is not None and prompt.status == "pending":
+                prompt.status = "expired"
 
 
 def get_by_message(message_id: str) -> PendingPrompt | None:

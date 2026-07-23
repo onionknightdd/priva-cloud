@@ -70,6 +70,31 @@ class FeishuChannelConfigServiceStub:
                 request_serializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.AccountRef.SerializeToString,
                 response_deserializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.FeishuSecret.FromString,
                 _registered_method=True)
+        self.CreateLinkCode = channel.unary_unary(
+                '/priva.dataplane.v1.FeishuChannelConfigService/CreateLinkCode',
+                request_serializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.AccountRef.SerializeToString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.LinkCode.FromString,
+                _registered_method=True)
+        self.BindOwnerWithCode = channel.unary_unary(
+                '/priva.dataplane.v1.FeishuChannelConfigService/BindOwnerWithCode',
+                request_serializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.BindOwnerRequest.SerializeToString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.BindOwnerResult.FromString,
+                _registered_method=True)
+        self.UnbindOwner = channel.unary_unary(
+                '/priva.dataplane.v1.FeishuChannelConfigService/UnbindOwner',
+                request_serializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.UnbindOwnerRequest.SerializeToString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.FeishuChannelConfig.FromString,
+                _registered_method=True)
+        self.GetPlatformConfig = channel.unary_unary(
+                '/priva.dataplane.v1.FeishuChannelConfigService/GetPlatformConfig',
+                request_serializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.Empty.SerializeToString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.ChannelPlatformConfig.FromString,
+                _registered_method=True)
+        self.SetPlatformConfig = channel.unary_unary(
+                '/priva.dataplane.v1.FeishuChannelConfigService/SetPlatformConfig',
+                request_serializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.SetChannelPlatformConfigRequest.SerializeToString,
+                response_deserializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.ChannelPlatformConfig.FromString,
+                _registered_method=True)
 
 
 class FeishuChannelConfigServiceServicer:
@@ -119,6 +144,41 @@ class FeishuChannelConfigServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def CreateLinkCode(self, request, context):
+        """USER route (control-panel)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def BindOwnerWithCode(self, request, context):
+        """CONNECTOR route
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UnbindOwner(self, request, context):
+        """USER route
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetPlatformConfig(self, request, context):
+        """ADMIN route
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetPlatformConfig(self, request, context):
+        """ADMIN route
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_FeishuChannelConfigServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -156,6 +216,31 @@ def add_FeishuChannelConfigServiceServicer_to_server(servicer, server):
                     servicer.GetFeishuSecret,
                     request_deserializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.AccountRef.FromString,
                     response_serializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.FeishuSecret.SerializeToString,
+            ),
+            'CreateLinkCode': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateLinkCode,
+                    request_deserializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.AccountRef.FromString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.LinkCode.SerializeToString,
+            ),
+            'BindOwnerWithCode': grpc.unary_unary_rpc_method_handler(
+                    servicer.BindOwnerWithCode,
+                    request_deserializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.BindOwnerRequest.FromString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.BindOwnerResult.SerializeToString,
+            ),
+            'UnbindOwner': grpc.unary_unary_rpc_method_handler(
+                    servicer.UnbindOwner,
+                    request_deserializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.UnbindOwnerRequest.FromString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.FeishuChannelConfig.SerializeToString,
+            ),
+            'GetPlatformConfig': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetPlatformConfig,
+                    request_deserializer=priva__common_dot_dataplane_dot_v1_dot_common__pb2.Empty.FromString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.ChannelPlatformConfig.SerializeToString,
+            ),
+            'SetPlatformConfig': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetPlatformConfig,
+                    request_deserializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.SetChannelPlatformConfigRequest.FromString,
+                    response_serializer=priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.ChannelPlatformConfig.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -347,6 +432,141 @@ class FeishuChannelConfigService:
             '/priva.dataplane.v1.FeishuChannelConfigService/GetFeishuSecret',
             priva__common_dot_dataplane_dot_v1_dot_common__pb2.AccountRef.SerializeToString,
             priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.FeishuSecret.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CreateLinkCode(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/priva.dataplane.v1.FeishuChannelConfigService/CreateLinkCode',
+            priva__common_dot_dataplane_dot_v1_dot_common__pb2.AccountRef.SerializeToString,
+            priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.LinkCode.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def BindOwnerWithCode(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/priva.dataplane.v1.FeishuChannelConfigService/BindOwnerWithCode',
+            priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.BindOwnerRequest.SerializeToString,
+            priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.BindOwnerResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UnbindOwner(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/priva.dataplane.v1.FeishuChannelConfigService/UnbindOwner',
+            priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.UnbindOwnerRequest.SerializeToString,
+            priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.FeishuChannelConfig.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetPlatformConfig(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/priva.dataplane.v1.FeishuChannelConfigService/GetPlatformConfig',
+            priva__common_dot_dataplane_dot_v1_dot_common__pb2.Empty.SerializeToString,
+            priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.ChannelPlatformConfig.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetPlatformConfig(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/priva.dataplane.v1.FeishuChannelConfigService/SetPlatformConfig',
+            priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.SetChannelPlatformConfigRequest.SerializeToString,
+            priva__common_dot_dataplane_dot_v1_dot_feishu__channel__config__pb2.ChannelPlatformConfig.FromString,
             options,
             channel_credentials,
             insecure,

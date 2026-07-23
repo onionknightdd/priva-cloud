@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { CalendarClock, LogOut, Users, ScrollText, LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen, Server, Activity, Network, Gauge, SquareTerminal } from 'lucide-react'
+import { CalendarClock, LogOut, MessageSquare, Users, ScrollText, LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen, Server, Activity, Network, Gauge, SquareTerminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useAuthStore from '@shared/stores/authStore'
 import { useResizable } from '@shared/hooks/useResizable'
@@ -16,6 +16,7 @@ import SystemMapView from './components/admin/SystemMapView'
 import ConsoleView from './components/admin/ConsoleView'
 import UserEditDrawer from './components/admin/UserEditDrawer'
 import AgentRunnerSandbox from './components/admin/AgentRunnerSandbox'
+import ChannelSettings from './components/admin/ChannelSettings'
 import safeStorage from '@shared/utils/safeStorage'
 
 // Promoted admin SPA (Phase 2 §D2). Reuses the existing, design-spec-conformant
@@ -40,6 +41,7 @@ const NAV = {
   ],
   config: [
     { id: 'sandbox', labelKey: 'admin.sandboxTitle', icon: Server },
+    { id: 'channels', labelKey: 'admin.navChannels', icon: MessageSquare },
   ],
 }
 
@@ -323,7 +325,8 @@ export default function AdminApp() {
         {activeTab === 'dashboard' && section === 'audit' && <AuditLog />}
         {activeTab === 'dashboard' && section === 'scheduler' && <SchedulerOversight />}
         {activeTab === 'config' && section === 'sandbox' && <AgentRunnerSandbox />}
-        {activeTab === 'config' && section !== 'sandbox' && <ConfigPlaceholder />}
+        {activeTab === 'config' && section === 'channels' && <ChannelSettings />}
+        {activeTab === 'config' && !['sandbox', 'channels'].includes(section) && <ConfigPlaceholder />}
       </main>
 
       {/* Self-gates on selectedUser; stays mounted so its exit slide can play. */}

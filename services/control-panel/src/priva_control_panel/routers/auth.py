@@ -17,7 +17,11 @@ from priva_common.models.auth import (
     SetupStatus,
     UserPublic,
 )
-from priva_common.models.feishu import FeishuConfigResponse, FeishuUserConfigUpdate
+from priva_common.models.feishu import (
+    FeishuConfigResponse,
+    FeishuLinkCodeResponse,
+    FeishuUserConfigUpdate,
+)
 from ..services.feishu_connector import nudge_reconcile
 from ..services.auth import (
     create_jwt,
@@ -284,11 +288,22 @@ _FEISHU_ACCESS_MODES = ("owner_only", "allowlist", "all")
 _FEISHU_DOMAINS = ("feishu", "lark")
 
 
+def _group_globally_disabled(client) -> bool:
+    """The admin global group-chat switch, folded into the user's read view so the
+    SPA can grey out the toggle. Fail-soft: an unreachable singleton reads as off."""
+    try:
+        return bool(client.channel_platform.get().group_chat_disabled)
+    except Exception:
+        return False
+
+
 @router.get("/me/feishu-config", response_model=FeishuConfigResponse)
 async def get_my_feishu_config(user: UserRecord = Depends(require_user)):
     from priva_common.dataplane import get_client
-    rec = get_client().feishu_configs.get(user.account_id)
-    return FeishuConfigResponse.from_record(rec, user.account_id)
+    client = get_client()
+    rec = client.feishu_configs.get(user.account_id)
+    return FeishuConfigResponse.from_record(
+        rec, user.account_id, group_chat_globally_disabled=_group_globally_disabled(client))
 
 
 @router.put("/me/feishu-config", response_model=FeishuConfigResponse)
@@ -323,13 +338,41 @@ async def update_my_feishu_config(
     if request.user_enabled is not None:
         kwargs["user_enabled"] = request.user_enabled
     for f in ("single_chat_access_mode", "allowed_union_ids", "welcome_message", "reject_message",
-              "model", "max_queue_size", "enable_permission_feedback", "feedback_timeout_seconds", "domain"):
+              "model", "max_queue_size", "enable_permission_feedback", "feedback_timeout_seconds",
+              "domain", "group_chat_enabled"):
         v = getattr(request, f)
         if v is not None:
             kwargs[f] = v
 
-    rec = get_client().feishu_configs.set_user(user.account_id, updated_by=user.username, **kwargs)
+    client = get_client()
+    rec = client.feishu_configs.set_user(user.account_id, updated_by=user.username, **kwargs)
     await nudge_reconcile(user.account_id, user.username)  # best-effort; poll is the backstop
+    return FeishuConfigResponse.from_record(
+        rec, user.account_id, group_chat_globally_disabled=_group_globally_disabled(client))
+
+
+@router.post("/me/feishu-link-code", response_model=FeishuLinkCodeResponse)
+async def create_my_feishu_link_code(user: UserRecord = Depends(require_user)):
+    """Mint a single-use owner-binding code (feat_feishu_DM.md §4.1). The plaintext
+    exists only in this response; overwrites any previous pending code. No reconcile
+    nudge — minting a code must not bounce the WS (link cols are not in the digest)."""
+    from priva_common.dataplane import get_client
+    code, expires = get_client().feishu_configs.create_link_code(user.account_id)
+    get_audit_logger().append(AuditEntry(
+        actor=user.username, action="self.feishu_link_code_created",
+        target=user.username, details={"expires_at": expires}))  # never the code itself
+    return FeishuLinkCodeResponse(code=code, expires_at=expires)
+
+
+@router.delete("/me/feishu-owner", response_model=FeishuConfigResponse)
+async def unbind_my_feishu_owner(user: UserRecord = Depends(require_user)):
+    """Drop the owner binding (gate falls back to allow-all) and discard any pending
+    code. Digest changes → connector re-arms with the ownerless cfg."""
+    from priva_common.dataplane import get_client
+    rec = get_client().feishu_configs.unbind_owner(user.account_id, updated_by=user.username)
+    get_audit_logger().append(AuditEntry(
+        actor=user.username, action="self.feishu_owner_unbound", target=user.username, details={}))
+    await nudge_reconcile(user.account_id, user.username)
     return FeishuConfigResponse.from_record(rec, user.account_id)
 
 

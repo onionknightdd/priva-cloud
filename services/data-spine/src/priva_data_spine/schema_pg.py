@@ -53,7 +53,9 @@ DDL: tuple[str, ...] = (
     """,
     # session_uuid NULLable: "/new" detaches the binding (NULL) → next DM starts a
     # fresh SDK session; the unique index is partial so detached rows coexist.
-    "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_account ON channel_binding(account_id)",
+    # Sessions are PER CHAT (feat_feishu_DM.md §5.2): one binding per
+    # (account, feishu_chat_id) — "/new" only resets the chat it was typed in.
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_account_chat ON channel_binding(account_id, feishu_chat_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_session_active ON channel_binding(session_uuid) WHERE session_uuid IS NOT NULL",
     # 3 ── quota ------------------------------------------------------------
     f"""
@@ -228,6 +230,12 @@ DDL: tuple[str, ...] = (
       enable_permission_feedback BIGINT NOT NULL DEFAULT 1 CHECK (enable_permission_feedback IN (0,1)),
       feedback_timeout_seconds   BIGINT NOT NULL DEFAULT 180,
       domain                  TEXT NOT NULL DEFAULT 'feishu' CHECK (domain IN ('feishu','lark')),
+      group_chat_enabled      BIGINT NOT NULL DEFAULT 0 CHECK (group_chat_enabled IN (0,1)),
+      owner_union_id          TEXT NOT NULL DEFAULT '',
+      owner_open_id           TEXT NOT NULL DEFAULT '',
+      owner_bound_at          TEXT,
+      link_code_hash          TEXT,
+      link_code_expires_at    TEXT,
       conn_status             TEXT NOT NULL DEFAULT 'disabled'
                               CHECK (conn_status IN ('disabled','connecting','connected','auth_failed','error','conflict')),
       last_error_code         BIGINT,
@@ -241,6 +249,15 @@ DDL: tuple[str, ...] = (
     """,
     "CREATE INDEX IF NOT EXISTS ix_feishu_effective ON feishu_channel_config(account_id) "
     "WHERE user_enabled = 1 AND admin_disabled = 0",
+    # 11 ── channel_platform_config (mirror of schema.py: admin singleton, id=1) --
+    f"""
+    CREATE TABLE IF NOT EXISTS channel_platform_config (
+      id                  BIGINT PRIMARY KEY CHECK (id = 1),
+      group_chat_disabled BIGINT NOT NULL DEFAULT 0 CHECK (group_chat_disabled IN (0,1)),
+      updated_by          TEXT NOT NULL DEFAULT '',
+      updated_at          TEXT NOT NULL DEFAULT {NOW}
+    )
+    """,
 )
 
 # Idempotent column additions for DBs created before a column existed (mirror of
@@ -256,11 +273,21 @@ _MIGRATIONS: tuple[str, ...] = (
     "ALTER TABLE runner_defaults ADD COLUMN IF NOT EXISTS terminal_idle_timeout_seconds BIGINT NOT NULL DEFAULT 1800",
     "ALTER TABLE runner_defaults ADD COLUMN IF NOT EXISTS terminal_max_lifetime_seconds BIGINT NOT NULL DEFAULT 14400",
     "ALTER TABLE runner_defaults ADD COLUMN IF NOT EXISTS terminal_scale_down_grace_seconds BIGINT NOT NULL DEFAULT 120",
+    "ALTER TABLE feishu_channel_config ADD COLUMN IF NOT EXISTS owner_union_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE feishu_channel_config ADD COLUMN IF NOT EXISTS owner_open_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE feishu_channel_config ADD COLUMN IF NOT EXISTS owner_bound_at TEXT",
+    "ALTER TABLE feishu_channel_config ADD COLUMN IF NOT EXISTS link_code_hash TEXT",
+    "ALTER TABLE feishu_channel_config ADD COLUMN IF NOT EXISTS link_code_expires_at TEXT",
+    "ALTER TABLE feishu_channel_config ADD COLUMN IF NOT EXISTS group_chat_enabled BIGINT NOT NULL DEFAULT 0 "
+    "CHECK (group_chat_enabled IN (0,1))",
     # session_uuid: drop NOT NULL for the "/new" detach flow, and retire the old
     # non-partial index in favour of the partial ux_binding_session_active (created
     # by the DDL above). All idempotent — safe to run every boot.
     "ALTER TABLE channel_binding ALTER COLUMN session_uuid DROP NOT NULL",
     "DROP INDEX IF EXISTS ux_binding_session",
+    # Per-chat sessions (feat_feishu_DM.md §5.2): retire the one-binding-per-account
+    # unique index; the composite ux_binding_account_chat comes from the DDL above.
+    "DROP INDEX IF EXISTS ux_binding_account",
     # One-time backfill, safe every boot: pre-migration rows carry enforced=1
     # with an empty enforced_events; the service keeps enforced derived from
     # enforced_events afterwards, so this WHERE never matches again.

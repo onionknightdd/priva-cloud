@@ -17,8 +17,15 @@ class InboundMessage:
     account_id: str       # the app/account this socket belongs to (== routing target)
     sender_open_id: str   # who sent it (access gate + proactive addressing)
     chat_id: str          # p2p chat id (reply target)
-    text: str             # extracted message text
-    message_id: str       # feishu message id (idempotency)
+    text: str             # extracted message text (text DM, or flattened post runs)
+    message_id: str       # feishu message id (idempotency + image-resource fetch scope)
+    image_keys: tuple[str, ...] = ()  # image/post 图片 run 的 image_key，保序；字节需另行拉取
+    sender_union_id: str = ""  # bot 应用命名空间的 union_id — owner/allowlist gate 的比对键
+    chat_type: str = ""        # "p2p" | "group"（空视为 p2p — 兼容旧 fake/测试）
+    # 群聊 @ 触发（feat_feishu_DM.md §5.2）：该消息是否带 @ 提及。配套权限
+    # im:message.group_at_msg:readonly 下只有 @bot 消息会推到长连接（权限即过滤器），
+    # 所以 mentioned=True 即视为 @bot；text 已由 transport 完成占位符剥离。
+    mentioned: bool = False
 
 
 # Async callback the transport fires per inbound message (it has already ack'd <3s).
@@ -47,6 +54,9 @@ class IMTransport(Protocol):
     # wholesale replace). Both best-effort — a card failure falls back to send_text.
     async def send_card(self, chat_id: str, card: dict) -> "str | None": ...
     async def patch_card(self, message_id: str, card: dict) -> None: ...
+    # Download one inbound image (message-scoped resource fetch) → (bytes, media_type),
+    # or None on any failure (missing im:resource scope, unknown format, network).
+    async def fetch_image(self, message_id: str, image_key: str) -> "tuple[bytes, str] | None": ...
 
 
 @dataclass
@@ -65,6 +75,8 @@ class FakeTransport:
     removed: list[str] = field(default_factory=list)               # reaction_ids removed
     cards: list[tuple[str, dict]] = field(default_factory=list)    # (chat_id, card) sent
     patches: list[tuple[str, dict]] = field(default_factory=list)  # (message_id, card) patched
+    images: dict = field(default_factory=dict)                     # image_key -> (bytes, media_type)
+    fetches: list[tuple[str, str]] = field(default_factory=list)   # (message_id, image_key) requested
     _rid_seq: int = 0
     _mid_seq: int = 0
 
@@ -96,6 +108,10 @@ class FakeTransport:
 
     async def patch_card(self, message_id: str, card: dict) -> None:
         self.patches.append((message_id, card))
+
+    async def fetch_image(self, message_id: str, image_key: str) -> "tuple[bytes, str] | None":
+        self.fetches.append((message_id, image_key))
+        return self.images.get(image_key)
 
     # --- test helpers -----------------------------------------------------
     async def inject(self, msg: InboundMessage) -> None:

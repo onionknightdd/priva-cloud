@@ -61,6 +61,11 @@ export const getRunnerDefaults = () => getJSON('/admin/runner-defaults')
 export const updateRunnerDefaults = (data) => putJSON('/admin/runner-defaults', data)
 export const getRunnerImages = () => getJSON('/admin/runner-images')
 
+// Configurations ▸ Channels: platform-wide channel settings — today the global
+// group-chat kill switch (composes with each user's own opt-in).
+export const getChannelPlatformConfig = () => getJSON('/admin/channel-platform')
+export const updateChannelPlatformConfig = (data) => putJSON('/admin/channel-platform', data)
+
 // Hook Policy (Agent Runner Sandbox → Runtime): admin-stored hooks delivered to
 // every account's agent-runner at its next session build. create saves disabled;
 // deleting a predefined (seeded) row is rejected (409). validate is compile-only.

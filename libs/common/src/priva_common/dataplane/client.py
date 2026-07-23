@@ -30,6 +30,7 @@ __all__ = [
     "PendingRegistrationRecord",
     "HookPolicyRecord",
     "FeishuChannelConfigRecord",
+    "ChannelPlatformConfigRecord",
     "AccountClient",
     "BindingClient",
     "QuotaClient",
@@ -40,6 +41,7 @@ __all__ = [
     "RegistrationClient",
     "HookPolicyClient",
     "FeishuChannelConfigClient",
+    "ChannelPlatformConfigClient",
     "DataplaneClient",
 ]
 
@@ -95,6 +97,17 @@ class FeishuChannelConfigRecord(BaseModel):
     effective_enabled: bool = False
     single_chat_access_mode: str = "owner_only"  # owner_only | allowlist | all
     allowed_union_ids: str = "[]"                 # JSON array as string
+    # Group-chat participation (feat_feishu_DM.md §5): user opt-in AND NOT the
+    # platform-wide kill switch. effective_group_enabled is server-computed and
+    # part of desired_digest (a flip re-arms the worker's cfg snapshot).
+    group_chat_enabled: bool = False
+    effective_group_enabled: bool = False
+    # Owner link-code binding (feat_feishu_DM.md §4) — ids in the BOT app's namespace.
+    # Owner cols are part of desired_digest (bind/unbind re-arms the worker); the
+    # pending link-code lives server-side only (hash+expiry) and is never read back.
+    owner_union_id: str = ""
+    owner_open_id: str = ""
+    owner_bound_at: str | None = None
     welcome_message: str = ""
     reject_message: str = ""
     model: str | None = None
@@ -121,6 +134,16 @@ class FeishuSecretRecord(BaseModel):
     app_id: str | None = None
     app_secret: str = ""      # plaintext; "" = unset or undecryptable
     domain: str = "feishu"
+
+
+class ChannelPlatformConfigRecord(BaseModel):
+    """ADMIN-only platform-wide channel settings (`channel_platform_config`, single
+    row). group_chat_disabled is the global group-chat kill switch: flipping it
+    recomputes every feishu row's desired_digest server-side so the connector
+    re-arms all affected workers on its next poll."""
+    group_chat_disabled: bool = False
+    updated_by: str = ""
+    updated_at: str | None = None
 
 
 class RunnerDefaultsRecord(BaseModel):
@@ -320,6 +343,7 @@ class FeishuChannelConfigClient(Protocol):
         enable_permission_feedback: bool | None = None,
         feedback_timeout_seconds: int | None = None,
         domain: str | None = None,
+        group_chat_enabled: bool | None = None,
         updated_by: str = "",
     ) -> FeishuChannelConfigRecord: ...
     def set_admin(
@@ -339,6 +363,26 @@ class FeishuChannelConfigClient(Protocol):
     # Connector-only privileged read: decrypted plaintext app_secret. None when the
     # account has no config row at all.
     def get_secret(self, account_id: str) -> FeishuSecretRecord | None: ...
+    # Owner link-code binding (feat_feishu_DM.md §4). create_link_code mints a
+    # single-use code (returns plaintext + expires_at; only its SHA-256 is stored),
+    # bind_owner_with_code atomically validates+binds+clears (constant-time compare,
+    # CONNECTOR route), unbind_owner clears the owner (USER route via control-panel).
+    def create_link_code(self, account_id: str) -> tuple[str, str]: ...
+    def bind_owner_with_code(
+        self, account_id: str, code: str, union_id: str, open_id: str
+    ) -> bool: ...
+    def unbind_owner(self, account_id: str, *, updated_by: str = "") -> FeishuChannelConfigRecord: ...
+
+
+class ChannelPlatformConfigClient(Protocol):
+    """ADMIN-only platform-wide channel settings singleton. `set` recomputes the
+    desired_digest of every feishu row whose effective_group_enabled flips, so the
+    connector's poll re-arms all affected workers (feat_feishu_DM.md §5.1)."""
+
+    def get(self) -> ChannelPlatformConfigRecord: ...
+    def set(
+        self, *, group_chat_disabled: bool | None = None, updated_by: str = ""
+    ) -> ChannelPlatformConfigRecord: ...
 
 
 class RunnerDefaultsClient(Protocol):
@@ -411,3 +455,4 @@ class DataplaneClient:
     registrations: RegistrationClient
     hook_policies: HookPolicyClient
     feishu_configs: FeishuChannelConfigClient
+    channel_platform: ChannelPlatformConfigClient

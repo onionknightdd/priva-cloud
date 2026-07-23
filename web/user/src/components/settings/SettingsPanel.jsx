@@ -22,7 +22,7 @@ import { getLucideIcon, ICON_NAMES } from '../../utils/lucideIconMap'
 import Toggle from '@shared/components/shared/Toggle'
 import Dropdown from '@shared/components/shared/Dropdown'
 import DrawIcon from '@shared/components/shared/DrawIcon'
-import { getFeishuConfig, updateFeishuConfig } from '../../api/channels'
+import { createFeishuLinkCode, getFeishuConfig, unbindFeishuOwner, updateFeishuConfig } from '../../api/channels'
 
 function FilterableModelSelect({ models, value, onChange, label, labelStyle, inputStyle, placeholder, filterPlaceholder, noMatchesText }) {
   const [open, setOpen] = useState(false)
@@ -1686,6 +1686,10 @@ function ChannelsTab() {
   const [secretDraft, setSecretDraft] = useState('')
   const [showSecret, setShowSecret] = useState(false)
   const [pendingClear, setPendingClear] = useState(false)
+  const [linkCode, setLinkCode] = useState(null)      // { code, expires_at } | null
+  const [codeCopied, setCodeCopied] = useState(false)
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  const [pendingUnbind, setPendingUnbind] = useState(false)
   const initedRef = useRef(false)
   const mountedRef = useRef(true)
 
@@ -1727,6 +1731,51 @@ function ChannelsTab() {
   const adminDisabled = !!cfg?.admin_disabled
   const appIdDirty = appIdDraft.trim() !== (cfg?.app_id || '')
   const status = feishuStatusView(cfg, t)
+
+  // Owner link-code: 1s tick drives the expiry countdown; the 8s cfg poll flips
+  // owner_bound once the user DMs the code, at which point the code block clears.
+  useEffect(() => {
+    if (!linkCode) return undefined
+    const id = setInterval(() => setNowTick(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [linkCode])
+  useEffect(() => {
+    if (cfg?.owner_bound && linkCode) setLinkCode(null)
+  }, [cfg?.owner_bound])  // eslint-disable-line react-hooks/exhaustive-deps
+  const codeRemainMs = linkCode ? Date.parse(linkCode.expires_at) - nowTick : 0
+  const codeRemain = codeRemainMs > 0
+    ? `${String(Math.floor(codeRemainMs / 60000)).padStart(2, '0')}:${String(Math.floor((codeRemainMs % 60000) / 1000)).padStart(2, '0')}`
+    : null
+
+  const mintCode = async () => {
+    setBusy(true)
+    try {
+      const data = await createFeishuLinkCode()
+      if (mountedRef.current) { setLinkCode(data); setError(null) }
+    } catch (e) {
+      if (mountedRef.current) setError(e.message)
+    } finally {
+      if (mountedRef.current) setBusy(false)
+    }
+  }
+
+  const doUnbind = async () => {
+    setBusy(true)
+    try {
+      const data = await unbindFeishuOwner()
+      if (mountedRef.current) { setCfg(data); setError(null); setPendingUnbind(false) }
+    } catch (e) {
+      if (mountedRef.current) setError(e.message)
+    } finally {
+      if (mountedRef.current) setBusy(false)
+    }
+  }
+
+  const copyLinkCommand = () => {
+    navigator.clipboard.writeText(`/link ${linkCode.code}`)
+    setCodeCopied(true)
+    setTimeout(() => setCodeCopied(false), 800)
+  }
 
   const saveSecret = async () => {
     if (!secretDraft) return
@@ -1856,6 +1905,107 @@ function ChannelsTab() {
         <label style={labelStyle}>{t('settings.feishu.domain')}</label>
         <Dropdown size="sm" value={cfg?.domain || 'feishu'} onChange={(v) => save({ domain: v })}
           options={[{ value: 'feishu', label: 'Feishu (飞书)' }, { value: 'lark', label: 'Lark' }]} />
+      </div>
+
+      {/* Owner binding (link-code) */}
+      <div>
+        <label style={labelStyle}>{t('settings.feishu.owner')}</label>
+        {cfg?.owner_bound ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-xs px-2 py-1" style={{ color: 'var(--green)', borderLeft: '2px solid var(--green)', background: 'var(--bg-elevated)', borderRadius: 4 }}>
+                {t('settings.feishu.ownerBound')}
+              </span>
+              <span className="text-xs" style={{ color: 'var(--text-secondary)', fontFamily: FEISHU_MONO }}>
+                {cfg.owner_union_id_masked}
+              </span>
+              {cfg.owner_bound_at && (
+                <span className="text-xs" style={{ color: 'var(--text-dim)' }}>
+                  {new Date(cfg.owner_bound_at).toLocaleString()}
+                </span>
+              )}
+              <button type="button" onClick={() => setPendingUnbind(true)}
+                style={{ ...feishuSecBtn, borderColor: 'var(--red)', color: 'var(--red)' }}>
+                {t('settings.feishu.unbind')}
+              </button>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xs" style={{ color: 'var(--text-dim)' }}>{t('settings.feishu.accessMode')}</span>
+              <Dropdown size="sm" value={cfg?.single_chat_access_mode || 'owner_only'}
+                onChange={(v) => save({ single_chat_access_mode: v })}
+                options={[
+                  { value: 'owner_only', label: t('settings.feishu.modeOwnerOnly') },
+                  { value: 'all', label: t('settings.feishu.modeAll') },
+                ]} />
+            </div>
+            {pendingUnbind && (
+              <div className="flex flex-col gap-2 px-3 py-2" style={{ borderLeft: '2px solid var(--red)', background: 'var(--bg-elevated)', borderRadius: 4 }}>
+                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('settings.feishu.unbindConfirm')}</span>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setPendingUnbind(false)}
+                    style={{ padding: '4px 12px', borderRadius: 4, fontSize: 12, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                    {t('confirm.cancel')}
+                  </button>
+                  <button type="button" disabled={busy} onClick={doUnbind}
+                    style={{ padding: '4px 12px', borderRadius: 4, fontSize: 12, border: 'none', background: 'var(--red)', color: 'var(--text-inverse)', cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.5 : 1 }}>
+                    {t('settings.feishu.unbind')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-3">
+              <span className="text-xs px-2 py-1" style={{ color: 'var(--text-dim)', borderLeft: '2px solid var(--border)', background: 'var(--bg-elevated)', borderRadius: 4 }}>
+                {t('settings.feishu.ownerUnbound')}
+              </span>
+              <button type="button" disabled={busy} onClick={mintCode} style={feishuSecBtn}>
+                {t('settings.feishu.genCode')}
+              </button>
+            </div>
+            <span className="text-xs" style={{ color: 'var(--text-dim)', lineHeight: 1.5 }}>
+              {t('settings.feishu.ownerHint')}
+            </span>
+            {linkCode && (
+              <div className="flex flex-col gap-1 px-3 py-2" style={{ borderLeft: '2px solid var(--cyan)', background: 'var(--bg-elevated)', borderRadius: 4 }}>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm" style={{ color: 'var(--text-primary)', fontFamily: FEISHU_MONO }}>
+                    /link {linkCode.code}
+                  </span>
+                  <button type="button" onClick={copyLinkCommand}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 2, color: codeCopied ? 'var(--green)' : 'var(--text-dim)', transition: 'color 150ms ease' }}>
+                    {codeCopied ? <Check size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
+                  </button>
+                  <span className="text-xs" style={{ color: codeRemain ? 'var(--text-dim)' : 'var(--red)' }}>
+                    {codeRemain ? t('settings.feishu.codeExpires', { time: codeRemain }) : t('settings.feishu.codeExpired')}
+                  </span>
+                </div>
+                <span className="text-xs" style={{ color: 'var(--text-dim)' }}>{t('settings.feishu.codeHint')}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Group-chat participation (user opt-in; admin holds a platform-wide kill switch) */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-1">
+            <label style={labelStyle}>{t('settings.feishu.groupChat')}</label>
+            <span className="text-xs" style={{ color: 'var(--text-dim)', lineHeight: 1.5 }}>
+              {t('settings.feishu.groupChatHint')}
+            </span>
+          </div>
+          <Toggle size="sm" checked={!!cfg?.group_chat_enabled}
+            disabled={busy || adminDisabled || !!cfg?.group_chat_globally_disabled}
+            onChange={(next) => save({ group_chat_enabled: next })} />
+        </div>
+        {cfg?.group_chat_globally_disabled && (
+          <div className="px-3 py-2 text-xs" style={{ borderLeft: '2px solid var(--yellow)', background: 'var(--bg-elevated)', borderRadius: 4, color: 'var(--yellow)' }}>
+            {t('settings.feishu.groupChatGloballyDisabled')}
+          </div>
+        )}
       </div>
 
       {error && <div className="text-xs" style={{ color: 'var(--red)' }}>{error}</div>}

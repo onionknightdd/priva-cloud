@@ -239,7 +239,7 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
                      single_chat_access_mode=None, allowed_union_ids=None, welcome_message=None,
                      reject_message=None, model=None, max_queue_size=None,
                      enable_permission_feedback=None, feedback_timeout_seconds=None,
-                     domain=None, updated_by=""):
+                     domain=None, group_chat_enabled=None, updated_by=""):
             req = feishu_channel_config_pb2.SetFeishuUserConfigRequest(
                 account_id=account_id, updated_by=updated_by)
             mask: list[str] = []
@@ -279,6 +279,9 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
             if domain is not None:
                 req.domain = domain
                 mask.append("domain")
+            if group_chat_enabled is not None:
+                req.group_chat_enabled = group_chat_enabled
+                mask.append("group_chat_enabled")
             req.update_mask.extend(mask)
             return cv.feishu_config_from_pb(self._s.SetUser(req))
 
@@ -322,6 +325,34 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         def get_secret(self, account_id):
             return cv.feishu_secret_from_pb(
                 self._s.GetFeishuSecret(common_pb2.AccountRef(account_id=account_id)))
+
+        def create_link_code(self, account_id):
+            r = self._s.CreateLinkCode(common_pb2.AccountRef(account_id=account_id))
+            return r.code, r.expires_at
+
+        def bind_owner_with_code(self, account_id, code, union_id, open_id):
+            return self._s.BindOwnerWithCode(feishu_channel_config_pb2.BindOwnerRequest(
+                account_id=account_id, code=code, union_id=union_id, open_id=open_id)).ok
+
+        def unbind_owner(self, account_id, *, updated_by=""):
+            return cv.feishu_config_from_pb(self._s.UnbindOwner(feishu_channel_config_pb2.UnbindOwnerRequest(
+                account_id=account_id, updated_by=updated_by)))
+
+    class _ChannelPlatform:
+        def __init__(self):
+            self._s = feishu_channel_config_pb2_grpc.FeishuChannelConfigServiceStub(channel)
+
+        def get(self):
+            return cv.channel_platform_from_pb(self._s.GetPlatformConfig(common_pb2.Empty()))
+
+        def set(self, *, group_chat_disabled=None, updated_by=""):
+            req = feishu_channel_config_pb2.SetChannelPlatformConfigRequest(updated_by=updated_by)
+            mask: list[str] = []
+            if group_chat_disabled is not None:
+                req.group_chat_disabled = group_chat_disabled
+                mask.append("group_chat_disabled")
+            req.update_mask.extend(mask)
+            return cv.channel_platform_from_pb(self._s.SetPlatformConfig(req))
 
     class _RunnerDefaults:
         def __init__(self):
@@ -567,6 +598,7 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         registrations=_Registrations(),
         hook_policies=_HookPolicies(),
         feishu_configs=_FeishuConfigs(),
+        channel_platform=_ChannelPlatform(),
     )
     _cache[dsn] = client
     return client

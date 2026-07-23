@@ -12,6 +12,15 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+def _mask_union_id(union_id: str) -> str:
+    """`on_9f3ab8c41d2` → `on_9f3a…1d2`: enough to recognize, not enough to replay."""
+    if not union_id:
+        return ""
+    if len(union_id) <= 10:
+        return union_id[:4] + "…"
+    return f"{union_id[:7]}…{union_id[-3:]}"
+
+
 class FeishuConnectionStatus(BaseModel):
     """Connector-observed runtime health (read-only; written by the channel-connector)."""
     conn_status: str = "disabled"  # disabled|connecting|connected|auth_failed|error|conflict
@@ -40,16 +49,30 @@ class FeishuConfigResponse(BaseModel):
     enable_permission_feedback: bool = True
     feedback_timeout_seconds: int = 180
     domain: str = "feishu"
+    # Owner link-code binding — union_id is masked (never fully exposed to the SPA);
+    # the pending code itself is NEVER in this read view (POST /feishu-link-code only).
+    owner_bound: bool = False
+    owner_bound_at: str | None = None
+    owner_union_id_masked: str = ""
+    # Group-chat participation (feat_feishu_DM.md §5): the user's own opt-in, the
+    # composed effective bit, and the admin global switch (drives the grey-out +
+    # hint in the SPA — the user toggle stays visible but inert while it's on).
+    group_chat_enabled: bool = False
+    effective_group_enabled: bool = False
+    group_chat_globally_disabled: bool = False
     connection: FeishuConnectionStatus = Field(default_factory=FeishuConnectionStatus)
     updated_by: str = ""
     updated_at: str | None = None
 
     @classmethod
-    def from_record(cls, rec, account_id: str) -> "FeishuConfigResponse":
+    def from_record(cls, rec, account_id: str,
+                    group_chat_globally_disabled: bool = False) -> "FeishuConfigResponse":
         """Map a FeishuChannelConfigRecord (or None = not configured) to the DTO.
         Duck-typed to avoid importing the data-plane record type here."""
         if rec is None:
-            return cls(account_id=account_id)
+            return cls(account_id=account_id,
+                       group_chat_globally_disabled=group_chat_globally_disabled)
+        owner_union = getattr(rec, "owner_union_id", "") or ""
         return cls(
             account_id=rec.account_id,
             app_id=rec.app_id,
@@ -67,6 +90,12 @@ class FeishuConfigResponse(BaseModel):
             enable_permission_feedback=rec.enable_permission_feedback,
             feedback_timeout_seconds=rec.feedback_timeout_seconds,
             domain=rec.domain,
+            owner_bound=bool(owner_union),
+            owner_bound_at=getattr(rec, "owner_bound_at", None),
+            owner_union_id_masked=_mask_union_id(owner_union),
+            group_chat_enabled=bool(getattr(rec, "group_chat_enabled", False)),
+            effective_group_enabled=bool(getattr(rec, "effective_group_enabled", False)),
+            group_chat_globally_disabled=group_chat_globally_disabled,
             connection=FeishuConnectionStatus(
                 conn_status=rec.conn_status,
                 last_error_code=rec.last_error_code,
@@ -95,8 +124,28 @@ class FeishuUserConfigUpdate(BaseModel):
     enable_permission_feedback: bool | None = None
     feedback_timeout_seconds: int | None = None
     domain: str | None = None
+    group_chat_enabled: bool | None = None
 
 
 class FeishuAdminConfigUpdate(BaseModel):
     """Admin write — kill-switch ONLY (cannot touch credentials or the user's toggle)."""
     admin_disabled: bool | None = None
+
+
+class ChannelPlatformConfigResponse(BaseModel):
+    """Admin Configurations ▸ Channels — the platform-wide singleton."""
+    group_chat_disabled: bool = False
+    updated_by: str = ""
+    updated_at: str | None = None
+
+
+class ChannelPlatformConfigUpdate(BaseModel):
+    """Admin write — the global group-chat kill switch (None = leave unchanged)."""
+    group_chat_disabled: bool | None = None
+
+
+class FeishuLinkCodeResponse(BaseModel):
+    """One-shot response to POST /me/feishu-link-code — the ONLY place the plaintext
+    code ever appears (storage keeps its SHA-256 + expiry)."""
+    code: str
+    expires_at: str

@@ -48,7 +48,10 @@ DDL: tuple[str, ...] = (
     # session_uuid is NULLable: the "/new" (empty session id) command detaches the
     # binding (session_uuid = NULL) so the next DM starts a fresh SDK session; the
     # unique index is partial so many detached rows coexist.
-    "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_account ON channel_binding(account_id)",
+    # Sessions are PER CHAT (feat_feishu_DM.md §5.2): one binding per
+    # (account, feishu_chat_id) — every group and every p2p chat gets its own
+    # session, and "/new" only resets the chat it was typed in.
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_account_chat ON channel_binding(account_id, feishu_chat_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_session_active ON channel_binding(session_uuid) WHERE session_uuid IS NOT NULL",
     # 3 ── quota ------------------------------------------------------------
     f"""
@@ -240,6 +243,14 @@ DDL: tuple[str, ...] = (
       enable_permission_feedback INTEGER NOT NULL DEFAULT 1 CHECK (enable_permission_feedback IN (0,1)),
       feedback_timeout_seconds   INTEGER NOT NULL DEFAULT 180,
       domain                  TEXT NOT NULL DEFAULT 'feishu' CHECK (domain IN ('feishu','lark')),
+      -- group-chat participation (feat_feishu_DM.md §5; user opt-in, default off) --
+      group_chat_enabled      INTEGER NOT NULL DEFAULT 0 CHECK (group_chat_enabled IN (0,1)),
+      -- owner link-code binding (feat_feishu_DM.md §4; ids in BOT app namespace) --
+      owner_union_id          TEXT NOT NULL DEFAULT '',
+      owner_open_id           TEXT NOT NULL DEFAULT '',
+      owner_bound_at          TEXT,
+      link_code_hash          TEXT,
+      link_code_expires_at    TEXT,
       -- status · connector-written only -----------------------------------
       conn_status             TEXT NOT NULL DEFAULT 'disabled'
                               CHECK (conn_status IN ('disabled','connecting','connected','auth_failed','error','conflict')),
@@ -257,12 +268,25 @@ DDL: tuple[str, ...] = (
     # the creds-present filter is applied in SQL on top of this).
     "CREATE INDEX IF NOT EXISTS ix_feishu_effective ON feishu_channel_config(account_id) "
     "WHERE user_enabled = 1 AND admin_disabled = 0",
+    # 11 ── channel_platform_config -------------------------------------------
+    # ADMIN-only platform-wide channel settings. Single row (id=1), same pattern
+    # as runner_defaults. group_chat_disabled is the global group-chat kill
+    # switch (feat_feishu_DM.md §5.1): the service folds it into every feishu
+    # row's effective_group_enabled AND recomputes their desired_digest on flip.
+    f"""
+    CREATE TABLE IF NOT EXISTS channel_platform_config (
+      id                  INTEGER PRIMARY KEY CHECK (id = 1),
+      group_chat_disabled INTEGER NOT NULL DEFAULT 0 CHECK (group_chat_disabled IN (0,1)),
+      updated_by          TEXT NOT NULL DEFAULT '',
+      updated_at          TEXT NOT NULL DEFAULT {NOW}
+    ) STRICT
+    """,
 )
 
 TABLES = (
     "account", "channel_binding", "quota", "scheduled_job", "job_run_record", "job_fire",
     "account_resource_spec", "pending_registration", "runner_defaults", "hook_policy",
-    "feishu_channel_config",
+    "feishu_channel_config", "channel_platform_config",
 )
 
 # Idempotent column additions for DBs created before a column existed. CREATE
@@ -287,6 +311,19 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
      "ALTER TABLE runner_defaults ADD COLUMN terminal_max_lifetime_seconds INTEGER NOT NULL DEFAULT 14400"),
     ("runner_defaults", "terminal_scale_down_grace_seconds",
      "ALTER TABLE runner_defaults ADD COLUMN terminal_scale_down_grace_seconds INTEGER NOT NULL DEFAULT 120"),
+    ("feishu_channel_config", "owner_union_id",
+     "ALTER TABLE feishu_channel_config ADD COLUMN owner_union_id TEXT NOT NULL DEFAULT ''"),
+    ("feishu_channel_config", "owner_open_id",
+     "ALTER TABLE feishu_channel_config ADD COLUMN owner_open_id TEXT NOT NULL DEFAULT ''"),
+    ("feishu_channel_config", "owner_bound_at",
+     "ALTER TABLE feishu_channel_config ADD COLUMN owner_bound_at TEXT"),
+    ("feishu_channel_config", "link_code_hash",
+     "ALTER TABLE feishu_channel_config ADD COLUMN link_code_hash TEXT"),
+    ("feishu_channel_config", "link_code_expires_at",
+     "ALTER TABLE feishu_channel_config ADD COLUMN link_code_expires_at TEXT"),
+    ("feishu_channel_config", "group_chat_enabled",
+     "ALTER TABLE feishu_channel_config ADD COLUMN group_chat_enabled INTEGER NOT NULL DEFAULT 0 "
+     "CHECK (group_chat_enabled IN (0,1))"),
 )
 
 # One-time backfills, safe to run every boot. Pre-migration rows carry
@@ -296,6 +333,9 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
 _BACKFILLS: tuple[str, ...] = (
     "UPDATE hook_policy SET enforced_events = events "
     "WHERE enforced = 1 AND enforced_events = '[]'",
+    # Per-chat sessions (feat_feishu_DM.md §5.2): retire the one-binding-per-account
+    # unique index; the composite ux_binding_account_chat is created by the DDL above.
+    "DROP INDEX IF EXISTS ux_binding_account",
 )
 
 
@@ -339,7 +379,10 @@ def _migrate_binding_session_nullable(conn: sqlite3.Connection) -> None:
         "FROM _channel_binding_old"
     )
     conn.execute("DROP TABLE _channel_binding_old")
-    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_account ON channel_binding(account_id)")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_account_chat "
+        "ON channel_binding(account_id, feishu_chat_id)"
+    )
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_binding_session_active "
         "ON channel_binding(session_uuid) WHERE session_uuid IS NOT NULL"

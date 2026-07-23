@@ -31,25 +31,28 @@ from priva_common.models.auth import UserRecord  # noqa: E402
 
 # --- fakes ------------------------------------------------------------------
 class FakeBindings:
+    """Per-chat bindings (feat_feishu_DM.md §5.2) — keyed by (account, chat),
+    mirroring the real ux_binding_account_chat unique index."""
+
     def __init__(self):
-        self._by_account: dict[str, BindingRecord] = {}
+        self._by_key: dict[tuple[str, str], BindingRecord] = {}
 
     def list_bindings(self, account_id):
-        b = self._by_account.get(account_id)
-        return [b] if b else []
+        return [b for (a, _), b in self._by_key.items() if a == account_id]
 
     def bind(self, account_id, session_uuid, feishu_chat_id=None):
         rec = BindingRecord(binding_id=uuid.uuid4().hex, account_id=account_id,
                             session_uuid=session_uuid, feishu_chat_id=feishu_chat_id)
-        self._by_account[account_id] = rec
+        self._by_key[(account_id, feishu_chat_id or "")] = rec
         return rec
 
     def rebind(self, account_id, session_uuid, feishu_chat_id=None):
-        cur = self._by_account.get(account_id)
+        key = (account_id, feishu_chat_id or "")
+        cur = self._by_key.get(key)
         bid = cur.binding_id if cur else uuid.uuid4().hex
         rec = BindingRecord(binding_id=bid, account_id=account_id,
                             session_uuid=session_uuid, feishu_chat_id=feishu_chat_id)
-        self._by_account[account_id] = rec
+        self._by_key[key] = rec
         return rec
 
 
@@ -58,6 +61,8 @@ class FakeFeishuConfigs:
         self._effective = list(effective or [])
         self._secrets = dict(secrets or {})
         self.status_calls: list[tuple] = []
+        self.bind_calls: list[tuple] = []
+        self.bind_result = True
 
     def set_effective(self, effective):
         self._effective = list(effective)
@@ -79,6 +84,10 @@ class FakeFeishuConfigs:
         self.status_calls.append((account_id, conn_status, last_error_message))
         return None
 
+    def bind_owner_with_code(self, account_id, code, union_id, open_id):
+        self.bind_calls.append((account_id, code, union_id, open_id))
+        return self.bind_result
+
 
 class FakeAccounts:
     def get(self, account_id):
@@ -98,8 +107,9 @@ class FakeDialer:
         self.calls: list[dict] = []
 
     async def run(self, account_id, username, *, prompt, session_id=None, model=None,
-                  do_wake=True, state=None, on_permission=None):
-        self.calls.append({"account_id": account_id, "prompt": prompt, "session_id": session_id})
+                  images=None, do_wake=True, state=None, on_permission=None):
+        self.calls.append({"account_id": account_id, "prompt": prompt, "session_id": session_id,
+                           "images": images})
         # dial.run folds into the worker's shared state and returns it.
         if state is None:
             state = StreamState()
@@ -702,7 +712,7 @@ def test_worker_streaming_card_end_to_end():
                 self.calls = []
 
             async def run(self, account_id, username, *, prompt, session_id=None, model=None,
-                          do_wake=True, state=None, on_permission=None):
+                          images=None, do_wake=True, state=None, on_permission=None):
                 self.calls.append({"prompt": prompt})
                 if state is None:
                     state = StreamState()

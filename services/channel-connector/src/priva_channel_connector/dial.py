@@ -15,7 +15,7 @@ import httpx
 
 from priva_common.config import get_settings
 from priva_common.logging import get_app_logger
-from priva_common.models.agent import AgentRunRequest
+from priva_common.models.agent import AgentRunRequest, ImageItem
 from priva_common.runner_token import mint
 
 from . import wake
@@ -44,6 +44,7 @@ class RunnerDialer:
         prompt: str,
         session_id: str | None = None,
         model: str | None = None,
+        images: "list[dict] | None" = None,
         do_wake: bool = True,
         state: "StreamState | None" = None,
         on_permission=None,
@@ -71,6 +72,9 @@ class RunnerDialer:
             message=prompt,
             session_id=session_id,
             model=model,
+            # Feishu-sourced images ride the same lane the web SPA uses; the pod
+            # validates (count/size/type) and builds the vision content blocks.
+            images=[ImageItem(**img) for img in images] if images else None,
             enable_permission_feedback=True,
         ).model_dump(mode="json", exclude_none=True)
         headers = {"X-Priva-Runner-Token": mint(account_id, username or "")}

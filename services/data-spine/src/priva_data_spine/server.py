@@ -139,6 +139,19 @@ def _feishu_pb(r) -> feishu_channel_config_pb2.FeishuChannelConfig:
         desired_digest=r.desired_digest or "",
         updated_by=r.updated_by or "",
         updated_at=r.updated_at or "",
+        owner_union_id=r.owner_union_id or "",
+        owner_open_id=r.owner_open_id or "",
+        owner_bound_at=r.owner_bound_at or "",
+        group_chat_enabled=r.group_chat_enabled,
+        effective_group_enabled=r.effective_group_enabled,
+    )
+
+
+def _channel_platform_pb(r) -> feishu_channel_config_pb2.ChannelPlatformConfig:
+    return feishu_channel_config_pb2.ChannelPlatformConfig(
+        group_chat_disabled=r.group_chat_disabled,
+        updated_by=r.updated_by or "",
+        updated_at=r.updated_at or "",
     )
 
 
@@ -360,8 +373,9 @@ class _ResourceSpecServicer(resource_spec_pb2_grpc.ResourceSpecServiceServicer):
 
 class _FeishuChannelConfigServicer(
         feishu_channel_config_pb2_grpc.FeishuChannelConfigServiceServicer):
-    def __init__(self, svc):
+    def __init__(self, svc, platform_svc):
         self.svc = svc
+        self.platform_svc = platform_svc  # channel_platform singleton (same proto service)
 
     def Get(self, request, context):
         return _feishu_pb(self.svc.get(request.account_id))
@@ -393,6 +407,8 @@ class _FeishuChannelConfigServicer(
             kw["feedback_timeout_seconds"] = request.feedback_timeout_seconds
         if "domain" in mask:
             kw["domain"] = request.domain
+        if "group_chat_enabled" in mask:
+            kw["group_chat_enabled"] = request.group_chat_enabled
         return _feishu_pb(self.svc.set_user(request.account_id, updated_by=request.updated_by, **kw))
 
     def SetAdmin(self, request, context):
@@ -434,6 +450,30 @@ class _FeishuChannelConfigServicer(
             app_secret=r.app_secret or "",
             domain=r.domain or "feishu",
         )
+
+    def CreateLinkCode(self, request, context):
+        code, expires = self.svc.create_link_code(request.account_id)
+        return feishu_channel_config_pb2.LinkCode(code=code, expires_at=expires)
+
+    def BindOwnerWithCode(self, request, context):
+        ok = self.svc.bind_owner_with_code(
+            request.account_id, request.code, request.union_id, request.open_id)
+        return feishu_channel_config_pb2.BindOwnerResult(ok=bool(ok))
+
+    def UnbindOwner(self, request, context):
+        return _feishu_pb(self.svc.unbind_owner(
+            request.account_id, updated_by=request.updated_by or ""))
+
+    def GetPlatformConfig(self, request, context):
+        return _channel_platform_pb(self.platform_svc.get())
+
+    def SetPlatformConfig(self, request, context):
+        mask = set(request.update_mask)
+        kw = {}
+        if "group_chat_disabled" in mask:
+            kw["group_chat_disabled"] = request.group_chat_disabled
+        return _channel_platform_pb(
+            self.platform_svc.set(updated_by=request.updated_by or "", **kw))
 
 
 class _RunnerDefaultsServicer(runner_defaults_pb2_grpc.RunnerDefaultsServiceServicer):
@@ -701,7 +741,7 @@ def build_server(settings, max_workers: int = 16, repo=None) -> grpc.Server:
     resource_spec_pb2_grpc.add_ResourceSpecServiceServicer_to_server(
         _ResourceSpecServicer(client.resource_specs), server)
     feishu_channel_config_pb2_grpc.add_FeishuChannelConfigServiceServicer_to_server(
-        _FeishuChannelConfigServicer(client.feishu_configs), server)
+        _FeishuChannelConfigServicer(client.feishu_configs, client.channel_platform), server)
     runner_defaults_pb2_grpc.add_RunnerDefaultsServiceServicer_to_server(
         _RunnerDefaultsServicer(client.runner_defaults), server)
     registration_pb2_grpc.add_RegistrationServiceServicer_to_server(

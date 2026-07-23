@@ -39,7 +39,12 @@ from priva_common.models.admin import (
     SystemNode,
 )
 from priva_common.models.auth import UserCreate, UserPublic, UserUpdate
-from priva_common.models.feishu import FeishuAdminConfigUpdate, FeishuConfigResponse
+from priva_common.models.feishu import (
+    ChannelPlatformConfigResponse,
+    ChannelPlatformConfigUpdate,
+    FeishuAdminConfigUpdate,
+    FeishuConfigResponse,
+)
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from ..services.auth import require_admin, user_record_to_public
 from ..services.feishu_connector import nudge_reconcile
@@ -446,6 +451,45 @@ async def update_user_feishu_config(
     ))
     await nudge_reconcile(existing.account_id, existing.username)  # best-effort; poll is the backstop
     return FeishuConfigResponse.from_record(rec, existing.account_id)
+
+
+# --- Configurations ▸ Channels: platform-wide channel settings -------------------
+
+@router.get("/channel-platform", response_model=ChannelPlatformConfigResponse)
+async def get_channel_platform_config():
+    from priva_common.dataplane import get_client
+    r = get_client().channel_platform.get()
+    return ChannelPlatformConfigResponse(
+        group_chat_disabled=r.group_chat_disabled, updated_by=r.updated_by, updated_at=r.updated_at)
+
+
+@router.put("/channel-platform", response_model=ChannelPlatformConfigResponse)
+async def update_channel_platform_config(
+    request: ChannelPlatformConfigUpdate,
+    current_user: UserRecord = Depends(require_admin),
+):
+    """The global group-chat kill switch (feat_feishu_DM.md §5.1). data-spine
+    recomputes the desired_digest of every account whose effective_group_enabled
+    flips, so the connector re-arms exactly those workers; the nudges below only
+    shave the poll latency."""
+    from priva_common.dataplane import get_client
+    client = get_client()
+    if request.group_chat_disabled is None:
+        r = client.channel_platform.get()
+        return ChannelPlatformConfigResponse(
+            group_chat_disabled=r.group_chat_disabled, updated_by=r.updated_by, updated_at=r.updated_at)
+    r = client.channel_platform.set(
+        group_chat_disabled=request.group_chat_disabled, updated_by=current_user.username)
+    get_audit_logger().append(AuditEntry(
+        actor=current_user.username,
+        action="admin.group_chat_disabled" if request.group_chat_disabled else "admin.group_chat_enabled",
+        target="channel_platform",
+        details={"group_chat_disabled": request.group_chat_disabled},
+    ))
+    for cfg in client.feishu_configs.list_effective():
+        await nudge_reconcile(cfg.account_id)  # fire-and-forget per account
+    return ChannelPlatformConfigResponse(
+        group_chat_disabled=r.group_chat_disabled, updated_by=r.updated_by, updated_at=r.updated_at)
 
 
 @router.delete("/users/{username}")

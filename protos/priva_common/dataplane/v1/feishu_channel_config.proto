@@ -41,6 +41,17 @@ message FeishuChannelConfig {
   string desired_digest = 22;
   string updated_by = 23;
   string updated_at = 24;
+  // owner link-code binding (ids in the BOT app's namespace; owner_union_id is
+  // part of desired_digest). The pending link-code (hash+expiry) is server-side
+  // only and never serialized here.
+  string owner_union_id = 25;
+  string owner_open_id = 26;
+  string owner_bound_at = 27;
+  // group-chat participation (feat_feishu_DM.md §5): user opt-in AND NOT the
+  // platform-wide admin kill switch. effective_group_enabled is server-computed
+  // and folded into desired_digest (a flip re-arms the worker's cfg snapshot).
+  bool   group_chat_enabled = 28;
+  bool   effective_group_enabled = 29;   // server-computed
 }
 
 // USER route — credentials + user_enabled + behaviour. app_secret plaintext:
@@ -62,6 +73,7 @@ message SetFeishuUserConfigRequest {
   string domain = 13;
   string updated_by = 14;
   repeated string update_mask = 15;
+  bool   group_chat_enabled = 16;
 }
 
 // ADMIN route — kill-switch only.
@@ -97,6 +109,46 @@ message FeishuSecret {
   string domain = 4;       // feishu | lark
 }
 
+// Owner link-code binding (docs/feat/feat_feishu_DM.md §4). CreateLinkCode is the
+// USER route (control-panel, behind the platform login): mints a single-use code —
+// the plaintext rides ONLY in this response, storage keeps its SHA-256 + expiry.
+// BindOwnerWithCode is the CONNECTOR route: constant-time validate + bind + clear.
+message LinkCode {
+  string code = 1;         // plaintext, 6-char Crockford base32; never logged/stored
+  string expires_at = 2;
+}
+
+message BindOwnerRequest {
+  string account_id = 1;
+  string code = 2;
+  string union_id = 3;     // BOT app namespace — the gate's comparison key
+  string open_id = 4;      // snapshot (card-operator checks / logs)
+}
+
+message BindOwnerResult { bool ok = 1; }   // failure reasons deliberately not distinguished
+
+message UnbindOwnerRequest {
+  string account_id = 1;
+  string updated_by = 2;
+}
+
+// channel_platform_config — the ADMIN-only platform-wide singleton (id=1, same
+// pattern as runner_defaults). group_chat_disabled is the global group-chat kill
+// switch: flipping it recomputes every feishu row's desired_digest server-side
+// (effective_group_enabled is part of the digest) so the connector re-arms all
+// affected workers on its next poll.
+message ChannelPlatformConfig {
+  bool   group_chat_disabled = 1;
+  string updated_by = 2;
+  string updated_at = 3;
+}
+
+message SetChannelPlatformConfigRequest {
+  bool   group_chat_disabled = 1;
+  string updated_by = 2;
+  repeated string update_mask = 3;
+}
+
 service FeishuChannelConfigService {
   rpc Get(AccountRef) returns (FeishuChannelConfig);   // empty account_id when unset
   rpc SetUser(SetFeishuUserConfigRequest) returns (FeishuChannelConfig);
@@ -105,4 +157,9 @@ service FeishuChannelConfigService {
   rpc List(Empty) returns (FeishuChannelConfigList);
   rpc ListEffective(Empty) returns (FeishuChannelConfigList);
   rpc GetFeishuSecret(AccountRef) returns (FeishuSecret);  // connector-only; plaintext
+  rpc CreateLinkCode(AccountRef) returns (LinkCode);              // USER route (control-panel)
+  rpc BindOwnerWithCode(BindOwnerRequest) returns (BindOwnerResult);  // CONNECTOR route
+  rpc UnbindOwner(UnbindOwnerRequest) returns (FeishuChannelConfig);  // USER route
+  rpc GetPlatformConfig(Empty) returns (ChannelPlatformConfig);       // ADMIN route
+  rpc SetPlatformConfig(SetChannelPlatformConfigRequest) returns (ChannelPlatformConfig);  // ADMIN route
 }

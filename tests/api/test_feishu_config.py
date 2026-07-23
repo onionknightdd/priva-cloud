@@ -124,3 +124,71 @@ def test_secret_clear(app_client):
     assert client.get("/api/auth/me/feishu-config", headers=alice_h).json()["app_secret_set"] is True
     client.put("/api/auth/me/feishu-config", headers=alice_h, json={"app_secret": "__clear__"})
     assert client.get("/api/auth/me/feishu-config", headers=alice_h).json()["app_secret_set"] is False
+
+
+# --- owner link-code binding (feat_feishu_DM.md §4) --------------------------
+def _fc():
+    from priva_common.dataplane import get_client
+    return get_client().feishu_configs
+
+
+def test_link_code_mint_bind_lifecycle(app_client):
+    client, _, alice_h = app_client
+    r = client.post("/api/auth/me/feishu-link-code", headers=alice_h)
+    assert r.status_code == 200, r.text
+    code, expires = r.json()["code"], r.json()["expires_at"]
+    assert len(code) == 6 and expires
+    d = client.get("/api/auth/me/feishu-config", headers=alice_h).json()
+    acc = d["account_id"]
+    assert d["owner_bound"] is False
+    assert code not in str(d)  # plaintext code appears ONLY in the mint response
+
+    fc = _fc()
+    digest_before = fc.get(acc).desired_digest
+    assert fc.bind_owner_with_code(acc, "WRONG0", "on_user1", "ou_1") is False
+    assert fc.bind_owner_with_code(acc, code.lower(), "on_user1", "ou_1") is True  # case-insensitive
+    assert fc.bind_owner_with_code(acc, code, "on_user2", "ou_2") is False         # single-use
+
+    d = client.get("/api/auth/me/feishu-config", headers=alice_h).json()
+    assert d["owner_bound"] is True and d["owner_bound_at"]
+    assert "on_user1" not in str(d)  # only the masked form crosses the HTTP boundary
+    assert d["owner_union_id_masked"]
+    rec = fc.get(acc)
+    assert rec.owner_union_id == "on_user1" and rec.owner_open_id == "ou_1"
+    assert rec.desired_digest != digest_before  # bind re-arms the connector
+
+
+def test_link_code_expired_rejected(app_client):
+    client, _, alice_h = app_client
+    code = client.post("/api/auth/me/feishu-link-code", headers=alice_h).json()["code"]
+    acc = client.get("/api/auth/me/feishu-config", headers=alice_h).json()["account_id"]
+    fc = _fc()
+    fc.repo.feishu_upsert(acc, {"link_code_expires_at": "2020-01-01T00:00:00+00:00"})
+    assert fc.bind_owner_with_code(acc, code, "on_late", "ou_l") is False
+
+
+def test_link_code_remint_invalidates_previous(app_client):
+    client, _, alice_h = app_client
+    first = client.post("/api/auth/me/feishu-link-code", headers=alice_h).json()["code"]
+    second = client.post("/api/auth/me/feishu-link-code", headers=alice_h).json()["code"]
+    acc = client.get("/api/auth/me/feishu-config", headers=alice_h).json()["account_id"]
+    fc = _fc()
+    if first != second:  # 1-in-32^6 collision guard
+        assert fc.bind_owner_with_code(acc, first, "on_x", "ou_x") is False
+    assert fc.bind_owner_with_code(acc, second, "on_x", "ou_x") is True
+
+
+def test_unbind_owner_clears_and_rearms(app_client):
+    client, _, alice_h = app_client
+    code = client.post("/api/auth/me/feishu-link-code", headers=alice_h).json()["code"]
+    acc = client.get("/api/auth/me/feishu-config", headers=alice_h).json()["account_id"]
+    fc = _fc()
+    assert fc.bind_owner_with_code(acc, code, "on_user9", "ou_9") is True
+    digest_bound = fc.get(acc).desired_digest
+
+    r = client.delete("/api/auth/me/feishu-owner", headers=alice_h)
+    assert r.status_code == 200, r.text
+    assert r.json()["owner_bound"] is False
+    rec = fc.get(acc)
+    assert rec.owner_union_id == "" and rec.owner_bound_at is None
+    assert rec.desired_digest != digest_bound  # unbind re-arms too

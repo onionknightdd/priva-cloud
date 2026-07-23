@@ -63,9 +63,12 @@ class Repository(ABC):
     @abstractmethod
     def binding_get_by_account(self, account_id: str) -> dict | None: ...
     @abstractmethod
+    def binding_get_by_account_chat(self, account_id: str, feishu_chat_id: str | None) -> dict | None: ...
+    @abstractmethod
     def binding_list_by_account(self, account_id: str) -> list[dict]: ...
     @abstractmethod
     def binding_claim_first_run(self, binding_id: str) -> bool: ...
+    # Keyed by (account_id, feishu_chat_id) — per-chat sessions (feat_feishu_DM.md §5.2).
     @abstractmethod
     def binding_rebind(self, account_id: str, session_uuid: str, feishu_chat_id: str | None, rebound_at: str) -> None: ...
     # quota
@@ -136,6 +139,11 @@ class Repository(ABC):
     def runner_defaults_seed(self, values: dict) -> dict: ...
     @abstractmethod
     def runner_defaults_upsert(self, fields: dict) -> dict: ...
+    # channel_platform_config (single row, id=1)
+    @abstractmethod
+    def channel_platform_get(self) -> dict | None: ...
+    @abstractmethod
+    def channel_platform_upsert(self, fields: dict) -> dict: ...
     # hook_policy
     @abstractmethod
     def hook_policy_list(self, enabled_only: bool = False) -> list[dict]: ...
@@ -258,6 +266,13 @@ class SqliteRepo(Repository):
     def binding_get_by_account(self, account_id):
         return self._one("SELECT * FROM channel_binding WHERE account_id = ?", (account_id,))
 
+    def binding_get_by_account_chat(self, account_id, feishu_chat_id):
+        # IS handles NULL chat ids (legacy rows / tests) like PG's IS NOT DISTINCT FROM.
+        return self._one(
+            "SELECT * FROM channel_binding WHERE account_id = ? AND feishu_chat_id IS ?",
+            (account_id, feishu_chat_id),
+        )
+
     def binding_list_by_account(self, account_id):
         return self._all("SELECT * FROM channel_binding WHERE account_id = ?", (account_id,))
 
@@ -270,9 +285,9 @@ class SqliteRepo(Repository):
 
     def binding_rebind(self, account_id, session_uuid, feishu_chat_id, rebound_at):
         self._write(
-            "UPDATE channel_binding SET session_uuid = ?, first_run_done = 0, feishu_chat_id = ?, rebound_at = ? "
-            "WHERE account_id = ?",
-            (session_uuid, feishu_chat_id, rebound_at, account_id),
+            "UPDATE channel_binding SET session_uuid = ?, first_run_done = 0, rebound_at = ? "
+            "WHERE account_id = ? AND feishu_chat_id IS ?",
+            (session_uuid, rebound_at, account_id, feishu_chat_id),
         )
 
     # quota -----------------------------------------------------------------
@@ -471,7 +486,10 @@ class SqliteRepo(Repository):
         "user_enabled", "admin_disabled",
         "single_chat_access_mode", "allowed_union_ids", "welcome_message",
         "reject_message", "model", "max_queue_size", "enable_permission_feedback",
-        "feedback_timeout_seconds", "domain", "desired_digest", "updated_by",
+        "feedback_timeout_seconds", "domain", "group_chat_enabled",
+        "owner_union_id", "owner_open_id", "owner_bound_at",
+        "link_code_hash", "link_code_expires_at",
+        "desired_digest", "updated_by",
     )
     _FEISHU_STATUS_COLS = ("conn_status", "last_error_code", "last_error_message", "last_connected_at")
 
@@ -548,6 +566,25 @@ class SqliteRepo(Repository):
             tuple(fields[c] for c in cols),
         )
         return self.runner_defaults_get()
+
+    # channel_platform_config (single row id=1) -------------------------------
+    _CHANNEL_PLATFORM_COLS = ("group_chat_disabled", "updated_by")
+
+    def channel_platform_get(self):
+        return self._one("SELECT * FROM channel_platform_config WHERE id = 1")
+
+    def channel_platform_upsert(self, fields):
+        cols = [c for c in self._CHANNEL_PLATFORM_COLS if c in fields]
+        insert_cols = ["id"] + cols
+        ph = ", ".join("?" for _ in insert_cols)
+        updates = ", ".join(f"{c}=excluded.{c}" for c in cols)
+        updates = (updates + ", " if updates else "") + "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+        self._write(
+            f"INSERT INTO channel_platform_config ({', '.join(insert_cols)}) VALUES ({ph}) "
+            f"ON CONFLICT(id) DO UPDATE SET {updates}",
+            tuple([1] + [fields[c] for c in cols]),
+        )
+        return self.channel_platform_get()
 
     # hook_policy -------------------------------------------------------------
     _HOOK_POLICY_COLS = ("id", "hook_type", "name", "description", "events", "matcher",
@@ -730,6 +767,12 @@ class PgRepo(Repository):
     def binding_get_by_account(self, account_id):
         return self._one("SELECT * FROM channel_binding WHERE account_id = %s", (account_id,))
 
+    def binding_get_by_account_chat(self, account_id, feishu_chat_id):
+        return self._one(
+            "SELECT * FROM channel_binding WHERE account_id = %s AND feishu_chat_id IS NOT DISTINCT FROM %s",
+            (account_id, feishu_chat_id),
+        )
+
     def binding_list_by_account(self, account_id):
         return self._all("SELECT * FROM channel_binding WHERE account_id = %s", (account_id,))
 
@@ -742,9 +785,9 @@ class PgRepo(Repository):
 
     def binding_rebind(self, account_id, session_uuid, feishu_chat_id, rebound_at):
         self._write(
-            "UPDATE channel_binding SET session_uuid = %s, first_run_done = 0, feishu_chat_id = %s, rebound_at = %s "
-            "WHERE account_id = %s",
-            (session_uuid, feishu_chat_id, rebound_at, account_id),
+            "UPDATE channel_binding SET session_uuid = %s, first_run_done = 0, rebound_at = %s "
+            "WHERE account_id = %s AND feishu_chat_id IS NOT DISTINCT FROM %s",
+            (session_uuid, rebound_at, account_id, feishu_chat_id),
         )
 
     # quota -----------------------------------------------------------------
@@ -996,6 +1039,25 @@ class PgRepo(Repository):
             tuple(fields[c] for c in cols),
         )
         return self.runner_defaults_get()
+
+    # channel_platform_config (single row id=1) -------------------------------
+    _CHANNEL_PLATFORM_COLS = SqliteRepo._CHANNEL_PLATFORM_COLS
+
+    def channel_platform_get(self):
+        return self._one("SELECT * FROM channel_platform_config WHERE id = 1")
+
+    def channel_platform_upsert(self, fields):
+        cols = [c for c in self._CHANNEL_PLATFORM_COLS if c in fields]
+        insert_cols = ["id"] + cols
+        ph = ", ".join("%s" for _ in insert_cols)
+        updates = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols)
+        updates = (updates + ", " if updates else "") + f"updated_at = {self._NOW}"
+        self._write(
+            f"INSERT INTO channel_platform_config ({', '.join(insert_cols)}) VALUES ({ph}) "
+            f"ON CONFLICT (id) DO UPDATE SET {updates}",
+            tuple([1] + [fields[c] for c in cols]),
+        )
+        return self.channel_platform_get()
 
     # hook_policy -------------------------------------------------------------
     _HOOK_POLICY_COLS = SqliteRepo._HOOK_POLICY_COLS

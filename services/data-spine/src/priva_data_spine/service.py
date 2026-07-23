@@ -10,13 +10,14 @@ import hashlib
 import hmac
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import bcrypt
 
 from priva_common.crypto import decrypt_value, encrypt_value
 from priva_common.dataplane import (
     BindingRecord,
+    ChannelPlatformConfigRecord,
     DataplaneClient,
     FeishuChannelConfigRecord,
     FeishuSecretRecord,
@@ -193,8 +194,9 @@ class BindingService:
         return self._to_binding(self.repo.binding_get(binding_id))
 
     def rebind(self, account_id, session_uuid, feishu_chat_id=None):
+        # Keyed by (account, chat) — per-chat sessions (feat_feishu_DM.md §5.2).
         self.repo.binding_rebind(account_id, session_uuid, feishu_chat_id, _now_iso())
-        return self._to_binding(self.repo.binding_get_by_account(account_id))
+        return self._to_binding(self.repo.binding_get_by_account_chat(account_id, feishu_chat_id))
 
     def claim_first_run_im(self, binding_id):
         return self.repo.binding_claim_first_run(binding_id)
@@ -509,13 +511,30 @@ class FeishuChannelConfigService:
     write-back goes through a separate path that never touches updated_at/digest."""
 
     # Desired columns whose change requires the connector to teardown/re-arm the WS.
-    _DIGEST_COLS = ("app_id", "app_secret_enc", "user_enabled", "admin_disabled", "domain")
+    # owner_union_id is included so bind/unbind refreshes the worker's cfg snapshot
+    # (feat_feishu_DM.md ruling #3); the pending link-code cols are deliberately NOT
+    # here — minting a code must not bounce the connection. The group-chat gate rides
+    # as the COMPOSED effective bit (user opt-in AND NOT global kill switch): the user
+    # toggle only re-arms while the switch actually changes behaviour, and an admin
+    # global flip re-arms every affected row via recompute_digests().
+    _DIGEST_COLS = ("app_id", "app_secret_enc", "user_enabled", "admin_disabled", "domain",
+                    "owner_union_id", "group_chat_enabled")
+
+    # Owner link-code (feat_feishu_DM.md §4.1): 6-char Crockford base32 (no I/L/O/U),
+    # single-use, 10-minute TTL, only the SHA-256 hex is stored.
+    _LINK_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+    _LINK_CODE_LEN = 6
+    _LINK_CODE_TTL_SECONDS = 600
 
     def __init__(self, repo: Repository):
         self.repo = repo
 
+    def _group_globally_disabled(self) -> bool:
+        row = self.repo.channel_platform_get()
+        return bool(row and row.get("group_chat_disabled"))
+
     @staticmethod
-    def _digest(merged: dict) -> str:
+    def _digest(merged: dict, group_disabled: bool) -> str:
         payload = json.dumps(
             [
                 merged.get("app_id") or "",
@@ -523,19 +542,24 @@ class FeishuChannelConfigService:
                 int(merged.get("user_enabled") or 0),
                 int(merged.get("admin_disabled") or 0),
                 merged.get("domain") or "feishu",
+                merged.get("owner_union_id") or "",
+                # composed effective_group bit — recompute_digests() re-derives this
+                # for every row when the admin flips the global switch
+                int(bool(merged.get("group_chat_enabled")) and not group_disabled),
             ],
             separators=(",", ":"),
         )
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
     @staticmethod
-    def _to_record(row: dict | None) -> FeishuChannelConfigRecord | None:
+    def _to_record(row: dict | None, group_disabled: bool = False) -> FeishuChannelConfigRecord | None:
         if row is None:
             return None
         has_secret = bool(row.get("app_secret_enc"))
         user_enabled = bool(row.get("user_enabled"))
         admin_disabled = bool(row.get("admin_disabled"))
         effective = user_enabled and not admin_disabled and bool(row.get("app_id")) and has_secret
+        group_enabled = bool(row.get("group_chat_enabled"))
         return FeishuChannelConfigRecord(
             account_id=row["account_id"],
             app_id=row.get("app_id") or None,
@@ -546,6 +570,8 @@ class FeishuChannelConfigService:
             effective_enabled=effective,
             single_chat_access_mode=row.get("single_chat_access_mode") or "owner_only",
             allowed_union_ids=row.get("allowed_union_ids") or "[]",
+            group_chat_enabled=group_enabled,
+            effective_group_enabled=group_enabled and not group_disabled,
             welcome_message=row.get("welcome_message") or "",
             reject_message=row.get("reject_message") or "",
             model=row.get("model") or None,
@@ -553,6 +579,9 @@ class FeishuChannelConfigService:
             enable_permission_feedback=bool(row.get("enable_permission_feedback")),
             feedback_timeout_seconds=int(row.get("feedback_timeout_seconds") or 180),
             domain=row.get("domain") or "feishu",
+            owner_union_id=row.get("owner_union_id") or "",
+            owner_open_id=row.get("owner_open_id") or "",
+            owner_bound_at=row.get("owner_bound_at"),
             conn_status=row.get("conn_status") or "disabled",
             last_error_code=row.get("last_error_code"),
             last_error_message=row.get("last_error_message"),
@@ -564,20 +593,21 @@ class FeishuChannelConfigService:
         )
 
     def get(self, account_id):
-        return self._to_record(self.repo.feishu_get(account_id))
+        return self._to_record(self.repo.feishu_get(account_id), self._group_globally_disabled())
 
     def _write_desired(self, account_id, fields: dict):
+        gd = self._group_globally_disabled()
         if not fields:
-            return self._to_record(self.repo.feishu_get(account_id))
+            return self._to_record(self.repo.feishu_get(account_id), gd)
         merged = {**(self.repo.feishu_get(account_id) or {}), **fields}
-        fields["desired_digest"] = self._digest(merged)
-        return self._to_record(self.repo.feishu_upsert(account_id, fields))
+        fields["desired_digest"] = self._digest(merged, gd)
+        return self._to_record(self.repo.feishu_upsert(account_id, fields), gd)
 
     def set_user(self, account_id, *, app_id=None, app_secret=UNSET, user_enabled=None,
                  single_chat_access_mode=None, allowed_union_ids=None, welcome_message=None,
                  reject_message=None, model=None, max_queue_size=None,
                  enable_permission_feedback=None, feedback_timeout_seconds=None,
-                 domain=None, updated_by=""):
+                 domain=None, group_chat_enabled=None, updated_by=""):
         fields: dict = {}
         if app_id is not None:
             fields["app_id"] = app_id
@@ -608,6 +638,8 @@ class FeishuChannelConfigService:
             fields["feedback_timeout_seconds"] = int(feedback_timeout_seconds)
         if domain is not None:
             fields["domain"] = domain
+        if group_chat_enabled is not None:
+            fields["group_chat_enabled"] = 1 if group_chat_enabled else 0
         if updated_by:
             fields["updated_by"] = updated_by
         return self._write_desired(account_id, fields)
@@ -631,13 +663,90 @@ class FeishuChannelConfigService:
             fields["last_error_message"] = last_error_message
         if last_connected_at is not None:
             fields["last_connected_at"] = last_connected_at
-        return self._to_record(self.repo.feishu_status_update(account_id, fields))
+        return self._to_record(self.repo.feishu_status_update(account_id, fields),
+                               self._group_globally_disabled())
 
     def list(self):
-        return [self._to_record(r) for r in self.repo.feishu_list()]
+        gd = self._group_globally_disabled()
+        return [self._to_record(r, gd) for r in self.repo.feishu_list()]
 
     def list_effective(self):
-        return [self._to_record(r) for r in self.repo.feishu_list_effective()]
+        gd = self._group_globally_disabled()
+        return [self._to_record(r, gd) for r in self.repo.feishu_list_effective()]
+
+    def recompute_digests(self) -> int:
+        """Re-derive desired_digest for every row against the CURRENT global
+        group-chat switch (called by ChannelPlatformConfigService.set on flip).
+        Only rows whose digest actually changes are rewritten — i.e. exactly the
+        accounts whose effective_group_enabled flipped — so the connector's poll
+        re-arms them and nothing else. Returns the number of rows touched."""
+        gd = self._group_globally_disabled()
+        touched = 0
+        for row in self.repo.feishu_list():
+            fresh = self._digest(row, gd)
+            if fresh != (row.get("desired_digest") or ""):
+                self.repo.feishu_upsert(row["account_id"], {"desired_digest": fresh})
+                touched += 1
+        return touched
+
+    # --- owner link-code (feat_feishu_DM.md §4) ----------------------------
+    def create_link_code(self, account_id) -> tuple[str, str]:
+        """Mint a single-use owner-binding code (control-panel route, behind the
+        platform login). Overwrites any previous pending code; only the SHA-256 is
+        stored. Returns (plaintext_code, expires_at) — the plaintext exists only in
+        this response and the user's screen."""
+        import secrets as _secrets
+        code = "".join(_secrets.choice(self._LINK_CODE_ALPHABET)
+                       for _ in range(self._LINK_CODE_LEN))
+        expires = (datetime.now(timezone.utc)
+                   + timedelta(seconds=self._LINK_CODE_TTL_SECONDS)).isoformat()
+        self._write_desired(account_id, {
+            "link_code_hash": hashlib.sha256(code.encode()).hexdigest(),
+            "link_code_expires_at": expires,
+        })
+        return code, expires
+
+    def bind_owner_with_code(self, account_id, code, union_id, open_id) -> bool:
+        """CONNECTOR route: atomically validate the code (hashed, constant-time,
+        unexpired) and bind the sender as owner, clearing the code (single-use).
+        Failure reasons are deliberately not distinguished (no existence oracle)."""
+        row = self.repo.feishu_get(account_id)
+        if row is None or not code or not union_id:
+            return False
+        stored = row.get("link_code_hash") or ""
+        expires = row.get("link_code_expires_at") or ""
+        if not stored or not expires:
+            return False
+        presented = hashlib.sha256(code.strip().upper().encode()).hexdigest()
+        if not hmac.compare_digest(stored, presented):
+            return False
+        try:
+            if datetime.fromisoformat(expires) < datetime.now(timezone.utc):
+                return False
+        except ValueError:
+            return False
+        self._write_desired(account_id, {
+            "owner_union_id": union_id,
+            "owner_open_id": open_id or "",
+            "owner_bound_at": _now_iso(),
+            "link_code_hash": None,
+            "link_code_expires_at": None,
+        })
+        return True
+
+    def unbind_owner(self, account_id, *, updated_by=""):
+        """USER route (control-panel): drop the owner binding — the gate falls back
+        to allow-all (unbound semantics, ruling #1). Also discards any pending code."""
+        fields = {
+            "owner_union_id": "",
+            "owner_open_id": "",
+            "owner_bound_at": None,
+            "link_code_hash": None,
+            "link_code_expires_at": None,
+        }
+        if updated_by:
+            fields["updated_by"] = updated_by
+        return self._write_desired(account_id, fields)
 
     def get_secret(self, account_id) -> FeishuSecretRecord | None:
         """Connector-only: decrypt and return the plaintext app_secret. app_secret is
@@ -654,6 +763,46 @@ class FeishuChannelConfigService:
             app_secret=(decrypt_value(enc) or "") if enc else "",
             domain=row.get("domain") or "feishu",
         )
+
+
+# --- ChannelPlatformConfig ---------------------------------------------------
+
+class ChannelPlatformConfigService:
+    """ADMIN-only platform-wide channel settings — a single row (id=1), same
+    pattern as runner_defaults but with static defaults (all-off), so no seeding
+    is needed: a missing row simply reads as the defaults. Flipping the global
+    group-chat switch recomputes every feishu row's desired_digest (the composed
+    effective_group bit lives in the digest) so the connector re-arms exactly the
+    accounts whose effective behaviour changed (feat_feishu_DM.md §5.1)."""
+
+    def __init__(self, repo: Repository):
+        self.repo = repo
+
+    @staticmethod
+    def _to_record(row: dict | None) -> ChannelPlatformConfigRecord:
+        if row is None:
+            return ChannelPlatformConfigRecord()
+        return ChannelPlatformConfigRecord(
+            group_chat_disabled=bool(row.get("group_chat_disabled")),
+            updated_by=row.get("updated_by") or "",
+            updated_at=row.get("updated_at"),
+        )
+
+    def get(self) -> ChannelPlatformConfigRecord:
+        return self._to_record(self.repo.channel_platform_get())
+
+    def set(self, *, group_chat_disabled=None, updated_by="") -> ChannelPlatformConfigRecord:
+        fields: dict = {}
+        if group_chat_disabled is not None:
+            fields["group_chat_disabled"] = 1 if group_chat_disabled else 0
+        if updated_by:
+            fields["updated_by"] = updated_by
+        if not fields:
+            return self.get()
+        rec = self._to_record(self.repo.channel_platform_upsert(fields))
+        if group_chat_disabled is not None:
+            FeishuChannelConfigService(self.repo).recompute_digests()
+        return rec
 
 
 # --- RunnerDefaults ---------------------------------------------------------
@@ -1054,6 +1203,7 @@ def build_inprocess_client(repo: Repository, settings) -> DataplaneClient:
         registrations=RegistrationService(repo),
         hook_policies=HookPolicyService(repo),
         feishu_configs=FeishuChannelConfigService(repo),
+        channel_platform=ChannelPlatformConfigService(repo),
     )
 
 

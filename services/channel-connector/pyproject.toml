@@ -11,7 +11,7 @@ dependencies = [
     "kubernetes",            # waker: patch AgentTenant spec.wake + poll status (copied from scheduler)
     "grpcio",                # dataplane transport (client side)
     "python-jose",           # runner-token mint/verify (priva_common.runner_token)
-    "lark-oapi>=1.4",        # Feishu/Lark WS long-connection + IM REST (thread-per-app)
+    "lark-oapi>=1.7,<2",     # Feishu/Lark WS + IM REST; lark_ws relies on 1.7 internals (_disconnect/_auto_reconnect/reconnect hooks), verified on 1.7.1
 ]
 
 [project.entry-points."priva_cloud.services"]
