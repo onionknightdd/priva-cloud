@@ -114,8 +114,16 @@ export default function JobDrawer({ onDelete }) {
   const isEdit = !!editingJob
   const [closing, setClosing] = useState(false)
   const { mounted, panelRef, backdropRef } = useOverlayTransition({
-    open: !closing, variant: 'drawer', onExited: closeDrawer,
+    open: !closing, variant: 'drawer',
   })
+
+  // `useOverlayTransition` retains this component until the drawer exit
+  // animation ends. Clear the scheduler state only once it has unmounted so a
+  // later click on “New task” mounts a fresh drawer instead of reusing this
+  // closed instance.
+  useEffect(() => {
+    if (closing && !mounted) closeDrawer()
+  }, [closing, closeDrawer, mounted])
 
   // --- form state -----------------------------------------------------------
   const initialCfg = editingJob?.job_config || null
