@@ -2,7 +2,7 @@
 
 > 状态：Phase 0 已落地 · Phase 1 代码完成 · Phase 2 代码完成（均待镜像部署验证）
 > 关联文档：`docs/im-channel-permission-zh.md`（权限/AUQ 交互协议）
-> 更新：2026-07-23
+> 更新：2026-07-24
 
 ## 1. 背景与架构
 
@@ -196,6 +196,8 @@ chat_type == "group" → effective_group_enabled?
 | 6 | 绑定标识存 union_id（open_id 仅快照）；兜底文案中文 | 2026-07-23 |
 | 7 | digest 折合成后的 effective_group 位；全局翻转走 recompute_digests 精准 re-arm | 2026-07-23 |
 | 8 | 单聊会话同步切 per-chat（多访客各自独立 session）；群内 `/link` 不做绑定 | 2026-07-23 |
+| 9 | slash command 走方案①引导卡片（飞书无注册 API）：绑定成功 + `/help` 触发；欢迎卡仅 🆕 按钮（不含 clear/compact），`/help` 卡三按钮，clear/compact 按 `open_chat_id` 触发完整 run | 2026-07-24 |
+| 10 | DM 卡片里 AskUserQuestion 显示名改为 `Question`；已回答的选择用 markdown 列表（`- **问**：答`）渲染 | 2026-07-24 |
 
 ## 7. 飞书应用权限清单（用户侧配置指引）
 
@@ -217,3 +219,68 @@ commit/detach 后打点入库（`SetBindingDisplay` RPC）——群→群名（�
 私聊→contact API 人名；**每次 arm 每 chat 只解析一次**，群改名/权限补开后需等
 re-arm 刷新；名字取不到时存空串，UI 降级显示 chat_id 缩写。
 CP 只读接口：`GET /api/auth/me/feishu-sessions`（激活在前、按时间倒序）。
+
+## 9. 调研：slash command 能否接入后自动注册（2026-07-24）
+
+**结论：不能。** 飞书开放平台没有程序化注册/更新机器人指令的 API（无 Telegram
+`setMyCommands` / Slack slash command 配置的等价物），客户端也没有输入 `/`
+唤起指令列表的原生能力。现有 `/new` `/link` 等指令纯靠 connector 本地文本前缀
+匹配（`router.py`），飞书侧对指令一无所知，用户必须手打全文。
+
+飞书最接近的能力是**机器人自定义菜单**（bot 单聊输入框旁的菜单按钮）：
+
+- 只能在**开发者后台手工配置**（机器人能力配置页 → 自定义菜单编辑），无 open API；
+- 点击推送 `application.bot.menu_v6` 事件（携带配置时填的 `event_key`），走现有
+  WS 长连接可收（`lark_oapi` 有 `register_p2_application_bot_menu_v6`，需在
+  「事件与回调」额外勾选）；connector 目前未订阅该事件；
+- Model B 下每账号自带应用 → 菜单需**每个租户在自己的后台配一次**，平台无法代劳。
+
+| 方案 | 自动化 | 说明 |
+|---|---|---|
+| ① 指令引导卡片（选定） | 完全自动 | 见 §9.1 定稿设计 |
+| ② 自定义菜单 | 半自动 | 接入指引让租户配一次菜单（event_key 约定 `new` 等），connector 加 `menu_v6` handler 映射到现有 Decision；点击体验最好但配置环节不可自动化。注意 `menu_v6` 事件体只有 operator/event_key/timestamp，**无 chat_id/message_id**，需按 open_id 发送并从响应读回 p2p chat_id |
+
+参考：[机器人菜单使用指南](https://open.feishu.cn/document/client-docs/bot-v3/bot-customized-menu)。
+
+### 9.1 方案① 定稿设计（2026-07-24 裁定）
+
+**触发时机**：① `/link` 绑定成功——回执由纯文本换成引导卡片；② 新本地指令
+`/help`（别名 `/帮助`）随时唤起（与 `/new` 同为 connector 拦截，不进 agent）。
+不做首次消息自动发（访客/群场景噪音）。
+
+**卡片内容**——两个版本（裁定 2026-07-24：欢迎卡不含 clear/compact——刚绑定
+还没开始用，上下文指令无意义；`/help` 是使用中唤起的，保留完整版）：
+
+欢迎卡（`/link` 绑定成功，绿标题）：
+
+```
+┌────────────────────────────────────────────┐
+│ ✅ 绑定成功                                 │
+├────────────────────────────────────────────┤
+│ 你已成为该机器人的所有者，直接发消息          │
+│ 即可开始对话。每个聊天窗口是独立会话。         │
+│                                            │
+│ `/new`   开启新对话（别名 /新 /reset）       │
+│ `/help`  查看使用指南                        │
+│                                            │
+│ 📷 支持直接发送图片：最多 5 张，单张 ≤ 3MB    │
+│ 访问模式与会话管理请前往网页控制台 · 飞书设置  │
+├────────────────────────────────────────────┤
+│ [🆕 开始新对话]                             │
+└────────────────────────────────────────────┘
+```
+
+使用指南卡（`/help` 唤起，蓝标题「🤖 使用指南」，去掉所有者行）：完整指令列表
+（`/new` `/clear` `/compact` `/help`）+ 三按钮
+`[🆕 开始新对话] [🧹 /clear] [📦 /compact]`，其余内容与欢迎卡一致。
+
+**按钮语义**：
+
+- 「🆕 开始新对话」→ `router.detach()`，回执「🆕 已开始新对话」；重复点击幂等。
+- 「/clear」「/compact」→ 等价于用户手打该文本：按卡片回调上下文的
+  `open_chat_id` 定位 chat 绑定，以 `/clear`、`/compact` 为 prompt 走完整
+  run（dial + 流式卡片，SDK 解释指令）。实现上需把 worker 的 run pipeline
+  抽出为消息入口与卡片入口共用。
+- 点击校验沿用现有模式：仅卡片接收者本人可点（open_id 比对，`card_actions.py`
+  新增 `kind`，如 `menu`，value 携带 cmd + 允许的 open_id）。
+- 卡片留在聊天记录中即常驻菜单；文案（图片限制/别名）对齐 §2.2 已实现行为。

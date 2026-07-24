@@ -23,6 +23,8 @@ the custom sentinel is ``__other__``, buttons carry ``{"act": ...}``.
 
 from __future__ import annotations
 
+import re
+
 OTHER = "__other__"
 SKIP = "skip"
 CUSTOM_FIELD = "custom"
@@ -190,21 +192,29 @@ def _confirm_elements(prompt) -> list[dict]:
     els = _intro(prompt)
     els.append({"tag": "button", "text": _pt("✅ 允许"), "type": "primary", "width": "fill",
                 "behaviors": [{"type": "callback", "value": {"act": "allow"}}]})
-    els.append({"tag": "button", "text": _pt("✋ 拒绝"), "type": "default", "width": "fill",
+    els.append({"tag": "button", "text": _pt("🛑 拒绝"), "type": "default", "width": "fill",
                 "behaviors": [{"type": "callback", "value": {"act": "deny"}}]})
     return els
 
 
 # --- terminal cards --------------------------------------------------------
+# Locked answer lines are ``- {head} -> {vals}`` (answer_from_form) — split the pair back out
+# so the terminal card can render a markdown list with the head bolded.
+_ANSWER_LINE_RE = re.compile(r"^-?\s*(.+?)\s*->\s*(.*)$")
+
+
 def answered_card(prompt, answer_text: str) -> dict:
-    rows = [_md("<font color='green'>✅ 已收到你的选择</font>")]
+    rows = ["<font color='green'>✅ 已收到你的选择</font>"]
     for ln in (answer_text or "").split("\n"):
         ln = ln.strip()
-        if ln.startswith("-"):
-            ln = ln[1:].strip()
-        if ln:
-            rows.append(_md(f"<font color='grey'>{ln}</font>"))
-    return _card(rows)
+        if not ln:
+            continue
+        m = _ANSWER_LINE_RE.match(ln)
+        if m:
+            rows.append(f"- **{m.group(1)}**：{m.group(2)}")
+        else:
+            rows.append(ln if ln.startswith("- ") else f"- {ln}")
+    return _card([_md("\n".join(rows))])
 
 
 def skipped_card(prompt) -> dict:

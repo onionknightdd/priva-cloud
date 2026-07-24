@@ -600,7 +600,7 @@ def test_askuser_panel_shows_questions_never_input_dump():
     done = ToolStep("t2", "AskUserQuestion", "done", "", dict(_ASK_INPUT),
                     result_text='Your questions have been answered: "选哪个方案？"="A". "要部署吗？"="是".')
     body2 = _json.dumps(_tool_panel(done), ensure_ascii=False)
-    assert "已收到你的选择" in body2 and "选哪个方案？ -> A" in body2
+    assert "已收到你的选择" in body2 and "- **选哪个方案？**：A" in body2
 
 
 def test_process_panel_header_uses_summary_with_fallback():

@@ -48,6 +48,14 @@ _GLYPH = {
     "error": "<font color='red'>✗</font>",
 }
 
+# Display-name overrides for step rows / fold headers. Grouping and special-casing still key
+# off the real tool name — this is presentation only.
+_TOOL_DISPLAY = {"AskUserQuestion": "Question"}
+
+
+def _disp(name: str) -> str:
+    return _TOOL_DISPLAY.get(name, name)
+
 # --- agent-UI tool-run summary parity ---------------------------------------
 # The folded panel header shows the SAME aggregated phrase the agent UI's collapsed tool
 # run shows (web/user/src/utils/toolRunSummary.js `summarizeRun`): grouped counts joined by
@@ -233,7 +241,7 @@ def _steps_md(steps) -> str:
     if hidden > 0:
         lines.append(f"… 更早 {hidden} 步")
     for st in shown:
-        row = f"{_GLYPH.get(st.status, '•')} **{st.name}**"
+        row = f"{_GLYPH.get(st.status, '•')} **{_disp(st.name)}**"
         if st.summary:
             row += f"  `{st.summary.replace('`', 'ˋ')}`"
         lines.append(row)
@@ -289,7 +297,7 @@ _INPUT_FIELD = {"Read": "file_path", "NotebookEdit": "notebook_path",
 def _tool_title(st) -> str:
     """Per-tool fold header: glyph + name + one-line input summary (+ green/red line delta for
     a successful Edit/Write, same as the aggregated summary)."""
-    title = f"{_GLYPH.get(st.status, '•')} **{st.name}**"
+    title = f"{_GLYPH.get(st.status, '•')} **{_disp(st.name)}**"
     if st.summary:
         title += f"  `{st.summary.replace('`', 'ˋ')}`"
     if st.name in ("Edit", "Write") and st.status == "done":
@@ -364,9 +372,9 @@ _ASKUSER_QA_RE = re.compile(r'"([^"]+)"\s*=\s*"([^"]*)"')
 
 def _askuser_output_elements(st) -> list[dict]:
     """A resolved AskUserQuestion → the chosen answers in the '✅ 已收到你的选择' style (green
-    header + one grey ``Q -> A`` line each), parsed from the tool_result, instead of the raw
-    ``Your questions have been answered: …`` code block. Falls back to the raw output if the
-    text doesn't parse (so nothing is ever lost)."""
+    header + a markdown list, one ``- **Q**：A`` item each), parsed from the tool_result,
+    instead of the raw ``Your questions have been answered: …`` code block. Falls back to the
+    raw output if the text doesn't parse (so nothing is ever lost)."""
     out = (st.result_text or "").strip()
     if not out:
         return []
@@ -374,7 +382,7 @@ def _askuser_output_elements(st) -> list[dict]:
     if not pairs:
         return _tool_output_elements(st)
     rows = ["<font color='green'>✅ 已收到你的选择</font>"]
-    rows += [f"<font color='grey'>{q} -> {a}</font>" for q, a in pairs]
+    rows += [f"- **{q}**：{a}" for q, a in pairs]
     return [_md("\n".join(rows))]
 
 

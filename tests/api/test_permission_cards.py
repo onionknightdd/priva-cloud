@@ -267,10 +267,29 @@ def test_askuser_tool_panel_renders_clean_answer_style():
     from priva_channel_connector.cards import _tool_panel
     st = ToolStep("t1", "AskUserQuestion", "done",
                   result_text='Your questions have been answered: "偏好风格？"="详细深入 (Detailed)". Continue.')
-    body = " ".join(e.get("content", "") for e in _tool_panel(st)["elements"])
+    panel = _tool_panel(st)
+    body = " ".join(e.get("content", "") for e in panel["elements"])
     assert "已收到你的选择" in body
-    assert "偏好风格？ -> 详细深入 (Detailed)" in body
+    assert "- **偏好风格？**：详细深入 (Detailed)" in body    # markdown list item
     assert "Your questions have been answered" not in body   # raw dump replaced
+    # fold header shows the short display name, never the raw tool name
+    assert "**Question**" in panel["header"]["title"]["content"]
+    assert "AskUserQuestion" not in panel["header"]["title"]["content"]
+
+
+def test_askuser_step_row_uses_short_display_name():
+    from priva_channel_connector.sse import ToolStep
+    from priva_channel_connector.cards import _steps_md
+    md = _steps_md([ToolStep("t1", "AskUserQuestion", "running", summary="偏好风格？")])
+    assert "**Question**" in md and "AskUserQuestion" not in md
+
+
+def test_answered_card_renders_markdown_list():
+    card = pc.answered_card(_mk(questions=_Q_MULTI), "- 风格 -> 简洁; 直接\n- 范围 -> 全部")
+    content = card["body"]["elements"][0]["content"]
+    assert "已收到你的选择" in content
+    assert "- **风格**：简洁; 直接" in content
+    assert "- **范围**：全部" in content
 
 
 def test_askuser_tool_panel_falls_back_when_unparseable():
