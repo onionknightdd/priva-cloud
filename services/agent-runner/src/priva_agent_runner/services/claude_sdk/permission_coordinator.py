@@ -101,7 +101,11 @@ class PermissionCoordinator:
         if decision == "allow":
             future.set_result(PermissionResultAllow(updated_input=updated_input or None))
         else:
-            future.set_result(PermissionResultDeny(message=message))
+            # A deny message becomes the errored tool_result's content, which must
+            # not be empty: the Anthropic API 400s on an empty error tool_result
+            # ("content cannot be empty if is_error is true") and lenient gateways
+            # feed the model a malformed empty block instead. Default it.
+            future.set_result(PermissionResultDeny(message=message or "User denied permission"))
 
     def cancel_all(self):
         for future in list(self.pending.values()):

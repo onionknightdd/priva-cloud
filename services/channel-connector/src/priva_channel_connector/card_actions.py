@@ -45,23 +45,29 @@ def _render_open(prompt) -> dict:
     return permission_cards.permission_card(prompt)
 
 
-def _resolve_coro(prompt, decision: str, answer: str | None):
+def _resolve_coro(prompt, decision: str, answer: str | None, deny_message: str = ""):
     updated_input = None
     if decision == "allow" and prompt.kind == "ask_user" and answer is not None:
         updated_input = {"questions": prompt.questions, "answer": answer}
     return resolve.resolve_permission(
         account_id=prompt.account_id, username=prompt.username,
         session_id=prompt.session_id, request_id=prompt.request_id,
-        decision=decision, updated_input=updated_input,
+        decision=decision, updated_input=updated_input, message=deny_message,
     )
 
 
-def _finish(prompt, decision: str, answer: str | None, toast: str, *, status: str):
+def _finish(prompt, decision: str, answer: str | None, toast: str, *, status: str,
+            deny_message: str = ""):
     """Resolve + drop the prompt. Embedded → clear the embed (ticker resumes, re-renders the
-    streaming card) and return a toast; standalone → swap the card to its terminal state."""
+    streaming card) and return a toast; standalone → swap the card to its terminal state.
+
+    ``deny_message`` becomes the CLI's errored tool_result content. A deny MUST carry a
+    non-empty one: an empty error tool_result is invalid upstream (the Anthropic API 400s
+    with "content cannot be empty if is_error is true", and lenient gateways feed the
+    model a malformed empty block instead)."""
     prompt.status = status
     pending.discard(prompt)
-    coro = _resolve_coro(prompt, decision, answer)
+    coro = _resolve_coro(prompt, decision, answer, deny_message)
     if prompt.state is not None:
         if getattr(prompt.state, "pending_prompt", None) is prompt:
             prompt.state.pending_prompt = None
@@ -96,11 +102,13 @@ def handle(account_id: str, parsed: dict):
 
     # 1) Buttons carrying an explicit act: skip / permission allow-deny / model① 提交.
     if act == permission_cards.SKIP:
-        return _finish(prompt, "deny", None, "已跳过", status="skipped")
+        return _finish(prompt, "deny", None, "已跳过", status="skipped",
+                       deny_message="用户跳过了此问题")
     if act == "allow":
         return _finish(prompt, "allow", None, "已允许", status="answered")
     if act == "deny":
-        return _finish(prompt, "deny", None, "已拒绝", status="skipped")
+        return _finish(prompt, "deny", None, "已拒绝", status="skipped",
+                       deny_message="用户拒绝了本次操作")
     if act == "submit":                          # model① explicit 提交 — send the held pick now
         answer = permission_cards.answer_from_option(prompt.questions, getattr(prompt, "selected", ""))
         if not answer:

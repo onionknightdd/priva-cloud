@@ -308,3 +308,51 @@ def test_askuser_errored_tool_panel_keeps_raw():
                   tool_input={"options": []}, result_text="InputValidationError: questions missing")
     body = " ".join(e.get("content", "") for e in _tool_panel(st)["elements"])
     assert "已收到你的选择" not in body
+
+
+# --- deny must carry a human-readable message ------------------------------
+# An empty deny message becomes an empty errored tool_result upstream, which the
+# Anthropic API rejects (400 "content cannot be empty if is_error is true") and
+# lenient gateways feed the model as a malformed empty block (raw-JSON echo in
+# the chat). Every deny path must therefore send a non-empty message.
+
+def _capture_resolve(monkeypatch):
+    calls = []
+
+    async def fake_resolve(**kwargs):
+        calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(card_actions.resolve, "resolve_permission", fake_resolve)
+    return calls
+
+
+def _run(coro):
+    import asyncio
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+def test_handle_deny_sends_deny_message(monkeypatch):
+    calls = _capture_resolve(monkeypatch)
+    p = _register(_mk(request_id="rg", message_id="mg", kind="permission"))
+    resp, coro = card_actions.handle("a1", {"message_id": "mg", "tag": "button",
+                                            "value": {"act": "deny"}})
+    _run(coro)   # the actual coroutine handle() built — hits the patched resolver
+    assert p.status == "skipped"
+    assert calls and calls[-1]["decision"] == "deny"
+    assert calls[-1]["message"] == "用户拒绝了本次操作"
+
+
+def test_handle_skip_sends_deny_message(monkeypatch):
+    calls = _capture_resolve(monkeypatch)
+    p = _register(_mk(request_id="rh", message_id="mh", questions=_Q_SINGLE))
+    resp, coro = card_actions.handle("a1", {"message_id": "mh", "tag": "button",
+                                            "value": {"act": pc.SKIP}})
+    _run(coro)
+    assert p.status == "skipped"
+    assert calls and calls[-1]["decision"] == "deny"
+    assert calls[-1]["message"] == "用户跳过了此问题"

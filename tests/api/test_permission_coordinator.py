@@ -79,6 +79,35 @@ class PermissionCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, PermissionResultDeny)
         self.assertEqual(result.message, "user did not answer")
 
+    async def test_deny_with_empty_message_gets_default(self) -> None:
+        # An empty deny message becomes an empty errored tool_result, which the
+        # Anthropic API rejects outright (400 "content cannot be empty if
+        # is_error is true") — resolve() must default it.
+        queue: asyncio.Queue = asyncio.Queue()
+        coordinator = PermissionCoordinator("stream-A", queue)
+
+        task = asyncio.create_task(coordinator.can_use_tool("bash", {"cmd": "rm -rf x"}, context=None))
+        request = await queue.get()
+
+        coordinator.resolve(request["data"]["request_id"], "deny", "")
+        result = await task
+
+        self.assertIsInstance(result, PermissionResultDeny)
+        self.assertEqual(result.message, "User denied permission")
+
+    async def test_deny_keeps_explicit_message(self) -> None:
+        queue: asyncio.Queue = asyncio.Queue()
+        coordinator = PermissionCoordinator("stream-A", queue)
+
+        task = asyncio.create_task(coordinator.can_use_tool("bash", {"cmd": "rm -rf x"}, context=None))
+        request = await queue.get()
+
+        coordinator.resolve(request["data"]["request_id"], "deny", "用户拒绝了本次操作")
+        result = await task
+
+        self.assertIsInstance(result, PermissionResultDeny)
+        self.assertEqual(result.message, "用户拒绝了本次操作")
+
     async def test_registry_can_remap_session_ids(self) -> None:
         coordinator = PermissionCoordinator("stream-A", asyncio.Queue())
         registry.register("stream-A", coordinator)
