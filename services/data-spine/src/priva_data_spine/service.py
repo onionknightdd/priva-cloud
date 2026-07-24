@@ -833,7 +833,6 @@ class RunnerDefaultsService:
             "cpu_cores": float(k.runner_cpu_cores),
             "memory_mb": int(k.runner_memory_mb),
             "storage_gb": int(k.runner_storage_gb),
-            "runner_image": str(k.runner_image),
             "terminal_resource_percent": int(k.terminal_resource_percent),
             "terminal_max_sessions": int(k.terminal_max_sessions),
             "terminal_idle_timeout_seconds": int(k.terminal_idle_timeout_seconds),
@@ -849,7 +848,6 @@ class RunnerDefaultsService:
             cpu_cores=float(row["cpu_cores"]),
             memory_mb=int(row["memory_mb"]),
             storage_gb=int(row["storage_gb"]),
-            runner_image=row["runner_image"],
             terminal_resource_percent=int(row["terminal_resource_percent"]),
             terminal_max_sessions=int(row["terminal_max_sessions"]),
             terminal_idle_timeout_seconds=int(row["terminal_idle_timeout_seconds"]),
@@ -866,7 +864,7 @@ class RunnerDefaultsService:
 
     def set(self, *, idle_grace_seconds=None, min_alive_after_wake_seconds=None,
             cpu_cores=None, memory_mb=None, storage_gb=None,
-            runner_image=None, terminal_resource_percent=None, terminal_max_sessions=None,
+            terminal_resource_percent=None, terminal_max_sessions=None,
             terminal_idle_timeout_seconds=None, terminal_max_lifetime_seconds=None,
             terminal_scale_down_grace_seconds=None) -> RunnerDefaultsRecord:
         if self.repo.runner_defaults_get() is None:  # ensure the single row exists
@@ -882,8 +880,6 @@ class RunnerDefaultsService:
             fields["memory_mb"] = int(memory_mb)
         if storage_gb is not None:
             fields["storage_gb"] = int(storage_gb)
-        if runner_image is not None:
-            fields["runner_image"] = str(runner_image)
         if terminal_resource_percent is not None:
             fields["terminal_resource_percent"] = int(terminal_resource_percent)
         if terminal_max_sessions is not None:

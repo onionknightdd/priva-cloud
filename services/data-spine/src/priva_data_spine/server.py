@@ -164,7 +164,6 @@ def _rdefaults_pb(r) -> runner_defaults_pb2.RunnerDefaults:
         cpu_cores=r.cpu_cores,
         memory_mb=r.memory_mb,
         storage_gb=r.storage_gb,
-        runner_image=r.runner_image,
         terminal_resource_percent=r.terminal_resource_percent,
         terminal_max_sessions=r.terminal_max_sessions,
         terminal_idle_timeout_seconds=r.terminal_idle_timeout_seconds,
@@ -503,8 +502,6 @@ class _RunnerDefaultsServicer(runner_defaults_pb2_grpc.RunnerDefaultsServiceServ
             kw["memory_mb"] = request.memory_mb
         if "storage_gb" in mask:
             kw["storage_gb"] = request.storage_gb
-        if "runner_image" in mask:
-            kw["runner_image"] = request.runner_image
         if "terminal_resource_percent" in mask:
             kw["terminal_resource_percent"] = request.terminal_resource_percent
         if "terminal_max_sessions" in mask:

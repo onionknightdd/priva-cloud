@@ -13,7 +13,7 @@ kubernetes:
   in_cluster: true
   namespace_system: "priva-cloud"
   namespace_tenants: "priva-cloud"   # alpha: control plane + tenant pods share one ns
-  runner_image: "priva/agent-runner:dev"
+  runner_image: "priva/agent-runner:dev"  # THE runner image (AgentTenant spec.image overrides per-account)
   runner_image_pull_policy: "IfNotPresent"
   runner_service_port: 8091
   idle_grace_seconds: 1800

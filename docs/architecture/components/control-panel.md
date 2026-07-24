@@ -473,7 +473,7 @@ The shipped SPA (`web/admin/src/AdminApp.jsx`) groups nav under **two top tabs**
 - **Dashboard:** Fleet · Resource-Quota · System-Map · Console · Users · Audit
 - **Configurations:** Agent Runner Sandbox
 
-Resource-Quota, System-Map, and Console are **additions beyond §6.1** (live per-account resource view; animated topology + live health; control-plane exec console) — kept. **Agent Runner Sandbox** is the global runner-defaults editor (as-built 2026-06-25, §B.3): idle-grace / min-alive / CPU+memory+workspace quota / runner-image dropdown, edited as platform-wide defaults that every account inherits unless it carries a per-account CR override, applied lazily by the operator (no force-restart). Backed by the data-spine `runner_defaults` store + `/api/admin/runner-defaults` + `/runner-images`.
+Resource-Quota, System-Map, and Console are **additions beyond §6.1** (live per-account resource view; animated topology + live health; control-plane exec console) — kept. **Agent Runner Sandbox** is the global runner-defaults editor (as-built 2026-06-25, §B.3): idle-grace / min-alive / CPU+memory+workspace quota, edited as platform-wide defaults that every account inherits unless it carries a per-account CR override, applied lazily by the operator (no force-restart). Backed by the data-spine `runner_defaults` store + `/api/admin/runner-defaults`. The runner **image** is not a runtime default: the operator's deployment settings (`PRIVA_KUBERNETES__RUNNER_IMAGE`, versioned with the platform release) decide it, with AgentTenant `spec.image` as the per-account override.
 
 ### B.2 §6.1 taxonomy coverage
 

@@ -187,7 +187,9 @@ class KubernetesSettings(BaseModel):
     # (locked 2026-06-21). Split into system/tenants namespaces later via env override.
     namespace_system: str = "priva-cloud"  # control-panel / data-spine / operator
     namespace_tenants: str = "priva-cloud"  # per-account agent-runner pods + CRs
-    runner_image: str = "priva/agent-runner:dev"  # stamped into AgentTenant spec.image
+    # THE runner image authority (operator env, versioned with the platform release).
+    # An AgentTenant carrying spec.image overrides it for that account only.
+    runner_image: str = "priva/agent-runner:dev"
     runner_image_pull_policy: str = "IfNotPresent"  # so minikube uses locally-loaded images
     # Name of an existing kubernetes.io/dockerconfigjson Secret in the tenants namespace,
     # rendered as imagePullSecrets on every runner pod. "" = none (public/local images).

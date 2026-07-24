@@ -148,7 +148,6 @@ def runner_defaults_from_pb(m) -> RunnerDefaultsRecord:
         cpu_cores=m.cpu_cores,
         memory_mb=m.memory_mb,
         storage_gb=m.storage_gb,
-        runner_image=m.runner_image,
         terminal_resource_percent=m.terminal_resource_percent,
         terminal_max_sessions=m.terminal_max_sessions,
         terminal_idle_timeout_seconds=m.terminal_idle_timeout_seconds,

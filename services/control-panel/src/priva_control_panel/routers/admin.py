@@ -23,7 +23,6 @@ from priva_common.models.admin import (
     ResourceUsageResponse,
     RunnerDefaultsResponse,
     RunnerDefaultsUpdate,
-    RunnerImagesResponse,
     RetryableToolEntry,
     RetryCallbackWeComConfig,
     RetryableToolsResponse,
@@ -79,7 +78,6 @@ def _runner_defaults_response(d) -> RunnerDefaultsResponse:
         cpu_millicores=int(round(d.cpu_cores * 1000)),
         memory_mb=d.memory_mb,
         storage_gb=d.storage_gb,
-        runner_image=d.runner_image,
         terminal_resource_percent=d.terminal_resource_percent,
         terminal_max_sessions=d.terminal_max_sessions,
         terminal_idle_timeout_seconds=d.terminal_idle_timeout_seconds,
@@ -128,11 +126,6 @@ async def update_runner_defaults(
         if request.storage_gb <= 0:
             raise HTTPException(400, "storage_gb must be > 0")
         kw["storage_gb"] = int(request.storage_gb)
-    if request.runner_image is not None:
-        img = request.runner_image.strip()
-        if not img:
-            raise HTTPException(400, "runner_image must not be empty")
-        kw["runner_image"] = img
     if request.terminal_resource_percent is not None:
         percent = int(request.terminal_resource_percent)
         if percent < 0 or percent > 50 or percent % 5:
@@ -187,24 +180,6 @@ async def update_runner_defaults(
         details=kw,
     ))
     return _runner_defaults_response(d)
-
-
-@router.get("/runner-images", response_model=RunnerImagesResponse)
-async def get_runner_images():
-    """Agent-runner image tags discoverable in the cluster (kubelet node images),
-    unioned with the current default so the panel always lists the active one."""
-    from priva_common.dataplane import get_client
-    from ..provisioner import list_runner_images
-
-    imgs = await asyncio.to_thread(list_runner_images)
-    try:
-        default_img = get_client().runner_defaults.get().runner_image
-    except Exception:
-        default_img = None
-    found = set(imgs)
-    if default_img:
-        found.add(default_img)
-    return RunnerImagesResponse(images=sorted(found), source="nodes" if imgs else "fallback")
 
 
 @router.get("/users", response_model=list[UserPublic])
@@ -762,7 +737,7 @@ async def restart_account_pod(
     """Admin: force-restart an awake account runner through a controlled 1→0→1.
 
     The zero boundary lets the operator converge the full Deployment template before
-    wake, so inherited resource/image and Runner/Terminal allocation changes actually
+    wake, so inherited resource and Runner/Terminal allocation changes actually
     reach the replacement Pod. No-op if the runner is asleep.
     """
     from ..provisioner import force_restart_pod

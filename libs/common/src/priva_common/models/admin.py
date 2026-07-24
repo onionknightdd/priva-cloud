@@ -176,7 +176,6 @@ class RunnerDefaultsResponse(BaseModel):
     cpu_millicores: int = 1000
     memory_mb: int = 2048
     storage_gb: int = 1
-    runner_image: str = "priva/agent-runner:dev"
     terminal_resource_percent: int = 0
     terminal_max_sessions: int = 2
     terminal_idle_timeout_seconds: int = 1800
@@ -198,20 +197,11 @@ class RunnerDefaultsUpdate(BaseModel):
     cpu_millicores: int | None = None
     memory_mb: int | None = None
     storage_gb: int | None = None
-    runner_image: str | None = None
     terminal_resource_percent: int | None = None
     terminal_max_sessions: int | None = None
     terminal_idle_timeout_seconds: int | None = None
     terminal_max_lifetime_seconds: int | None = None
     terminal_scale_down_grace_seconds: int | None = None
-
-
-class RunnerImagesResponse(BaseModel):
-    """Agent-runner image tags discoverable in the cluster (kubelet node images),
-    unioned with the current default. ``source`` records how they were enumerated
-    ('nodes', or 'fallback' when node listing is unavailable)."""
-    images: list[str] = Field(default_factory=list)
-    source: str = "nodes"
 
 
 # --- Hook Policy (admin "Runtime" panel) -------------------------------------

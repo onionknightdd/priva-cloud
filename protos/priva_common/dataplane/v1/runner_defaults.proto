@@ -9,13 +9,15 @@ import "priva_common/dataplane/v1/common.proto";
 // cluster settings on first read. An account whose CR omits a field inherits the
 // matching default here; a per-account override (CR field present) wins. cpu_cores
 // is fractional cores; memory_mb / storage_gb are whole units (Mi / Gi).
+// The runner image is NOT part of these defaults: it comes from the operator's
+// deployment settings, with AgentTenant spec.image as the per-account override.
 message RunnerDefaults {
+  reserved 6;
   int32 idle_grace_seconds = 1;
   int32 min_alive_after_wake_seconds = 2;
   double cpu_cores = 3;
   int32 memory_mb = 4;
   int32 storage_gb = 5;
-  string runner_image = 6;
   string updated_at = 7;
   int32 terminal_resource_percent = 8;
   int32 terminal_max_sessions = 9;
@@ -26,12 +28,12 @@ message RunnerDefaults {
 
 // Partial update: only fields named in update_mask are applied.
 message SetRunnerDefaultsRequest {
+  reserved 6;
   int32 idle_grace_seconds = 1;
   int32 min_alive_after_wake_seconds = 2;
   double cpu_cores = 3;
   int32 memory_mb = 4;
   int32 storage_gb = 5;
-  string runner_image = 6;
   repeated string update_mask = 7;
   int32 terminal_resource_percent = 8;
   int32 terminal_max_sessions = 9;

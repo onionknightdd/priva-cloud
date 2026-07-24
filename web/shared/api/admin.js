@@ -57,7 +57,6 @@ export const updatePlugin = (id, data) => putJSON(`/admin/system/plugin/${encode
 // it has a per-account override. CPU crosses the wire as millicores (digit-only UI).
 export const getRunnerDefaults = () => getJSON('/admin/runner-defaults')
 export const updateRunnerDefaults = (data) => putJSON('/admin/runner-defaults', data)
-export const getRunnerImages = () => getJSON('/admin/runner-images')
 
 // Configurations ▸ Channels: platform-wide channel settings — today the global
 // group-chat kill switch (composes with each user's own opt-in).

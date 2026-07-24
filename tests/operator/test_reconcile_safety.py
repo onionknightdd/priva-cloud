@@ -12,7 +12,6 @@ def _defaults(storage_gb=1):
         cpu_cores=1.0,
         memory_mb=2048,
         storage_gb=storage_gb,
-        runner_image="runner:test",
         terminal_resource_percent=25,
         terminal_max_sessions=2,
         terminal_idle_timeout_seconds=1800,

@@ -18,7 +18,6 @@ def _defaults() -> dict:
         "cpuCores": 1.0,
         "memoryMb": 2048,
         "storageGb": 10,
-        "runnerImage": "runner:test",
         "terminal": {
             "resourcePercent": 25,
             "maxSessions": 2,
@@ -82,7 +81,7 @@ def test_periodic_sync_recreates_deleted_cr_with_username(monkeypatch):
 
     defaults = SimpleNamespace(
         idle_grace_seconds=1800, min_alive_after_wake_seconds=1800,
-        cpu_cores=1.0, memory_mb=2048, storage_gb=10, runner_image="runner:test",
+        cpu_cores=1.0, memory_mb=2048, storage_gb=10,
         terminal_resource_percent=25, terminal_max_sessions=2,
         terminal_idle_timeout_seconds=1800, terminal_max_lifetime_seconds=14400,
         terminal_scale_down_grace_seconds=120,
@@ -105,7 +104,7 @@ def test_periodic_sync_recreates_deleted_cr_with_username(monkeypatch):
 
     assert result["created"] == 1
     assert created[0][0] == ("acct-1", "alice")
-    assert created[0][1]["runtime_defaults"]["runnerImage"] == "runner:test"
+    assert created[0][1]["runtime_defaults"]["storageGb"] == 10
 
 
 def test_crd_requires_username_in_raw_and_helm_manifests():

@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Clock, Cpu, ShieldCheck, Package, Check, Loader, Settings2, SquareTerminal } from 'lucide-react'
+import { Clock, Cpu, ShieldCheck, Check, Loader, Settings2, SquareTerminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
 import Dropdown from '@shared/components/shared/Dropdown'
-import { getRunnerDefaults, updateRunnerDefaults, getRunnerImages } from '@shared/api/admin'
+import { getRunnerDefaults, updateRunnerDefaults } from '@shared/api/admin'
 import RuntimeHooks from './RuntimeHooks'
 
 // Agent Runner Sandbox — the platform-wide GLOBAL defaults for per-account agent-runner
@@ -37,8 +37,8 @@ const FIELD_LABEL_WIDTH = 240
 const FIELD_BOX_WIDTH = 260
 
 // field id == the runner-defaults API key. type 'int' renders a number input + a unit
-// label OUTSIDE the box; 'image' a shared Dropdown fed by cluster discovery; 'segment'
-// a greyed-out (next-phase) control. CPU is millicores end-to-end (digit-only UI).
+// label OUTSIDE the box; 'segment' a greyed-out (next-phase) control. CPU is
+// millicores end-to-end (digit-only UI).
 const GROUPS = [
   {
     id: 'lifecycle',
@@ -79,14 +79,6 @@ const GROUPS = [
       { id: 'egress', labelKey: 'admin.sandboxNetworkEgress', type: 'segment', disabled: true, options: [{ value: 'allow', labelKey: 'admin.allow' }, { value: 'deny', labelKey: 'admin.deny' }], hintKey: 'admin.sandboxNetworkEgressHint' },
     ],
   },
-  {
-    id: 'image',
-    labelKey: 'admin.sandboxImage',
-    icon: Package,
-    fields: [
-      { id: 'runner_image', labelKey: 'admin.sandboxAgentRunnerImage', type: 'image', hintKey: 'admin.sandboxAgentRunnerImageHint' },
-    ],
-  },
   // Runtime is a custom section (admin hook policies) — it owns its own data
   // fetch, staged per-group saves, and drawer, so it has no form `fields` and
   // no entry in GROUP_KEYS. Rendered specially in the detail column.
@@ -105,7 +97,6 @@ const GROUP_KEYS = {
   resources: ['cpu_millicores', 'memory_mb', 'storage_gb'],
   terminal: ['terminal_resource_percent', 'terminal_max_sessions', 'terminal_idle_timeout_seconds', 'terminal_max_lifetime_seconds', 'terminal_scale_down_grace_seconds'],
   isolation: [],
-  image: ['runner_image'],
   runtime: [],
 }
 
@@ -122,7 +113,6 @@ export default function AgentRunnerSandbox() {
   const [error, setError] = useState(null)
   const [values, setValues] = useState({})       // current edited values (by API key)
   const [baseline, setBaseline] = useState({})    // last-saved values (dirty diff)
-  const [images, setImages] = useState([])
   const [saving, setSaving] = useState(null)      // group id currently saving
   const [savedAt, setSavedAt] = useState(null)    // group id that just saved (Check flash)
 
@@ -137,7 +127,6 @@ export default function AgentRunnerSandbox() {
         cpu_millicores: d.cpu_millicores,
         memory_mb: d.memory_mb,
         storage_gb: d.storage_gb,
-        runner_image: d.runner_image,
         terminal_resource_percent: d.terminal_resource_percent,
         terminal_max_sessions: d.terminal_max_sessions,
         terminal_idle_timeout_seconds: d.terminal_idle_timeout_seconds,
@@ -156,15 +145,6 @@ export default function AgentRunnerSandbox() {
 
   useEffect(() => { load() }, [load])
 
-  // Image list for the dropdown (best-effort; the current default is always included).
-  useEffect(() => {
-    let alive = true
-    getRunnerImages()
-      .then((r) => { if (alive) setImages(r?.images || []) })
-      .catch(() => { /* dropdown falls back to the current value */ })
-    return () => { alive = false }
-  }, [])
-
   const setField = useCallback((fieldId, val) => {
     setValues((prev) => ({ ...prev, [fieldId]: val }))
   }, [])
@@ -176,13 +156,9 @@ export default function AgentRunnerSandbox() {
   const saveGroup = useCallback(async (groupId) => {
     const payload = {}
     for (const k of GROUP_KEYS[groupId]) {
-      if (k === 'runner_image') {
-        payload[k] = String(values[k] ?? '').trim()
-      } else {
-        const n = parseInt(values[k], 10)
-        if (Number.isNaN(n)) continue
-        payload[k] = n
-      }
+      const n = parseInt(values[k], 10)
+      if (Number.isNaN(n)) continue
+      payload[k] = n
     }
     if (Object.keys(payload).length === 0) return
     setSaving(groupId)
@@ -263,20 +239,6 @@ export default function AgentRunnerSandbox() {
             )
           })}
         </div>
-      )
-    } else if (f.type === 'image') {
-      const opts = images.map((tag) => ({ value: tag, label: tag }))
-      if (val && !opts.some((o) => o.value === val)) opts.unshift({ value: val, label: val })
-      control = (
-        <Dropdown
-          size="sm"
-          mono
-          searchable
-          value={val}
-          onChange={(v) => setField(f.id, v)}
-          options={opts}
-          placeholder={t('admin.sandboxSelectImage')}
-        />
       )
     } else if (f.type === 'percentage') {
       control = (

@@ -152,13 +152,14 @@ class ChannelPlatformConfigRecord(BaseModel):
 
 class RunnerDefaultsRecord(BaseModel):
     """Platform-wide global defaults for per-account agent-runner pods. Always a
-    complete set (seeded from settings) — an account's CR overrides win per-field."""
+    complete set (seeded from settings) — an account's CR overrides win per-field.
+    The runner image is NOT a runtime default: the operator's deployment settings
+    decide it (AgentTenant spec.image = per-account override)."""
     idle_grace_seconds: int = 1800
     min_alive_after_wake_seconds: int = 1800
     cpu_cores: float = 1.0
     memory_mb: int = 2048
     storage_gb: int = 1
-    runner_image: str = "priva/agent-runner:dev"
     # 0 disables Web Terminal platform-wide. Non-zero values are fixed 5% steps
     # and may reserve at most half of each tenant's CPU and memory allocation.
     terminal_resource_percent: int = 0
@@ -402,7 +403,6 @@ class RunnerDefaultsClient(Protocol):
         cpu_cores: float | None = None,
         memory_mb: int | None = None,
         storage_gb: int | None = None,
-        runner_image: str | None = None,
         terminal_resource_percent: int | None = None,
         terminal_max_sessions: int | None = None,
         terminal_idle_timeout_seconds: int | None = None,

@@ -368,7 +368,7 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
             return cv.runner_defaults_from_pb(self._s.Get(common_pb2.Empty()))
 
         def set(self, *, idle_grace_seconds=None, min_alive_after_wake_seconds=None,
-                cpu_cores=None, memory_mb=None, storage_gb=None, runner_image=None,
+                cpu_cores=None, memory_mb=None, storage_gb=None,
                 terminal_resource_percent=None, terminal_max_sessions=None,
                 terminal_idle_timeout_seconds=None, terminal_max_lifetime_seconds=None,
                 terminal_scale_down_grace_seconds=None):
@@ -389,9 +389,6 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
             if storage_gb is not None:
                 req.storage_gb = storage_gb
                 mask.append("storage_gb")
-            if runner_image is not None:
-                req.runner_image = runner_image
-                mask.append("runner_image")
             if terminal_resource_percent is not None:
                 req.terminal_resource_percent = terminal_resource_percent
                 mask.append("terminal_resource_percent")

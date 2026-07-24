@@ -146,7 +146,7 @@ def _defaults_from_spec(spec):
     terminal = raw.get("terminal") or {}
     required = (
         "idleGraceSeconds", "minAliveAfterWakeSeconds", "cpuCores", "memoryMb",
-        "storageGb", "runnerImage",
+        "storageGb",
     )
     terminal_required = (
         "resourcePercent", "maxSessions", "idleTimeoutSeconds",
@@ -161,7 +161,6 @@ def _defaults_from_spec(spec):
         cpu_cores=float(raw["cpuCores"]),
         memory_mb=int(raw["memoryMb"]),
         storage_gb=int(raw["storageGb"]),
-        runner_image=str(raw["runnerImage"]),
         terminal_resource_percent=int(terminal["resourcePercent"]),
         terminal_max_sessions=int(terminal["maxSessions"]),
         terminal_idle_timeout_seconds=int(terminal["idleTimeoutSeconds"]),
@@ -244,7 +243,7 @@ def ensure(spec, name, namespace, uid, status, patch, logger, **_):
     if status.get("desiredAllocationHash") != desired_generation:
         patch.status["desiredAllocationHash"] = desired_generation
 
-    image = kube.resolve_image(spec, s, defaults)
+    image = kube.resolve_image(spec, s)
     owner = names.owner_ref(name, uid)
     # Make sure the global managed-policy CM exists before this account's pod
     # mounts it (force past the throttle on create/resume).
@@ -343,14 +342,15 @@ def on_wake(spec, name, namespace, uid, status, patch, logger, **_):
         return
 
     # Cold scale-up: converge the FULL Deployment template (volumes/env/mounts, not just
-    # image+resources) to the current effective config (CR override > global default >
-    # env seed) while at replicas 0 — so a tenant born under an older operator picks up
+    # image+resources) to the current effective config (resources: CR override > global
+    # default; image: CR override > operator settings) while at replicas 0 — so a tenant
+    # born under an older operator picks up
     # template additions on its next wake, without ever restarting a running pod.
     defaults = _defaults_or_reject(spec, status, patch, logger)
     if defaults is None:
         return
     kube.ensure_runtime_objects(
-        namespace, account_id, username, kube.resolve_image(spec, s, defaults),
+        namespace, account_id, username, kube.resolve_image(spec, s),
         s.kubernetes.runner_image_pull_policy, s, names.owner_ref(name, uid), spec, defaults)
     if kube.get_replicas(namespace, account_id) < 0:
         patch.status["phase"] = "PendingTerminalDrain"
@@ -408,7 +408,7 @@ def on_terminal_wake(spec, name, namespace, uid, status, patch, logger, **_):
     applied_generation = kube.applied_allocation_hash(namespace, account_id)
     if runner_replicas == 0 and terminal_replicas <= 0:
         kube.ensure_runtime_objects(
-            namespace, account_id, username, kube.resolve_image(spec, s, defaults),
+            namespace, account_id, username, kube.resolve_image(spec, s),
             s.kubernetes.runner_image_pull_policy, s, names.owner_ref(name, uid), spec, defaults)
         applied_generation = kube.applied_allocation_hash(namespace, account_id)
     if runner_replicas > 0:
@@ -441,7 +441,7 @@ def on_terminal_wake(spec, name, namespace, uid, status, patch, logger, **_):
         }
         return
 
-    image = kube.resolve_image(spec, s, defaults)
+    image = kube.resolve_image(spec, s)
     kube.ensure_terminal_objects(
         namespace, account_id, username, image, s.kubernetes.runner_image_pull_policy,
         s, names.owner_ref(name, uid), spec, defaults)
@@ -516,7 +516,7 @@ def reconcile_terminal(spec, name, namespace, uid, status, patch, logger, **_):
 
     if replicas < 0:
         kube.ensure_terminal_objects(
-            namespace, account_id, username, kube.resolve_image(spec, s, defaults),
+            namespace, account_id, username, kube.resolve_image(spec, s),
             s.kubernetes.runner_image_pull_policy, s, names.owner_ref(name, uid), spec, defaults)
         patch.status["terminal"] = {
             **current, "phase": "Zero", "readyReplicas": 0,
@@ -664,7 +664,7 @@ def reconcile_runtime(spec, name, namespace, status, patch, logger, uid=None, **
         applied_generation = kube.applied_allocation_hash(namespace, account_id)
         if applied_generation != desired_generation:
             kube.ensure_runtime_objects(
-                namespace, account_id, username, kube.resolve_image(spec, s, defaults),
+                namespace, account_id, username, kube.resolve_image(spec, s),
                 s.kubernetes.runner_image_pull_policy, s,
                 names.owner_ref(name, uid), spec, defaults)
         if _is_persistent(spec):

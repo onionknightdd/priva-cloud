@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from priva_common.dataplane.v1 import common_pb2 as priva__common_dot_dataplane_dot_v1_dot_common__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n/priva_common/dataplane/v1/runner_defaults.proto\x12\x12priva.dataplane.v1\x1a&priva_common/dataplane/v1/common.proto\"\xf1\x02\n\x0eRunnerDefaults\x12\x1a\n\x12idle_grace_seconds\x18\x01 \x01(\x05\x12$\n\x1cmin_alive_after_wake_seconds\x18\x02 \x01(\x05\x12\x11\n\tcpu_cores\x18\x03 \x01(\x01\x12\x11\n\tmemory_mb\x18\x04 \x01(\x05\x12\x12\n\nstorage_gb\x18\x05 \x01(\x05\x12\x14\n\x0crunner_image\x18\x06 \x01(\t\x12\x12\n\nupdated_at\x18\x07 \x01(\t\x12!\n\x19terminal_resource_percent\x18\x08 \x01(\x05\x12\x1d\n\x15terminal_max_sessions\x18\t \x01(\x05\x12%\n\x1dterminal_idle_timeout_seconds\x18\n \x01(\x05\x12%\n\x1dterminal_max_lifetime_seconds\x18\x0b \x01(\x05\x12)\n!terminal_scale_down_grace_seconds\x18\x0c \x01(\x05\"\xfc\x02\n\x18SetRunnerDefaultsRequest\x12\x1a\n\x12idle_grace_seconds\x18\x01 \x01(\x05\x12$\n\x1cmin_alive_after_wake_seconds\x18\x02 \x01(\x05\x12\x11\n\tcpu_cores\x18\x03 \x01(\x01\x12\x11\n\tmemory_mb\x18\x04 \x01(\x05\x12\x12\n\nstorage_gb\x18\x05 \x01(\x05\x12\x14\n\x0crunner_image\x18\x06 \x01(\t\x12\x13\n\x0bupdate_mask\x18\x07 \x03(\t\x12!\n\x19terminal_resource_percent\x18\x08 \x01(\x05\x12\x1d\n\x15terminal_max_sessions\x18\t \x01(\x05\x12%\n\x1dterminal_idle_timeout_seconds\x18\n \x01(\x05\x12%\n\x1dterminal_max_lifetime_seconds\x18\x0b \x01(\x05\x12)\n!terminal_scale_down_grace_seconds\x18\x0c \x01(\x05\x32\xb6\x01\n\x15RunnerDefaultsService\x12\x44\n\x03Get\x12\x19.priva.dataplane.v1.Empty\x1a\".priva.dataplane.v1.RunnerDefaults\x12W\n\x03Set\x12,.priva.dataplane.v1.SetRunnerDefaultsRequest\x1a\".priva.dataplane.v1.RunnerDefaultsb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n/priva_common/dataplane/v1/runner_defaults.proto\x12\x12priva.dataplane.v1\x1a&priva_common/dataplane/v1/common.proto\"\xe1\x02\n\x0eRunnerDefaults\x12\x1a\n\x12idle_grace_seconds\x18\x01 \x01(\x05\x12$\n\x1cmin_alive_after_wake_seconds\x18\x02 \x01(\x05\x12\x11\n\tcpu_cores\x18\x03 \x01(\x01\x12\x11\n\tmemory_mb\x18\x04 \x01(\x05\x12\x12\n\nstorage_gb\x18\x05 \x01(\x05\x12\x12\n\nupdated_at\x18\x07 \x01(\t\x12!\n\x19terminal_resource_percent\x18\x08 \x01(\x05\x12\x1d\n\x15terminal_max_sessions\x18\t \x01(\x05\x12%\n\x1dterminal_idle_timeout_seconds\x18\n \x01(\x05\x12%\n\x1dterminal_max_lifetime_seconds\x18\x0b \x01(\x05\x12)\n!terminal_scale_down_grace_seconds\x18\x0c \x01(\x05J\x04\x08\x06\x10\x07\"\xec\x02\n\x18SetRunnerDefaultsRequest\x12\x1a\n\x12idle_grace_seconds\x18\x01 \x01(\x05\x12$\n\x1cmin_alive_after_wake_seconds\x18\x02 \x01(\x05\x12\x11\n\tcpu_cores\x18\x03 \x01(\x01\x12\x11\n\tmemory_mb\x18\x04 \x01(\x05\x12\x12\n\nstorage_gb\x18\x05 \x01(\x05\x12\x13\n\x0bupdate_mask\x18\x07 \x03(\t\x12!\n\x19terminal_resource_percent\x18\x08 \x01(\x05\x12\x1d\n\x15terminal_max_sessions\x18\t \x01(\x05\x12%\n\x1dterminal_idle_timeout_seconds\x18\n \x01(\x05\x12%\n\x1dterminal_max_lifetime_seconds\x18\x0b \x01(\x05\x12)\n!terminal_scale_down_grace_seconds\x18\x0c \x01(\x05J\x04\x08\x06\x10\x07\x32\xb6\x01\n\x15RunnerDefaultsService\x12\x44\n\x03Get\x12\x19.priva.dataplane.v1.Empty\x1a\".priva.dataplane.v1.RunnerDefaults\x12W\n\x03Set\x12,.priva.dataplane.v1.SetRunnerDefaultsRequest\x1a\".priva.dataplane.v1.RunnerDefaultsb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,9 +33,9 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'priva_common.dataplane.v1.r
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_RUNNERDEFAULTS']._serialized_start=112
-  _globals['_RUNNERDEFAULTS']._serialized_end=481
-  _globals['_SETRUNNERDEFAULTSREQUEST']._serialized_start=484
-  _globals['_SETRUNNERDEFAULTSREQUEST']._serialized_end=864
-  _globals['_RUNNERDEFAULTSSERVICE']._serialized_start=867
-  _globals['_RUNNERDEFAULTSSERVICE']._serialized_end=1049
+  _globals['_RUNNERDEFAULTS']._serialized_end=465
+  _globals['_SETRUNNERDEFAULTSREQUEST']._serialized_start=468
+  _globals['_SETRUNNERDEFAULTSREQUEST']._serialized_end=832
+  _globals['_RUNNERDEFAULTSSERVICE']._serialized_start=835
+  _globals['_RUNNERDEFAULTSSERVICE']._serialized_end=1017
 # @@protoc_insertion_point(module_scope)

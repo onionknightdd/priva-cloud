@@ -151,11 +151,14 @@ def resolve_storage_gb(spec: dict, settings, defaults=None) -> int:
     return int(sg)
 
 
-def resolve_image(spec: dict, settings, defaults=None) -> str:
+def resolve_image(spec: dict, settings) -> str:
+    """spec.image (per-account CR override) wins; otherwise the operator's own
+    deployment settings decide — the runner image is a platform-release concern,
+    not a runtime default."""
     img = spec.get("image")
     if img:
         return img
-    return defaults.runner_image if defaults else settings.kubernetes.runner_image
+    return settings.kubernetes.runner_image
 
 
 def allocation_hash(
@@ -178,7 +181,7 @@ def allocation_hash(
     payload = {
         "version": 1,
         "username": username,
-        "image": image or resolve_image(spec, settings, defaults),
+        "image": image or resolve_image(spec, settings),
         "pullPolicy": pull_policy or getattr(k, "runner_image_pull_policy", "IfNotPresent"),
         "runnerResources": resolve_resources(spec, settings, defaults),
         "terminalResources": resolve_terminal_resources(spec, settings, defaults),

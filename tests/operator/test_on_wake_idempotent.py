@@ -45,7 +45,7 @@ def test_cold_wake_converges_template_then_scales(monkeypatch, patch_obj, stub_l
     called = {"scale": 0, "converge": 0}
     monkeypatch.setattr(
         R, "_runner_defaults",
-        lambda spec=None: SimpleNamespace(runner_image="img:test"),
+        lambda spec=None: SimpleNamespace(),
     )
     monkeypatch.setattr(R.kube, "get_replicas", lambda ns, aid: 0)
     monkeypatch.setattr(R.kube, "ensure_runtime_objects",

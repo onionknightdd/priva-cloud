@@ -87,7 +87,6 @@ def _runtime_defaults_spec(defaults: Any | None = None) -> dict:
         "cpuCores": float(defaults.cpu_cores),
         "memoryMb": int(defaults.memory_mb),
         "storageGb": int(defaults.storage_gb),
-        "runnerImage": str(defaults.runner_image),
         "terminal": {
             "resourcePercent": int(defaults.terminal_resource_percent),
             "maxSessions": int(defaults.terminal_max_sessions),
@@ -159,7 +158,7 @@ def ensure_tenant(account_id: str, username: str, *, runner_type: str | None = N
                   runtime_defaults: dict | None = None) -> None:
     """Create or repair the AgentTenant CR for an account (idempotent).
 
-    Inheritable fields (image, resources, storageGb, idle) are written ONLY when an
+    Inheritable fields (resources, storageGb, idle) are written ONLY when an
     explicit per-account value is passed — otherwise they are OMITTED so the field is
     absent on the CR, which the operator reads as "inherit the global runner default"
     (the admin Sandbox panel). A present field = a per-account override that wins and
@@ -305,30 +304,6 @@ async def probe_health(pod_ip: str, port: int) -> dict | None:
     except Exception:
         return None
     return None
-
-
-def list_runner_images() -> list[str]:
-    """Agent-runner image tags present on the cluster nodes (the kubelet's image list,
-    ``Node.status.images``). This is the cross-environment way to discover what's
-    actually pullable WITHOUT a registry API — dev (minikube) has no registry, and prod's
-    is customer-provided with no stored creds. Digest-only refs (``repo@sha256:…``) are
-    dropped; only human ``repo:tag`` refs mentioning agent-runner are kept. Best-effort:
-    returns [] on any error (incl. missing nodes RBAC). Blocking kube call — invoke via
-    ``asyncio.to_thread``. (Prod enhancement: union with the registry v2 tags/list API.)
-    """
-    _load()
-    try:
-        resp = _core().list_node()
-    except Exception as exc:
-        logger.debug("list_runner_images: list_node failed: {}", exc)
-        return []
-    tags: set[str] = set()
-    for node in resp.items:
-        for img in (node.status.images or []):
-            for ref in (img.names or []):
-                if "agent-runner" in ref and "@sha256" not in ref:
-                    tags.add(ref)
-    return sorted(tags)
 
 
 def list_gateway_pod_ips() -> list[str]:
@@ -805,7 +780,7 @@ def force_restart_pod(account_id: str) -> int:
     """Admin: force a *converging* restart of an awake account runner.
 
     Deleting a Pod alone only recreates it from the Deployment's existing template.
-    That is insufficient after an admin changes inherited image/resources or the
+    That is insufficient after an admin changes inherited resources or the
     Runner/Terminal allocation percentage: the replacement would still use the old
     template. Use the same safe lifecycle as a cold wake instead:
 

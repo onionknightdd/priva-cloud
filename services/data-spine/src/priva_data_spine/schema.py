@@ -170,7 +170,6 @@ DDL: tuple[str, ...] = (
       cpu_cores                    REAL    NOT NULL,
       memory_mb                    INTEGER NOT NULL,
       storage_gb                   INTEGER NOT NULL,
-      runner_image                 TEXT    NOT NULL,
       terminal_resource_percent    INTEGER NOT NULL DEFAULT 0,
       terminal_max_sessions        INTEGER NOT NULL DEFAULT 2,
       terminal_idle_timeout_seconds INTEGER NOT NULL DEFAULT 1800,
@@ -345,11 +344,23 @@ _BACKFILLS: tuple[str, ...] = (
 )
 
 
+# Idempotent column removals for DBs created while a column still existed —
+# the inverse guard of _MIGRATIONS: applied only when table_info shows the
+# column present (SQLite >= 3.35 supports DROP COLUMN).
+_DROP_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    ("runner_defaults", "runner_image"),
+)
+
+
 def _apply_migrations(conn: sqlite3.Connection) -> None:
     for table, column, ddl in _MIGRATIONS:
         cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         if column not in cols:
             conn.execute(ddl)
+    for table, column in _DROP_MIGRATIONS:
+        cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column in cols:
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
 
 
 def _migrate_binding_session_nullable(conn: sqlite3.Connection) -> None:

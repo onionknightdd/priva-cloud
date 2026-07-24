@@ -173,7 +173,6 @@ DDL: tuple[str, ...] = (
       cpu_cores                    DOUBLE PRECISION NOT NULL,
       memory_mb                    BIGINT NOT NULL,
       storage_gb                   BIGINT NOT NULL,
-      runner_image                 TEXT   NOT NULL,
       terminal_resource_percent    BIGINT NOT NULL DEFAULT 0,
       terminal_max_sessions        BIGINT NOT NULL DEFAULT 2,
       terminal_idle_timeout_seconds BIGINT NOT NULL DEFAULT 1800,
@@ -292,6 +291,9 @@ _MIGRATIONS: tuple[str, ...] = (
     "DROP INDEX IF EXISTS ux_binding_account",
     "ALTER TABLE channel_binding ADD COLUMN IF NOT EXISTS chat_type TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE channel_binding ADD COLUMN IF NOT EXISTS chat_name TEXT NOT NULL DEFAULT ''",
+    # The runner image moved out of runner_defaults: the operator's deployment
+    # settings are the authority (AgentTenant spec.image = per-account override).
+    "ALTER TABLE runner_defaults DROP COLUMN IF EXISTS runner_image",
     # One-time backfill, safe every boot: pre-migration rows carry enforced=1
     # with an empty enforced_events; the service keeps enforced derived from
     # enforced_events afterwards, so this WHERE never matches again.

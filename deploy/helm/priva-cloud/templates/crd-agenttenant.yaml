@@ -82,7 +82,6 @@ spec:
                     cpuCores: {type: number, exclusiveMinimum: true, minimum: 0}
                     memoryMb: {type: integer, minimum: 1}
                     storageGb: {type: integer, minimum: 1}
-                    runnerImage: {type: string, minLength: 1}
                     terminal:
                       type: object
                       properties:
