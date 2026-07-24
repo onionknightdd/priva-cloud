@@ -28,8 +28,6 @@ from priva_common.models.admin import (
     RetryCallbackWeComConfig,
     RetryableToolsResponse,
     RetryableToolsUpdate,
-    RiskyToolsResponse,
-    RiskyToolsUpdate,
     SensitivePatternEntry,
     SensitivePatternsResponse,
     SensitivePatternsUpdate,
@@ -1302,48 +1300,6 @@ async def update_retryable_tools(
         retry_callback_script=request.retry_callback_script,
         retry_callback_wecom=request.retry_callback_wecom,
     )
-
-
-@router.get("/risky-tools", response_model=RiskyToolsResponse)
-async def get_risky_tools():
-    """List the admin-configured risky-tool patterns that force user
-    approval even in bypassPermissions mode."""
-    store = get_user_store()
-    runtime = store.get_runtime_config()
-    return RiskyToolsResponse(
-        risky_tool_list=list(runtime.get("risky_tool_list") or [])
-    )
-
-
-@router.put("/risky-tools", response_model=RiskyToolsResponse)
-async def update_risky_tools(
-    request: RiskyToolsUpdate,
-    current_user: UserRecord = Depends(require_admin),
-):
-    """Update the risky-tool patterns. Each pattern must be a valid
-    Claude Code native permission-grammar string (e.g. 'Bash(rm:*)',
-    'Write(/etc/**)', 'WebFetch(domain:github.com)', 'mcp__*__delete_*').
-    Malformed patterns are rejected with HTTP 422."""
-    from priva_common.risky_matcher import parse_rule_strict
-
-    # Validate all patterns before committing any change.
-    for raw in request.risky_tool_list:
-        try:
-            parse_rule_strict(raw)
-        except ValueError as e:
-            raise HTTPException(422, str(e)) from e
-
-    store = get_user_store()
-    store.update_runtime_config("risky_tool_list", list(request.risky_tool_list))
-
-    audit = get_audit_logger()
-    audit.append(AuditEntry(
-        actor=current_user.username,
-        action="runtime.risky_tool_list_updated",
-        target="risky_tool_list",
-        details={"count": len(request.risky_tool_list)},
-    ))
-    return RiskyToolsResponse(risky_tool_list=list(request.risky_tool_list))
 
 
 @router.get("/sensitive-patterns", response_model=SensitivePatternsResponse)

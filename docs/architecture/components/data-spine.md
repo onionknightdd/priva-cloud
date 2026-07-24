@@ -134,7 +134,7 @@ CREATE UNIQUE INDEX ux_account_username ON account(username);
 
 CREATE TABLE account_runtime_config (
     account_id TEXT NOT NULL REFERENCES account(account_id) ON DELETE CASCADE,
-    cfg_key    TEXT NOT NULL,   -- cli_path, append_systemprompt, history_retention_days, retryable_tools, risky_tool_list, pii_masking, skill_exclude
+    cfg_key    TEXT NOT NULL,   -- cli_path, append_systemprompt, history_retention_days, retryable_tools, pii_masking, skill_exclude
     cfg_value  TEXT NOT NULL,   -- JSON (json1)
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     PRIMARY KEY (account_id, cfg_key)
@@ -598,7 +598,7 @@ A standalone, **idempotent** `priva-dataplane migrate` job (K8s `Job`, run once 
 | Legacy source | → SQLite | Transform / note |
 |---|---|---|
 | `.priva.settings.yml` `users.*` | `account`, `account_runtime_config` | bcrypt `password_hash` copied as-is. **`api_key`: decrypt with the old hardcoded Fernet key → re-encrypt under the new per-account DEK.** The hardcoded key (`crypto.py:10`) is used **only** by the migrator, then deleted. |
-| `.priva.settings.yml` `runtime.*` | `account_runtime_config` | `cli_path`, `append_systemprompt`, `retryable_tools`, `risky_tool_list`, `pii_masking`, `history_retention_days`. **Bake in** the lazy migrations (`sensitive_data_patterns→pii_masking`, `enable_global_skills→skill_exclude`) here, then freeze — no runtime lazy migration post-cutover. |
+| `.priva.settings.yml` `runtime.*` | `account_runtime_config` | `cli_path`, `append_systemprompt`, `retryable_tools`, `pii_masking`, `history_retention_days`. **Bake in** the lazy migrations (`sensitive_data_patterns→pii_masking`, `enable_global_skills→skill_exclude`) here, then freeze — no runtime lazy migration post-cutover. |
 | `.priva.audit.{date}.jsonl` + counts sidecar | **stays JSONL (C1)** | **Not migrated into SQLite.** Relocated per-user to `/audit/<account_id>/YYYY-MM-DD.jsonl` on the dedicated audit volume (pod = sole writer). Counts sidecars dropped. Optional per-file hash-chain is opt-in. |
 | `.priva.wecom.sessions.json` | `channel_binding` (identity-keyed; **no `wecom_session`** — withdrawn) | `last_activity` already ISO-8601 UTC TEXT → plain copy (no monotonic re-baseline). **M5: no `session_index` row to seed.** A **1:1** entry's `session_id` (already the JSONL filename) → a `channel_binding` row keyed on the resolved **sender identity** (`session_uuid = that id`, `first_run_done=1`). **Group** (`chat_id`-keyed) entries are **not** migrated as shared sessions (no-chat_id-key, 2026-06-18) — members re-establish their own identity bindings on first message. |
 | `.priva.user.yml` `channels.wecom`/`.openclaw` | `channel_config_wecom`/`_openclaw` + `secret` | `secret`/`auth_token`/OpenClaw Ed25519 PEM: plaintext today → **encrypt under per-account DEK** (rows in `secret`, configs reference `secret_id`). |

@@ -227,7 +227,7 @@ The exclusive cross-service contract layer — **services depend on it; it impor
 
 - **Dataplane clients** (`get_client()`, `set_inprocess_handlers()`): transport-agnostic Protocol interfaces — `AccountClient`, `BindingClient`, `QuotaClient`, `SchedulerClient`, `AdminClient`, `SecretClient`, `ResourceSpecClient`, `RunnerDefaultsClient`, `RegistrationClient` — over in-process or gRPC transports.
 - **Config** (`pydantic-settings`, YAML overlay + `PRIVA_*` env override), **logging** (loguru, 5 channels, hourly rotation, HTTP access middleware), **metrics** (`prometheus-client`: `HTTP_REQUESTS`/`HTTP_DURATION`, `AGENT_RUNS_*`).
-- **Crypto** (Fernet `enc:v1:`), **runner_token** (HS256 mint/verify), **user/runtime config stores**, **audit_log** (daily-partitioned JSONL, cursor pagination), the **Redis key catalog** (single source of truth for T1 durable inbox + T2 ephemeral routes/locks/claims/approvals, used by the Phase-4 services), **risky_matcher**, **sensitive_mask**, **skill_exclude**, **script_lint**, and the Pydantic **models/** DTOs.
+- **Crypto** (Fernet `enc:v1:`), **runner_token** (HS256 mint/verify), **user/runtime config stores**, **audit_log** (daily-partitioned JSONL, cursor pagination), the **Redis key catalog** (single source of truth for T1 durable inbox + T2 ephemeral routes/locks/claims/approvals, used by the Phase-4 services), **sensitive_mask**, **skill_exclude**, **script_lint**, and the Pydantic **models/** DTOs.
 - **protos/** holds the gRPC contracts; `protos/gen.sh` runs `grpc_tools.protoc` to generate stubs into `libs/common/src/priva_common/dataplane/v1/` (committed; no runtime codegen).
 
 ### deploy

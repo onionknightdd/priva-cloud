@@ -9,6 +9,7 @@ from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk.types import (
     HookMatcher,
     PermissionResultAllow,
+    PermissionResultDeny,
     SyncHookJSONOutput,
 )
 from fastapi import HTTPException
@@ -114,12 +115,23 @@ async def _noop_pre_tool_hook(input_data: Any, tool_use_id: str, context: Any) -
     return SyncHookJSONOutput(continue_=True)
 
 
-async def _auto_approve_tool(tool_name: str, tool_input: dict[str, Any], context: Any) -> PermissionResultAllow:
-    # Even in bypassPermissions mode the CLI asks for approval when writing
-    # under .claude/{skills,commands,agents}/** (built-in protection in the
-    # Claude Code CLI — see wf5 in the bundled binary). Without a can_use_tool
-    # callback the SDK raises "canUseTool callback is not provided" and the
-    # tool call fails. An auto-approve callback lets these writes through.
+async def _auto_approve_tool(
+    tool_name: str, tool_input: dict[str, Any], context: Any
+) -> PermissionResultAllow | PermissionResultDeny:
+    # Even in bypassPermissions mode the CLI consults the callback when (a) a
+    # PreToolUse hook returned permissionDecision "ask" (the admin-managed
+    # hook lane — the hook's reason arrives as context.decision_reason), or
+    # (b) it is writing under .claude/{skills,commands,agents}/** (built-in
+    # protection in the Claude Code CLI — see wf5 in the bundled binary).
+    # Without a can_use_tool callback the SDK raises "canUseTool callback is
+    # not provided" and the tool call fails. This fallback serves runs with
+    # no PermissionCoordinator (nobody to ask): hook asks fail closed, the
+    # built-in-protection writes stay auto-approved.
+    reason = getattr(context, "decision_reason", None)
+    if reason:
+        return PermissionResultDeny(
+            message=f"需要用户确认但当前运行无法交互,已拒绝:{reason}"
+        )
     return PermissionResultAllow(updated_input=None)
 
 
@@ -291,10 +303,10 @@ async def build_agent_options(
     if fork_session and session_id:
         options.fork_session = True
     effective_mode = permission_mode or "bypassPermissions"
-    # In bypass mode with no explicit callback, fall back to the plain
-    # auto-approve. When the admin has configured a non-empty risky_tool_list,
-    # service.agent_run_events installs a risky-aware wrapper upstream and
-    # passes it in via can_use_tool, so this fallback is skipped.
+    # In bypass mode with no explicit callback, fall back to _auto_approve_tool
+    # (auto-allow, but managed-hook "ask" decisions fail closed). Streaming
+    # runs always pass the coordinator-backed unified callback upstream, so
+    # this fallback only serves coordinator-less paths.
     if can_use_tool is None and effective_mode == "bypassPermissions":
         can_use_tool = _auto_approve_tool
     if can_use_tool is not None:

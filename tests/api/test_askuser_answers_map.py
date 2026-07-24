@@ -1,8 +1,10 @@
 import asyncio
 import unittest
+from types import SimpleNamespace
 
 from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 
+from priva_agent_runner.services.claude_sdk.options import _auto_approve_tool
 from priva_agent_runner.services.claude_sdk.permission_coordinator import PermissionCoordinator
 from priva_agent_runner.services.claude_sdk.service import (
     _askuser_answers_map,
@@ -47,7 +49,7 @@ class UnifiedAskUserRewriteTests(unittest.IsolatedAsyncioTestCase):
     async def test_allow_rewrites_to_cli_answers_schema(self) -> None:
         queue: asyncio.Queue = asyncio.Queue()
         coordinator = PermissionCoordinator("s", queue)
-        cut = _make_unified_can_use_tool(coordinator, "bypassPermissions", [])
+        cut = _make_unified_can_use_tool(coordinator, "bypassPermissions")
 
         tool_input = {"questions": [{"question": "Where to invest?", "header": "Investing"}]}
         task = asyncio.create_task(cut("AskUserQuestion", tool_input, None))
@@ -67,7 +69,7 @@ class UnifiedAskUserRewriteTests(unittest.IsolatedAsyncioTestCase):
     async def test_deny_passes_through_untouched(self) -> None:
         queue: asyncio.Queue = asyncio.Queue()
         coordinator = PermissionCoordinator("s", queue)
-        cut = _make_unified_can_use_tool(coordinator, "bypassPermissions", [])
+        cut = _make_unified_can_use_tool(coordinator, "bypassPermissions")
 
         task = asyncio.create_task(cut("AskUserQuestion", {"questions": []}, None))
         req = await queue.get()
@@ -76,6 +78,71 @@ class UnifiedAskUserRewriteTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result, PermissionResultDeny)
         self.assertEqual(result.message, "user did not answer")
+
+
+class HookAskRoutingTests(unittest.IsolatedAsyncioTestCase):
+    """bypassPermissions routing of managed-hook "ask" decisions.
+
+    In bypass mode the CLI consults can_use_tool only when a PreToolUse hook
+    returned permissionDecision "ask" (context.decision_reason carries the
+    hook's reason) or the CLI's built-in .claude/** protection fired. The
+    unified callback must pause hook asks on the coordinator — relaying the
+    hook's reason verbatim — and auto-allow every other consult.
+    """
+
+    async def test_hook_ask_pauses_on_coordinator_with_hook_reason(self) -> None:
+        queue: asyncio.Queue = asyncio.Queue()
+        coordinator = PermissionCoordinator("s", queue)
+        cut = _make_unified_can_use_tool(coordinator, "bypassPermissions")
+
+        ctx = SimpleNamespace(decision_reason="匹配到高风险工具模式 'Bash(rm:*)'。")
+        task = asyncio.create_task(
+            cut("Bash", {"command": "rm -rf /tmp/x"}, ctx)
+        )
+        req = await queue.get()
+        self.assertEqual(req["event"], "permission_request")
+        self.assertEqual(req["data"]["kind"], "permission")
+        self.assertTrue(req["data"]["risky"])
+        self.assertEqual(req["data"]["reason"], "匹配到高风险工具模式 'Bash(rm:*)'。")
+
+        coordinator.resolve(req["data"]["request_id"], "allow", "")
+        result = await task
+        self.assertIsInstance(result, PermissionResultAllow)
+
+    async def test_hook_ask_fails_closed_when_feedback_disabled(self) -> None:
+        queue: asyncio.Queue = asyncio.Queue()
+        coordinator = PermissionCoordinator("s", queue)
+        cut = _make_unified_can_use_tool(
+            coordinator, "bypassPermissions", enable_feedback=False
+        )
+
+        ctx = SimpleNamespace(decision_reason="risky rm")
+        result = await cut("Bash", {"command": "rm -rf /tmp/x"}, ctx)
+        self.assertIsInstance(result, PermissionResultDeny)
+        self.assertIn("risky rm", result.message)
+        self.assertTrue(queue.empty())
+
+    async def test_no_decision_reason_auto_allows(self) -> None:
+        queue: asyncio.Queue = asyncio.Queue()
+        coordinator = PermissionCoordinator("s", queue)
+        cut = _make_unified_can_use_tool(coordinator, "bypassPermissions")
+
+        for ctx in (None, SimpleNamespace(decision_reason=None)):
+            result = await cut("Bash", {"command": "ls"}, ctx)
+            self.assertIsInstance(result, PermissionResultAllow)
+            self.assertIsNone(result.updated_input)
+        self.assertTrue(queue.empty())
+
+    async def test_auto_approve_fallback_denies_hook_ask(self) -> None:
+        # Coordinator-less fallback (build_agent_options): nobody can answer,
+        # so a hook "ask" must fail closed instead of silently approving.
+        ctx = SimpleNamespace(decision_reason="risky rm")
+        result = await _auto_approve_tool("Bash", {"command": "rm -rf /"}, ctx)
+        self.assertIsInstance(result, PermissionResultDeny)
+        self.assertIn("risky rm", result.message)
+
+        result = await _auto_approve_tool("Bash", {"command": "ls"}, None)
+        self.assertIsInstance(result, PermissionResultAllow)
 
 
 if __name__ == "__main__":

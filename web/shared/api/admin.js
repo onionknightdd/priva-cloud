@@ -46,8 +46,6 @@ export const updateHistoryRetention = (data) => putJSON('/admin/history-retentio
 export const getRetryableTools = () => getJSON('/admin/retryable-tools')
 export const updateRetryableTools = (data) => putJSON('/admin/retryable-tools', data)
 
-export const getRiskyTools = () => getJSON('/admin/risky-tools')
-export const updateRiskyTools = (data) => putJSON('/admin/risky-tools', data)
 
 export const getSensitivePatterns = () => getJSON('/admin/sensitive-patterns')
 export const updateSensitivePatterns = (data) => putJSON('/admin/sensitive-patterns', data)

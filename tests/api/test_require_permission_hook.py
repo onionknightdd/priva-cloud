@@ -1,13 +1,14 @@
 """Emit-shape tests for the require-permission-risky-tools hook.
 
 The hook is the `require-permission-risky-tools` hook-policy SEED (a standalone
-python3 script in data-spine, stdlib-only port of priva_common.risky_matcher).
-Since v3 the risky patterns are EMBEDDED in the script (no $PRIVA_HOOK_DIR
+stdlib-only python3 script in data-spine) — the ONLY place risky-tool rules
+live. Since v3 the patterns are EMBEDDED in the script (no $PRIVA_HOOK_DIR
 context file), so the script is self-contained wherever the CLI runs it. These
 tests run the actual seed script the way the executor does — stdin JSON in,
 JSON on stdout out — locking in the permissionDecision='ask' emit shape.
-Interactive enforcement still happens in service.py via the can_use_tool
-wrapper (direct matches_any), independent of this hook.
+The CLI relays that "ask" to the runner's can_use_tool callback (the hook's
+reason arrives as context.decision_reason), which pauses for user approval —
+see test_askuser_answers_map.HookAskRoutingTests.
 """
 
 import json

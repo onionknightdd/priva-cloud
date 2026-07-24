@@ -203,7 +203,9 @@ exit 0
 '''
 
 # ── require-permission-risky-tools ──────────────────────────────────────────
-# Standalone port of priva_common.risky_matcher (same grammar, same semantics).
+# THE risky-tool policy: rules + matcher live only in this script (Claude Code
+# permission grammar). The runner has no risky knowledge — its can_use_tool
+# just relays this hook's "ask" (context.decision_reason) as a user prompt.
 # v3: patterns are EMBEDDED in the script (like block-dangerous-bash) — no
 # runtime context file, so the hook is self-contained wherever the CLI runs it.
 

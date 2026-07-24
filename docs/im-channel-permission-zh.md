@@ -60,8 +60,9 @@ Body (JSON):
 
 - **`enable_permission_feedback`（可选，默认 `false`）**——是否启用本指南
   描述的同步应答能力：
-  - `true`：本文全部生效。`AskUserQuestion` 会同步阻塞等用户作答，命中
-    `risky_tool_list` 的危险操作也会阻塞等确认。**你的渠道必须按本文实现
+  - `true`：本文全部生效。`AskUserQuestion` 会同步阻塞等用户作答，被
+    admin managed hook（`require-permission-risky-tools`）判定为 "ask" 的
+    危险操作也会阻塞等确认。**你的渠道必须按本文实现
     读流 + 回传**，否则连接会一直挂到超时（默认 600s）。
   - `false` 或不传：服务端**直接移除 `AskUserQuestion` 工具**（模型无法发
     起询问，连接不会挂死），危险/受控工具一律按“拒绝”默认处理。适合
@@ -71,7 +72,8 @@ Body (JSON):
     不处理该字段。
 - `permission_mode` 用 `bypassPermissions`。注意：`enable_permission_feedback=true`
   时，**即使在 bypass 模式下 `AskUserQuestion` 仍会同步阻塞**等待用户作答；
-  危险操作是否拦截由管理员的 `risky_tool_list` 控制。
+  危险操作是否拦截由 admin managed hook（`/etc/claude-code` 的
+  `require-permission-risky-tools`，规则内嵌在 hook 脚本里）的 "ask" 决策控制。
 - `x-user-name` 既是身份，也是该 run 的 owner。后面调
   `/permission/respond` 必须用**同一身份**，否则 403。
 

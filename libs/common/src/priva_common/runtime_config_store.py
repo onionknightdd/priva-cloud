@@ -1,7 +1,7 @@
 """Runtime config store — the PVC-owned half of the old UserStore.
 
 `runtime.*` settings (cli_path, append_systemprompt, history_retention_days,
-retryable_tools, risky_tool_list, pii_masking, skill_exclude) live in the
+retryable_tools, pii_masking, skill_exclude) live in the
 ``runtime`` section of ``.priva.settings.yml`` and stay file-backed (Phase-1
 decision: runtime config is pod/PVC-owned, NOT in data-spine). UserStore
 delegates its get/update_runtime_config here so account methods can move to the
@@ -84,9 +84,6 @@ class RuntimeConfigStore:
         #   append_systemprompt    : dict {enable, content}
         #   history_retention_days : int
         #   retryable_tools        : list[dict]
-        #   risky_tool_list        : list[str] -- Claude Code permission DSL
-        #                            patterns forcing user approval in
-        #                            bypassPermissions mode.
         #   pii_masking            : dict {enable, patterns}
         # Passing value=None removes the key.
         with self._lock:

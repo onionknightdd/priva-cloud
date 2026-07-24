@@ -276,65 +276,6 @@ def _get_sticky_vision_model(session_id: str | None) -> str | None:
     return _vision_sessions.get(session_id)
 
 
-def _risky_list_enabled() -> list[str]:
-    """Return the admin-configured risky-tool pattern list (or empty)."""
-    try:
-        from priva_common.user_store import get_user_store
-        return list(get_user_store().get_runtime_config().get("risky_tool_list") or [])
-    except Exception:
-        return []
-
-
-def _uses_permission_coordinator(permission_mode: PermissionMode | None) -> bool:
-    """Decide whether a PermissionCoordinator should be created for this run.
-
-    For explicit permission modes (acceptEdits / default / plan) we always
-    need the coordinator. For bypassPermissions we only need it when the
-    admin has configured a non-empty risky_tool_list -- that list forces
-    user approval for specific tools even in bypass mode.
-    """
-    if permission_mode not in (None, "bypassPermissions"):
-        return True
-    return bool(_risky_list_enabled())
-
-
-def _make_risky_aware_can_use_tool(
-    coordinator: PermissionCoordinator,
-    risky_list: list[str],
-):
-    """Build a can_use_tool callback that pauses for user approval on
-    matched risky tools and auto-allows everything else.
-
-    Matches directly via priva_common.risky_matcher (the old
-    require_permission_risky_tools builtin is now a seeded hook policy —
-    this permission-gate path is independent of the hook engine). The
-    no-match branch returns PermissionResultAllow(updated_input=None) --
-    identical to _auto_approve_tool -- so the CLI's built-in protection for
-    .claude/{skills,commands,agents}/** continues to work as before.
-    """
-    from priva_common.risky_matcher import matches_any
-
-    async def wrapped(tool_name, tool_input, context):
-        matched, rule = matches_any(risky_list, tool_name, tool_input)
-        if matched:
-            return await coordinator.request_permission(
-                tool_name, tool_input, context,
-                risky=True,
-                matched_rule=rule,
-                reason=_risky_reason(rule),
-            )
-        return PermissionResultAllow(updated_input=None)
-
-    return wrapped
-
-
-def _risky_reason(rule: str | None) -> str:
-    return (
-        f"匹配到高风险工具模式 '{rule}'。"
-        f"请再次确认 Agent 即将要执行的操作是否符合预期。"
-    )
-
-
 def _askuser_answers_map(questions: list | None, answer_text: str) -> dict[str, str]:
     """Normalise the permission UI / IM channel free-text answer into the
     AskUserQuestion ``answers`` map the Claude Code CLI actually expects.
@@ -386,7 +327,6 @@ def _askuser_answers_map(questions: list | None, answer_text: str) -> dict[str, 
 def _make_unified_can_use_tool(
     coordinator: PermissionCoordinator,
     effective_mode: str,
-    risky_list: list[str],
     enable_feedback: bool = True,
 ):
     """Build the single can_use_tool callback used by every streaming run.
@@ -398,13 +338,15 @@ def _make_unified_can_use_tool(
     - explicit permission modes (default / acceptEdits / plan) -> route
       every tool through the coordinator (preserves the prior
       coordinator.can_use_tool behaviour);
-    - bypassPermissions + non-empty risky list -> delegate to
-      require_permission_risky_tools; matched tools block for approval,
-      everything else auto-allows;
-    - bypassPermissions + empty risky list -> auto-allow with
-      PermissionResultAllow(updated_input=None), identical to
-      _auto_approve_tool, so the CLI's built-in protection for
-      .claude/{skills,commands,agents}/** keeps working.
+    - bypassPermissions -> the CLI auto-approves normal tool calls WITHOUT
+      consulting this callback. It consults us only when something
+      explicitly asked: a PreToolUse hook (the admin-managed hook lane,
+      /etc/claude-code) returned permissionDecision "ask" — the hook's
+      permissionDecisionReason arrives as context.decision_reason — or the
+      CLI's built-in protection for .claude/{skills,commands,agents}/**
+      fired. Hook asks pause for user approval via the coordinator; every
+      other consult auto-allows with PermissionResultAllow(
+      updated_input=None), preserving the built-in-protection semantics.
 
     When enable_feedback is False the run is non-interactive: the caller
     cannot answer prompts, so AskUserQuestion is already stripped from the
@@ -412,8 +354,6 @@ def _make_unified_can_use_tool(
     would otherwise block for a prompt is denied with a default message
     instead of hanging the connection. Non-gated tools are unaffected.
     """
-    from priva_common.risky_matcher import matches_any
-
     _disabled = PermissionResultDeny(message="permission feedback disabled")
 
     async def wrapped(tool_name, tool_input, context):
@@ -445,19 +385,22 @@ def _make_unified_can_use_tool(
                 tool_name, tool_input, context, kind="permission",
             )
 
-        if risky_list:
-            matched, rule = matches_any(risky_list, tool_name, tool_input)
-            if matched:
-                if not enable_feedback:
-                    return _disabled
-                return await coordinator.request_permission(
-                    tool_name, tool_input, context,
-                    risky=True,
-                    matched_rule=rule,
-                    reason=_risky_reason(rule),
-                    kind="permission",
+        # bypassPermissions: the CLI consults this callback only on explicit
+        # asks (see docstring). A non-empty decision_reason marks a PreToolUse
+        # hook "ask" — pause for user approval, relaying the hook's reason.
+        reason = getattr(context, "decision_reason", None)
+        if reason:
+            if not enable_feedback:
+                # Nobody can answer on this channel — fail closed.
+                return PermissionResultDeny(
+                    message=f"需要用户确认但当前通道无法交互,已拒绝:{reason}"
                 )
-            return PermissionResultAllow(updated_input=None)
+            return await coordinator.request_permission(
+                tool_name, tool_input, context,
+                risky=True,
+                reason=reason,
+                kind="permission",
+            )
 
         return PermissionResultAllow(updated_input=None)
 
@@ -899,13 +842,13 @@ async def agent_run_events(
         coordinator.event_queue = output_queue
         coordinator.owner_username = username
 
-    # AskUserQuestion always blocks on the coordinator; other tools follow
-    # the mode/risky rules — see _make_unified_can_use_tool. The coordinator
-    # is always present now (streaming runs always create one).
+    # AskUserQuestion always blocks on the coordinator; in bypass mode a
+    # managed-hook "ask" (context.decision_reason) pauses for approval —
+    # see _make_unified_can_use_tool. The coordinator is always present now
+    # (streaming runs always create one).
     effective_mode = permission_mode or "bypassPermissions"
-    risky_list = _risky_list_enabled() if effective_mode == "bypassPermissions" else []
     cut_cb = _make_unified_can_use_tool(
-        coordinator, effective_mode, risky_list, enable_permission_feedback
+        coordinator, effective_mode, enable_permission_feedback
     )
 
     options = await build_agent_options(

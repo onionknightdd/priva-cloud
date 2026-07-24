@@ -403,14 +403,6 @@ class RetryableToolsUpdate(BaseModel):
     retry_callback_wecom: RetryCallbackWeComConfig | None = None
 
 
-class RiskyToolsResponse(BaseModel):
-    risky_tool_list: list[str] = []
-
-
-class RiskyToolsUpdate(BaseModel):
-    risky_tool_list: list[str] = []
-
-
 class SensitivePatternEntry(BaseModel):
     name: str
     pattern: str
