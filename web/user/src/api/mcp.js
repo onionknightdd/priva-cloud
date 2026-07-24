@@ -1,4 +1,4 @@
-import { sandboxRead, sandboxPost, sandboxPut, sandboxDelete } from '@shared/api/client'
+import { sandboxRead, sandboxReadPost, sandboxPost, sandboxPut, sandboxDelete } from '@shared/api/client'
 
 // Project servers are keyed by (cwd, name); global servers ignore cwd. The cwd
 // rides as a query param on the item endpoints.
@@ -25,6 +25,10 @@ export const updateMcpServer = (level, name, cwd, data) =>
 export const deleteMcpServer = (level, name, cwd) =>
   sandboxDelete(`/resource/mcp/${encodeURIComponent(level)}/${encodeURIComponent(name)}${scopeQuery(cwd)}`)
 
-export const validateMcpServer = (data) => sandboxPost('/resource/mcp/validate', data)
+// sandboxReadPost: validate replies with every discovered tool's input_schema — the
+// same >8KB payload that put capabilities on the safe lane. POST, but the reply is large.
+export const validateMcpServer = (data) => sandboxReadPost('/resource/mcp/validate', data)
 
-export const validateMcpTool = (data) => sandboxPost('/resource/mcp/validate/tool', data)
+// sandboxReadPost: a tool test reply carries the tool's full output (docs/search results),
+// which can far exceed the ~8KB EPP cap.
+export const validateMcpTool = (data) => sandboxReadPost('/resource/mcp/validate/tool', data)
