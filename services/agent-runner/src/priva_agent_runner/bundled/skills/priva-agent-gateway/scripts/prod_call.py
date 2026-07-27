@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""prod_call.py — 通过 priva 网关调用生产环境 Agent（SSE 流式接口）。
+"""prod_call.py — 以编程方式调用云端 agent sandbox（网关 SSE 流式接口）。
 
 用法:
-    python3 prod_call.py --prompt "用户的指令" \
+    AGENT_SANDBOX_GATEWAY_URL=<网关域名> python3 prod_call.py --prompt "任务描述" \
         [--session-id "上一轮的session_id"] \
         [--verbose]
 
+网关地址没有内置默认值：首次调用时通过 AGENT_SANDBOX_GATEWAY_URL 提供网关域名，
+脚本会把规范化后的地址写入 ./.priva-agent-gateway/session.json 的 gateway_url
+字段，之后的调用不必再带该环境变量。两者都缺失时以退出码 1 失败并给出指引。
+
 退出码:
     0 — 成功（result 事件的 data JSON 写到 stdout）
-    1 — 参数错误或 ./.priva-agent-gateway/auth 文件缺失/为空
+    1 — 参数错误、网关地址未配置，或 ./.priva-agent-gateway/auth 文件缺失/为空
     2 — 网络错误（连接、超时、SSE 读取中断）
     3 — API 返回非 2xx，或流结束未收到 result，或 stream_error
     4 — 并发冲突：同一 session_id 已有进行中的调用（fail-fast）
@@ -27,20 +31,23 @@ import urllib.request
 from pathlib import Path
 from typing import IO
 
-DEFAULT_API_URL = "http://localhost:8080/api/sandbox/agent/run/stream"
-API_URL = os.environ.get("PRIVA_AGENT_GATEWAY_URL", DEFAULT_API_URL)
+GATEWAY_ENV_VAR = "AGENT_SANDBOX_GATEWAY_URL"
+# The runtime's streaming contract lives at a fixed path under the gateway; the
+# operator only ever supplies the gateway domain.
+API_PATH = "/api/sandbox/agent/run/stream"
 TIMEOUT_SECONDS = 300
 
 SKILL_NAME = "priva-agent-gateway"
 STATE_DIR = Path.cwd() / f".{SKILL_NAME}"
 AUTH_FILE = STATE_DIR / "auth"
+SESSION_FILE = STATE_DIR / "session.json"
 
 
 def load_bearer_token() -> str:
     if not AUTH_FILE.is_file():
         sys.stderr.write(
             f"错误：未找到 auth 文件 {AUTH_FILE}\n"
-            f"请向用户索取生产环境 Bearer token，并以明文单行形式写入该文件。\n"
+            f"请向用户索取云端 agent sandbox 的 Bearer token，并以明文单行形式写入该文件。\n"
         )
         sys.exit(1)
     token = AUTH_FILE.read_text(encoding="utf-8").strip()
@@ -50,11 +57,89 @@ def load_bearer_token() -> str:
     return token
 
 
-def iter_sse_events(resp):
-    """Parse an SSE stream from a urlopen response, yielding (event, data_str)."""
+def _read_session_state() -> dict:
+    """Return session.json as a dict, or {} when absent/unparsable."""
+    try:
+        data = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _normalize_gateway_url(raw: str) -> str:
+    """Turn an operator-supplied gateway domain into the full endpoint URL.
+
+    Accepts a bare domain (``agent.example.com``), an origin
+    (``https://agent.example.com``), a base path, or an already-complete
+    endpoint URL — so a caller who pastes the full URL isn't punished.
+    """
+    url = (raw or "").strip().rstrip("/")
+    if not url:
+        return ""
+    if "://" not in url:
+        url = f"https://{url}"
+    if API_PATH not in url:
+        url += API_PATH
+    return url
+
+
+def _persist_gateway_url(url: str) -> None:
+    """Merge ``gateway_url`` into session.json, preserving every other key."""
+    state = _read_session_state()
+    if state.get("gateway_url") == url:
+        return
+    state["gateway_url"] = url
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        SESSION_FILE.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+    except OSError as e:
+        sys.stderr.write(f"警告：无法把 gateway_url 写入 {SESSION_FILE} — {e}\n")
+
+
+def resolve_api_url() -> str:
+    """Resolve the gateway endpoint: env var first, then the persisted value.
+
+    There is deliberately no built-in default — a wrong one silently points the
+    call at the wrong cluster. Supplying the env var once persists it, so later
+    calls in the same working directory need no environment at all.
+    """
+    from_env = os.environ.get(GATEWAY_ENV_VAR, "").strip()
+    url = _normalize_gateway_url(from_env or _read_session_state().get("gateway_url") or "")
+    if not url:
+        sys.stderr.write(
+            f"错误：未配置云端 agent sandbox 的网关地址。\n"
+            f"请向用户索取网关域名，然后带上环境变量重跑一次本命令（只需一次，"
+            f"脚本会把它持久化到 {SESSION_FILE} 的 gateway_url 字段）：\n"
+            f'  {GATEWAY_ENV_VAR}="agent.example.com" python3 <skill-path>/scripts/prod_call.py --prompt "..."\n'
+        )
+        sys.exit(1)
+    if from_env:
+        _persist_gateway_url(url)
+    return url
+
+
+class _StreamTimeout(Exception):
+    """The call outlived TIMEOUT_SECONDS of wall-clock time."""
+
+
+def iter_sse_events(resp, deadline: float | None = None):
+    """Parse an SSE stream from a urlopen response, yielding (event, data_str).
+
+    ``deadline`` is a ``time.monotonic()`` stamp; passing it raises
+    ``_StreamTimeout`` once the wall clock runs past it. The check has to live
+    here, on every raw line, rather than in the caller's per-event loop: the
+    gateway's heartbeat is an SSE *comment* (``: keepalive``) that yields no
+    event at all, and each heartbeat byte also resets urlopen's per-socket
+    timeout — so a stalled run would otherwise stream heartbeats forever
+    without either timeout ever firing.
+    """
     event: str | None = None
     data_lines: list[str] = []
     for raw in resp:
+        if deadline is not None and time.monotonic() > deadline:
+            raise _StreamTimeout
         line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
         if line == "":
             if event is not None or data_lines:
@@ -141,8 +226,8 @@ def _write_event(handle: IO, event: str, data) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="生产环境 Agent 调用器（SSE 网关）")
-    parser.add_argument("--prompt", required=True, help="用户的指令内容（对应 priva message 字段）")
+    parser = argparse.ArgumentParser(description="云端 agent sandbox 调用器（网关 SSE 接口）")
+    parser.add_argument("--prompt", required=True, help="要交给远端 agent 的任务描述（对应 priva message 字段）")
     parser.add_argument("--session-id", default="", help="上一轮会话 ID，留空表示新会话")
     parser.add_argument(
         "--verbose",
@@ -151,6 +236,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    api_url = resolve_api_url()
     token = load_bearer_token()
 
     # Fail-fast concurrency guard: only continuation calls (with an
@@ -166,7 +252,7 @@ def main() -> int:
         body["session_id"] = args.session_id
 
     req = urllib.request.Request(
-        API_URL,
+        api_url,
         data=json.dumps(body).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {token}",
@@ -203,26 +289,20 @@ def main() -> int:
     stream_error: dict | None = None
     timed_out = False
     # Real wall-clock deadline: urlopen(timeout=) is only a per-socket-op
-    # timeout, so a stream that keeps sending keepalives could otherwise
-    # run unbounded. We check elapsed time on every SSE event (keepalives
-    # included) and abort once the total exceeds TIMEOUT_SECONDS.
+    # timeout, so a stream that keeps heartbeating could otherwise run
+    # unbounded. iter_sse_events enforces it per raw line — see its docstring
+    # for why a per-event check here would never fire.
     deadline = time.monotonic() + TIMEOUT_SECONDS
     try:
         with resp:
-            for event, data_str in iter_sse_events(resp):
+            for event, data_str in iter_sse_events(resp, deadline):
                 if not data_str:
-                    if time.monotonic() > deadline:
-                        timed_out = True
-                        break
                     continue
                 try:
                     payload = json.loads(data_str)
                 except json.JSONDecodeError:
-                    if time.monotonic() > deadline:
-                        timed_out = True
-                        break
                     continue
-                if log_handle is not None and event != "keepalive":
+                if log_handle is not None:
                     _write_event(log_handle, event, payload)
                 if event == "result":
                     result_payload = payload
@@ -230,9 +310,8 @@ def main() -> int:
                 if event in ("stream_error", "retry_exhausted"):
                     stream_error = {"event": event, **payload}
                     break
-                if time.monotonic() > deadline:
-                    timed_out = True
-                    break
+    except _StreamTimeout:
+        timed_out = True
     except (TimeoutError, OSError) as e:
         sys.stderr.write(f"错误：SSE 流读取异常 — {type(e).__name__}: {e}\n")
         if log_handle is not None:
