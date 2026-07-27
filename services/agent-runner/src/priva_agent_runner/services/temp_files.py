@@ -19,7 +19,7 @@ from priva_common.config import get_settings
 
 logger = get_app_logger(__name__)
 
-MAX_FILE_SIZE = 3 * 1024 * 1024  # 3MB
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB — keep in sync with PromptComposer.jsx
 TTL_SECONDS = 24 * 60 * 60  # 24 hours
 
 ALLOWED_EXTENSIONS = {

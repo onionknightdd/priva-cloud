@@ -156,7 +156,7 @@
       "none": "—"
     },
     "uploadFile": "Upload file",
-    "fileTooLarge": "File too large (max 3MB)",
+    "fileTooLarge": "File too large (max 5MB)",
     "unsupportedType": "Unsupported file type",
     "maxFilesReached": "Maximum 5 files allowed",
     "clearAll": "Clear ({{count}})",
@@ -165,7 +165,7 @@
     "disclaimer": "LLM can make mistakes. Please double-check responses.",
     "noVisionModel": "No vision model set — images will be dropped after send.",
     "usingVisionModel": "Will use: {{model}}",
-    "imageTooLarge": "Image too large (max 6MB before compression)",
+    "imageTooLarge": "Image too large (max 10MB before compression)",
     "renderErrorTitle": "Chat messages failed to render",
     "renderErrorMessage": "Something went wrong while rendering this conversation. You can retry without leaving the chat.",
     "renderErrorRetry": "Retry rendering",

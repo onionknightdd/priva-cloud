@@ -17,7 +17,7 @@ import { pressTick } from '@shared/motion/waapiMicro'
 import { AnimatedCollapse } from '@shared/components/shared/Accordion'
 import { EASE_ACCORDION } from '@shared/motion/tokens'
 
-const MAX_FILE_SIZE = 3 * 1024 * 1024 // 3MB
+const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB — keep in sync with temp_files.MAX_FILE_SIZE
 const MAX_FILES = 5
 const ALLOWED_EXTENSIONS = new Set([
   '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.pdf', '.zip',

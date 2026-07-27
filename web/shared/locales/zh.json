@@ -156,7 +156,7 @@
       "none": "—"
     },
     "uploadFile": "上传文件",
-    "fileTooLarge": "文件过大（最大 3MB）",
+    "fileTooLarge": "文件过大（最大 5MB）",
     "unsupportedType": "不支持的文件类型",
     "maxFilesReached": "最多允许 5 个文件",
     "clearAll": "清空 ({{count}})",
@@ -165,7 +165,7 @@
     "disclaimer": "LLM 可能会犯错，请仔细核实回复内容。",
     "noVisionModel": "未设置视觉模型 — 图片将在发送后被丢弃。",
     "usingVisionModel": "将使用: {{model}}",
-    "imageTooLarge": "图片过大（压缩前最大 6MB）",
+    "imageTooLarge": "图片过大（压缩前最大 10MB）",
     "renderErrorTitle": "聊天消息渲染失败",
     "renderErrorMessage": "渲染当前会话时发生错误。你可以直接重试，无需离开聊天页面。",
     "renderErrorRetry": "重试渲染",
