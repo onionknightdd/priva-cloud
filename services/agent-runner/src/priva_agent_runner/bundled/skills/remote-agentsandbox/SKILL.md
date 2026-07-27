@@ -12,7 +12,10 @@ metadata:
 SSE 流式契约交给远端 agent 执行，结果以 `result` 事件返回。
 
 远端 agent 是一个具备完整工具权限的独立 sandbox，你只是它的一个普通 API 客户端——
-这里没有新协议，用的就是运行时标准的 `POST /api/sandbox/agent/run/stream`。
+这里没有新协议，用的就是运行时标准的 agent run 流式契约。请求经网关的
+`/api/cp-proxy/agent/run/stream` 转发到远端 runtime 的 `/api/sandbox/agent/run/stream`——
+走 cp-proxy 是必须的：`/api/sandbox` 那条通道上的 ext_proc 会把响应体截断在 ~8KB，
+事件流也不例外，长一点的运行就永远等不到 `result`。
 
 ## 首次使用配置
 
@@ -105,7 +108,7 @@ token 明文永远不会出现在 stdout/stderr 里。
 
 ```json
 {
-  "gateway_url": "https://agent.example.com/api/sandbox/agent/run/stream",
+  "gateway_url": "https://agent.example.com/api/cp-proxy/agent/run/stream",
   "session_id": "6776417b-8339-403d-820c-6a1b0a7e453a",
   "last_used": "2026-03-03T10:30:00Z",
   "topic": "分析 payment 模块的测试覆盖"

@@ -308,13 +308,28 @@ export function streamAgentRun(message, sessionId, onEvent, permissionMode, onCo
     if (addDirs && addDirs.length > 0) {
       body.add_dirs = addDirs
     }
-    debugLog('send', `SSE ▶ POST ${BASE_URL}/agent/run/stream`, body)
-    const res = await fetch(`${BASE_URL}/agent/run/stream`, {
+    // cp-proxy, not the /api/sandbox lane: agentgateway's GIE EPP ext_proc cuts
+    // every response body at ~8KB (ADR 0003), and an event stream is a response
+    // body like any other — past 8KB the stream dies and `result` never lands.
+    // Accept: text/event-stream puts the control-panel proxy in relay mode.
+    const init = {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        ...getAuthHeaders(),
+      },
       body: JSON.stringify(body),
       signal: controller.signal,
-    })
+    }
+    debugLog('send', `SSE ▶ POST /api/cp-proxy/agent/run/stream`, body)
+    let res
+    try {
+      res = await fetch('/api/cp-proxy/agent/run/stream', init)
+      if (res.status === 404) res = await fetch(`${BASE_URL}/agent/run/stream`, init)
+    } catch {
+      res = await fetch(`${BASE_URL}/agent/run/stream`, init)
+    }
 
     if (!res.ok) {
       if (res.status === 401) {

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 # Minimal containers may not register web font types; browsers refuse fonts
@@ -232,7 +232,8 @@ def create_app() -> FastAPI:
     # (control-panel face, no ext_proc), so it returns the full body. It re-does
     # the EPP's per-account steering: auth the user's bearer token, wake their
     # pod, mint a per-account runner token, and proxy the allowed method — so a caller
-    # reaches only their OWN pod. Streams/SSE keep using /api/sandbox.
+    # reaches only their OWN pod. SSE callers (Accept: text/event-stream) branch to
+    # _stream_runner_response below and are relayed chunk by chunk instead of buffered.
     async def _proxy_runner_request(request: Request, sandbox_path: str, method: str = "GET") -> Response:
         from . import provisioner
         from .services.auth import authenticate_raw_token
@@ -266,6 +267,12 @@ def create_app() -> FastAPI:
         if accept:
             headers["Accept"] = accept
         body = await request.body() if method != "GET" else None
+
+        # SSE must not be buffered: the caller needs events as they happen, and an
+        # agent run outlives any sane total timeout. Hand it to the streaming path.
+        if "text/event-stream" in (accept or "").lower():
+            return await _stream_runner_response(url, headers, body, method)
+
         try:
             # trust_env=False: in-cluster pod-to-pod hop must not honor any host/system proxy.
             # httpx buffers r.content fully — fine for file-manager previews/uploads.
@@ -275,6 +282,58 @@ def create_app() -> FastAPI:
             return Response(f"runner upstream unavailable: {exc}", status_code=502)
         return Response(content=r.content, status_code=r.status_code,
                         media_type=r.headers.get("content-type", "application/json"))
+
+    async def _stream_runner_response(url: str, headers: dict, body, method: str) -> Response:
+        """Relay an SSE response from the account's pod, chunk by chunk.
+
+        SSE on the /api/sandbox lane is truncated like any other body: agentgateway
+        hardcodes the GIE EPP ext_proc to FullDuplexStreamed and ignores our
+        mode_override, so a run's event stream is cut at ~8KB and the client never
+        sees `result` (ADR 0003 exempted "streams/SSE/WS", but that reasoning only
+        holds for WS — after the upgrade those bytes tunnel past ext_proc, while SSE
+        is an ordinary response body). This lane rides the "/" catch-all, which has
+        no ext_proc at all.
+
+        read=None because the gap between two events is the model thinking, not a
+        stalled socket; the run's own limits bound it. The client going away
+        cancels this generator, which closes the upstream connection and lets the
+        runner tear the run down.
+        """
+        timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+        cx = httpx.AsyncClient(trust_env=False, timeout=timeout)
+        try:
+            req = cx.build_request(method, url, headers=headers, content=body)
+            r = await cx.send(req, stream=True)
+        except Exception as exc:
+            await cx.aclose()
+            return Response(f"runner upstream unavailable: {exc}", status_code=502)
+
+        # An error reply is a small one-shot body, not a stream — read it whole so
+        # the caller gets the message instead of an empty stream.
+        if r.status_code >= 400:
+            try:
+                detail = await r.aread()
+            finally:
+                await r.aclose()
+                await cx.aclose()
+            return Response(content=detail, status_code=r.status_code,
+                            media_type=r.headers.get("content-type", "application/json"))
+
+        async def relay():
+            try:
+                async for chunk in r.aiter_raw():
+                    yield chunk
+            finally:
+                await r.aclose()
+                await cx.aclose()
+
+        return StreamingResponse(
+            relay(),
+            status_code=r.status_code,
+            media_type=r.headers.get("content-type", "text/event-stream"),
+            # No intermediary may buffer or cache a live event stream.
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     # Generic large-body-safe read lane: any GET /api/cp-proxy/<path> is proxied to
     # the caller's pod at /api/sandbox/<path>. Not under /api/sandbox, so Gateway-API

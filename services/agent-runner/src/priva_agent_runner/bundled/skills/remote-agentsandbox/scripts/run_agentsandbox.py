@@ -34,7 +34,16 @@ from typing import IO
 GATEWAY_ENV_VAR = "AGENT_SANDBOX_GATEWAY_URL"
 # The runtime's streaming contract lives at a fixed path under the gateway; the
 # operator only ever supplies the gateway domain.
-API_PATH = "/api/sandbox/agent/run/stream"
+#
+# cp-proxy, not /api/sandbox: the latter rides agentgateway's GIE InferencePool,
+# whose EPP ext_proc is hardcoded to buffer every response body and cuts it at
+# ~8KB — an event stream included, so `result` never arrives on a real run. The
+# cp-proxy lane reaches the same runtime endpoint through the control-panel,
+# which has no ext_proc on its path (ADR 0003).
+API_PATH = "/api/cp-proxy/agent/run/stream"
+# Endpoints a persisted gateway_url may already carry, stripped before the
+# canonical path is appended so an older saved value migrates itself.
+_KNOWN_API_PATHS = (API_PATH, "/api/sandbox/agent/run/stream")
 TIMEOUT_SECONDS = 300
 
 # Per-workdir state (token, persisted gateway_url, session + verbose logs).
@@ -73,16 +82,19 @@ def _normalize_gateway_url(raw: str) -> str:
 
     Accepts a bare domain (``agent.example.com``), an origin
     (``https://agent.example.com``), a base path, or an already-complete
-    endpoint URL — so a caller who pastes the full URL isn't punished.
+    endpoint URL — so a caller who pastes the full URL isn't punished. A URL
+    ending in a superseded endpoint is rewritten to the current one.
     """
     url = (raw or "").strip().rstrip("/")
     if not url:
         return ""
     if "://" not in url:
         url = f"https://{url}"
-    if API_PATH not in url:
-        url += API_PATH
-    return url
+    for path in _KNOWN_API_PATHS:
+        if url.endswith(path):
+            url = url[: -len(path)]
+            break
+    return url + API_PATH
 
 
 def _persist_gateway_url(url: str) -> None:
@@ -117,8 +129,9 @@ def resolve_api_url() -> str:
             f'  {GATEWAY_ENV_VAR}="agent.example.com" python3 <skill-path>/scripts/run_agentsandbox.py --prompt "..."\n'
         )
         sys.exit(1)
-    if from_env:
-        _persist_gateway_url(url)
+    # Unconditional: this also rewrites a stored URL whose endpoint has been
+    # superseded. _persist_gateway_url no-ops when nothing changed.
+    _persist_gateway_url(url)
     return url
 
 
