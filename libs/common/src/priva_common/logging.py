@@ -180,11 +180,17 @@ def configure_logging(settings) -> None:
         logger.configure(extra={"channel": "server"})
 
         base_dir = _log_base_dir(settings)
-        _add_sink("server", settings.logging.server, base_dir)
-        _add_sink("app", settings.logging.app, base_dir)
-        _add_sink("access", settings.logging.access, base_dir)
-        _add_sink("scheduler", settings.logging.scheduler, base_dir)
-        _add_sink("channels", settings.logging.channels, base_dir)
+        # Sinks bind the stream *object* at add-time; grabbing the real stdout
+        # here (before the proxies below replace sys.stdout) is what keeps the
+        # console sink from feeding its own output back into the logger.
+        console = getattr(settings.logging, "console", None)
+        console_stream = sys.stdout if console is not None and console.enabled else None
+        console_level = console.level if console is not None else None
+        _add_sink("server", settings.logging.server, base_dir, console_stream, console_level)
+        _add_sink("app", settings.logging.app, base_dir, console_stream, console_level)
+        _add_sink("access", settings.logging.access, base_dir, console_stream, console_level)
+        _add_sink("scheduler", settings.logging.scheduler, base_dir, console_stream, console_level)
+        _add_sink("channels", settings.logging.channels, base_dir, console_stream, console_level)
 
         intercept_handler = _InterceptHandler()
         root_logger = logging.getLogger()
@@ -295,9 +301,17 @@ class AccessLogMiddleware:
         ).info("")
 
 
-def _add_sink(channel: str, config: LoggingTargetSettings, base_dir: Path) -> None:
+def _add_sink(
+    channel: str,
+    config: LoggingTargetSettings,
+    base_dir: Path,
+    console_stream: TextIO | None = None,
+    console_level: str | None = None,
+) -> None:
     log_path = _resolve_log_path(config.path, base_dir)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    channel_filter = lambda record, target_channel=channel: record["extra"].get("channel", "server") == target_channel  # noqa: E731
 
     logger.add(
         log_path,
@@ -309,8 +323,21 @@ def _add_sink(channel: str, config: LoggingTargetSettings, base_dir: Path) -> No
         enqueue=True,
         encoding="utf-8",
         catch=True,
-        filter=lambda record, target_channel=channel: record["extra"].get("channel", "server") == target_channel,
+        filter=channel_filter,
     )
+
+    if console_stream is not None:
+        # Per-channel mirror (not one shared console sink): each channel's
+        # format references channel-specific extras — e.g. access uses
+        # {extra[client_ip]} — so a single format can't render every record.
+        logger.add(
+            console_stream,
+            level=console_level or config.level,
+            format=config.format,
+            enqueue=True,
+            catch=True,
+            filter=channel_filter,
+        )
 
 
 def _log_base_dir(settings) -> Path:

@@ -40,7 +40,15 @@ class LoggingTargetSettings(BaseModel):
     compression: str
 
 
+class ConsoleLoggingSettings(BaseModel):
+    # Mirror every channel's file sink to the process stdout so container logs
+    # (`kubectl logs` / `docker logs`) carry the same lines as the log files.
+    enabled: bool = True
+    level: str | None = None  # None → each channel keeps its file-sink level
+
+
 class LoggingSettings(BaseModel):
+    console: ConsoleLoggingSettings = Field(default_factory=ConsoleLoggingSettings)
     access: LoggingTargetSettings = Field(
         default_factory=lambda: LoggingTargetSettings(
             path="logs/access.log",
