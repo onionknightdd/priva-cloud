@@ -72,6 +72,15 @@ def _button(text: str, cmd: str, *, open_id: str, chat_type: str, union_id: str,
     }
 
 
+# 指令列表下方的统一说明：本地指令（/new /help /skill /info）都不进会话上下文——
+# 实测同一会话连跑三次 CLI `/context`，session 不变、Tokens 恒定、Messages 行不存在。
+_CONTEXT_NOTE = "所有指令的输出不会出现在对话的上下文中。"
+
+
+def _note() -> dict:
+    return _md(f"<font color='grey'>{_CONTEXT_NOTE}</font>")
+
+
 def _footer(max_images: int, max_image_bytes: int) -> dict:
     mb = max_image_bytes // (1024 * 1024)
     return _md(f"<font color='grey'>📷 支持直接发送图片：最多 {max_images} 张，单张 ≤ {mb}MB\n"
@@ -82,8 +91,10 @@ def welcome_card(*, open_id: str, chat_type: str = "p2p", union_id: str = "",
                  max_images: int = 5, max_image_bytes: int = 3 * 1024 * 1024) -> dict:
     """`/link` 绑定成功的回执卡。"""
     return _card("✅ 绑定成功", "green", [
-        _md("你已成为该机器人的所有者，直接发消息即可开始对话。每个聊天窗口是独立会话。"),
-        _md("`/new`　开启新对话（别名 `/新` `/reset`）\n`/help`　查看使用指南"),
+        _md("你已成为该机器人的所有者，直接发消息即可对话。以下是特殊指令："),
+        _md("`/new`　　开启新对话\n"
+            "`/help`　　查看使用指南"),
+        _note(),
         _footer(max_images, max_image_bytes),
         _button("🆕 开始新对话", "/new", open_id=open_id, chat_type=chat_type,
                 union_id=union_id, primary=True),
@@ -101,7 +112,7 @@ def help_card(*, open_id: str, chat_type: str = "p2p", union_id: str = "",
             "`/skill`　查看已安装的 skill\n"
             "`/info`　　查看当前会话信息（模型 · Token 用量 · 会话 id）\n"
             "`/help`　　查看本指南"),
-        _md("<font color='grey'>所有指令的输出不会出现在对话的上下文中。</font>"),
+        _note(),
         _footer(max_images, max_image_bytes),
         _button("🆕 开始新对话", "/new", open_id=open_id, chat_type=chat_type,
                 union_id=union_id, primary=True),
@@ -223,8 +234,10 @@ def info_text(context_text: str, session_id: str | None) -> str:
 # 卡片发送失败（send_card → None：接口报错/字段被拒）时至少把同样的内容说清楚，
 # 绝不让用户对着空白聊天窗口猜。
 def welcome_text() -> str:
-    return ("✅ 绑定成功！你已成为此机器人的所有者，直接发消息即可开始对话。\n"
-            "/new 开启新对话 · /help 查看使用指南")
+    return ("✅ 绑定成功！你已成为该机器人的所有者，直接发消息即可对话。以下是特殊指令：\n"
+            "/new 开启新对话\n"
+            "/help 查看使用指南\n"
+            f"{_CONTEXT_NOTE}")
 
 
 def skills_text(data: dict) -> str:
@@ -245,4 +258,4 @@ def help_text() -> str:
             "/skill 查看已安装的 skill\n"
             "/info 查看当前会话信息（模型 · Token 用量 · 会话 id）\n"
             "/help 查看本指南\n"
-            "所有指令的输出不会出现在对话的上下文中。")
+            f"{_CONTEXT_NOTE}")

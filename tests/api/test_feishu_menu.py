@@ -76,6 +76,9 @@ def test_welcome_card_shape():
     body = " ".join(e.get("content", "") for e in card["body"]["elements"])
     assert "/help" in body and "5 张" in body and "3MB" in body
     assert "/clear" not in body and "/compact" not in body
+    # 与使用指南卡同一套文案：无别名、同一句上下文说明
+    assert "以下是特殊指令" in body and "不会出现在对话的上下文中" in body
+    assert "别名" not in body and "独立会话" not in body
 
 
 def test_help_card_shape():
