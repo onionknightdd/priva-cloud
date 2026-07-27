@@ -182,6 +182,28 @@ async def update_runner_defaults(
     return _runner_defaults_response(d)
 
 
+def _user_public_with_spec(user: UserRecord) -> UserPublic:
+    """One account's row for the admin users table: identity + the EFFECTIVE resource
+    spec (per-account override, else the inherited global defaults) — the same join
+    ``list_users`` does in batch."""
+    from priva_common.dataplane import get_client
+
+    pub = user_record_to_public(user)
+    spec = get_client().resource_specs.get(user.account_id)
+    if spec is not None:
+        pub.cpu_cores, pub.memory_mb, pub.volume_gb = spec.cpu_cores, spec.memory_mb, spec.volume_gb
+    else:  # inheriting the global defaults — report the effective values
+        rd = get_client().runner_defaults.get()
+        pub.cpu_cores, pub.memory_mb, pub.volume_gb = rd.cpu_cores, rd.memory_mb, rd.storage_gb
+    return pub
+
+
+def _active_admin_count(store) -> int:
+    """Admins that can still log in. ``count_admins`` is status-blind, so it would let
+    the last *usable* admin be frozen while disabled/purged rows pad the count."""
+    return sum(1 for u in store.list_users() if u.role == "admin" and u.status == "active")
+
+
 @router.get("/users", response_model=list[UserPublic])
 async def list_users():
     from priva_common.dataplane import get_client
@@ -267,7 +289,7 @@ async def update_user(
 
     # Last admin protection on role demotion
     if request.role and request.role != "admin" and existing.role == "admin":
-        if store.count_admins() <= 1:
+        if existing.status == "active" and _active_admin_count(store) <= 1:
             raise HTTPException(400, "Cannot remove the last admin")
 
     kwargs = {}
@@ -335,6 +357,13 @@ async def update_user(
             except Exception as exc:  # pragma: no cover
                 logger.warning("update_user: push creds failed for {}: {}", username, exc)
 
+    # Re-run the last-admin guard on the same uninterrupted stretch as the write: the
+    # creds push above awaits, so two concurrent demotions could each clear the guard
+    # at the top of this handler and land a role='user' row, leaving no usable admin.
+    if request.role and request.role != "admin" and existing.role == "admin":
+        if existing.status == "active" and _active_admin_count(store) <= 1:
+            raise HTTPException(400, "Cannot remove the last admin")
+
     try:
         user = store.update_user(username, **kwargs)
     except ValueError as e:
@@ -374,14 +403,95 @@ async def update_user(
         except Exception as exc:  # pragma: no cover - kube optional locally
             logger.warning("update_tenant_runtime failed for {}: {}", username, exc)
 
-    pub = user_record_to_public(user)
-    spec = get_client().resource_specs.get(user.account_id)
-    if spec is not None:
-        pub.cpu_cores, pub.memory_mb, pub.volume_gb = spec.cpu_cores, spec.memory_mb, spec.volume_gb
-    else:  # inheriting the global defaults — report the effective values
-        rd = get_client().runner_defaults.get()
-        pub.cpu_cores, pub.memory_mb, pub.volume_gb = rd.cpu_cores, rd.memory_mb, rd.storage_gb
-    return pub
+    return _user_public_with_spec(user)
+
+
+@router.post("/users/{username}/disable", response_model=UserPublic)
+async def disable_user(
+    username: str,
+    current_user: UserRecord = Depends(require_admin),
+):
+    """Freeze an account (reversible): login + gateway refuse it, the scheduler skips
+    it, its Feishu worker is torn down, and the operator quiesces its Runner/Terminal
+    to zero. Every byte of the account's data is preserved — ``enable`` undoes it."""
+    store = get_user_store()
+    if username == current_user.username:
+        raise HTTPException(400, "Cannot disable your own account")
+
+    existing = store.get_user(username)
+    if existing is None:
+        raise HTTPException(404, f"User '{username}' not found")
+
+    if existing.status == "purged":
+        raise HTTPException(400, "Account is being purged")
+
+    # Last admin protection
+    if existing.role == "admin" and existing.status == "active" and _active_admin_count(store) <= 1:
+        raise HTTPException(400, "Cannot remove the last admin")
+
+    try:
+        user = store.update_user(username, status="disabled")
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    # The account status is authoritative; the CR patch is convergence. A kube failure
+    # (or a CR that was never provisioned) must not leave the account half-frozen —
+    # sync_all_tenants re-converges desiredState within its loop.
+    from ..provisioner import set_tenant_desired_state
+    try:
+        await asyncio.to_thread(set_tenant_desired_state, user.account_id, "offboarding")
+    except Exception as exc:  # pragma: no cover - kube optional locally
+        logger.warning("quiesce AgentTenant failed for {}: {}", username, exc)
+
+    audit = get_audit_logger()
+    audit.append(AuditEntry(
+        actor=current_user.username,
+        action="user.disabled",
+        target=username,
+        details={"role": existing.role},
+    ))
+
+    await nudge_reconcile(user.account_id, user.username)  # drop the Feishu WS now; poll is the backstop
+    return _user_public_with_spec(user)
+
+
+@router.post("/users/{username}/enable", response_model=UserPublic)
+async def enable_user(
+    username: str,
+    current_user: UserRecord = Depends(require_admin),
+):
+    """Thaw a disabled account: access is restored and the operator releases the
+    Runner/Terminal back to the wake path. A purged account is a tombstone — its
+    runtime and storage are already destroyed — and can never be brought back."""
+    store = get_user_store()
+    existing = store.get_user(username)
+    if existing is None:
+        raise HTTPException(404, f"User '{username}' not found")
+
+    if existing.status == "purged":
+        raise HTTPException(400, "Account is being purged")
+
+    try:
+        user = store.update_user(username, status="active")
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    from ..provisioner import set_tenant_desired_state
+    try:
+        await asyncio.to_thread(set_tenant_desired_state, user.account_id, "active")
+    except Exception as exc:  # pragma: no cover - kube optional locally
+        logger.warning("release AgentTenant failed for {}: {}", username, exc)
+
+    audit = get_audit_logger()
+    audit.append(AuditEntry(
+        actor=current_user.username,
+        action="user.enabled",
+        target=username,
+        details={"role": existing.role},
+    ))
+
+    await nudge_reconcile(user.account_id, user.username)
+    return _user_public_with_spec(user)
 
 
 @router.get("/users/{username}/feishu-config", response_model=FeishuConfigResponse)
@@ -465,11 +575,20 @@ async def update_channel_platform_config(
         group_chat_disabled=r.group_chat_disabled, updated_by=r.updated_by, updated_at=r.updated_at)
 
 
-@router.delete("/users/{username}")
+@router.delete("/users/{username}", status_code=202)
 async def delete_user(
     username: str,
     current_user: UserRecord = Depends(require_admin),
 ):
+    """Purge an account — irreversible, and allowed while it is awake (force-kill).
+
+    Ordered so no failure can resurrect the account: the row is tombstoned
+    ``purged`` FIRST (which already revokes every token and stops the scheduler /
+    gateway), THEN the AgentTenant CR is deleted, which hands teardown to the
+    operator's finalizer (pods to zero, storage deprovisioned, export PVC removed).
+    The row itself is reaped by the ``sync_all_tenants`` sweep once the CR is gone, so
+    a crash anywhere in between resumes instead of rolling back. Returns 202 — the
+    account shows as PURGING until the sweep releases the username."""
     store = get_user_store()
     if username == current_user.username:
         raise HTTPException(400, "Cannot delete your own account")
@@ -479,11 +598,11 @@ async def delete_user(
         raise HTTPException(404, f"User '{username}' not found")
 
     # Last admin protection
-    if existing.role == "admin" and store.count_admins() <= 1:
+    if existing.role == "admin" and existing.status == "active" and _active_admin_count(store) <= 1:
         raise HTTPException(400, "Cannot remove the last admin")
 
     try:
-        store.delete_user(username)
+        store.update_user(username, status="purged")
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -495,7 +614,18 @@ async def delete_user(
         details={"role": existing.role},
     ))
 
-    return {"status": "ok"}
+    await nudge_reconcile(existing.account_id, existing.username)  # drop the Feishu WS now
+
+    from ..provisioner import delete_tenant
+    try:
+        await asyncio.to_thread(delete_tenant, existing.account_id)
+    except Exception as exc:
+        # The tombstone stands: the account stays purged and sync_all_tenants re-issues
+        # the CR delete, but the admin must know the runtime is not gone yet.
+        logger.warning("delete AgentTenant failed for {}: {}", username, exc)
+        raise HTTPException(502, f"Account revoked, but teardown could not start: {exc}") from exc
+
+    return {"status": "purging", "account_id": existing.account_id}
 
 
 # --- Self-registration approval ---

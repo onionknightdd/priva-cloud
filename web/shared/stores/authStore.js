@@ -17,6 +17,12 @@ const useAuthStore = create((set, get) => ({
   token: getToken() || null,
   needsSetup: null,
   loading: true,
+  // Why the session ended, when it did not end by the user's own choice. Read by
+  // LoginPage — the only surface still mounted once the session is gone. Every
+  // logout clears it, so a plain sign-out or a 401 expiry shows nothing extra.
+  logoutReason: null,
+
+  setLogoutReason: (reason) => set({ logoutReason: reason }),
 
   setToken: (token) => {
     persistToken(token)
@@ -27,7 +33,7 @@ const useAuthStore = create((set, get) => ({
 
   logout: () => {
     clearToken()
-    set({ user: null, token: null })
+    set({ user: null, token: null, logoutReason: null })
 
     // Reset the SPA's feature stores to clear the previous user's data.
     for (const store of RESET_STORES) {

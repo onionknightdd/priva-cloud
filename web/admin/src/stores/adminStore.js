@@ -23,6 +23,16 @@ const useAdminStore = create((set, get) => ({
     }
   },
 
+  // Same re-list, but never flips usersLoading — the table stays mounted and
+  // updates in place. Used by the lifecycle mutations and the purge poll, which
+  // would otherwise flash the skeleton on every tick.
+  refreshUsers: async () => {
+    try {
+      const users = await adminApi.listUsers()
+      set({ users })
+    } catch {}
+  },
+
   openUserDrawer: (username) => set({ selectedUser: username, drawerOpen: true }),
   closeUserDrawer: () => set({ selectedUser: null, drawerOpen: false }),
 

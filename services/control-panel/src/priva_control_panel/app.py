@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -243,6 +243,10 @@ def create_app() -> FastAPI:
         token = auth[7:] if auth.lower().startswith("bearer ") else None
         try:
             user = await authenticate_raw_token(token, request.headers.get("x-user-name"))
+        except HTTPException as exc:
+            if exc.status_code == 403:  # lifecycle gate fired: revoked, not unauthenticated
+                return Response("account access revoked", status_code=403)
+            user = None
         except Exception:
             user = None
         if user is None or not getattr(user, "account_id", None):

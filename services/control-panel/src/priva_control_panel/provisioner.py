@@ -97,10 +97,21 @@ def _runtime_defaults_spec(defaults: Any | None = None) -> dict:
     }
 
 
+def _desired_state_for(status: str | None) -> str:
+    """Account lifecycle status → CR ``spec.desiredState``.
+
+    Anything but ``active`` quiesces the account's pods (the operator's
+    ``_quiesce_if_inactive`` scales Runner + Terminal to zero). A purge is expressed by
+    DELETING the CR (the operator's teardown finalizer), never by this field.
+    """
+    return "active" if (status or "active") == "active" else "offboarding"
+
+
 def _tenant_spec(
     account_id: str,
     username: str,
     *,
+    status: str | None = None,
     runner_type: str | None = None,
     cpu: float | None = None,
     memory_mb: int | None = None,
@@ -111,7 +122,7 @@ def _tenant_spec(
     spec: dict = {
         "accountId": account_id,
         "username": username,
-        "desiredState": "active",
+        "desiredState": _desired_state_for(status),
         "agentRunnerType": runner_type or "auto_scale",
         "concurrency": {"maxConcurrentSessions": s.kubernetes.max_concurrent_sessions},
         "runtimeDefaults": runtime_defaults or _runtime_defaults_spec(),
@@ -152,7 +163,8 @@ def _repair_existing_tenant(account_id: str, username: str, runtime_defaults: di
     return True
 
 
-def ensure_tenant(account_id: str, username: str, *, runner_type: str | None = None,
+def ensure_tenant(account_id: str, username: str, *, status: str | None = None,
+                  runner_type: str | None = None,
                   cpu: float | None = None, memory_mb: int | None = None,
                   storage_gb: int | None = None,
                   runtime_defaults: dict | None = None) -> None:
@@ -164,12 +176,13 @@ def ensure_tenant(account_id: str, username: str, *, runner_type: str | None = N
     (the admin Sandbox panel). A present field = a per-account override that wins and
     stops following the default. The admin create-user path passes nothing (full
     inherit); the self-registration approval path passes the user-requested specs
-    (= overrides)."""
+    (= overrides). ``status`` is the account's lifecycle state: a non-active account is
+    created quiesced, so a re-created CR can never wake a frozen account back up."""
     s = get_settings()
     ns = s.kubernetes.namespace_tenants
     resolved_defaults = runtime_defaults or _runtime_defaults_spec()
     spec = _tenant_spec(
-        account_id, username, runner_type=runner_type, cpu=cpu,
+        account_id, username, status=status, runner_type=runner_type, cpu=cpu,
         memory_mb=memory_mb, storage_gb=storage_gb,
         runtime_defaults=resolved_defaults,
     )
@@ -196,6 +209,9 @@ def sync_all_tenants(*, defaults: Any | None = None) -> dict[str, int]:
 
     One account/default/resource list is used for the whole pass. Existing objects are
     patched only on drift, so the periodic backstop creates no steady-state CR events.
+    Also the purge sweep: a ``purged`` account never gets its CR back, and once the
+    operator's teardown finalizer has released the CR, this reaps the tombstone row —
+    the step that survives a control-panel crash mid-purge.
     """
     from priva_common.dataplane import get_client
     from priva_common.user_store import get_user_store
@@ -204,13 +220,31 @@ def sync_all_tenants(*, defaults: Any | None = None) -> dict[str, int]:
     runtime_defaults = _runtime_defaults_spec(defaults or dp.runner_defaults.get())
     resources = {row.account_id: row for row in dp.resource_specs.list()}
     existing = {item.get("metadata", {}).get("name"): item for item in list_tenants()}
-    counts = {"created": 0, "repaired": 0, "unchanged": 0, "skipped": 0}
+    counts = {"created": 0, "repaired": 0, "unchanged": 0, "skipped": 0, "purged": 0}
     for user in get_user_store().list_users():
         account_id = user.account_id
         if not account_id:
             counts["skipped"] += 1
             continue
         obj = existing.get(account_id)
+        if user.status == "purged":
+            # A purge that keeps failing must not abort the pass — every other account
+            # still has to be created / repaired / converged on this tick.
+            try:
+                if obj is not None:
+                    # Never re-create, and re-issue the delete: this is the retry for a
+                    # purge whose CR delete failed (or never ran) after the tombstone.
+                    delete_tenant(account_id)
+                    counts["skipped"] += 1
+                else:
+                    dp.accounts.delete(account_id)
+                    logger.info("purge complete, account row reaped account={} username={}",
+                                account_id, user.username)
+                    counts["purged"] += 1
+            except Exception as exc:
+                logger.warning("purge sweep failed account={}: {}", account_id, exc)
+                counts["skipped"] += 1
+            continue
         if obj is not None:
             current = obj.get("spec") or {}
             wanted = {
@@ -218,11 +252,21 @@ def sync_all_tenants(*, defaults: Any | None = None) -> dict[str, int]:
                 "username": user.username,
                 "runtimeDefaults": runtime_defaults,
             }
-            if all(current.get(key) == value for key, value in wanted.items()):
-                counts["unchanged"] += 1
-            else:
+            drifted = not all(current.get(key) == value for key, value in wanted.items())
+            if drifted:
                 _repair_existing_tenant(account_id, user.username, runtime_defaults)
-                counts["repaired"] += 1
+            desired_state = _desired_state_for(user.status)
+            if current.get("desiredState", "active") != desired_state:
+                # A CR patch that keeps failing must not abort the pass either — the
+                # accounts after this one still need their tick (tombstones included).
+                try:
+                    set_tenant_desired_state(account_id, desired_state)
+                except Exception as exc:
+                    logger.warning("desiredState converge failed account={}: {}", account_id, exc)
+                    counts["skipped"] += 1
+                    continue
+                drifted = True
+            counts["repaired" if drifted else "unchanged"] += 1
             continue
         if user.status != "active":
             counts["skipped"] += 1
@@ -231,6 +275,7 @@ def sync_all_tenants(*, defaults: Any | None = None) -> dict[str, int]:
         ensure_tenant(
             account_id,
             user.username,
+            status=user.status,
             runner_type=user.agent_runner_type,
             cpu=(resource.cpu_cores if resource else None),
             memory_mb=(resource.memory_mb if resource else None),
@@ -269,6 +314,45 @@ def update_tenant_runtime(account_id: str, *, runner_type: str | None = None,
         return
     _custom().patch_namespaced_custom_object(GROUP, VERSION, ns, PLURAL, account_id, {"spec": spec})
     logger.info("patched AgentTenant runtime account={} spec={}", account_id, spec)
+
+
+def set_tenant_desired_state(account_id: str, desired_state: str) -> None:
+    """Admin disable/enable: patch the lifecycle field the operator quiesces on.
+
+    ``offboarding`` scales Runner + Terminal to zero and keeps them there; ``active``
+    hands the account back to the wake path. A missing CR (404) is a no-op — the
+    account's status is authoritative and ``sync_all_tenants`` re-creates the CR
+    already carrying the right desiredState. Blocking kube call."""
+    if desired_state not in ("active", "offboarding", "purge"):
+        raise ValueError(f"bad desiredState {desired_state!r}")
+    s = get_settings()
+    ns = s.kubernetes.namespace_tenants
+    try:
+        _custom().patch_namespaced_custom_object(
+            GROUP, VERSION, ns, PLURAL, account_id, {"spec": {"desiredState": desired_state}})
+    except client.ApiException as exc:
+        if exc.status != 404:
+            raise
+        return
+    logger.info("patched AgentTenant desiredState account={} state={}", account_id, desired_state)
+
+
+def delete_tenant(account_id: str) -> None:
+    """Purge: delete the account's AgentTenant CR.
+
+    The deletion is the trigger for the operator's teardown finalizer (scale Runner +
+    Terminal to zero, deprovision the account's storage, delete the export PVC); the
+    Deployments/Services then go with owner-ref GC. An already-absent CR is SUCCESS, so
+    a purge interrupted anywhere can simply be re-issued. Blocking kube call."""
+    s = get_settings()
+    ns = s.kubernetes.namespace_tenants
+    try:
+        _custom().delete_namespaced_custom_object(GROUP, VERSION, ns, PLURAL, account_id)
+    except client.ApiException as exc:
+        if exc.status != 404:
+            raise
+        return
+    logger.info("deleted AgentTenant account={}", account_id)
 
 
 def list_tenants() -> list[dict]:

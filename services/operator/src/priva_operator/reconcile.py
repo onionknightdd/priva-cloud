@@ -33,6 +33,14 @@ _runner_defaults_cache = None
 _runner_defaults_last_attempt = 0.0
 _RUNNER_DEFAULTS_MIN_INTERVAL = 15.0
 
+# Teardown budget. kopf holds its finalizer until the delete handler stops asking for a
+# retry, so an unbounded retry would wedge the CR in Terminating forever — and with it the
+# account row the control plane only sweeps once the CR is gone. Bound the attempts and
+# release with a loud log instead: a named leak is recoverable by hand, a stuck CR is not.
+_PURGE_MAX_ATTEMPTS = 10
+_PURGE_RETRY_BACKOFF = 30.0
+_purging: dict[str, str | None] = {}
+
 
 def _tenants_namespace() -> str:
     return get_settings().kubernetes.namespace_tenants
@@ -101,6 +109,27 @@ def _ids_or_reject(spec, name, status, patch, logger):
         return None
     _upsert_condition(status, patch, "IdentityReady", True, "Resolved", "account identity is complete")
     return result
+
+
+def _teardown_started(account_id: str, meta=None) -> bool:
+    """True once *this* CR is being purged — nothing may (re)provision for it.
+
+    ``meta.deletionTimestamp`` covers every handler invoked after the delete lands. The
+    process-local record additionally covers a timer tick that was already inside the thread
+    pool at that moment: kopf stops *spawning* timers for a deleting object but cannot
+    cancel a sync handler mid-flight, and such a tick would otherwise re-provision the
+    volume the finalizer just reclaimed. Entries are never pruned, so each records the torn
+    down CR's ``metadata.uid`` and only blocks that object: an out-of-band ``kubectl delete``
+    of a still-active account's CR must not brick the CR the control plane then re-creates.
+    An unknown uid on either side keeps the conservative "block this account" answer.
+    """
+    meta = meta or {}
+    if account_id in _purging:
+        purged_uid = _purging[account_id]
+        uid = meta.get("uid")
+        if purged_uid is None or uid is None or purged_uid == uid:
+            return True
+    return bool(meta.get("deletionTimestamp"))
 
 
 def _quiesce_if_inactive(spec, name, namespace, status, patch) -> bool:
@@ -228,8 +257,10 @@ def _begin_terminal_drain(pod_ip: str, port: int, revision: int, logger) -> bool
 
 @kopf.on.create(GROUP, VERSION, PLURAL)
 @kopf.on.resume(GROUP, VERSION, PLURAL)
-def ensure(spec, name, namespace, uid, status, patch, logger, **_):
+def ensure(spec, name, namespace, uid, status, patch, logger, meta=None, **_):
     s = get_settings()
+    if _teardown_started(spec.get("accountId") or name, meta):
+        return
     if _quiesce_if_inactive(spec, name, namespace, status, patch):
         return
     identity = _ids_or_reject(spec, name, status, patch, logger)
@@ -310,9 +341,54 @@ def ensure(spec, name, namespace, uid, status, patch, logger, **_):
     logger.info("ensured runtime objects for account=%s type=%s", account_id, _runner_type(spec))
 
 
-@kopf.on.field(GROUP, VERSION, PLURAL, field="spec.wake.requestedAt")
-def on_wake(spec, name, namespace, uid, status, patch, logger, **_):
+@kopf.on.delete(
+    GROUP, VERSION, PLURAL, retries=_PURGE_MAX_ATTEMPTS, backoff=_PURGE_RETRY_BACKOFF)
+def purge(spec, name, namespace, logger, uid=None, retry=0, **_):
+    """Reclaim what Kubernetes will not, then let kopf release the finalizer.
+
+    Deployments and Services carry an ownerReference, so the API server collects them on
+    its own; the account's volume is either not a Kubernetes object at all (dev: a loop
+    image on the NFS box) or an unowned claim (prod), so it is reclaimed here or never.
+    Identity comes off the spec the way ``_quiesce_if_inactive`` takes it, so teardown
+    never blocks on an incomplete spec, and every step tolerates an already-done
+    predecessor — kopf re-enters this handler after a crash or a failed attempt.
+    """
     s = get_settings()
+    account_id = spec.get("accountId") or name
+    _purging[account_id] = uid
+    try:
+        if kube.get_replicas(namespace, account_id) > 0:
+            kube.scale(namespace, account_id, 0)
+        if kube.get_terminal_replicas(namespace, account_id) > 0:
+            kube.scale_terminal(namespace, account_id, 0)
+        storage_backend.get_backend(s).deprovision(account_id)
+        # Safety net for a backend that does not own the claim. cephfs does own it and
+        # just deleted it; pvc-protection keeps the object visible while it terminates,
+        # so a hit there is expected rather than something left behind.
+        if (kube.delete_export_claim(namespace, account_id)
+                and s.kubernetes.storage_backend != "cephfs"):
+            logger.warning(
+                "purge: reclaimed export claim the backend left behind account=%s claim=%s",
+                account_id, names.export_claim(account_id))
+    except Exception as exc:
+        if retry + 1 < _PURGE_MAX_ATTEMPTS:
+            logger.warning("purge: volume reclaim failed account=%s: %s", account_id, exc)
+            raise
+        logger.error(
+            "purge: releasing finalizer after %d failed reclaim attempts account=%s "
+            "backend=%s claim=%s — the account volume is LEAKED and needs manual "
+            "reclamation: %s",
+            _PURGE_MAX_ATTEMPTS, account_id, s.kubernetes.storage_backend,
+            names.export_claim(account_id), exc)
+        return
+    logger.info("purged account=%s", account_id)
+
+
+@kopf.on.field(GROUP, VERSION, PLURAL, field="spec.wake.requestedAt")
+def on_wake(spec, name, namespace, uid, status, patch, logger, meta=None, **_):
+    s = get_settings()
+    if _teardown_started(spec.get("accountId") or name, meta):
+        return
     if _quiesce_if_inactive(spec, name, namespace, status, patch):
         return
     identity = _ids_or_reject(spec, name, status, patch, logger)
@@ -373,9 +449,11 @@ def on_wake(spec, name, namespace, uid, status, patch, logger, **_):
 
 
 @kopf.on.field(GROUP, VERSION, PLURAL, field="spec.terminalWake.requestedAt")
-def on_terminal_wake(spec, name, namespace, uid, status, patch, logger, **_):
+def on_terminal_wake(spec, name, namespace, uid, status, patch, logger, meta=None, **_):
     """Wake only the independent Terminal Deployment. Runner state is untouched."""
     s = get_settings()
+    if _teardown_started(spec.get("accountId") or name, meta):
+        return
     if _quiesce_if_inactive(spec, name, namespace, status, patch):
         return
     identity = _ids_or_reject(spec, name, status, patch, logger)
@@ -464,9 +542,11 @@ def on_terminal_wake(spec, name, namespace, uid, status, patch, logger, **_):
 
 
 @kopf.timer(GROUP, VERSION, PLURAL, interval=10.0, sharp=False)
-def reconcile_terminal(spec, name, namespace, uid, status, patch, logger, **_):
+def reconcile_terminal(spec, name, namespace, uid, status, patch, logger, meta=None, **_):
     """Derive Terminal status and scale 1->0 after its last session plus grace."""
     s = get_settings()
+    if _teardown_started(spec.get("accountId") or name, meta):
+        return
     if _quiesce_if_inactive(spec, name, namespace, status, patch):
         return
     identity = _ids_or_reject(spec, name, status, patch, logger)
@@ -515,6 +595,8 @@ def reconcile_terminal(spec, name, namespace, uid, status, patch, logger, **_):
         return
 
     if replicas < 0:
+        if _teardown_started(account_id, meta):
+            return
         kube.ensure_terminal_objects(
             namespace, account_id, username, kube.resolve_image(spec, s),
             s.kubernetes.runner_image_pull_policy, s, names.owner_ref(name, uid), spec, defaults)
@@ -603,12 +685,14 @@ def reconcile_terminal(spec, name, namespace, uid, status, patch, logger, **_):
 
 
 @kopf.timer(GROUP, VERSION, PLURAL, interval=10.0, sharp=False)
-def reconcile_runtime(spec, name, namespace, status, patch, logger, uid=None, **_):
+def reconcile_runtime(spec, name, namespace, status, patch, logger, uid=None, meta=None, **_):
     """Periodic reconcile — status is *derived, not authoritative*, so re-derive it each
     tick: (1) heal status.podIP against the real Ready pod, (2) idle-sweep 1->0 past
     grace. Cheap pod-list, so the interval is short for fast self-heal of a dead/replaced
     pod (#1)."""
     s = get_settings()
+    if _teardown_started(spec.get("accountId") or name, meta):
+        return
     if _quiesce_if_inactive(spec, name, namespace, status, patch):
         return
     identity = _ids_or_reject(spec, name, status, patch, logger)
@@ -661,6 +745,8 @@ def reconcile_runtime(spec, name, namespace, status, patch, logger, uid=None, **
     # changes. Persistent runners are then restored to one, closing the desired-state
     # loop even after an out-of-band scale or operator restart.
     if replicas <= 0:
+        if _teardown_started(account_id, meta):
+            return
         applied_generation = kube.applied_allocation_hash(namespace, account_id)
         if applied_generation != desired_generation:
             kube.ensure_runtime_objects(
@@ -790,7 +876,7 @@ def reconcile_runtime(spec, name, namespace, status, patch, logger, uid=None, **
 
 @kopf.on.field(GROUP, VERSION, PLURAL, field="spec.desiredState")
 def on_desired_spec_change(
-    spec, name, namespace, uid, status, patch, logger, old=None, **_
+    spec, name, namespace, uid, status, patch, logger, old=None, meta=None, **_
 ):
     """Immediately converge lifecycle gates; identity/default drift uses the timers.
 
@@ -802,13 +888,13 @@ def on_desired_spec_change(
         return  # initial CREATE is handled once by ensure(), not once per watched field
     ensure(
         spec=spec, name=name, namespace=namespace, uid=uid, status=status,
-        patch=patch, logger=logger,
+        patch=patch, logger=logger, meta=meta,
     )
 
 
 @kopf.on.field(GROUP, VERSION, PLURAL, field="spec.agentRunnerType")
 def on_runner_type_change(
-    spec, name, namespace, uid, old, new, status, patch, logger, **_
+    spec, name, namespace, uid, old, new, status, patch, logger, meta=None, **_
 ):
     if old is None:
         return
@@ -818,7 +904,7 @@ def on_runner_type_change(
         # absent or stale Deployment can either 404 or violate the allocation boundary.
         ensure(
             spec=spec, name=name, namespace=namespace, uid=uid, status=status,
-            patch=patch, logger=logger,
+            patch=patch, logger=logger, meta=meta,
         )
         logger.info("runner_type -> persistent, pinned to 1 account=%s", account_id)
     elif new == "auto_scale":

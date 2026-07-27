@@ -1,13 +1,236 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, Key, ShieldOff } from 'lucide-react'
+import { X, Key, ShieldOff, Ban, Power, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useResizable } from '@shared/hooks/useResizable'
 import useOverlayTransition from '@shared/motion/useOverlayTransition'
 import useAdminStore from '../../stores/adminStore'
+import useAuthStore from '@shared/stores/authStore'
+import useUiStore from '@shared/stores/uiStore'
 import * as adminApi from '@shared/api/admin'
 import CopyButton from '@shared/components/shared/CopyButton'
 import Dropdown from '@shared/components/shared/Dropdown'
 import FeishuConfigSection from './FeishuConfigSection'
+
+// Purge-dialog framing of a fleet entry. FleetView calls an awake runner "online"
+// in neutral green; here the same fact is what the operator is about to kill, so
+// the palette escalates instead of reassuring.
+function purgeRunnerState(acct) {
+  if (!acct) return { labelKey: 'admin.stateIdle', color: 'var(--text-dim)' }
+  if (acct.phase === 'Waking') return { labelKey: 'admin.stateWaking', color: 'var(--yellow)' }
+  if (acct.awake) {
+    if ((acct.active_runs || 0) > 0) return { labelKey: 'admin.stateRunning', color: 'var(--red)' }
+    return { labelKey: 'admin.stateOnline', color: 'var(--yellow)' }
+  }
+  return { labelKey: 'admin.stateIdle', color: 'var(--text-dim)' }
+}
+
+// Live facts to put in front of the operator before freezing or destroying an
+// account. Without a fleet snapshot the runner state is unknown, not idle — the
+// two must not look alike in a dialog that force-kills whatever is running.
+function AccountStateLines({ acct, hasFleet, feishu }) {
+  const { t } = useTranslation()
+  const state = purgeRunnerState(acct)
+  const runs = acct?.active_runs
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs uppercase" style={{ color: 'var(--text-dim)', letterSpacing: '0.06em' }}>
+        {t('admin.currentState')}
+      </span>
+      <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+        Runner: {hasFleet ? (
+          <>
+            <span style={{ color: state.color }}>{t(state.labelKey)}</span>
+            {acct?.awake && (runs == null
+              ? ` · ${t('admin.runsUnknown')}`
+              : runs > 0 ? ` · ${t('admin.activeRuns', { count: runs })}` : '')}
+          </>
+        ) : (
+          <span style={{ color: 'var(--text-dim)' }}>{t('admin.stateUnknown')}</span>
+        )}
+      </span>
+      {feishu && (
+        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+          {t('admin.feishu.title')}: {feishu.app_id && feishu.app_secret_set
+            ? t('admin.feishuBound')
+            : t('admin.feishuUnbound')}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function DangerRow({ title, desc, actionLabel, icon, color, locked, onClick }) {
+  return (
+    <div className="flex items-center gap-3 px-3 py-3">
+      <div className="flex flex-col gap-1 flex-1 min-w-0">
+        <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+          {title}
+        </span>
+        <span className="text-xs font-light" style={{ color: 'var(--text-dim)', wordBreak: 'break-word' }}>
+          {desc}
+        </span>
+      </div>
+      <button
+        type="button"
+        className="flex items-center gap-1 px-3 py-1 text-xs flex-shrink-0"
+        style={{
+          background: 'transparent',
+          border: `1px solid ${color}`,
+          borderRadius: 4,
+          color,
+          cursor: locked ? 'not-allowed' : 'pointer',
+          opacity: locked ? 0.4 : 1,
+          transition: 'opacity 150ms ease',
+        }}
+        disabled={locked}
+        onClick={onClick}
+        onMouseEnter={(e) => { if (!locked) e.currentTarget.style.opacity = '0.8' }}
+        onMouseLeave={(e) => { if (!locked) e.currentTarget.style.opacity = '1' }}
+      >
+        {icon}
+        {actionLabel}
+      </button>
+    </div>
+  )
+}
+
+// Disable (reversible) and purge (not). Both dialogs are built at click time, so
+// the fleet snapshot and the Feishu binding have to be in hand before then.
+function DangerZone({ user, isSelf, onError }) {
+  const { t } = useTranslation()
+  const refreshUsers = useAdminStore((s) => s.refreshUsers)
+  const closeUserDrawer = useAdminStore((s) => s.closeUserDrawer)
+  const fleet = useAdminStore((s) => s.fleet)
+  const fetchFleet = useAdminStore((s) => s.fetchFleet)
+  const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
+  const [feishu, setFeishu] = useState(null)
+
+  const username = user.username
+  const status = user.status || 'active'
+  const disabled = status === 'disabled'
+  const purging = status === 'purged'
+
+  useEffect(() => { fetchFleet() }, [username, fetchFleet])
+
+  useEffect(() => {
+    let cancelled = false
+    setFeishu(null)
+    adminApi.getUserFeishuConfig(username)
+      .then((cfg) => { if (!cancelled) setFeishu(cfg) })
+      .catch(() => {})  // fail-soft: the dialog just leaves the Feishu line out
+    return () => { cancelled = true }
+  }, [username])
+
+  // Fleet entries are keyed by account_id; username is the only join key the
+  // admin user objects carry, and it is nullable on the fleet side.
+  const acct = fleet?.accounts?.find((a) => a.username === username)
+  const locked = isSelf || purging
+  const lockReason = isSelf ? t('admin.dangerSelfHint') : purging ? t('admin.dangerPurgingHint') : null
+
+  const handleToggle = () => {
+    showConfirmDialog({
+      title: disabled
+        ? t('admin.enableUserTitle', { name: username })
+        : t('admin.disableUserTitle', { name: username }),
+      message: disabled ? t('admin.enableUserMessage') : (
+        <div className="flex flex-col gap-2" style={{ wordBreak: 'break-word' }}>
+          <span>{t('admin.disableUserMessage')}</span>
+          <AccountStateLines acct={acct} hasFleet={!!fleet} feishu={feishu} />
+        </div>
+      ),
+      confirmLabel: disabled ? t('admin.enable') : t('admin.disable'),
+      danger: !disabled,
+      onConfirm: async () => {
+        try {
+          if (disabled) await adminApi.enableUser(username)
+          else await adminApi.disableUser(username)
+          await refreshUsers()
+        } catch (e) {
+          onError(e.message)
+        }
+      },
+    })
+  }
+
+  const handlePurge = () => {
+    showConfirmDialog({
+      title: t('admin.deleteUserTitle', { name: username }),
+      message: (
+        <div className="flex flex-col gap-2" style={{ wordBreak: 'break-word' }}>
+          <span>{t('admin.deleteUserMessage')}</span>
+          <AccountStateLines acct={acct} hasFleet={!!fleet} feishu={feishu} />
+          <div className="flex flex-col gap-1">
+            <span className="text-xs uppercase" style={{ color: 'var(--red)', letterSpacing: '0.06em' }}>
+              {t('admin.purgeDestroys')}
+            </span>
+            {[
+              t('admin.purgeDestroyRuns'),
+              t('admin.purgeDestroyData'),
+              t('admin.purgeDestroyRuntime'),
+            ].map((line) => (
+              <span key={line} className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                · {line}
+              </span>
+            ))}
+          </div>
+        </div>
+      ),
+      confirmLabel: t('admin.purgeConfirm'),
+      requireText: username,
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await adminApi.deleteUser(username)
+          closeUserDrawer()
+          await refreshUsers()
+        } catch (e) {
+          // The row is already tombstoned when teardown fails to start (502), so
+          // re-list anyway: the table must show PURGING, never a live ACTIVE row.
+          onError(e.message)
+          await refreshUsers()
+        }
+      },
+    })
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label
+        className="text-xs uppercase"
+        style={{ color: 'var(--red)', letterSpacing: '0.06em', fontWeight: 600 }}
+      >
+        {t('admin.dangerZone')}
+      </label>
+      <div className="flex flex-col" style={{ border: '1px solid var(--red)', borderRadius: 4 }}>
+        <DangerRow
+          title={disabled ? t('admin.enableAccount') : t('admin.disableAccount')}
+          desc={disabled ? t('admin.enableAccountDesc') : t('admin.disableAccountDesc')}
+          actionLabel={disabled ? t('admin.enable') : t('admin.disable')}
+          icon={disabled ? <Power size={12} strokeWidth={1.5} /> : <Ban size={12} strokeWidth={1.5} />}
+          color={disabled ? 'var(--green)' : 'var(--red)'}
+          locked={locked}
+          onClick={handleToggle}
+        />
+        <div style={{ borderTop: '1px solid var(--border)' }}>
+          <DangerRow
+            title={t('admin.purgeAccount')}
+            desc={t('admin.purgeAccountDesc')}
+            actionLabel={t('admin.purgeAction')}
+            icon={<Trash2 size={12} strokeWidth={1.5} />}
+            color="var(--red)"
+            locked={locked}
+            onClick={handlePurge}
+          />
+        </div>
+      </div>
+      {lockReason && (
+        <span className="text-xs font-light" style={{ color: 'var(--text-dim)' }}>
+          &gt; {lockReason}
+        </span>
+      )}
+    </div>
+  )
+}
 
 export default function UserEditDrawer() {
   const { t } = useTranslation()
@@ -17,6 +240,7 @@ export default function UserEditDrawer() {
   const fetchUsers = useAdminStore((s) => s.fetchUsers)
   const drawerWidth = useAdminStore((s) => s.drawerWidth)
   const setDrawerWidth = useAdminStore((s) => s.setDrawerWidth)
+  const authUser = useAuthStore((s) => s.user)
 
   const { dragging, onMouseDown } = useResizable({
     initial: drawerWidth,
@@ -397,6 +621,13 @@ export default function UserEditDrawer() {
               {t('admin.updatedAt')}: {formatDate(user.updated_at)}
             </span>
           </div>
+
+          {/* Account lifecycle — disable (reversible) and purge (not) */}
+          <DangerZone
+            user={user}
+            isSelf={user.username === authUser?.username}
+            onError={setError}
+          />
 
           {error && (
             <div className="text-xs" style={{ color: 'var(--red)' }}>{error}</div>

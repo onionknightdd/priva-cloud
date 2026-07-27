@@ -15,6 +15,7 @@ export default function LoginPage() {
 
   const setToken = useAuthStore((s) => s.setToken)
   const setUser = useAuthStore((s) => s.setUser)
+  const logoutReason = useAuthStore((s) => s.logoutReason)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -92,6 +93,27 @@ export default function LoginPage() {
             {t('auth.signInTitle')}
           </span>
         </div>
+
+        {logoutReason === 'revoked' && (
+          <div
+            className="flex flex-col gap-1 px-3 py-2"
+            style={{
+              background: 'var(--bg-elevated)',
+              borderLeft: '2px solid var(--red)',
+              borderRadius: '4px',
+            }}
+          >
+            <span className="text-xs font-semibold" style={{ color: 'var(--red)' }}>
+              {t('auth.accessRevoked')}
+            </span>
+            <span
+              className="text-xs font-light"
+              style={{ color: 'var(--text-secondary)', wordBreak: 'break-word' }}
+            >
+              {t('auth.accessRevokedHint')}
+            </span>
+          </div>
+        )}
 
         {error && (
           <p className="text-xs" style={{ color: 'var(--red)', margin: 0 }}>{error}</p>

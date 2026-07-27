@@ -131,6 +131,14 @@ export default function AdminApp() {
   }, [])
   useEffect(() => { initialize() }, [initialize])
 
+  // An admin can be disabled from another admin's console; every call then 403s.
+  // End the session instead of leaving a live-looking shell full of stale panels.
+  useEffect(() => {
+    const handler = () => logout()
+    window.addEventListener('auth:unauthorized', handler)
+    return () => window.removeEventListener('auth:unauthorized', handler)
+  }, [logout])
+
   if (loading) {
     return <div style={{ minHeight: '100vh', background: 'var(--bg-base)' }} />
   }

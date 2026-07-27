@@ -40,8 +40,22 @@ def user_record_to_public(user: UserRecord) -> UserPublic:
         api_key=user.api_key,
         created_at=user.created_at,
         updated_at=user.updated_at,
+        status=user.status,
         agent_runner_type=user.agent_runner_type,
     )
+
+
+def assert_account_active(user: UserRecord) -> None:
+    """Fail-closed account lifecycle gate — anything that isn't exactly ``active``
+    (disabled / offboarding / purged) is refused.
+
+    Applied at token resolution, so an admin disable revokes every already-issued JWT
+    and API key on the very next request instead of at token expiry. 403 (vs the 401
+    unauth path) so the SPA can distinguish "revoked" from "log in again", matching
+    the EPP's data-plane gate.
+    """
+    if user.status != "active":
+        raise HTTPException(403, "Account access revoked")
 
 
 async def authenticate_raw_token(
@@ -52,23 +66,29 @@ async def authenticate_raw_token(
 
     Single source of truth — used by both HTTP (get_current_user) and WebSocket.
     Returns UserRecord on success, None for anonymous, raises HTTPException on failure.
+    Credentials that belong to an account (JWT / per-user API key) additionally pass
+    the lifecycle gate; the platform-wide global key is an operator escape hatch and
+    keeps resolving so an admin can still act on a frozen account.
     """
     settings = get_settings()
     store = get_user_store()
 
     if token:
         # 1. Try JWT
+        user = None
         try:
             payload = decode_jwt(token)
             user = store.get_user(payload.sub)
-            if user:
-                return user
         except HTTPException:
             pass
+        if user:
+            assert_account_active(user)
+            return user
 
         # 2. Try per-user API key
         user = store.find_by_api_key(token)
         if user:
+            assert_account_active(user)
             return user
 
         # 3. Try global API key
@@ -128,13 +148,11 @@ async def require_active_account(
 ) -> UserRecord:
     """Require a provisioned account that is still allowed to use runtimes.
 
-    Control-plane profile endpoints intentionally continue to use ``require_user``
-    so an offboarded user can still be identified. Runtime discovery must match the
-    EPP's fail-closed gate: a disabled/offboarding account cannot discover or wake a
-    Runner or Terminal pod.
+    The lifecycle half is already enforced at token resolution; this adds the
+    provisioning half, so runtime discovery matches the EPP's fail-closed gate: an
+    account without a tenant cannot discover or wake a Runner or Terminal pod.
     """
-    if user.status != "active":
-        raise HTTPException(403, "Account access revoked")
+    assert_account_active(user)
     if not user.account_id:
         raise HTTPException(403, "Account is not provisioned")
     return user

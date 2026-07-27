@@ -726,6 +726,22 @@ def scale_terminal(namespace, account_id, replicas: int) -> None:
         names.terminal_deploy_name(account_id), namespace, {"spec": {"replicas": replicas}})
 
 
+def delete_export_claim(namespace, account_id) -> bool:
+    """Delete the per-account export claim; ``False`` when it was already absent.
+
+    The claim is created with no ownerReference (``storage_backend.CephFsBackend``), so
+    owner-ref garbage collection never reclaims it when the AgentTenant goes away.
+    """
+    try:
+        core().delete_namespaced_persistent_volume_claim(
+            names.export_claim(account_id), namespace)
+    except client.ApiException as exc:
+        if exc.status != 404:  # already gone == deleted
+            raise
+        return False
+    return True
+
+
 def _current_ready_pod_ip(namespace, account_id, app: str) -> str | None:
     """IP of the *one* pod for this account that is Ready **and** not terminating, else None.
 

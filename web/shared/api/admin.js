@@ -5,6 +5,12 @@ export const createUser = (data) => postJSON('/admin/users', data)
 export const updateUser = (username, data) => putJSON(`/admin/users/${encodeURIComponent(username)}`, data)
 export const deleteUser = (username) => deleteJSON(`/admin/users/${encodeURIComponent(username)}`)
 
+// Account lifecycle. disable/enable are reversible (status flips, all data kept);
+// deleteUser is the irreversible purge — it answers 202 and the row lingers as a
+// PURGING tombstone until the operator teardown and the provisioner sweep finish.
+export const disableUser = (username) => postJSON(`/admin/users/${encodeURIComponent(username)}/disable`)
+export const enableUser = (username) => postJSON(`/admin/users/${encodeURIComponent(username)}/enable`)
+
 // Feishu bot config — admin can READ status + toggle the kill-switch (admin_disabled)
 // only; credentials are edited by the user themselves. The secret is never returned.
 export const getUserFeishuConfig = (username) => getJSON(`/admin/users/${encodeURIComponent(username)}/feishu-config`)

@@ -28,6 +28,7 @@ from envoy.config.core.v3.base_pb2 import HeaderValue, HeaderValueOption
 from envoy.extensions.filters.http.ext_proc.v3 import processing_mode_pb2 as pm
 from envoy.service.ext_proc.v3 import external_processor_pb2 as ep
 from envoy.type.v3 import http_status_pb2
+from fastapi import HTTPException
 from grpclib.const import Cardinality, Handler
 from grpclib.server import Server
 
@@ -174,6 +175,10 @@ async def handle_request_headers(http_headers) -> "ep.ProcessingResponse":
         token = _query_param(headers.get(":path", ""), "token")  # so it may pass ?token=
     try:
         user = await authenticate_raw_token(token, headers.get("x-user-name"))
+    except HTTPException as exc:
+        if exc.status_code == 403:  # lifecycle gate fired: revoked, not unauthenticated
+            return _immediate(403, "account access revoked")
+        user = None
     except Exception:
         user = None
     if user is None or not getattr(user, "account_id", None):

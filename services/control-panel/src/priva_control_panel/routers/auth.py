@@ -26,6 +26,7 @@ from priva_common.models.feishu import (
 )
 from ..services.feishu_connector import nudge_reconcile
 from ..services.auth import (
+    assert_account_active,
     create_jwt,
     decode_jwt,
     rate_limiter,
@@ -147,6 +148,18 @@ async def login(request: LoginRequest):
 
     rate_limiter.reset(request.username)
     user = store.get_user(request.username)
+
+    # Right password, frozen account: record WHY before refusing, so the audit trail
+    # separates a lifecycle rejection from a bad-credential one.
+    if user.status != "active":
+        audit = get_audit_logger()
+        audit.append(AuditEntry(
+            actor=request.username,
+            action="login.failed",
+            target=request.username,
+            details={"status": user.status},
+        ))
+    assert_account_active(user)
 
     # Determine effective role
     role = user.role

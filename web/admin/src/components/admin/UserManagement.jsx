@@ -1,9 +1,8 @@
-import { memo, useEffect, useState, useMemo, useRef, useCallback, useLayoutEffect } from 'react'
+import { memo, useEffect, useState, useMemo, useRef, useLayoutEffect } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Pencil, Trash2, Plus, Search, Eye, Check, X } from 'lucide-react'
+import { Pencil, Plus, Search, Eye, Check, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useAdminStore from '../../stores/adminStore'
-import useAuthStore from '@shared/stores/authStore'
 import useUiStore from '@shared/stores/uiStore'
 import usePopoverTransition from '@shared/motion/usePopoverTransition'
 import { useListLifecycle, LifecycleItem } from '@shared/motion/ListLifecycle'
@@ -13,9 +12,26 @@ import Chip from '@shared/components/shared/Chip'
 import CopyButton from '@shared/components/shared/CopyButton'
 import Dropdown from '@shared/components/shared/Dropdown'
 
+// A purge answers 202 and leaves a PURGING tombstone row behind; the operator
+// teardown and the provisioner sweep drop it a few seconds later. Bounded so a
+// stuck teardown can never poll forever.
+const PURGE_POLL_MS = 3000
+const PURGE_POLL_MAX = 20
+
 // Runner type → chip color. persistent (always-on) gets a distinct semantic color.
 function runnerColor(type) {
   return type === 'persistent' ? 'var(--orange)' : 'var(--cyan)'
+}
+
+// Account lifecycle status → chip. 'purged' is a tombstone the backend sweep has
+// yet to clear, so it reads PURGING for as long as the row survives. Only the
+// literal 'active' is usable — the backend gate freezes every other value, so an
+// unrecognised one shows itself rather than passing for a healthy account.
+function statusChip(status) {
+  if (status === 'active') return { label: 'ACTIVE', color: 'var(--green)' }
+  if (status === 'disabled') return { label: 'DISABLED', color: 'var(--yellow)' }
+  if (status === 'purged') return { label: 'PURGING', color: 'var(--red)' }
+  return { label: String(status).toUpperCase(), color: 'var(--orange)' }
 }
 
 function formatDate(dateStr) {
@@ -23,14 +39,17 @@ function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString()
 }
 
-const UserRow = memo(function UserRow({ user, canDelete, onEdit, onDelete }) {
+const UserRow = memo(function UserRow({ user, onEdit }) {
   const { t } = useTranslation()
+  const status = user.status || 'active'
+  const chip = statusChip(status)
+  const active = status === 'active'
   return (
     <div
       className="flex items-center gap-3 px-4 py-2"
       style={{
         borderBottom: '1px solid var(--border-subtle)',
-        borderLeft: '2px solid transparent',
+        borderLeft: `2px solid ${active ? 'transparent' : chip.color}`,
         transition: 'background 150ms ease',
       }}
       onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
@@ -38,7 +57,7 @@ const UserRow = memo(function UserRow({ user, canDelete, onEdit, onDelete }) {
     >
       <span
         className="text-sm font-semibold flex-1 min-w-0 truncate"
-        style={{ color: 'var(--text-primary)' }}
+        style={{ color: active ? 'var(--text-primary)' : 'var(--text-secondary)' }}
       >
         {user.username}
       </span>
@@ -46,6 +65,9 @@ const UserRow = memo(function UserRow({ user, canDelete, onEdit, onDelete }) {
         <Chip color={user.role === 'admin' ? 'var(--green)' : 'var(--text-secondary)'}>
           {user.role.toUpperCase()}
         </Chip>
+      </span>
+      <span className="overflow-hidden" style={{ width: 84, flexShrink: 0 }}>
+        <Chip color={chip.color}>{chip.label}</Chip>
       </span>
       <span style={{ width: 88, flexShrink: 0 }}>
         {user.agent_runner_type ? (
@@ -67,25 +89,9 @@ const UserRow = memo(function UserRow({ user, canDelete, onEdit, onDelete }) {
       </span>
       <span
         className="flex items-center gap-1 justify-end"
-        style={{ width: 52, flexShrink: 0 }}
+        style={{ width: 52, height: 22, flexShrink: 0 }}
       >
-        <button
-          style={{
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            padding: 4,
-            color: 'var(--text-dim)',
-            transition: 'color 150ms ease',
-          }}
-          onClick={(e) => { e.stopPropagation(); onEdit(user.username) }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-          title={t('admin.edit')}
-        >
-          <Pencil size={14} strokeWidth={1.5} />
-        </button>
-        {canDelete && (
+        {status !== 'purged' && (
           <button
             style={{
               background: 'transparent',
@@ -95,12 +101,12 @@ const UserRow = memo(function UserRow({ user, canDelete, onEdit, onDelete }) {
               color: 'var(--text-dim)',
               transition: 'color 150ms ease',
             }}
-            onClick={(e) => { e.stopPropagation(); onDelete(user.username) }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red)' }}
+            onClick={(e) => { e.stopPropagation(); onEdit(user.username) }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
             onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-            title={t('admin.delete')}
+            title={t('admin.edit')}
           >
-            <Trash2 size={14} strokeWidth={1.5} />
+            <Pencil size={14} strokeWidth={1.5} />
           </button>
         )}
       </span>
@@ -115,6 +121,7 @@ function TableSkeleton() {
         <div key={i} className="flex items-center gap-4 px-4 py-3">
           <div className="skeleton" style={{ width: 80, height: 13 }} />
           <div className="skeleton" style={{ width: 48, height: 13 }} />
+          <div className="skeleton" style={{ width: 64, height: 13 }} />
           <div className="skeleton" style={{ width: 28, height: 13 }} />
           <div className="skeleton" style={{ width: 60, height: 13 }} />
           <div className="skeleton" style={{ width: 40, height: 13 }} />
@@ -522,9 +529,8 @@ export default function UserManagement() {
   const users = useAdminStore((s) => s.users)
   const usersLoading = useAdminStore((s) => s.usersLoading)
   const fetchUsers = useAdminStore((s) => s.fetchUsers)
+  const refreshUsers = useAdminStore((s) => s.refreshUsers)
   const openUserDrawer = useAdminStore((s) => s.openUserDrawer)
-  const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
-  const authUser = useAuthStore((s) => s.user)
   const pendingUsers = useAdminStore((s) => s.pendingUsers)
   const fetchPendingUsers = useAdminStore((s) => s.fetchPendingUsers)
   const [showCreate, setShowCreate] = useState(false)
@@ -552,23 +558,22 @@ export default function UserManagement() {
     return result
   }, [users, searchQuery, roleFilter])
 
-  const handleDelete = useCallback((username) => {
-    showConfirmDialog({
-      title: t('admin.deleteUserTitle'),
-      message: t('admin.deleteUserMessage', { name: username }),
-      confirmLabel: t('admin.delete'),
-      requireText: username,
-      danger: true,
-      onConfirm: async () => {
-        try {
-          await adminApi.deleteUser(username)
-          fetchUsers()
-        } catch (e) {
-          console.error(e)
-        }
-      },
-    })
-  }, [showConfirmDialog, fetchUsers, t])
+  // Quiet re-list while a tombstone row is still standing, so PURGING clears
+  // itself without the operator having to reload the page.
+  const hasPurging = useMemo(() => users.some((u) => u.status === 'purged'), [users])
+
+  useEffect(() => {
+    if (!hasPurging) return
+    let attempts = 0
+    let timer = null
+    const tick = () => {
+      attempts += 1
+      refreshUsers()
+      if (attempts < PURGE_POLL_MAX) timer = setTimeout(tick, PURGE_POLL_MS)
+    }
+    timer = setTimeout(tick, PURGE_POLL_MS)
+    return () => clearTimeout(timer)
+  }, [hasPurging, refreshUsers])
 
   const tableScrollRef = useRef(null)
   const tableRowsRef = useRef(null)
@@ -735,6 +740,7 @@ export default function UserManagement() {
                 >
                   <span className="flex-1 min-w-0">{t('admin.username')}</span>
                   <span style={{ width: 60, flexShrink: 0 }}>{t('admin.role')}</span>
+                  <span style={{ width: 84, flexShrink: 0 }}>{t('admin.status')}</span>
                   <span style={{ width: 88, flexShrink: 0 }}>{t('admin.runner')}</span>
                   <span style={{ width: 32, flexShrink: 0, textAlign: 'center' }}>{t('admin.apiKey')}</span>
                   <span style={{ width: 72, flexShrink: 0 }}>{t('admin.created')}</span>
@@ -754,12 +760,7 @@ export default function UserManagement() {
                         ref={rowVirtualizer.measureElement}
                         style={{ position: 'absolute', top: vi.start - tableRowsMargin, left: 0, width: '100%' }}
                       >
-                        <UserRow
-                          user={user}
-                          canDelete={user.username !== authUser?.username}
-                          onEdit={openUserDrawer}
-                          onDelete={handleDelete}
-                        />
+                        <UserRow user={user} onEdit={openUserDrawer} />
                       </div>
                     )
                   })}

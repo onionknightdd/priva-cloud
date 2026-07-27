@@ -20,6 +20,7 @@ StorageBackend interface. One process, low concurrency → a threading.Lock suff
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import threading
 from pathlib import Path
@@ -31,6 +32,17 @@ EXPORT = Path(os.environ.get("EXPORT_DIR", "/export"))
 IMAGES = Path(os.environ.get("IMAGES_DIR", "/data/images"))
 _lock = threading.Lock()
 app = FastAPI(title="priva-quota-manager")
+
+# Every id is interpolated straight into a filesystem path, so the pattern must be unable
+# to express a separator or a traversal component (a leading alphanumeric rules out "..").
+# Real ids are uuid4 hex; the wider class still accepts any Kubernetes object name.
+_ACCOUNT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+
+def _checked(account_id: str) -> str:
+    if not _ACCOUNT_ID.fullmatch(account_id):
+        raise HTTPException(400, "invalid account id")
+    return account_id
 
 
 def _run(*cmd: str) -> str:
@@ -89,6 +101,7 @@ class QuotaReq(BaseModel):
 
 @app.post("/accounts/{account_id}")
 def create_account(account_id: str, req: AccountReq):
+    _checked(account_id)
     with _lock:
         try:
             _ensure_mounted(account_id, int(req.volume_gb), req.uid, req.gid)
@@ -103,8 +116,42 @@ def create_account(account_id: str, req: AccountReq):
     return {"sub_path": account_id, "limit_bytes": int(req.volume_gb) * 1024 ** 3}
 
 
+@app.delete("/accounts/{account_id}")
+def delete_account(account_id: str):
+    _checked(account_id)
+    img, sub = _img(account_id), EXPORT / account_id
+    with _lock:
+        try:
+            if os.path.ismount(sub):
+                try:
+                    _run("umount", str(sub))
+                except subprocess.CalledProcessError:
+                    # A runner's NFS client may still hold the submount; detach it from the
+                    # tree now and let the kernel free the image on the last close.
+                    _run("umount", "-l", str(sub))
+            if os.path.ismount(sub):
+                raise HTTPException(500, f"delete failed: {sub} is still mounted")
+            if img.exists():
+                dev = _loopdev(img)  # a plain umount auto-detaches; the lazy one does not
+                if dev:
+                    _run("losetup", "-d", dev)
+            img.unlink(missing_ok=True)
+            if sub.is_dir():
+                sub.rmdir()
+        except subprocess.CalledProcessError as e:
+            raise HTTPException(500, f"delete failed: {e.stderr.strip()}")
+        except OSError as e:
+            raise HTTPException(500, f"delete failed: {e}")
+        try:
+            _run("exportfs", "-ra")  # best-effort, same caveat as the create path
+        except subprocess.CalledProcessError:
+            pass
+    return {"status": "deleted"}
+
+
 @app.put("/accounts/{account_id}/quota")
 def set_quota(account_id: str, req: QuotaReq):
+    _checked(account_id)
     img = _img(account_id)
     with _lock:
         if not img.exists():
@@ -152,6 +199,7 @@ def usage_all():
 
 @app.get("/usage/{account_id}")
 def usage_one(account_id: str):
+    _checked(account_id)
     with _lock:
         u = _usage(account_id)
     if not u:

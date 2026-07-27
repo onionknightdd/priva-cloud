@@ -59,6 +59,10 @@ class StorageBackend:
     def provision(self, account_id: str, volume_gb: int) -> MountInfo:  # pragma: no cover
         raise NotImplementedError
 
+    def deprovision(self, account_id: str) -> None:  # pragma: no cover
+        """Destroy the account's volume. An already-absent target IS success."""
+        raise NotImplementedError
+
     def set_quota(self, account_id: str, volume_gb: int) -> None:  # pragma: no cover
         raise NotImplementedError
 
@@ -90,6 +94,20 @@ class NfsXfsBackend(StorageBackend):
             c.post(f"/accounts/{account_id}", json=body).raise_for_status()
         logger.info("provisioned export subdir account={} quota={}Gi", account_id, volume_gb)
         return MountInfo(kind="shared_pvc_subpath", claim=self._claim, sub_path=account_id)
+
+    def deprovision(self, account_id: str) -> None:
+        # RAISE on failure: the finalizer must not be released while the image survives on
+        # /data — the NFS server re-mounts every image it finds at boot, resurrecting the
+        # account's export. Letting this raise makes kopf retry the delete handler.
+        try:
+            with self._client() as c:
+                response = c.delete(f"/accounts/{account_id}")
+                if response.status_code != 404:  # already gone == deleted
+                    response.raise_for_status()
+            logger.info("deprovisioned export subdir account={}", account_id)
+        except Exception as exc:
+            logger.warning("quota-manager deprovision failed account={}: {}", account_id, exc)
+            raise
 
     def set_quota(self, account_id: str, volume_gb: int) -> None:
         try:
@@ -189,6 +207,19 @@ class CephFsBackend(StorageBackend):
                 raise
             self._grow_if_needed(name, int(volume_gb), strict=False)
         return MountInfo(kind="csi_pv", claim=name)
+
+    def deprovision(self, account_id: str) -> None:
+        from kubernetes.client import ApiException
+
+        from priva_operator import names
+        name = names.export_claim(account_id)
+        # The claim carries no ownerReference (see provision), so nothing else reclaims it.
+        try:
+            self._core().delete_namespaced_persistent_volume_claim(name, self._ns)
+            logger.info("deprovisioned export PVC {}", name)
+        except ApiException as exc:
+            if exc.status != 404:  # already gone == deleted
+                raise
 
     def set_quota(self, account_id: str, volume_gb: int) -> None:
         from priva_operator import names

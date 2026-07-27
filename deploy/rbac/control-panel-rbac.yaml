@@ -14,7 +14,8 @@ metadata:
 rules:
   - apiGroups: ["priva.io"]
     resources: ["agenttenants", "agenttenants/status"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
+    # delete: account purge — dropping the CR is what hands teardown to the operator
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["deployments", "deployments/scale"]
     verbs: ["get", "patch"]

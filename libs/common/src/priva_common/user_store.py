@@ -48,6 +48,7 @@ class UserStore:
         password: str | None = None,
         role: str | None = None,
         api_key=_UNSET,
+        status: str | None = None,
         agent_runner_type: str | None = None,
     ) -> UserRecord:
         accounts = self._accounts()
@@ -55,7 +56,7 @@ class UserStore:
         if rec is None:
             raise ValueError(f"User '{username}' not found")
         return accounts.update(rec.account_id, password=password, role=role, api_key=api_key,
-                               agent_runner_type=agent_runner_type)
+                               status=status, agent_runner_type=agent_runner_type)
 
     def delete_user(self, username: str) -> None:
         accounts = self._accounts()

@@ -1,4 +1,5 @@
 import useToastStore from '../stores/toastStore'
+import useAuthStore from '../stores/authStore'
 import { getToken } from './tokenStore'
 import { debugLog } from '../utils/debugLog'
 
@@ -32,6 +33,33 @@ function pushApiToast(status, body) {
       body: body ? String(body).slice(0, 400) : undefined,
     })
   } catch { /* toast unavailable */ }
+}
+
+// The account lifecycle gate (control-panel assert_account_active, the edge EPP and
+// the runner proxy) answers 403 "account access revoked" on EVERY request once an
+// account is disabled or purged — the session is dead, so it must end like a 401.
+// Matched on the exact detail: other 403s ("Admin access required", and notably
+// "target account access revoked", where the ADMIN's own session is still valid)
+// have to stay ordinary errors.
+const REVOKED_DETAIL = 'account access revoked'
+
+function isAccountRevoked(body) {
+  if (!body) return false
+  let detail = body
+  try {
+    const parsed = JSON.parse(body)
+    if (typeof parsed?.detail === 'string') detail = parsed.detail
+  } catch { /* the EPP and the runner proxy send it as plain text, not JSON */ }
+  return detail.trim().toLowerCase() === REVOKED_DETAIL
+}
+
+// Marks WHY the session is ending, so the login page the user lands on can tell
+// "your account was disabled" from "your session expired". Set after the event is
+// dispatched, because the listener's logout() clears the flag.
+function markAccessRevoked() {
+  try {
+    useAuthStore.getState().setLogoutReason('revoked')
+  } catch { /* store unavailable */ }
 }
 
 const WAKE_RETRY_MAX = 6
@@ -116,6 +144,11 @@ export async function handleAPIResponse(res) {
   }
   if (!res.ok) {
     const text = await res.text()
+    if (res.status === 403 && isAccountRevoked(text)) {
+      window.dispatchEvent(new Event('auth:unauthorized'))
+      markAccessRevoked()
+      throw new UnauthorizedError(`API error ${res.status}: ${text}`)
+    }
     // 503 is the edge EPP's transient "sandbox is waking" signal — never surface
     // it as a hard error toast. The waking/ready toasts (fetchWithWake) cover it,
     // and the request still throws so callers fall back / retry.

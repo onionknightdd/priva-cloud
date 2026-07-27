@@ -72,6 +72,8 @@ class UserPublic(BaseModel):
     workspace: str | None = None
     created_at: datetime
     updated_at: datetime
+    # lifecycle (admin table STATUS column): active | disabled | offboarding | purged
+    status: str = "active"
     # runner type + resource spec (admin table RUNNER column + edit drawer prefill)
     agent_runner_type: str = "auto_scale"
     cpu_cores: float | None = None
