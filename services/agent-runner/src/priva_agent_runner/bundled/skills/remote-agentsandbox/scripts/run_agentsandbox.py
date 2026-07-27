@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""prod_call.py — 以编程方式调用云端 agent sandbox（网关 SSE 流式接口）。
+"""run_agentsandbox.py — 以编程方式调用云端 agent sandbox（网关 SSE 流式接口）。
 
 用法:
-    AGENT_SANDBOX_GATEWAY_URL=<网关域名> python3 prod_call.py --prompt "任务描述" \
+    AGENT_SANDBOX_GATEWAY_URL=<网关域名> python3 run_agentsandbox.py --prompt "任务描述" \
         [--session-id "上一轮的session_id"] \
         [--verbose]
 
@@ -114,7 +114,7 @@ def resolve_api_url() -> str:
             f"错误：未配置云端 agent sandbox 的网关地址。\n"
             f"请向用户索取网关域名，然后带上环境变量重跑一次本命令（只需一次，"
             f"脚本会把它持久化到 {SESSION_FILE} 的 gateway_url 字段）：\n"
-            f'  {GATEWAY_ENV_VAR}="agent.example.com" python3 <skill-path>/scripts/prod_call.py --prompt "..."\n'
+            f'  {GATEWAY_ENV_VAR}="agent.example.com" python3 <skill-path>/scripts/run_agentsandbox.py --prompt "..."\n'
         )
         sys.exit(1)
     if from_env:

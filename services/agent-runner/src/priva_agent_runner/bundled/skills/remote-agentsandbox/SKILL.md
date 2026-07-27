@@ -34,7 +34,7 @@ SSE 流式契约交给远端 agent 执行，结果以 `result` 事件返回。
 
 ```bash
 AGENT_SANDBOX_GATEWAY_URL="agent.example.com" \
-  python3 <skill-path>/scripts/prod_call.py --prompt "任务描述"
+  python3 <skill-path>/scripts/run_agentsandbox.py --prompt "任务描述"
 ```
 
 环境变量填**网关域名**即可（`agent.example.com`）；也接受带 scheme 的 origin
@@ -75,7 +75,7 @@ token 明文永远不会出现在 stdout/stderr 里。
   stdout JSON 解析完成、`session.json` 写入完成）后，再发起下一次调用。
 - 如果确实需要并行处理多个独立任务，请为每个任务使用**不同的新会话**
   （即不传 `--session-id`，让远端各自创建新 session），而不是共享同一个。
-- 永远不要把同一次 `prod_call.py` 调用放到多个并行的 tool call 里。
+- 永远不要把同一次 `run_agentsandbox.py` 调用放到多个并行的 tool call 里。
 
 **脚本会强制 fail-fast**：传入 `--session-id` 时，脚本会用 `fcntl.flock`
 在 `./.agentsandbox-gateway/<session_id>.lock` 上取**非阻塞**独占锁。
@@ -86,7 +86,7 @@ token 明文永远不会出现在 stdout/stderr 里。
 ## 工作原理
 
 1. 用户下达一条希望交给远端 sandbox 执行的任务。
-2. 通过 python3 运行 `scripts/prod_call.py`，传入 prompt。
+2. 通过 python3 运行 `scripts/run_agentsandbox.py`，传入 prompt。
 3. 脚本解析网关地址、读取 `./.agentsandbox-gateway/auth`、构建 priva 风格 payload、
    以 SSE 形式调用网关、流式读取响应。
 4. 中间事件（`assistant` / `tool_use` / `tool_result` / `task_*` 等）全部丢弃，
@@ -159,7 +159,7 @@ token 明文永远不会出现在 stdout/stderr 里。
 ### 第二步 — 调用脚本
 
 ```bash
-python3 <skill-path>/scripts/prod_call.py \
+python3 <skill-path>/scripts/run_agentsandbox.py \
   --prompt "任务描述" \
   [--session-id "之前的session_id"] \
   [--verbose]
@@ -311,7 +311,7 @@ EOF
 
 → 新话题，不传 session_id：
 ```bash
-python3 <skill-path>/scripts/prod_call.py \
+python3 <skill-path>/scripts/run_agentsandbox.py \
   --prompt "分析 payment 模块的测试覆盖情况，列出未覆盖的关键分支"
 ```
 
@@ -319,7 +319,7 @@ python3 <skill-path>/scripts/prod_call.py \
 
 → 继续上一轮会话。读取会话状态，先向用户确认（会改动文件），然后：
 ```bash
-python3 <skill-path>/scripts/prod_call.py \
+python3 <skill-path>/scripts/run_agentsandbox.py \
   --prompt "为上一步列出的未覆盖分支补充单元测试" \
   --session-id "6776417b-..."
 ```
@@ -328,6 +328,6 @@ python3 <skill-path>/scripts/prod_call.py \
 
 → 新话题，只读操作，无需确认：
 ```bash
-python3 <skill-path>/scripts/prod_call.py \
+python3 <skill-path>/scripts/run_agentsandbox.py \
   --prompt "查询昨天的 API 调用量统计报表"
 ```
