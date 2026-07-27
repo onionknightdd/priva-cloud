@@ -16,7 +16,7 @@ SSE 流式契约交给远端 agent 执行，结果以 `result` 事件返回。
 
 ## 首次使用配置
 
-调用脚本前需要两样东西，都存放在 **`<当前工作目录>/.remote-agentsandbox/`** 下。
+调用脚本前需要两样东西，都存放在 **`<当前工作目录>/.agentsandbox-gateway/`** 下。
 脚本以**当前工作目录**（`Path.cwd()`）为基准定位该目录——每个工作目录独立维护一份配置，
 与本技能的安装目录解耦。
 
@@ -26,7 +26,7 @@ SSE 流式契约交给远端 agent 执行，结果以 `result` 事件返回。
 地址来源按顺序解析：
 
 1. 环境变量 `AGENT_SANDBOX_GATEWAY_URL`
-2. `./.remote-agentsandbox/session.json` 里的 `gateway_url` 字段
+2. `./.agentsandbox-gateway/session.json` 里的 `gateway_url` 字段
 
 两者都没有时脚本以**退出码 1** 失败并打印指引。此时应当**向用户索取网关域名**，
 然后带上环境变量重跑一次——脚本会自动把规范化后的地址持久化进 `session.json`，
@@ -43,15 +43,15 @@ AGENT_SANDBOX_GATEWAY_URL="agent.example.com" \
 
 ### ② Bearer token
 
-`./.remote-agentsandbox/auth` 文件，内容为云端 agent sandbox 的 **Bearer token**
+`./.agentsandbox-gateway/auth` 文件，内容为云端 agent sandbox 的 **Bearer token**
 （明文、单行、不要带引号、不要带多余换行）。文件不存在时脚本以退出码 1 失败。
 
 此时向用户索取 token，并用以下命令写入（**必须用 `printf`，不要用 `echo`**，
 避免追加换行；也不要把 token 直接写在 shell history 里）：
 
 ```bash
-mkdir -p ./.remote-agentsandbox
-printf '%s' "$TOKEN" > ./.remote-agentsandbox/auth
+mkdir -p ./.agentsandbox-gateway
+printf '%s' "$TOKEN" > ./.agentsandbox-gateway/auth
 ```
 
 脚本启动时自动读取该文件并放入 `Authorization: Bearer ...` 请求头，
@@ -78,7 +78,7 @@ token 明文永远不会出现在 stdout/stderr 里。
 - 永远不要把同一次 `prod_call.py` 调用放到多个并行的 tool call 里。
 
 **脚本会强制 fail-fast**：传入 `--session-id` 时，脚本会用 `fcntl.flock`
-在 `./.remote-agentsandbox/<session_id>.lock` 上取**非阻塞**独占锁。
+在 `./.agentsandbox-gateway/<session_id>.lock` 上取**非阻塞**独占锁。
 如果同一 session 已有进行中的调用，第二次调用会立即以 **退出码 4** 失败、
 不发送 HTTP 请求。看到 exit 4 后应该等当前调用返回再串行重试，
 而不是立刻重发。新会话（不传 `--session-id`）不加锁——它们彼此独立。
@@ -87,7 +87,7 @@ token 明文永远不会出现在 stdout/stderr 里。
 
 1. 用户下达一条希望交给远端 sandbox 执行的任务。
 2. 通过 python3 运行 `scripts/prod_call.py`，传入 prompt。
-3. 脚本解析网关地址、读取 `./.remote-agentsandbox/auth`、构建 priva 风格 payload、
+3. 脚本解析网关地址、读取 `./.agentsandbox-gateway/auth`、构建 priva 风格 payload、
    以 SSE 形式调用网关、流式读取响应。
 4. 中间事件（`assistant` / `tool_use` / `tool_result` / `task_*` 等）全部丢弃，
    只留下终态 `result` 事件的 `data` JSON 输出到 stdout。
@@ -101,7 +101,7 @@ token 明文永远不会出现在 stdout/stderr 里。
 > 仅仅因为 `session.json` 存在就复用 `session_id` 是**错误**的——会把无关话题塞进同一会话，污染远端 agent 的上下文。
 
 脚本本身不维护会话状态——会话状态由你在
-`<当前工作目录>/.remote-agentsandbox/session.json` 中管理，结构如下：
+`<当前工作目录>/.agentsandbox-gateway/session.json` 中管理，结构如下：
 
 ```json
 {
@@ -167,7 +167,7 @@ python3 <skill-path>/scripts/prod_call.py \
 
 脚本会：
 - 解析网关地址（环境变量 → `session.json` 的 `gateway_url`）
-- 从 `./.remote-agentsandbox/auth` 读取 Bearer token
+- 从 `./.agentsandbox-gateway/auth` 读取 Bearer token
 - 构建 priva `AgentRunRequest` 形态的 JSON body：
   - 始终包含 `message`（即 prompt）
   - 传入了 `--session-id` 时才包含 `session_id` 字段（否则字段省略 = 新会话）
@@ -179,7 +179,7 @@ python3 <skill-path>/scripts/prod_call.py \
 #### `--verbose` 中间过程日志
 
 加上 `--verbose` 后，脚本会把所有 SSE 事件实时（每个事件一行、`flush` 落盘）
-写入到 `./.remote-agentsandbox/<session_id>.jsonl`：
+写入到 `./.agentsandbox-gateway/<session_id>.jsonl`：
 
 - **继续会话**（传了 `--session-id`）：直接 append 到 `<session_id>.jsonl`，
   多轮调用形成同一文件里递增的事件流。
@@ -204,7 +204,7 @@ queue_flush / session_reset / retry_attempt / retry_exhausted / stream_error / r
 
 **如何把中间过程展示给用户**：
 完成后，从 stdout 拿到的 `result` JSON 里取出 `session_id`，
-然后读取 `./.remote-agentsandbox/<session_id>.jsonl`（JSON Lines 格式，每行独立解析）。
+然后读取 `./.agentsandbox-gateway/<session_id>.jsonl`（JSON Lines 格式，每行独立解析）。
 对用户呈现时建议按时间顺序概述关键 `tool_use` / `tool_result` / `task_*` 事件。
 
 ### 第三步 — 解析并展示响应
@@ -257,7 +257,7 @@ stdout 上的 JSON 直接来自 priva 的 `result` SSE 事件，结构形如：
 ```bash
 python3 - <<'EOF'
 import json, pathlib, datetime
-p = pathlib.Path("./.remote-agentsandbox/session.json")
+p = pathlib.Path("./.agentsandbox-gateway/session.json")
 state = json.loads(p.read_text()) if p.exists() else {}
 state.update({
     "session_id": "<从响应中提取>",
