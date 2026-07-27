@@ -1,8 +1,8 @@
 # 飞书 DM 功能设计（channel-connector）
 
-> 状态：Phase 0 已落地 · Phase 1 代码完成 · Phase 2 代码完成（均待镜像部署验证）
+> 状态：Phase 0 / 1 / 2 已落地 · §9.1 指令引导卡片已落地（2026-07-27 部署）
 > 关联文档：`docs/im-channel-permission-zh.md`（权限/AUQ 交互协议）
-> 更新：2026-07-24
+> 更新：2026-07-27
 
 ## 1. 背景与架构
 
@@ -237,8 +237,8 @@ CP 只读接口：`GET /api/auth/me/feishu-sessions`（激活在前、按时间�
 
 | 方案 | 自动化 | 说明 |
 |---|---|---|
-| ① 指令引导卡片（选定） | 完全自动 | 见 §9.1 定稿设计 |
-| ② 自定义菜单 | 半自动 | 接入指引让租户配一次菜单（event_key 约定 `new` 等），connector 加 `menu_v6` handler 映射到现有 Decision；点击体验最好但配置环节不可自动化。注意 `menu_v6` 事件体只有 operator/event_key/timestamp，**无 chat_id/message_id**，需按 open_id 发送并从响应读回 p2p chat_id |
+| ① 指令引导卡片（选定） | 完全自动 | 见 §9.1 定稿设计，2026-07-27 落地 |
+| ② 自定义菜单（已接入） | 半自动 | 租户在开发者后台配一次菜单 + 勾选 `application.bot.menu_v6` 事件；connector 侧已实现，见 §9.3。注意 `menu_v6` 事件体只有 operator/event_key/timestamp，**无 chat_id/message_id**，需按 open_id 发送并从响应读回 p2p chat_id |
 
 参考：[机器人菜单使用指南](https://open.feishu.cn/document/client-docs/bot-v3/bot-customized-menu)。
 
@@ -284,3 +284,63 @@ CP 只读接口：`GET /api/auth/me/feishu-sessions`（激活在前、按时间�
 - 点击校验沿用现有模式：仅卡片接收者本人可点（open_id 比对，`card_actions.py`
   新增 `kind`，如 `menu`，value 携带 cmd + 允许的 open_id）。
 - 卡片留在聊天记录中即常驻菜单；文案（图片限制/别名）对齐 §2.2 已实现行为。
+
+### 9.2 落地实现（2026-07-27）
+
+| 文件 | 改动 |
+|---|---|
+| `menu_cards.py`（新） | 纯渲染：`welcome_card` / `help_card`（schema 2.0 + `header.template` green/blue）、`MENU_COMMANDS` 白名单、卡片失败用的纯文本兜底 |
+| `router.py` | `HELP_COMMANDS = {/help, /帮助}` → `Decision(kind="help")`（与 `/new` 同为本地拦截，不进 agent） |
+| `worker.py` | `/link` 成功回执换成欢迎卡（失败仍纯文本）；`kind=="help"` 回使用指南卡；`handle_menu()` 把按钮点击**合成一条入站消息**走同一条管道；模块级 `_ACTIVE` 注册表（arm 注册 / teardown 先注销） |
+| `card_actions.py` | `value.act == "menu"` 分支前置于 pending 查找（引导卡片不登记 pending，重启后照样可点） |
+| `lark_ws.py` | card action 解析补 `operator.union_id`（合成消息要过 owner gate） |
+
+**关键取舍**：按钮不是绕过 access gate 的后门——合成消息照走群聊闸 / owner gate；
+`message_id` 留空使表情反应链路自动 no-op。union_id 优先取本次点击的 operator，
+回落到卡片 value 里记的那个（open_id 已比对，同一人）。
+
+### 9.3 机器人自定义菜单（方案②，2026-07-27）
+
+租户在开发者后台配置菜单项 + 在「事件与回调」订阅 `application.bot.menu_v6` 后，
+点击推送 `event_key`，connector 映射到与卡片按钮**完全相同**的合成消息管道。
+
+平台约定的 event_key（`menu_cards.BOT_MENU_KEYS`）：
+
+| event_key | 菜单文案 | 注入指令 | 回执后的内容 |
+|---|---|---|---|
+| `new_session` | /new 重置会话 | `/new` | detach **完成后**发「✅ 会话已成功重置」卡 |
+| `compact` | /compact 压缩会话 | `/compact` | 「📦 正在压缩会话…」卡（点点 1→2→3 循环）→ 就地 patch 成「✅ 会话已压缩」 |
+| `help` | /help 查看帮助 | `/help` | 使用指南卡（§9.1） |
+| `list_skill` | /skill 查看 skill | `/skill` | skill 清单卡（原生表格） |
+| `session_info` | /info 会话信息 | `/info` | 当前会话信息卡（见下） |
+
+**指令回执**：菜单/按钮点击先回一条「🔔 收到菜单指令：`<cmd>`」——飞书菜单点击本身
+没有任何视觉反馈（不像普通消息有表情生命周期），必须给即时确认；随后才是指令内容。
+
+**chat_id 解析**：菜单事件没有 chat_id。worker 维护模块级 `_P2P_CHATS`
+（`(account, open_id) → chat_id`，任何入站私聊消息都会写一笔，跨 re-arm 存活）；
+未命中时上面那条回执改按 open_id 投递，从 `im.v1.message.create` 的响应体读回 p2p
+`chat_id` 并回填缓存——一次调用同时完成"确认"和"解出会话"。解不出会话则记 warning
+丢弃，不炸线程。**access gate 先于回执**：非授权用户点菜单一条消息都发不出去。
+
+**`/skill`（`/skills` `/技能`）**：新增 `skills.py`，走 dial.py 同一接入面
+（wake + `X-Priva-Runner-Token`）只读 GET ar pod 的
+`/api/sandbox/resource/skills/`，渲染成清单卡——**飞书原生 `table`**（复用
+`cards.answer_elements` / `native_table`，与终态卡同一实现），每个分组一张两列表，
+`enabled=false` 整行标灰「已停用」，超过 30 条报「另有 N 个未列出」。拉取失败回一句
+「⚠️ 暂时读不到 skill 列表」，绝不静默。
+
+**`/info`（`/信息`）**：唯一被**改写**而非拦截的指令——router 把它换成 CLI 原生
+`/context` 在当前会话真跑一次，输出渲染成「📊 当前会话信息」卡：`## Context Usage`
+上提成标题、会话 id 进副标题（**裸 id**，飞书标题组件拒绝任何字号字段——实测
+`ErrCode 11311: header text_size invalid`，减轻视觉重量只能靠减字）、
+`**Model:**`→`**模型：**`、`Estimated usage by category`→`Token 消耗大致分布`，
+其余原样跟着 CLI 走，三张表全部是原生表格。跑挂/无输出时退回通用终态卡并把
+`**Session id:**` 补进正文——错误原样可见，会话 id 绝不丢。
+
+**上下文洁净性（实测 2026-07-27）**：同一会话连跑三次 `/context`，session id 不变、
+`**Tokens:**` 恒为 274、`Messages` 行始终不存在 → CLI 的本地指令输出不进会话上下文。
+使用指南卡据此明示「所有指令的输出不会出现在对话的上下文中」。
+
+**卡片形态实测**：无 header 的流式卡 `patch` 成带 header 的卡（`/info` 走这条）飞书
+接受；`header.template` green/blue/wathet/indigo 均正常。

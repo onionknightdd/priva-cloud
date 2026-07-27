@@ -428,7 +428,9 @@ def _split_cells(line: str) -> list[str]:
     return [c.strip() for c in s.split("|")]
 
 
-def _md_table_to_native(header: list[str], rows: list[list[str]]) -> dict:
+def native_table(header: list[str], rows: list[list[str]]) -> dict:
+    """飞书原生 ``table`` 元素（card-json-v2，实测通过）。单元格是 ``lark_md``，行数超过
+    ``page_size`` 时飞书自带翻页。菜单侧的 skill 清单卡也复用这一份，保证同一种表格观感。"""
     cols = [{"name": f"c{i}", "display_name": h or " ", "data_type": "lark_md",
              "horizontal_align": "left", "width": "auto"} for i, h in enumerate(header)]
     trows = [{f"c{i}": (rc[i] if i < len(rc) else "") for i in range(len(header))} for rc in rows]
@@ -437,7 +439,7 @@ def _md_table_to_native(header: list[str], rows: list[list[str]]) -> dict:
             "columns": cols, "rows": trows}
 
 
-def _answer_elements(text: str) -> list[dict]:
+def answer_elements(text: str) -> list[dict]:
     """Top-level answer → elements: GFM markdown tables become NATIVE ``table`` elements, the
     rest stays markdown. A table = a pipe row immediately followed by a ``|---|---|`` separator,
     then its pipe body rows."""
@@ -462,7 +464,7 @@ def _answer_elements(text: str) -> list[dict]:
                 rows.append(_split_cells(lines[j]))
                 j += 1
             flush()
-            els.append(_md_table_to_native(header, rows))
+            els.append(native_table(header, rows))
             i = j
         else:
             buf.append(lines[i])
@@ -537,7 +539,7 @@ def render_card(state: StreamState, *, final: bool, dots: int = 3) -> dict:
         elements.append(panel)
 
     if answer:
-        elements.extend(_answer_elements(answer))       # top-level → GFM tables become native
+        elements.extend(answer_elements(answer))       # top-level → GFM tables become native
     elif panel is not None and not state.is_error:
         elements.append(_md("(无文本回复)"))
 

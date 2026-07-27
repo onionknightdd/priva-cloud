@@ -44,6 +44,9 @@ class IMTransport(Protocol):
     async def start(self) -> None: ...
     async def stop(self) -> None: ...
     async def send_text(self, chat_id: str, text: str) -> None: ...
+    # 按 open_id 投递并返回响应里的 p2p chat_id（取不到 → None）。自定义菜单点击
+    # （application.bot.menu_v6）不带 chat_id，这是把它解出来的唯一途径。
+    async def send_text_to_user(self, open_id: str, text: str) -> "str | None": ...
     # Message-reaction lifecycle (emoji stamped on an *inbound* DM). ``add_reaction``
     # returns the created reaction_id (None if it failed / no message id) so the caller
     # can later ``remove_reaction`` it. Best-effort: cosmetic, never fail the run.
@@ -80,6 +83,7 @@ class FakeTransport:
     images: dict = field(default_factory=dict)                     # image_key -> (bytes, media_type)
     fetches: list[tuple[str, str]] = field(default_factory=list)   # (message_id, image_key) requested
     display_names: dict = field(default_factory=dict)              # chat_id / open_id -> name
+    p2p_chats: dict = field(default_factory=dict)                  # open_id -> chat_id (菜单点击解析)
     _rid_seq: int = 0
     _mid_seq: int = 0
 
@@ -91,6 +95,11 @@ class FakeTransport:
 
     async def send_text(self, chat_id: str, text: str) -> None:
         self.sent.append((chat_id, text))
+
+    async def send_text_to_user(self, open_id: str, text: str) -> "str | None":
+        chat_id = self.p2p_chats.get(open_id)
+        self.sent.append((chat_id or open_id, text))
+        return chat_id
 
     async def add_reaction(self, message_id: str, emoji_type: str) -> "str | None":
         if not message_id:

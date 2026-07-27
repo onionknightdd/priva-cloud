@@ -243,6 +243,11 @@ class LarkTransport:
     async def send_text(self, chat_id: str, text: str) -> None:
         await asyncio.to_thread(self._send_sync, chat_id, text)
 
+    async def send_text_to_user(self, open_id: str, text: str) -> str | None:
+        if not open_id:
+            return None
+        return await asyncio.to_thread(self._send_to_user_sync, open_id, text)
+
     async def add_reaction(self, message_id: str, emoji_type: str) -> str | None:
         if not message_id:
             return None
@@ -371,10 +376,16 @@ class LarkTransport:
             # Card-action handler must RETURN a response (toast/card) the SDK sends back.
             return self._dispatch_card_action(data)
 
+        def _on_p2_bot_menu(data) -> None:
+            self._dispatch_bot_menu(data)
+
         handler = (
             lark.EventDispatcherHandler.builder("", "")
             .register_p2_im_message_receive_v1(_on_p2_message)
             .register_p2_card_action_trigger(_on_p2_card_action)
+            # 机器人自定义菜单（租户在开发者后台配置，需额外勾选「事件与回调」里的
+            # application.bot.menu_v6）——没订阅时这个 handler 只是永不触发。
+            .register_p2_application_bot_menu_v6(_on_p2_bot_menu)
             .build()
         )
         try:
@@ -516,6 +527,38 @@ class LarkTransport:
         if self._loop is not None and not self._loop.is_closed():
             asyncio.run_coroutine_threadsafe(self._on_message(inbound), self._loop)
 
+    def _dispatch_bot_menu(self, data) -> None:
+        """``application.bot.menu_v6``：机器人自定义菜单点击。事件体只有 operator +
+        event_key（无 chat_id / message_id），所以解析后直接交给 card_actions 路由到
+        本账号的 worker，由它解出 p2p 会话再走合成消息管道。跑在 lark 线程上（<3s ack），
+        任何真活都必须调度回 connector loop。"""
+        if self._stopping:
+            return
+        try:
+            ev = getattr(data, "event", None)
+            operator = getattr(ev, "operator", None)
+            oid = getattr(operator, "operator_id", None) if operator else None
+            event_key = getattr(ev, "event_key", None) or ""
+            open_id = getattr(oid, "open_id", None) or ""
+            union_id = getattr(oid, "union_id", None) or ""
+        except Exception:
+            logger.exception("feishu bot menu parse failed account={}", self.account_id)
+            return
+        logger.info("feishu BOT MENU account={} key={!r} from={}",
+                    self.account_id, event_key, (open_id or "-")[:14])
+        try:
+            from . import card_actions
+            coro = card_actions.handle_bot_menu(self.account_id, event_key, open_id, union_id)
+        except Exception:
+            logger.exception("feishu bot menu handle failed account={}", self.account_id)
+            return
+        if coro is None:
+            return
+        if self._loop is not None and not self._loop.is_closed():
+            asyncio.run_coroutine_threadsafe(coro, self._loop)
+        else:
+            coro.close()
+
     def _dispatch_card_action(self, data):
         """Feishu ``card.action.trigger`` over the long-connection. Runs on the lark thread
         and MUST return a ``P2CardActionTriggerResponse`` synchronously (the SDK sends it back
@@ -536,6 +579,8 @@ class LarkTransport:
             context = getattr(ev, "context", None)
             parsed = {
                 "open_id": getattr(operator, "open_id", None) if operator else None,
+                # 引导卡片按钮合成的入站消息要过 owner/allowlist gate → 需要 union_id。
+                "union_id": getattr(operator, "union_id", None) if operator else None,
                 "tag": getattr(action, "tag", None) if action else None,
                 "name": getattr(action, "name", None) if action else None,
                 "value": getattr(action, "value", None) if action else None,
@@ -590,6 +635,33 @@ class LarkTransport:
                 "lark send failed account={} code={} msg={}",
                 self.account_id, getattr(resp, "code", "?"), getattr(resp, "msg", "?"),
             )
+
+    def _send_to_user_sync(self, open_id: str, text: str) -> str | None:
+        """按 open_id 投递（receive_id_type=open_id）并从响应里读回 p2p ``chat_id``。
+        自定义菜单点击的事件体没有 chat_id，这是唯一能解出会话的官方途径（§9 方案②）。"""
+        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+
+        rest = self._rest_client()
+        req = (
+            CreateMessageRequest.builder()
+            .receive_id_type("open_id")
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(open_id)
+                .msg_type("text")
+                .content(json.dumps({"text": text}))
+                .build()
+            )
+            .build()
+        )
+        resp = rest.im.v1.message.create(req)
+        if not resp.success():
+            logger.warning(
+                "lark send-to-user failed account={} code={} msg={}",
+                self.account_id, getattr(resp, "code", "?"), getattr(resp, "msg", "?"),
+            )
+            return None
+        return getattr(getattr(resp, "data", None), "chat_id", None)
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> str | None:
         # POST /im/v1/messages/:message_id/reactions {reaction_type:{emoji_type}} → reaction_id.

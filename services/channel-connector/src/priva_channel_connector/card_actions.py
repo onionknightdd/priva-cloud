@@ -21,7 +21,8 @@ from __future__ import annotations
 
 from priva_common.logging import get_app_logger
 
-from . import cards, pending, permission_cards, resolve
+from . import cards, menu_cards, pending, permission_cards, resolve
+from .worker import get_worker
 
 logger = get_app_logger(__name__)
 
@@ -79,9 +80,54 @@ def _finish(prompt, decision: str, answer: str | None, toast: str, *, status: st
     return _with_card(card, toast), coro
 
 
+def _handle_menu(account_id: str, parsed: dict, value: dict):
+    """引导卡片（欢迎卡 / 使用指南卡，§9.1）的按钮：等价于用户手打该指令。这类卡片
+    常驻聊天记录，可能在 re-arm、甚至进程重启之后才被点，所以**不进 pending 注册表**
+    ——授权与上下文全编在 ``value`` 里（``uid`` 仅卡片接收者本人可点），命中后把
+    worker 合成入站消息的协程交回 connector loop。"""
+    cmd = value.get("cmd") or ""
+    if cmd not in menu_cards.MENU_COMMANDS:
+        return _toast("该按钮已失效"), None
+    uid = value.get("uid") or ""
+    operator = parsed.get("open_id") or ""
+    if uid and operator and operator != uid:
+        return _toast("仅卡片接收者本人可操作此卡片"), None
+    chat_id = parsed.get("chat_id") or ""
+    if not chat_id:
+        return _toast("无法定位会话，请直接发送该指令"), None
+    worker = get_worker(account_id)
+    if worker is None:
+        return _toast("连接已关闭，请重新发起对话"), None
+    # union_id：优先取本次点击的 operator（权威），回落到卡片里记的那个（同一个人—
+    # open_id 已比对过）。缺了它 owner_only 的 access gate 会拒掉合成消息。
+    union_id = parsed.get("union_id") or value.get("un") or ""
+    coro = worker.handle_menu(cmd, chat_id, value.get("ct") or "p2p",
+                              operator or uid, union_id)
+    logger.info("card menu: account={} cmd={} chat={}", account_id, cmd, chat_id)
+    return _toast(menu_cards.MENU_COMMANDS[cmd]), coro
+
+
+def handle_bot_menu(account_id: str, event_key: str, open_id: str, union_id: str):
+    """机器人自定义菜单点击（``application.bot.menu_v6``）→ 该账号 worker 的协程，或
+    None（未知 key / 已注销）。菜单没有卡片可回，所以这里没有响应体，只有活儿。"""
+    if not event_key or event_key not in menu_cards.BOT_MENU_KEYS:
+        logger.warning("bot menu: unknown event_key={!r} account={}", event_key, account_id)
+        return None
+    worker = get_worker(account_id)
+    if worker is None:
+        logger.warning("bot menu: no armed worker account={} key={}", account_id, event_key)
+        return None
+    return worker.handle_bot_menu(event_key, open_id, union_id)
+
+
 def handle(account_id: str, parsed: dict):
     """Returns ``(response_dict, coro_or_None)``. response_dict → P2CardActionTriggerResponse;
     coro (if any) is the resolve POST to schedule on the event loop."""
+    raw_value = parsed.get("value") if isinstance(parsed.get("value"), dict) else {}
+    if raw_value.get("act") == menu_cards.MENU_ACT:
+        # 引导卡片按钮：不走下面的 pending 相关性查找（它本来就没登记过）。
+        return _handle_menu(account_id, parsed, raw_value)
+
     message_id = parsed.get("message_id") or ""
     prompt = pending.get_by_message(message_id)
     if prompt is None:
@@ -97,7 +143,7 @@ def handle(account_id: str, parsed: dict):
     name = parsed.get("name")
     option = parsed.get("option")
     form_value = parsed.get("form_value") or {}
-    value = parsed.get("value") if isinstance(parsed.get("value"), dict) else {}
+    value = raw_value
     act = value.get("act")
 
     # 1) Buttons carrying an explicit act: skip / permission allow-deny / model① 提交.

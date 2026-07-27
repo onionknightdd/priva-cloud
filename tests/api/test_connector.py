@@ -101,8 +101,12 @@ class FakeFeishuConfigs:
 
 
 class FakeAccounts:
+    def __init__(self):
+        self.status: dict[str, str] = {}  # account lifecycle; unset == active
+
     def get(self, account_id):
-        return UserRecord(username=f"user-{account_id}", password_hash="h", account_id=account_id)
+        return UserRecord(username=f"user-{account_id}", password_hash="h", account_id=account_id,
+                          status=self.status.get(account_id, "active"))
 
 
 class FakeClient:
@@ -244,10 +248,11 @@ def test_worker_new_detaches_without_running():
         t = created[0]
 
         await t.inject(_msg("A", "/new"))
-        # detached, no dial, an ack was sent
+        # detached, no dial, and the "已成功重置" card answered (§9.1 完成态卡片)
         assert dialer.calls == []
         assert client.bindings.list_bindings("A")[0].session_uuid is None
-        assert len(t.sent) == 1 and "New conversation" in t.sent[0][1]
+        assert t.sent == [] and len(t.cards) == 1
+        assert "已成功重置" in t.cards[0][1]["header"]["title"]["content"]
 
         # next real message resumes fresh (session None)
         await t.inject(_msg("A", "hi again"))
@@ -683,11 +688,11 @@ def test_tool_output_truncation_hint():
 
 
 def test_answer_native_table_and_prose():
-    from priva_channel_connector.cards import _answer_elements
+    from priva_channel_connector.cards import answer_elements
     text = ("结果如下:\n\n"
             "| 文件 | 增删 |\n| --- | --- |\n| dial.py | +4 -1 |\n| cards.py | +40 |\n\n"
             "完成。")
-    els = _answer_elements(text)
+    els = answer_elements(text)
     table = next(e for e in els if e["tag"] == "table")                    # GFM table → native table element
     assert [c["display_name"] for c in table["columns"]] == ["文件", "增删"]
     assert table["rows"][0]["c0"] == "dial.py" and table["rows"][1]["c1"] == "+40"
@@ -696,8 +701,8 @@ def test_answer_native_table_and_prose():
 
 
 def test_answer_without_table_is_plain_markdown():
-    from priva_channel_connector.cards import _answer_elements
-    els = _answer_elements("就一句话,没有表格。")
+    from priva_channel_connector.cards import answer_elements
+    els = answer_elements("就一句话,没有表格。")
     assert len(els) == 1 and els[0]["tag"] == "markdown"
 
 
@@ -833,6 +838,28 @@ def test_reconcile_arm_teardown_and_digest_rearm():
         assert eng.armed_count == 1
         b_transports = [t for t in created if t.account_id == "B"]
         assert len(b_transports) == 2 and b_transports[0].stopped is True
+
+    asyncio.run(go())
+
+
+def test_reconcile_tears_down_a_disabled_account():
+    async def go():
+        client = FakeClient(effective=[_cfg("A", "dA1")], secrets={"A": _secret("A")})
+        eng = ReconcileEngine(client, _transport_factory([]), FakeDialer(RunOutcome()),
+                              poll_seconds=999)
+        await eng.reconcile_once()
+        assert eng.armed_count == 1
+
+        # Admin disable: creds/toggles are untouched, so the row stays in the effective
+        # set — only the account's lifecycle changed.
+        client.accounts.status["A"] = "disabled"
+        await eng.reconcile_once()
+        assert eng.armed_count == 0
+        assert ("A", "disabled", None) in client.feishu_configs.status_calls
+
+        # ...and the targeted push must not put it back.
+        await eng.reconcile_now("A")
+        assert eng.armed_count == 0
 
     asyncio.run(go())
 

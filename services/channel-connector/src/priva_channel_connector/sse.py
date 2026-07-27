@@ -20,7 +20,12 @@ exactly as they streamed, instead of lumping all steps at the end.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
+
+# `/info` = CLI `/context` + 会话 id。CLI 输出里 `**Tokens:** 38.4k / 200k (19%)` 那行之后
+# 插一行 `**Session id:**`（用户裁定的位置）。
+_TOKENS_LINE_RE = re.compile(r"^(\s*\*\*Tokens:\*\*.*)$", re.M)
 
 
 @dataclass
@@ -84,6 +89,23 @@ class StreamState:
         if o.text:
             s.timeline.append(o.text)
         return s
+
+
+def annotate_session_id(state: "StreamState", session_id: str | None) -> None:
+    """`/info` 专用：把 `**Session id:** …` 插到 `/context` 输出的 `**Tokens:**` 行下面。
+
+    就地改最后一段文本（终态卡的"答案"就是它）。找不到 Tokens 行（CLI 换了格式、或者
+    这次根本没输出）就退化成在最前面单独起一行——会话 id 是这条指令的主要信息之一，
+    绝不能因为格式不匹配而丢掉。"""
+    line = f"**Session id:** `{session_id}`" if session_id else "**Session id:** _（尚未建立会话）_"
+    idx = next((i for i in range(len(state.timeline) - 1, -1, -1)
+                if isinstance(state.timeline[i], str) and state.timeline[i].strip()), None)
+    if idx is None:
+        state.timeline.append(line)
+        return
+    text = state.timeline[idx]
+    new, n = _TOKENS_LINE_RE.subn(lambda m: f"{m.group(1)}\n{line}", text, count=1)
+    state.timeline[idx] = new if n else f"{line}\n\n{text}"
 
 
 async def iter_sse(resp):

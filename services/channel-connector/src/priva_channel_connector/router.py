@@ -26,6 +26,27 @@ logger = get_app_logger(__name__)
 # straight to the SDK.
 NEW_COMMANDS = frozenset({"/new", "/新", "/reset"})
 
+# "/help" family — connector-local like /new (never enters the agent): answers with the
+# 使用指南 card (feat_feishu_DM.md §9.1), the only way this bot can advertise its commands.
+HELP_COMMANDS = frozenset({"/help", "/帮助"})
+
+# "/skill" family — connector-local too: reads the account's skill inventory off its ar pod
+# (skills.py) and answers with a card. No run, no session touch.
+SKILL_COMMANDS = frozenset({"/skill", "/skills", "/技能"})
+
+# "/info" — the ONE command that is rewritten rather than intercepted: it runs the CLI's own
+# ``/context`` in the current session (verified to work headless — the web composer sends it
+# the same way) and the worker annotates the answer with the session id.
+INFO_COMMANDS = frozenset({"/info", "/信息"})
+CONTEXT_PROMPT = "/context"
+
+
+def is_compact(text: str) -> bool:
+    """``/compact`` （可带压缩指示语）。它不被拦截——照常进 SDK 跑——但 DM 侧给它专门的
+    进行中/完成卡片，而不是通用的流式过程卡（压缩的中间产物对用户没有意义）。"""
+    s = (text or "").strip()
+    return s == "/compact" or s.startswith("/compact ")
+
 # "/link A7K2MQ" / "/绑定 A7K2MQ" — owner link-code binding (feat_feishu_DM.md §4).
 # Loose length here; data-spine does the real (hashed, constant-time) validation.
 _LINK_RE = re.compile(r"^/(?:link|绑定)\s+([A-Za-z0-9]{4,12})$")
@@ -42,7 +63,7 @@ def match_link_code(text: str) -> str | None:
 
 @dataclass
 class Decision:
-    kind: str                              # "detach" | "run"
+    kind: str                              # "detach" | "help" | "skills" | "info" | "run"
     prompt: str | None = None              # the run prompt (raw text; incl. /clear, /compact)
     resume_session_id: str | None = None   # None => fresh session
 
@@ -66,12 +87,15 @@ class SessionRouter:
         text = (msg.text or "").strip()
         if text in NEW_COMMANDS:
             return Decision(kind="detach")
+        if text in HELP_COMMANDS:
+            return Decision(kind="help")
+        if text in SKILL_COMMANDS:
+            return Decision(kind="skills")
         b = self._binding(msg.account_id, msg.chat_id)
-        return Decision(
-            kind="run",
-            prompt=msg.text,
-            resume_session_id=(b.session_uuid if b else None),
-        )
+        resume = b.session_uuid if b else None
+        if text in INFO_COMMANDS:
+            return Decision(kind="info", prompt=CONTEXT_PROMPT, resume_session_id=resume)
+        return Decision(kind="run", prompt=msg.text, resume_session_id=resume)
 
     def detach(self, account_id: str, chat_id: str | None = None) -> None:
         """/new: rebind THIS chat's session_uuid → NULL (keeps first_run_done=0).

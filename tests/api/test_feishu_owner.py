@@ -18,7 +18,7 @@ if _CONN_SRC not in sys.path:
 from priva_channel_connector.router import SessionRouter, match_link_code  # noqa: E402
 from priva_channel_connector.sse import RunOutcome  # noqa: E402
 from priva_channel_connector.transport import InboundMessage  # noqa: E402
-from priva_channel_connector.worker import AppWorker, _LINK_FAIL, _LINK_OK  # noqa: E402
+from priva_channel_connector.worker import AppWorker, _LINK_FAIL  # noqa: E402
 
 from priva_common.dataplane import FeishuChannelConfigRecord  # noqa: E402
 
@@ -109,7 +109,9 @@ def test_link_dm_binds_and_replies_ok():
     # Sender is NOT the current owner — link must bypass the gate (re-bind path).
     dialer, client, t = _inject(_cfg(owner=OWNER), _msg("/link A7K2MQ", OTHER))
     assert client.feishu_configs.bind_calls == [("A", "A7K2MQ", OTHER, "ou_x")]
-    assert t.sent == [("oc_1", _LINK_OK)]
+    # 回执 = 欢迎卡（§9.1），不再是纯文本
+    assert t.sent == [] and len(t.cards) == 1
+    assert "绑定成功" in t.cards[0][1]["header"]["title"]["content"]
     assert dialer.calls == []  # never enters the agent
 
 

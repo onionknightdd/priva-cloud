@@ -3,7 +3,8 @@
 data-spine has no watch/stream (all-unary), so the baseline is poll-list-diff:
 every ``poll_seconds`` re-list ``feishu_configs.list_effective()`` and diff each row's
 ``desired_digest`` against what's armed. A row that vanishes (admin_disabled=1 /
-user_enabled=0 / creds cleared) is torn down (kill-switch = hard-stop). A digest
+user_enabled=0 / creds cleared) or whose account is no longer ``active`` (admin
+disable / purge) is torn down (kill-switch = hard-stop). A digest
 change (creds/domain/gate change) is torn down then re-armed — ordered, because the
 same app_id must never hold two WS at once (single-cast). A best-effort push
 (``reconcile_now``) collapses the ≤poll latency for the common single-account edit.
@@ -76,9 +77,24 @@ class ReconcileEngine:
             await asyncio.sleep(self._poll)
 
     # --- reconciliation ---------------------------------------------------
+    def _active_account_ids(self, account_ids) -> set[str]:
+        """The subset still allowed to hold a socket. ``list_effective`` answers the
+        credentials/kill-switch question only — it carries no account status and is
+        shared with the admin nudge path — so the lifecycle gate lives here: a
+        disabled/purged account drops out of the desired set and takes the normal
+        teardown path. Blocking dataplane calls."""
+        active = set()
+        for aid in account_ids:
+            account = self._client.accounts.get(aid)
+            if account is not None and account.status == "active":
+                active.add(aid)
+        return active
+
     async def reconcile_once(self) -> None:
         desired = await asyncio.to_thread(self._client.feishu_configs.list_effective)
         by_id = {c.account_id: c for c in desired}
+        active = await asyncio.to_thread(self._active_account_ids, list(by_id))
+        by_id = {aid: c for aid, c in by_id.items() if aid in active}
         async with self._lock:
             # Vanished from the effective set → disabled/creds-cleared → hard-stop.
             for aid in list(self._workers):
@@ -96,8 +112,10 @@ class ReconcileEngine:
         """Targeted push (control-panel → connector). Fetch just this account and
         converge it. Idempotent with the poll loop."""
         cfg = await asyncio.to_thread(self._client.feishu_configs.get, account_id)
+        active = await asyncio.to_thread(self._active_account_ids, [account_id])
         async with self._lock:
-            effective = cfg is not None and getattr(cfg, "effective_enabled", False)
+            effective = (cfg is not None and getattr(cfg, "effective_enabled", False)
+                         and account_id in active)
             if not effective:
                 if account_id in self._workers:
                     await self._teardown(account_id)

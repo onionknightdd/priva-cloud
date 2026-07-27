@@ -12,15 +12,39 @@ import base64
 
 from priva_common.logging import get_app_logger
 
+from . import menu_cards, skills
 from .cards import render_card
-from .router import match_link_code
-from .sse import StreamState
+from .router import is_compact, match_link_code
+from .sse import StreamState, annotate_session_id
+from .transport import InboundMessage
 
 logger = get_app_logger(__name__)
 
 _NEW_ACK = "🆕 已开始新对话 / New conversation started."
-_LINK_OK = "✅ 绑定成功！你已成为此机器人的所有者。"
 _LINK_FAIL = "❌ 绑定码无效或已过期，请在控制台重新生成。"
+
+# 卡片菜单点击（menu_cards 的按钮）要按 account 找回 worker：card_actions 在 lark 线程上
+# 做纯决策，拿到 worker 后把合成入站消息的协程交回 connector loop。进程内单副本注册表，
+# arm/teardown 成对增删（身份校验保证 re-arm 的先 teardown 后 arm 不会误删新 worker）。
+_ACTIVE: dict[str, "AppWorker"] = {}
+
+# 自定义菜单点击（application.bot.menu_v6）**不带 chat_id**（§9 方案②），所以记住每个
+# 发信人的 p2p chat：任何入站私聊消息都会写一笔。模块级（跨 re-arm 存活，pod 重启才丢），
+# 未命中时回落到「按 open_id 投递、从响应读回 chat_id」。
+_P2P_CHATS: dict[tuple[str, str], str] = {}
+_P2P_CHATS_MAX = 2048
+
+
+def get_worker(account_id: str) -> "AppWorker | None":
+    return _ACTIVE.get(account_id)
+
+
+def _remember_p2p_chat(account_id: str, open_id: str, chat_id: str) -> None:
+    if not (open_id and chat_id):
+        return
+    if len(_P2P_CHATS) >= _P2P_CHATS_MAX:
+        _P2P_CHATS.clear()      # 粗粒度封顶：这只是省一次 API 的缓存，丢了自动重建
+    _P2P_CHATS[(account_id, open_id)] = chat_id
 
 # Streaming-card tick: the worker patches the whole card on this cadence while a run is in
 # flight — this both streams fresh content (the state is folded live by the dialer) and
@@ -66,8 +90,13 @@ class AppWorker:
 
     async def start(self) -> None:
         await self._transport.start()
+        _ACTIVE[self.account_id] = self
 
     async def stop(self) -> None:
+        # Deregister first: a menu tap landing mid-teardown gets the "连接已关闭" toast
+        # instead of racing a dying worker.
+        if _ACTIVE.get(self.account_id) is self:
+            _ACTIVE.pop(self.account_id, None)
         # Kill-switch semantics (see engine): cancel in-flight turns FIRST — their
         # finally blocks still get to settle reactions/cards while the transport is
         # alive — then drop the socket. Un-drained turns are logged, never silent.
@@ -114,6 +143,8 @@ class AppWorker:
                             self.account_id, msg.chat_id)
                 return
         else:
+            # 私聊：记住 open_id → chat_id，自定义菜单点击（无 chat_id）靠它定位会话。
+            _remember_p2p_chat(self.account_id, msg.sender_open_id, msg.chat_id)
             # Link-code binding runs BEFORE the access gate: re-binding from a new Feishu
             # identity must not be blocked by the previous owner's gate — code possession
             # (minted behind the platform login) is the authorization. Never enters the agent.
@@ -139,9 +170,35 @@ class AppWorker:
             # Router touches the (blocking, sync) dataplane client — run off the loop.
             decision = await asyncio.to_thread(self._router.decide, msg)
 
+            if decision.kind == "help":
+                # 使用指南卡（§9.1）——纯本地回执，不进 agent、不动会话。
+                await self._send_menu_card(msg, menu_cards.help_card(
+                    open_id=msg.sender_open_id, chat_type=(msg.chat_type or "p2p"),
+                    union_id=msg.sender_union_id, max_images=_MAX_IMAGES,
+                    max_image_bytes=_MAX_IMAGE_BYTES,
+                ), menu_cards.help_text())
+                logger.info("feishu /help: account={} chat={}", self.account_id, msg.chat_id)
+                ok = True
+                return
+
+            if decision.kind == "skills":
+                # skill 清单卡（自定义菜单 list_skill / `/skill`）——只读 ar pod，不进 agent。
+                data = await skills.list_skills(self.account_id, self._username)
+                if data is None:
+                    await self._transport.send_text(
+                        msg.chat_id, "⚠️ 暂时读不到 skill 列表（沙箱未就绪或接口异常），稍后再试。")
+                else:
+                    await self._send_menu_card(msg, menu_cards.skills_card(data),
+                                               menu_cards.skills_text(data))
+                logger.info("feishu /skill: account={} chat={} ok={}",
+                            self.account_id, msg.chat_id, data is not None)
+                ok = data is not None
+                return
+
             if decision.kind == "detach":
                 await asyncio.to_thread(self._router.detach, self.account_id, msg.chat_id)
-                await self._transport.send_text(msg.chat_id, _NEW_ACK)
+                # 重置完成后才回卡片——卡片就是"已完成"的信号，不能先于事实。
+                await self._send_menu_card(msg, menu_cards.reset_card(), _NEW_ACK)
                 logger.info("feishu /new detach: account={} chat={}", self.account_id, msg.chat_id)
                 await self._stamp_display(msg)
                 ok = True
@@ -161,16 +218,26 @@ class AppWorker:
             if image_note:
                 prompt = f"{prompt}\n{image_note}".strip()
 
+            # `/compact` 的中间产物对用户没有意义，所以它不用通用流式过程卡，而是
+            # 「正在压缩会话…」→「会话已压缩」两态卡（点点由同一个 ticker 驱动）。
+            compacting = is_compact(prompt)
+            if compacting:
+                def _running(_state, dots):
+                    return menu_cards.compacting_card(dots)
+            else:
+                def _running(state_, dots):
+                    return render_card(state_, final=False, dots=dots)
+
             # #0 streaming card: post an initial "running" card up front to get a
             # message_id we can patch as the stream folds in. Best-effort — if the card
             # can't be posted (message_id is None) we fall back to the plain-text reply.
             state = StreamState()
-            message_id = await self._send_card(msg.chat_id, render_card(state, final=False, dots=1))
+            message_id = await self._send_card(msg.chat_id, _running(state, 1))
 
             # A ticker patches the card every _TICK_INTERVAL while the run is in flight: it
             # both streams the content (dial folds into the SAME `state`) and animates the
             # Thinking dots. Cancelled the moment the run returns.
-            ticker = asyncio.create_task(self._animate(message_id, state)) if message_id else None
+            ticker = asyncio.create_task(self._animate(message_id, state, _running)) if message_id else None
             try:
                 final_state = await self._dialer.run(
                     self.account_id,
@@ -197,6 +264,19 @@ class AppWorker:
                     except asyncio.CancelledError:
                         pass
 
+            # `/info`：CLI `/context` 的输出换成「当前会话信息」卡（会话 id 进副标题）。
+            # `/compact`：换成「会话已压缩」完成卡。两者跑挂时都退回通用终态卡，让错误
+            # 原样可见——绝不用一张"成功"卡盖住失败。
+            final_card = None
+            if decision.kind == "info":
+                sid = final_state.session_id or resume
+                if not final_state.is_error and final_state.text.strip():
+                    final_card = menu_cards.info_card(final_state.text, sid)
+                else:
+                    annotate_session_id(final_state, sid)
+            elif compacting and not final_state.is_error:
+                final_card = menu_cards.compacted_card()
+
             outcome = final_state.outcome()
             if outcome.session_id:
                 await asyncio.to_thread(
@@ -207,7 +287,7 @@ class AppWorker:
             if message_id:
                 # Final patch lands the terminal card, rendered from the SAME state dial
                 # folded — so card == outcome on every path.
-                await self._patch_card(message_id, render_card(final_state, final=True))
+                await self._patch_card(message_id, final_card or render_card(final_state, final=True))
             else:
                 reply = (outcome.text or "").strip()
                 if not reply:
@@ -220,6 +300,71 @@ class AppWorker:
         finally:
             self._expire_prompts(issued)
             await self._settle_reaction(msg.message_id, typing_rid, ok)
+
+    # --- 引导卡片菜单 ------------------------------------------------------
+    def _menu_message(self, cmd: str, chat_id: str, open_id: str, union_id: str):
+        """菜单/按钮点击合成的入站消息。``message_id`` 留空——没有可贴表情的原始消息，
+        反应 API 全程 no-op。"""
+        return InboundMessage(
+            account_id=self.account_id, sender_open_id=open_id, chat_id=chat_id,
+            text=cmd, message_id="", sender_union_id=union_id,
+            chat_type="p2p", mentioned=True,
+        )
+
+    async def handle_menu(self, cmd: str, chat_id: str, chat_type: str,
+                          open_id: str, union_id: str, *, ack: bool = True) -> None:
+        """引导卡片按钮 / 自定义菜单 == 用户手打该指令（§9.1）：先发一条「🔔 收到菜单
+        指令」回执（点击本身没有任何视觉反馈），再合成一条入站消息走完全相同的管道
+        （含群聊闸 / access gate / 会话绑定）。``ack=False`` 表示回执已由调用方发出
+        （菜单冷启动时它同时用来解析 chat_id）。"""
+        if ack:
+            await self._transport.send_text(chat_id, menu_cards.menu_ack(cmd))
+        msg = InboundMessage(
+            account_id=self.account_id, sender_open_id=open_id, chat_id=chat_id,
+            text=cmd, message_id="", sender_union_id=union_id,
+            chat_type=chat_type or "p2p", mentioned=True,
+        )
+        logger.info("feishu menu tap: account={} cmd={} chat={} from={}",
+                    self.account_id, cmd, chat_id, (open_id or "-")[:14])
+        await self._on_message(msg)
+
+    async def handle_bot_menu(self, event_key: str, open_id: str, union_id: str) -> None:
+        """飞书「机器人自定义菜单」点击（``application.bot.menu_v6``，§9 方案②）。
+
+        事件体里**没有 chat_id / message_id**，只有 operator + event_key，所以「🔔 收到
+        菜单指令」这条回执同时承担两件事：给点击一个即时反馈，以及在缓存未命中时按
+        open_id 投递、从响应体读回 p2p chat_id。之后与卡片按钮走同一条路。"""
+        mapped = menu_cards.BOT_MENU_KEYS.get(event_key or "")
+        if mapped is None:
+            logger.warning("feishu bot menu: unknown event_key={!r} account={}",
+                           event_key, self.account_id)
+            return
+        cmd, _label = mapped
+        # 回执要先于管道发出，所以 access gate 必须**先**在这里跑一次（管道里的那道闸
+        # 按 chat_id 工作，此时还够不着）。gate 只看 union_id / 访问模式。
+        if not self._router.access_allowed(self._cfg, self._menu_message(cmd, "", open_id, union_id)):
+            logger.info("feishu bot menu rejected (access gate): account={} from={}",
+                        self.account_id, (open_id or "-")[:14])
+            return
+        ack = menu_cards.menu_ack(cmd)
+        chat_id = _P2P_CHATS.get((self.account_id, open_id))
+        if chat_id:
+            await self._transport.send_text(chat_id, ack)
+        else:
+            chat_id = await self._transport.send_text_to_user(open_id, ack)
+            if not chat_id:
+                logger.warning("feishu bot menu: p2p chat unresolved account={} cmd={} from={}",
+                               self.account_id, cmd, (open_id or "-")[:14])
+                return
+            _remember_p2p_chat(self.account_id, open_id, chat_id)
+        logger.info("feishu bot menu: account={} key={} cmd={} chat={}",
+                    self.account_id, event_key, cmd, chat_id)
+        await self.handle_menu(cmd, chat_id, "p2p", open_id, union_id, ack=False)
+
+    async def _send_menu_card(self, msg, card: dict, fallback_text: str) -> None:
+        """引导卡片是终态卡（不流式、不 patch）：发失败就退回纯文本，绝不静默。"""
+        if not await self._send_card(msg.chat_id, card):
+            await self._transport.send_text(msg.chat_id, fallback_text)
 
     # --- session-list display metadata ------------------------------------
     async def _stamp_display(self, msg) -> None:
@@ -259,7 +404,16 @@ class AppWorker:
             ok = False
         logger.info("feishu link bind: account={} ok={} union={}",
                     self.account_id, bool(ok), msg.sender_union_id[:14])
-        await self._transport.send_text(msg.chat_id, _LINK_OK if ok else _LINK_FAIL)
+        if not ok:
+            await self._transport.send_text(msg.chat_id, _LINK_FAIL)
+            return
+        # 绑定成功 → 欢迎卡（§9.1）：飞书没有指令注册 API，这张卡是新 owner 唯一能
+        # 看到指令说明的地方，且留在聊天记录里当常驻菜单。
+        await self._send_menu_card(msg, menu_cards.welcome_card(
+            open_id=msg.sender_open_id, chat_type=(msg.chat_type or "p2p"),
+            union_id=msg.sender_union_id, max_images=_MAX_IMAGES,
+            max_image_bytes=_MAX_IMAGE_BYTES,
+        ), menu_cards.welcome_text())
 
     # --- inbound images ---------------------------------------------------
     async def _fetch_images(self, msg) -> tuple[list[dict] | None, str]:
@@ -314,10 +468,14 @@ class AppWorker:
         except Exception:
             logger.exception("feishu card patch failed account={}", self.account_id)
 
-    async def _animate(self, message_id: str, state: StreamState) -> None:
+    async def _animate(self, message_id: str, state: StreamState, render=None) -> None:
         """Patch the running card on a fixed cadence: streams the live-folded `state` and
         cycles the Thinking dots 1→2→3. Runs until cancelled at run end. Patch failures are
-        swallowed by _patch_card, so a hiccup never kills the ticker."""
+        swallowed by _patch_card, so a hiccup never kills the ticker. ``render(state, dots)``
+        lets a command swap in its own progress card (`/compact` → 正在压缩会话…)."""
+        if render is None:
+            def render(state_, dots_):
+                return render_card(state_, final=False, dots=dots_)
         dots = 1
         while True:
             await asyncio.sleep(_TICK_INTERVAL)
@@ -326,7 +484,7 @@ class AppWorker:
                 # a patch would wipe it. Pause here — the run is blocked server-side anyway, so
                 # there's no fresh content to stream — until dial clears pending on resume.
                 continue
-            await self._patch_card(message_id, render_card(state, final=False, dots=dots))
+            await self._patch_card(message_id, render(state, dots))
             dots = dots % 3 + 1
 
     # --- interactive permission / AskUserQuestion cards -------------------
