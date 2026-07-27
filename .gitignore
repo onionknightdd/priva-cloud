@@ -41,7 +41,7 @@ services/control-panel/src/priva_control_panel/_web/
 
 # ---- Runtime data ----
 # Agent gateway runtime queues, locks and auth token (machine-local, may hold secrets)
-.priva-agent-gateway/
+.remote-agentsandbox/
 
 # Application logs
 priva/logs/

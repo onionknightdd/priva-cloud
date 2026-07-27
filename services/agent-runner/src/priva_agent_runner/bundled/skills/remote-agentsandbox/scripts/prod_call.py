@@ -7,12 +7,12 @@
         [--verbose]
 
 网关地址没有内置默认值：首次调用时通过 AGENT_SANDBOX_GATEWAY_URL 提供网关域名，
-脚本会把规范化后的地址写入 ./.priva-agent-gateway/session.json 的 gateway_url
+脚本会把规范化后的地址写入 ./.remote-agentsandbox/session.json 的 gateway_url
 字段，之后的调用不必再带该环境变量。两者都缺失时以退出码 1 失败并给出指引。
 
 退出码:
     0 — 成功（result 事件的 data JSON 写到 stdout）
-    1 — 参数错误、网关地址未配置，或 ./.priva-agent-gateway/auth 文件缺失/为空
+    1 — 参数错误、网关地址未配置，或 ./.remote-agentsandbox/auth 文件缺失/为空
     2 — 网络错误（连接、超时、SSE 读取中断）
     3 — API 返回非 2xx，或流结束未收到 result，或 stream_error
     4 — 并发冲突：同一 session_id 已有进行中的调用（fail-fast）
@@ -37,7 +37,7 @@ GATEWAY_ENV_VAR = "AGENT_SANDBOX_GATEWAY_URL"
 API_PATH = "/api/sandbox/agent/run/stream"
 TIMEOUT_SECONDS = 300
 
-SKILL_NAME = "priva-agent-gateway"
+SKILL_NAME = "remote-agentsandbox"
 STATE_DIR = Path.cwd() / f".{SKILL_NAME}"
 AUTH_FILE = STATE_DIR / "auth"
 SESSION_FILE = STATE_DIR / "session.json"
@@ -232,7 +232,7 @@ def main() -> int:
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="把所有中间 SSE 事件写入 ./.priva-agent-gateway/<session_id>.jsonl",
+        help="把所有中间 SSE 事件写入 ./.remote-agentsandbox/<session_id>.jsonl",
     )
     args = parser.parse_args()
 
