@@ -1,4 +1,4 @@
-import { sandboxGet, sandboxRead, sandboxPut, sandboxDelete, getBackendOrigin } from '@shared/api/client'
+import { sandboxGet, sandboxRead, sandboxPut, sandboxDelete, getBackendOrigin, fetchWithWake } from '@shared/api/client'
 import { getToken } from '@shared/api/tokenStore'
 
 const BASE_URL = '/api/sandbox'
@@ -32,16 +32,23 @@ export const getSkillDetail = (scope, cwd, name) =>
 export const getSkillFile = (scope, cwd, name, path) =>
   sandboxRead(`/resource/skills/file?${skillQuery({ scope, cwd, name, path })}`)
 
+// cp-proxy: skill archives are multipart bodies far past the ~8KB EPP request cap —
+// the direct lane mangles them into a 422 "file field required".
 export const uploadSkill = async (scope, cwd, file) => {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('scope', scope)
   if (cwd != null) formData.append('cwd', cwd)
-  const res = await fetch(`${BASE_URL}/resource/skills/upload`, {
-    method: 'POST',
-    headers: { ...getAuthHeaders() },
-    body: formData,
-  })
+  const init = { method: 'POST', headers: { ...getAuthHeaders() }, body: formData }
+  let res
+  try {
+    res = await fetchWithWake('/api/cp-proxy/resource/skills/upload', init)
+    if (res.status === 404) {
+      res = await fetchWithWake(`${BASE_URL}/resource/skills/upload`, init)
+    }
+  } catch {
+    res = await fetchWithWake(`${BASE_URL}/resource/skills/upload`, init)
+  }
   if (res.status === 401) {
     window.dispatchEvent(new Event('auth:unauthorized'))
   }
@@ -55,10 +62,19 @@ export const uploadSkill = async (scope, cwd, file) => {
 export const deleteSkill = (scope, cwd, name) =>
   sandboxDelete(`/resource/skills/item?${skillQuery({ scope, cwd, name })}`)
 
+// cp-proxy: skill tar.gz archives run well past the ~8KB EPP response cap.
 export async function downloadSkill(scope, cwd, name) {
-  const res = await fetch(`${BASE_URL}/resource/skills/download?${skillQuery({ scope, cwd, name })}`, {
-    headers: { ...getAuthHeaders() },
-  })
+  const qs = skillQuery({ scope, cwd, name })
+  const init = { headers: { ...getAuthHeaders() } }
+  let res
+  try {
+    res = await fetchWithWake(`/api/cp-proxy/resource/skills/download?${qs}`, init)
+    if (res.status === 404) {
+      res = await fetchWithWake(`${BASE_URL}/resource/skills/download?${qs}`, init)
+    }
+  } catch {
+    res = await fetchWithWake(`${BASE_URL}/resource/skills/download?${qs}`, init)
+  }
   if (res.status === 401) {
     window.dispatchEvent(new Event('auth:unauthorized'))
   }

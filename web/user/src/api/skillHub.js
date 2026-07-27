@@ -1,4 +1,4 @@
-import { sandboxGet, sandboxRead, sandboxPost, sandboxDelete } from '@shared/api/client'
+import { sandboxGet, sandboxRead, sandboxPost, sandboxDelete, fetchWithWake } from '@shared/api/client'
 import { getToken } from '@shared/api/tokenStore'
 
 const BASE_URL = '/api/sandbox'
@@ -23,14 +23,21 @@ export const getHubSkillFile = (name, path) =>
 export const deliverHubSkill = (name) =>
   sandboxPost(`/resource/skill-hub/${encodeURIComponent(name)}/deliver`, {})
 
+// cp-proxy: bundled-skill archives are multipart bodies far past the ~8KB EPP
+// request cap — the direct lane mangles them into a 422 "file field required".
 export const uploadHubSkill = async (file) => {
   const formData = new FormData()
   formData.append('file', file)
-  const res = await fetch(`${BASE_URL}/resource/skill-hub/upload`, {
-    method: 'POST',
-    headers: { ...getAuthHeaders() },
-    body: formData,
-  })
+  const init = { method: 'POST', headers: { ...getAuthHeaders() }, body: formData }
+  let res
+  try {
+    res = await fetchWithWake('/api/cp-proxy/resource/skill-hub/upload', init)
+    if (res.status === 404) {
+      res = await fetchWithWake(`${BASE_URL}/resource/skill-hub/upload`, init)
+    }
+  } catch {
+    res = await fetchWithWake(`${BASE_URL}/resource/skill-hub/upload`, init)
+  }
   if (res.status === 401) {
     window.dispatchEvent(new Event('auth:unauthorized'))
   }

@@ -1,15 +1,22 @@
-import { getAuthHeaders, sandboxDelete, sandboxRead } from '@shared/api/client'
+import { getAuthHeaders, sandboxDelete, sandboxRead, fetchWithWake } from '@shared/api/client'
 
 const BASE_URL = '/api/sandbox'
 
+// cp-proxy: a multipart body past the ~8KB EPP cap gets mangled on the direct lane —
+// the runner then 422s with "file field required". Same lane as userFiles.uploadUserFile.
 export async function uploadFile(file) {
   const formData = new FormData()
   formData.append('file', file)
-  const res = await fetch(`${BASE_URL}/agent-attachments/upload`, {
-    method: 'POST',
-    headers: { ...getAuthHeaders() },
-    body: formData,
-  })
+  const init = { method: 'POST', headers: { ...getAuthHeaders() }, body: formData }
+  let res
+  try {
+    res = await fetchWithWake('/api/cp-proxy/agent-attachments/upload', init)
+    if (res.status === 404) {
+      res = await fetchWithWake(`${BASE_URL}/agent-attachments/upload`, init)
+    }
+  } catch {
+    res = await fetchWithWake(`${BASE_URL}/agent-attachments/upload`, init)
+  }
   if (res.status === 401) {
     window.dispatchEvent(new Event('auth:unauthorized'))
   }
@@ -30,10 +37,18 @@ export async function listUploadedFiles(date) {
   return sandboxRead(`/agent-attachments/${query}`)
 }
 
+// cp-proxy: attachment bodies run up to 3MB — far past the ~8KB EPP response cap.
 export async function downloadFile(uuid) {
-  const res = await fetch(`${BASE_URL}/agent-attachments/${encodeURIComponent(uuid)}`, {
-    headers: { ...getAuthHeaders() },
-  })
+  const init = { headers: { ...getAuthHeaders() } }
+  let res
+  try {
+    res = await fetchWithWake(`/api/cp-proxy/agent-attachments/${encodeURIComponent(uuid)}`, init)
+    if (res.status === 404) {
+      res = await fetchWithWake(`${BASE_URL}/agent-attachments/${encodeURIComponent(uuid)}`, init)
+    }
+  } catch {
+    res = await fetchWithWake(`${BASE_URL}/agent-attachments/${encodeURIComponent(uuid)}`, init)
+  }
   if (res.status === 401) {
     window.dispatchEvent(new Event('auth:unauthorized'))
   }
