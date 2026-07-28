@@ -31,3 +31,11 @@ class VisionModelResponse(BaseModel):
 
 class VisionModelUpdateRequest(BaseModel):
     vision_model: str | None = None
+
+
+class RecapSettingResponse(BaseModel):
+    recap_enabled: bool = True
+
+
+class RecapSettingUpdateRequest(BaseModel):
+    recap_enabled: bool

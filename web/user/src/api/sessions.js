@@ -26,6 +26,17 @@ export async function fetchRunningSessions() {
   return sandboxRead('/agent/sessions/running')
 }
 
+// One-line recap of what a session is about — { recap, turns }, both null/0
+// until the backend has generated one. `turns` is the message count the text
+// was derived from, so a poll can tell a fresh recap from a stale one.
+export async function fetchSessionRecap(sessionId) {
+  const res = await fetchWithWake(
+    `${BASE_URL}/agent/sessions/${encodeURIComponent(sessionId)}/recap`,
+    { headers: getAuthHeaders() }
+  )
+  return handleAPIResponse(res)
+}
+
 // Persist a session's additional directories (SDK --add-dir), saved server-side
 // so a resume on any device recovers them.
 export async function setSessionAddDirs(sessionId, addDirs) {

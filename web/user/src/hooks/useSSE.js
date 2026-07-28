@@ -36,6 +36,7 @@ import {
 } from '../utils/fileArtifacts'
 import { getSplitParams } from '../utils/splitMode'
 import { parseTaskNotification } from '../utils/taskNotification'
+import { refreshSessionRecap } from '../utils/sessionRecap'
 
 // Max characters of background-shell output kept in the task store; only the
 // tail is retained beyond this.
@@ -1680,6 +1681,10 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     }
     statusStore().setStatus(rt.key, terminalStatusFor(rt.key))
     useSidebarStore.getState().fetchSessions()
+    // The recap for this turn is generated after the stream closes, so this
+    // polls rather than reads once. Not awaited — nothing here depends on it.
+    const { sessionId: doneSid, recapTurns } = S.chat()
+    refreshSessionRecap(doneSid, S.chat, { knownTurns: recapTurns, poll: true })
   }
 
   // Connection banners belong to the session on screen; background sockets

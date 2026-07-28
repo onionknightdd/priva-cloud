@@ -87,6 +87,7 @@
   },
   "chat": {
     "placeholder": "Use / to select a skill\nUse @ to attach an uploaded file",
+    "recapDismiss": "Hide recap",
     "newChat": "New chat",
     "attach": "Attach",
     "stopEscape": "Stop (Escape)",
@@ -583,6 +584,8 @@
     "uploadSkill": "Upload a skill",
     "createTitle": "Create a skill",
     "createTarget": "Where should the skill live?",
+    "installTitle": "Install a skill",
+    "installTarget": "Where should the skill be installed?",
     "browse": "Browse…",
     "refresh": "Refresh",
     "createPrompt": "Help to create a skill in workdir: {{path}}"
@@ -1209,6 +1212,8 @@
     "transportWs": "WebSocket",
     "transportSse": "SSE (Legacy)",
     "transportNote": "WebSocket is recommended for multi-worker deployments. Use SSE if WebSocket is blocked by your network.",
+    "sessionRecap": "Session Recap",
+    "sessionRecapDesc": "After each turn, summarize the session in one line above the composer. Costs one extra model call per turn.",
     "developerMode": "Developer Mode",
     "developerModeDesc": "Enable developer tools and debug switches for this session.",
     "debugLogging": "Debug Logging",

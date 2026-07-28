@@ -20,6 +20,13 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
   // hydrated in loadSession from sessionTransform.
   subagentContent: {},
   sessionId: null,
+  // One-line server-generated recap of this session, shown above the composer.
+  // `recapTurns` is the message count it was derived from — used to tell a
+  // refreshed recap from the one already on screen. `recapDismissed` is the ×:
+  // it hides the current text only, and clears itself when a newer one lands.
+  recap: null,
+  recapTurns: 0,
+  recapDismissed: false,
   inputText: '',
   isStreaming: false,
   isCompacting: false,
@@ -174,6 +181,14 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
     }
   },
   setSessionId: (id) => set({ sessionId: id }),
+  setRecap: (text, turns) => set((s) => (
+    // A newer recap un-dismisses: × means "I've read this one", not "never
+    // show recaps for this session".
+    (turns || 0) > s.recapTurns
+      ? { recap: text || null, recapTurns: turns || 0, recapDismissed: false }
+      : {}
+  )),
+  dismissRecap: () => set({ recapDismissed: true }),
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setStreamAbort: (abort) => set({ streamAbort: abort }),
   setPendingAskUser: (data) => set({ pendingAskUser: data }),
@@ -425,6 +440,11 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
       messages,
       subagentContent: subagentContent || {},
       isStreaming: false,
+      // The incoming session's recap is fetched separately; clear the outgoing
+      // one so it can't flash under the new conversation.
+      recap: null,
+      recapTurns: 0,
+      recapDismissed: false,
       inputText: '',
       checkpoints: [],
       forkParentId: parentId,

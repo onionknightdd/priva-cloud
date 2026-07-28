@@ -18,10 +18,13 @@ from priva_common.models.resource import (
     QuickAction,
     QuickActionListResponse,
     QuickActionUpdateRequest,
+    RecapSettingResponse,
+    RecapSettingUpdateRequest,
     VisionModelResponse,
     VisionModelUpdateRequest,
 )
 from ..deps import require_user
+from ..services.claude_sdk import session_recap
 
 router = APIRouter(prefix="/api/sandbox/resource", tags=["user-config"])
 
@@ -71,3 +74,24 @@ async def update_vision_model(
         user.username, "vision_model", request.vision_model or None
     )
     return VisionModelResponse(vision_model=request.vision_model)
+
+
+# ── Session recap ────────────────────────────────────────────────────
+
+
+@router.get("/recap-setting", response_model=RecapSettingResponse)
+async def get_recap_setting(user: UserRecord = Depends(require_user)):
+    return RecapSettingResponse(recap_enabled=session_recap.is_enabled(user.username))
+
+
+@router.put("/recap-setting", response_model=RecapSettingResponse)
+async def update_recap_setting(
+    request: RecapSettingUpdateRequest,
+    user: UserRecord = Depends(require_user),
+):
+    # Stored explicitly either way: an absent key means "on", so turning the
+    # feature off has to write ``False`` rather than pop the key.
+    _user_yaml.save_user_yaml_key(
+        user.username, "recap_enabled", bool(request.recap_enabled)
+    )
+    return RecapSettingResponse(recap_enabled=request.recap_enabled)

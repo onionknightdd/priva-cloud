@@ -87,6 +87,7 @@
   },
   "chat": {
     "placeholder": "输入 / 选择技能\n输入 @ 附加已上传文件",
+    "recapDismiss": "隐藏摘要",
     "newChat": "新建对话",
     "attach": "附件",
     "stopEscape": "停止 (Escape)",
@@ -568,6 +569,8 @@
     "uploadSkill": "上传技能",
     "createTitle": "创建技能",
     "createTarget": "技能创建在哪里？",
+    "installTitle": "安装技能",
+    "installTarget": "技能安装到哪里？",
     "browse": "浏览…",
     "refresh": "刷新",
     "createPrompt": "请帮我在该工作目录下创建一个技能：{{path}}"
@@ -1193,6 +1196,8 @@
     "transportWs": "WebSocket",
     "transportSse": "SSE (传统)",
     "transportNote": "推荐使用 WebSocket，适用于多 Worker 部署。如果网络环境不支持 WebSocket，请切换至 SSE。",
+    "sessionRecap": "会话摘要",
+    "sessionRecapDesc": "每轮结束后用一句话概括这个会话,显示在输入框上方。每轮会额外消耗一次模型调用。",
     "developerMode": "开发者模式",
     "developerModeDesc": "为当前会话启用开发者工具与调试开关。",
     "debugLogging": "调试日志",

@@ -1,5 +1,6 @@
 import { fetchSessionMessages } from '../api/sessions'
 import { hasCanvasInspectorItems, transformSessionMessages } from '../utils/sessionTransform'
+import { refreshSessionRecap } from '../utils/sessionRecap'
 import {
   ensureRuntime,
   evictIfNeeded,
@@ -130,6 +131,9 @@ export async function openSession(sessionOrId, opts = {}) {
     taskSlice.getState().clearTasks()
     fileOpsSlice.getState().clearFileOps()
     chat.getState().loadSession(sessionId, messages, forkParentId, subagentContent, data.add_dirs || [])
+    // Whatever recap this session already has; not awaited, so it fades in
+    // after the transcript rather than holding the switch.
+    refreshSessionRecap(sessionId, chat.getState)
     for (const op of fileOps) fileOpsSlice.getState().addFileOp(op)
     fileBrowserSlice.getState().setTabs(fileBrowserTabs)
     for (const task of tasks) taskSlice.getState().addTask(task)

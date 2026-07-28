@@ -10,6 +10,8 @@ import {
   updateQuickActions as updateQuickActionsAPI,
   getVisionModel as getVisionModelAPI,
   updateVisionModel as updateVisionModelAPI,
+  getRecapSetting as getRecapSettingAPI,
+  updateRecapSetting as updateRecapSettingAPI,
 } from '../api/settings'
 import { getMyApiKey, generateMyApiKey, revokeMyApiKey } from '@shared/api/auth'
 import { getPresetPrompt, updatePresetPrompt } from '@shared/api/admin'
@@ -30,6 +32,10 @@ const useSettingsStore = create((set, get) => ({
   presetPrompt: null,
   presetPromptLoading: false,
   visionModel: null,
+  // Server-side, not localStorage: this gates a per-turn model call the backend
+  // makes, so the pod is the one that has to know. Optimistic default matches
+  // the backend's "absent means on".
+  recapEnabled: true,
   transport: safeStorage.getItem('priva-transport') || 'ws',
   // Developer Mode is the master gate; Debug Logging is one switch under it.
   // Persisted so the plain-JS API layer (debugLog) can read the flags directly.
@@ -106,6 +112,30 @@ const useSettingsStore = create((set, get) => ({
   saveVisionModel: async (model) => {
     await updateVisionModelAPI(model || null)
     set({ visionModel: model || null })
+  },
+
+  fetchRecapEnabled: async () => {
+    try {
+      const data = await getRecapSettingAPI()
+      set({ recapEnabled: data.recap_enabled !== false })
+      return data.recap_enabled !== false
+    } catch {
+      return get().recapEnabled
+    }
+  },
+
+  saveRecapEnabled: async (enabled) => {
+    const next = !!enabled
+    const prev = get().recapEnabled
+    set({ recapEnabled: next })
+    try {
+      await updateRecapSettingAPI(next)
+    } catch (e) {
+      // The toggle drives backend behaviour, so a failed write must not leave
+      // the UI claiming a state the pod never got.
+      set({ recapEnabled: prev })
+      throw e
+    }
   },
 
   setTransport: (t) => {
@@ -195,6 +225,7 @@ const useSettingsStore = create((set, get) => ({
     presetPrompt: null,
     presetPromptLoading: false,
     visionModel: null,
+    recapEnabled: true,
     transport: safeStorage.getItem('priva-transport') || 'ws',
     developerMode: safeStorage.getItem(DEVELOPER_MODE_KEY) === '1',
     debugMode: safeStorage.getItem(DEBUG_LOGGING_KEY) === '1',

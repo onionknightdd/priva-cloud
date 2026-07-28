@@ -1,6 +1,6 @@
-"""Pin / archive metadata for sessions and workdirs (server-side, durable).
+"""Pin / archive / recap metadata for sessions and workdirs (server-side, durable).
 
-Pin and archive are organizing flags the SDK has no concept of, so we keep them
+Pin, archive and recap are things the SDK has no concept of, so we keep them
 ourselves in a single **account-level** index next to the SDK's data:
 
     ~/.claude/priva_meta.json
@@ -12,12 +12,20 @@ ourselves in a single **account-level** index next to the SDK's data:
       ],
       "scheduler_sessions": {
         "<session_id>": {"job_id": str, "job_name": str, "run_id": str}
-      }
+      },
+      "recaps":   { "<session_id>": {"text": str, "turns": int} }
     }
 
 ``scheduler_sessions`` marks sessions a scheduled job opened (design D3): the
 sessions list surfaces them as ``origin='scheduler'`` (sidebar ⏰) and the D15
 boot prune uses the index to delete only scheduler-origin transcripts.
+
+``recaps`` is deliberately a **top-level** key rather than a field on the
+``sessions`` entry: ``set_session_flags`` drops an entry outright once neither
+flag is set, so a recap parked in there would be deleted the moment a user
+un-pinned the session. The recap *toggle* is not here at all — it is user
+config, so it lives in ``.priva.user.yml`` beside ``vision_model``; this file
+stays a pure per-session index.
 
 One file (not per-session sidecars like ``session_add_dirs``) because the runner
 pod is per-account / single-writer: the sessions list reads the whole index once
@@ -48,6 +56,8 @@ logger = get_app_logger(__name__)
 
 _META_FILENAME = "priva_meta.json"
 _RECENT_ACTIVITIES_LIMIT = 5
+# A recap is one sentence; anything longer is a model that ignored the prompt.
+_RECAP_MAX_CHARS = 120
 
 # Guards read-modify-write of the index. The pod is single-writer, but turns and
 # list requests are concurrent coroutines, so serialize mutations.
@@ -59,7 +69,13 @@ def _index_path() -> Path:
 
 
 def _empty() -> dict:
-    return {"sessions": {}, "workdirs": {}, "recent_activities": [], "scheduler_sessions": {}}
+    return {
+        "sessions": {},
+        "workdirs": {},
+        "recent_activities": [],
+        "scheduler_sessions": {},
+        "recaps": {},
+    }
 
 
 def _normalize_recent_activities(raw: object) -> list[dict]:
@@ -96,18 +112,20 @@ def _read_raw() -> dict:
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
-        logger.warning("Malformed metadata index at %s", path)
+        logger.warning("Malformed metadata index at {}", path)
         return _empty()
     if not isinstance(data, dict):
         return _empty()
     sessions = data.get("sessions")
     workdirs = data.get("workdirs")
     scheduler_sessions = data.get("scheduler_sessions")
+    recaps = data.get("recaps")
     return {
         "sessions": sessions if isinstance(sessions, dict) else {},
         "workdirs": workdirs if isinstance(workdirs, dict) else {},
         "recent_activities": _normalize_recent_activities(data.get("recent_activities")),
         "scheduler_sessions": scheduler_sessions if isinstance(scheduler_sessions, dict) else {},
+        "recaps": recaps if isinstance(recaps, dict) else {},
     }
 
 
@@ -163,6 +181,23 @@ def list_scheduler_sessions(meta: dict | None = None) -> dict[str, dict]:
     data = meta if meta is not None else _read_raw()
     out = data.get("scheduler_sessions", {})
     return {k: v for k, v in out.items() if isinstance(v, dict)}
+
+
+def get_recap(session_id: str, meta: dict | None = None) -> dict | None:
+    """``{"text": str, "turns": int}`` for a session, or None if never recapped.
+
+    ``turns`` is the transcript message count the text was derived from — the
+    client uses it to tell a refreshed recap from the one it already has.
+    """
+    data = meta if meta is not None else _read_raw()
+    entry = data.get("recaps", {}).get(session_id)
+    if not isinstance(entry, dict):
+        return None
+    text = entry.get("text")
+    if not isinstance(text, str) or not text:
+        return None
+    turns = entry.get("turns")
+    return {"text": text, "turns": turns if isinstance(turns, int) else 0}
 
 
 # --- Writes (serialized read-modify-write) ------------------------------------
@@ -237,6 +272,17 @@ async def set_scheduler_session(
         _write_raw(data)
 
 
+async def set_recap(session_id: str, text: str, turns: int) -> None:
+    """Store a session's one-line recap, replacing any previous one."""
+    text = " ".join(text.split())[:_RECAP_MAX_CHARS].strip()
+    if not session_id or not text:
+        return
+    async with _lock:
+        data = _read_raw()
+        data["recaps"][session_id] = {"text": text, "turns": int(turns)}
+        _write_raw(data)
+
+
 async def archive_workdir(session_ids: list[str]) -> None:
     """Cascade: mark every given session archived in one write."""
     async with _lock:
@@ -256,6 +302,7 @@ async def prune_session(session_id: str) -> None:
         data = _read_raw()
         changed = data["sessions"].pop(session_id, None) is not None
         changed = (data["scheduler_sessions"].pop(session_id, None) is not None) or changed
+        changed = (data["recaps"].pop(session_id, None) is not None) or changed
         recent_activities = [
             item for item in get_recent_activities(data)
             if item.get("session_id") != session_id

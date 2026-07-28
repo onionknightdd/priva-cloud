@@ -1431,6 +1431,12 @@ function AdvancedTab() {
   const setDeveloperMode = useSettingsStore((s) => s.setDeveloperMode)
   const debugMode = useSettingsStore((s) => s.debugMode)
   const setDebugMode = useSettingsStore((s) => s.setDebugMode)
+  const recapEnabled = useSettingsStore((s) => s.recapEnabled)
+  const saveRecapEnabled = useSettingsStore((s) => s.saveRecapEnabled)
+  const fetchRecapEnabled = useSettingsStore((s) => s.fetchRecapEnabled)
+
+  // Unlike the localStorage switches above, this one's truth lives on the pod.
+  useEffect(() => { fetchRecapEnabled() }, [fetchRecapEnabled])
 
   const options = [
     { value: 'ws', label: t('settings.transportWs') },
@@ -1470,6 +1476,17 @@ function AdvancedTab() {
           {t('settings.transportNote')}
         </p>
       </div>
+
+      {/* Divider */}
+      <div style={{ borderBottom: '1px solid var(--border)' }} />
+
+      {/* Session recap — server-side, so a failed write reverts the switch */}
+      <SettingRow
+        label={t('settings.sessionRecap')}
+        desc={t('settings.sessionRecapDesc')}
+        checked={recapEnabled}
+        onChange={(next) => { saveRecapEnabled(next).catch(() => {}) }}
+      />
 
       {/* Divider */}
       <div style={{ borderBottom: '1px solid var(--border)' }} />

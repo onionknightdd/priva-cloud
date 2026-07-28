@@ -34,3 +34,11 @@ export function getVisionModel() {
 export function updateVisionModel(visionModel) {
   return sandboxPut('/resource/vision-model', { vision_model: visionModel })
 }
+
+export function getRecapSetting() {
+  return sandboxGet('/resource/recap-setting')
+}
+
+export function updateRecapSetting(enabled) {
+  return sandboxPut('/resource/recap-setting', { recap_enabled: enabled })
+}

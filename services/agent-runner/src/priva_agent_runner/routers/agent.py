@@ -754,6 +754,26 @@ async def get_agent_session_messages(
     )
 
 
+@router.get("/sessions/{session_id}/recap")
+async def get_agent_session_recap(
+    session_id: str,
+    user: UserRecord | None = Depends(get_current_user),
+):
+    """The session's one-line recap, if one has been generated.
+
+    ``turns`` is the message count the text was derived from, so a client that
+    polls after a turn can tell a refreshed recap from the one it already has.
+    Returns nulls rather than 404 when there is none — "not summarized yet" is
+    an ordinary state, not an error.
+    """
+    del user  # auth only
+    recap = session_meta.get_recap(session_id)
+    return {
+        "recap": recap["text"] if recap else None,
+        "turns": recap["turns"] if recap else 0,
+    }
+
+
 @router.delete("/sessions/{session_id}")
 async def delete_agent_session(session_id: str, user: UserRecord | None = Depends(get_current_user)):
     """Delete a session's transcript (any cwd in this account)."""

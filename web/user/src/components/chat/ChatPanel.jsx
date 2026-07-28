@@ -17,6 +17,7 @@ import { UsageStatsOverviewTitle } from './UsageStatsOverview'
 import RecentActivities from './RecentActivities'
 import QuickActionChips from './QuickActionChips'
 import RewindBanner from './RewindBanner'
+import SessionRecap from './SessionRecap'
 import { getSplitParams, isSplitPane } from '../../utils/splitMode'
 import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 
@@ -511,6 +512,7 @@ export default function ChatPanel() {
           <MessageList />
         </Suspense>
       </MessageListBoundary>
+      <SessionRecap />
       <ChatInput cwd={activeCwd} cwdPlacement="below" />
     </div>
   )

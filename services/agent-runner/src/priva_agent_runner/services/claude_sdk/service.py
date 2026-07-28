@@ -21,7 +21,7 @@ from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 from priva_common.models.agent import PermissionMode
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from ...services.skills import _get_skills_dir
-from . import retry, session_meta, session_title
+from . import retry, session_meta, session_recap, session_title
 from .options import build_agent_options
 from priva_common.logging import get_app_logger
 from .permission_coordinator import PermissionCoordinator, registry
@@ -687,6 +687,9 @@ async def agent_run(
         }
     else:
         _audit_run_completed(username, new_sid or session_id, result_data.get("usage"), last_model)
+        # Unlike the title, this needs no settle: it never touches the CLI, so
+        # nothing it depends on dies when this function returns.
+        session_recap.spawn(new_sid or current_resume_id or session_id, username, options.cwd)
 
     response = {"messages": messages, **result_data, "attempts": final_attempts}
     if last_error:
@@ -1177,6 +1180,12 @@ async def agent_run_events(
 
             try:
                 await _run_one_attempt()
+                # Success only: a retried-away attempt would recap a transcript
+                # that is about to be rewritten. Fire-and-forget, so the caller
+                # sees no added latency after the last event.
+                session_recap.spawn(
+                    current_resume_id or stream_id or session_id, username, options.cwd
+                )
                 return
             except retry.RetryableSyntheticError as e:
                 last_error = e.payload
