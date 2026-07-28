@@ -1,6 +1,6 @@
 ---
 name: remote-agentsandbox
-description: "云端 agent sandbox 的 programmatic 调用：通过网关的 SSE 流式接口把任务交给远端 Priva agent 执行，并展示返回结果。当用户希望把工作委派给远端/托管的 Priva agent sandbox、而不是在本地执行时，使用本技能。网关域名在首次调用时由 AGENT_SANDBOX_GATEWAY_URL 环境变量提供，之后自动持久化复用。一旦建立了远端会话，同一上下文中的后续追问应继续使用本技能；多轮远端会话由本技能自动管理。"
+description: "云端 agent sandbox 的 programmatic 调用：通过网关的 SSE 流式接口把任务交给远端 agent 沙箱执行，并展示返回结果。当用户希望把工作委派给远端/托管的 agent sandbox、而不是在本地执行时，使用本技能。网关域名在首次调用时由 AGENT_SANDBOX_GATEWAY_URL 环境变量提供，之后自动持久化复用。一旦建立了远端会话，同一上下文中的后续追问应继续使用本技能；多轮远端会话由本技能自动管理。"
 metadata:
   icon: Server
   icon_color: "#79c0ff"
@@ -188,7 +188,7 @@ python3 <skill-path>/scripts/run_agentsandbox.py \
 - 解析网关地址（环境变量 → `session.json` 的 `gateway_url`）
 - 解析是否跳过 TLS 校验（`--insecure` → 环境变量 → `session.json` 的 `insecure`）
 - 从 `~/.agentsandbox-gateway/auth` 读取 Bearer token
-- 构建 priva `AgentRunRequest` 形态的 JSON body：
+- 构建 `AgentRunRequest` 形态的 JSON body：
   - 始终包含 `message`（即 prompt）
   - 传入了 `--session-id` 时才包含 `session_id` 字段（否则字段省略 = 新会话）
 - 用 `Authorization: Bearer <token>` 调用 SSE 网关
