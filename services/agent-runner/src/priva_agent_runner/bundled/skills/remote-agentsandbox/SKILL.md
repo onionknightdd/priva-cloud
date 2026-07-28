@@ -60,6 +60,25 @@ printf '%s' "$TOKEN" > ./.agentsandbox-gateway/auth
 脚本启动时自动读取该文件并放入 `Authorization: Bearer ...` 请求头，
 token 明文永远不会出现在 stdout/stderr 里。
 
+### ③ TLS 证书（仅当网关使用自签名 / 内部 CA 证书）
+
+默认会正常校验网关的 TLS 证书。私有集群常用自签名或内部 CA 签发的证书，
+此时调用会以**退出码 2** 失败——脚本会明确指出这是证书验证失败（而不是笼统的网络错误），
+并给出修复命令。
+
+确认该网关可信之后，加 `--insecure` 跳过验证：
+
+```bash
+python3 <skill-path>/scripts/run_agentsandbox.py --insecure --prompt "任务描述"
+```
+
+等价的环境变量是 `AGENT_SANDBOX_GATEWAY_INSECURE=1`。这个选择会持久化到
+`session.json` 的 `insecure` 字段，之后的调用不必再加 `--insecure`；
+需要恢复校验时置 `AGENT_SANDBOX_GATEWAY_INSECURE=0`。
+
+**跳过验证时每次调用都会在 stderr 打印警告**——持久化的选择不会让它变得静默。
+不要在用户没有确认网关可信之前主动加这个开关（见"安全说明"）。
+
 > 由于配置位于工作目录而非技能安装目录，通过 Skill Hub 重新安装本技能不会影响它们。
 > 但切换到新的工作目录时需要重新配置。
 
@@ -165,11 +184,12 @@ token 明文永远不会出现在 stdout/stderr 里。
 python3 <skill-path>/scripts/run_agentsandbox.py \
   --prompt "任务描述" \
   [--session-id "之前的session_id"] \
-  [--verbose]
+  [--verbose] [--insecure]
 ```
 
 脚本会：
 - 解析网关地址（环境变量 → `session.json` 的 `gateway_url`）
+- 解析是否跳过 TLS 校验（`--insecure` → 环境变量 → `session.json` 的 `insecure`）
 - 从 `./.agentsandbox-gateway/auth` 读取 Bearer token
 - 构建 priva `AgentRunRequest` 形态的 JSON body：
   - 始终包含 `message`（即 prompt）
@@ -278,8 +298,11 @@ EOF
 - **网关地址未配置**：脚本以退出码 1 失败，stderr 打印配置指引。按"首次使用配置 ①"
   向用户索取网关域名，带 `AGENT_SANDBOX_GATEWAY_URL` 重跑一次即可（自动持久化）。
 - **`auth` 文件缺失或为空**：退出码 1。按"首次使用配置 ②"写入 token 再重试。
+- **TLS 证书验证失败**：退出码 2，stderr 会明确指出是证书问题并附上修复命令。
+  常见于网关使用自签名 / 内部 CA 证书。**先与用户确认该网关可信**，
+  确认后按"首次使用配置 ③"加 `--insecure` 重跑（选择会持久化）。
 - **网络错误 / SSE 读取中断**：退出码 2。告知用户网关无法访问；
-  地址填错（域名不存在、TLS 握手失败）也会落到这里——先核对 `gateway_url`。
+  地址填错（域名不存在、端口不通）也会落到这里——先核对 `gateway_url`。
 - **API 返回非 2xx**：退出码 3。展示 HTTP 状态码和响应体（stderr 内容）。
   `401` 通常意味着 `auth` 里的 token 失效或不属于该网关。
 - **SSE 流结束但未收到 `result` 事件**：退出码 3。可能远端异常。
@@ -302,6 +325,10 @@ EOF
 - Bearer token 是敏感凭据：**不要**在响应中回显其内容、**不要**提交到
   代码仓库、**不要**写入日志。脚本只把它放在 `Authorization` 请求头里发往
   网关，不会打印到 stdout/stderr。
+- `--insecure` 会关闭 TLS 证书验证，此时**无法分辨真实网关与冒充者**，
+  而每次请求都携带上面那个 Bearer token。因此：只在用户明确确认网关可信后才使用，
+  **不要**为了"让它先跑通"而主动加上；也不要在公网网关上使用。
+  更稳妥的做法是让用户把内部 CA 证书装进系统信任库，那样无需本开关。
 - 远端 sandbox 里的 agent 拥有真实的工具权限，其操作会作用于该 sandbox 的
   工作区与它可访问的资源。执行破坏性操作（删除、覆盖、对外发送）前，
   必须先向用户确认："即将在远端 sandbox 执行[操作]，是否继续？"，

@@ -4,11 +4,15 @@
 用法:
     AGENT_SANDBOX_GATEWAY_URL=<网关域名> python3 run_agentsandbox.py --prompt "任务描述" \
         [--session-id "上一轮的session_id"] \
-        [--verbose]
+        [--verbose] [--insecure]
 
 网关地址没有内置默认值：首次调用时通过 AGENT_SANDBOX_GATEWAY_URL 提供网关域名，
 脚本会把规范化后的地址写入 ./.agentsandbox-gateway/session.json 的 gateway_url
 字段，之后的调用不必再带该环境变量。两者都缺失时以退出码 1 失败并给出指引。
+
+网关使用自签名或内部 CA 证书时，默认的 TLS 验证会让调用以退出码 2 失败（脚本会
+指出这是证书问题并给出修复命令）。加 --insecure（或置 AGENT_SANDBOX_GATEWAY_INSECURE=1）
+跳过验证，该选择同样持久化进 session.json；跳过时每次调用都会在 stderr 打印警告。
 
 退出码:
     0 — 成功（result 事件的 data JSON 写到 stdout）
@@ -24,6 +28,7 @@ import datetime
 import fcntl
 import json
 import os
+import ssl
 import sys
 import time
 import urllib.error
@@ -32,6 +37,7 @@ from pathlib import Path
 from typing import IO
 
 GATEWAY_ENV_VAR = "AGENT_SANDBOX_GATEWAY_URL"
+INSECURE_ENV_VAR = "AGENT_SANDBOX_GATEWAY_INSECURE"
 # The runtime's streaming contract lives at a fixed path under the gateway; the
 # operator only ever supplies the gateway domain.
 #
@@ -97,19 +103,19 @@ def _normalize_gateway_url(raw: str) -> str:
     return url + API_PATH
 
 
-def _persist_gateway_url(url: str) -> None:
-    """Merge ``gateway_url`` into session.json, preserving every other key."""
+def _persist_state(**updates) -> None:
+    """Merge keys into session.json, preserving every other key."""
     state = _read_session_state()
-    if state.get("gateway_url") == url:
+    if all(state.get(k) == v for k, v in updates.items()):
         return
-    state["gateway_url"] = url
+    state.update(updates)
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         SESSION_FILE.write_text(
             json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
     except OSError as e:
-        sys.stderr.write(f"警告：无法把 gateway_url 写入 {SESSION_FILE} — {e}\n")
+        sys.stderr.write(f"警告：无法写入 {SESSION_FILE} — {e}\n")
 
 
 def resolve_api_url() -> str:
@@ -130,9 +136,40 @@ def resolve_api_url() -> str:
         )
         sys.exit(1)
     # Unconditional: this also rewrites a stored URL whose endpoint has been
-    # superseded. _persist_gateway_url no-ops when nothing changed.
-    _persist_gateway_url(url)
+    # superseded. _persist_state no-ops when nothing changed.
+    _persist_state(gateway_url=url)
     return url
+
+
+def resolve_insecure(flag: bool) -> bool:
+    """Whether to skip TLS verification: --insecure, env var, then persisted.
+
+    A private cluster commonly fronts the gateway with a self-signed or
+    internal-CA certificate, and the default verify turns that into an opaque
+    "network error". Skipping is opt-in and never inferred — an unverified
+    connection cannot tell the real gateway from something impersonating it,
+    and this request carries a bearer token.
+    """
+    from_env = os.environ.get(INSECURE_ENV_VAR, "").strip().lower()
+    if flag or from_env in ("1", "true", "yes", "on"):
+        _persist_state(insecure=True)
+        return True
+    if from_env in ("0", "false", "no", "off"):
+        _persist_state(insecure=False)
+        return False
+    return bool(_read_session_state().get("insecure"))
+
+
+def build_ssl_context(url: str, insecure: bool):
+    """None for ordinary verified TLS; a verification-disabled context otherwise."""
+    if not insecure or not url.lower().startswith("https://"):
+        return None
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False  # must precede CERT_NONE, else ValueError
+    ctx.verify_mode = ssl.CERT_NONE
+    # Loud every time: persisted state must never make this silent.
+    sys.stderr.write("警告：已按要求跳过 TLS 证书验证，连接不防中间人攻击。\n")
+    return ctx
 
 
 class _StreamTimeout(Exception):
@@ -249,9 +286,15 @@ def main() -> int:
         action="store_true",
         help="把所有中间 SSE 事件写入 ./.agentsandbox-gateway/<session_id>.jsonl",
     )
+    parser.add_argument(
+        "--insecure",
+        action="store_true",
+        help="跳过网关 TLS 证书验证（自签名/内部 CA 证书时使用），并持久化该选择",
+    )
     args = parser.parse_args()
 
     api_url = resolve_api_url()
+    ssl_context = build_ssl_context(api_url, resolve_insecure(args.insecure))
     token = load_bearer_token()
 
     # Fail-fast concurrency guard: only continuation calls (with an
@@ -278,13 +321,22 @@ def main() -> int:
     )
 
     try:
-        resp = urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS)
+        resp = urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS, context=ssl_context)
     except urllib.error.HTTPError as e:
         sys.stderr.write(f"错误：API 返回 HTTP {e.code}\n")
         sys.stderr.write(e.read().decode("utf-8", errors="replace"))
         return 3
     except urllib.error.URLError as e:
         sys.stderr.write(f"错误：网络异常 — {e.reason}\n")
+        # A self-signed / internal-CA gateway lands here as an opaque failure;
+        # name the actual cause and the one-line fix instead.
+        if isinstance(e.reason, ssl.SSLCertVerificationError):
+            sys.stderr.write(
+                "该错误是网关的 TLS 证书未通过验证（自签名或内部 CA 签发）。\n"
+                "先与用户确认该网关可信，确认后加 --insecure 重跑一次即可跳过验证"
+                f"（选择会持久化到 {SESSION_FILE}，无需每次都加）：\n"
+                '  python3 <skill-path>/scripts/run_agentsandbox.py --insecure --prompt "..."\n'
+            )
         return 2
     except (TimeoutError, OSError) as e:
         sys.stderr.write(f"错误：连接异常 — {type(e).__name__}: {e}\n")
