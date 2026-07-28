@@ -7,7 +7,7 @@
         [--verbose] [--insecure]
 
 网关地址没有内置默认值：首次调用时通过 AGENT_SANDBOX_GATEWAY_URL 提供网关域名，
-脚本会把规范化后的地址写入 ./.agentsandbox-gateway/session.json 的 gateway_url
+脚本会把规范化后的地址写入 ~/.agentsandbox-gateway/session.json 的 gateway_url
 字段，之后的调用不必再带该环境变量。两者都缺失时以退出码 1 失败并给出指引。
 
 网关使用自签名或内部 CA 证书时，默认的 TLS 验证会让调用以退出码 2 失败（脚本会
@@ -16,7 +16,7 @@
 
 退出码:
     0 — 成功（result 事件的 data JSON 写到 stdout）
-    1 — 参数错误、网关地址未配置，或 ./.agentsandbox-gateway/auth 文件缺失/为空
+    1 — 参数错误、网关地址未配置，或 ~/.agentsandbox-gateway/auth 文件缺失/为空
     2 — 网络错误（连接、超时、SSE 读取中断）
     3 — API 返回非 2xx，或流结束未收到 result，或 stream_error
     4 — 并发冲突：同一 session_id 已有进行中的调用（fail-fast）
@@ -52,10 +52,11 @@ API_PATH = "/api/cp-proxy/agent/run/stream"
 _KNOWN_API_PATHS = (API_PATH, "/api/sandbox/agent/run/stream")
 TIMEOUT_SECONDS = 300
 
-# Per-workdir state (token, persisted gateway_url, session + verbose logs).
-# Deliberately not derived from the skill name — renaming the skill must not
-# orphan a working directory's token and session state.
-STATE_DIR = Path.cwd() / ".agentsandbox-gateway"
+# Per-user state (token, persisted gateway_url, session + verbose logs) under the
+# home directory — shared across every working directory. Deliberately not derived
+# from the skill name — renaming the skill must not orphan the user's token and
+# session state.
+STATE_DIR = Path.home() / ".agentsandbox-gateway"
 AUTH_FILE = STATE_DIR / "auth"
 SESSION_FILE = STATE_DIR / "session.json"
 
@@ -123,7 +124,7 @@ def resolve_api_url() -> str:
 
     There is deliberately no built-in default — a wrong one silently points the
     call at the wrong cluster. Supplying the env var once persists it, so later
-    calls in the same working directory need no environment at all.
+    calls need no environment at all.
     """
     from_env = os.environ.get(GATEWAY_ENV_VAR, "").strip()
     url = _normalize_gateway_url(from_env or _read_session_state().get("gateway_url") or "")
@@ -284,7 +285,7 @@ def main() -> int:
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="把所有中间 SSE 事件写入 ./.agentsandbox-gateway/<session_id>.jsonl",
+        help="把所有中间 SSE 事件写入 ~/.agentsandbox-gateway/<session_id>.jsonl",
     )
     parser.add_argument(
         "--insecure",
