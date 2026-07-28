@@ -21,7 +21,7 @@ from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 from priva_common.models.agent import PermissionMode
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from ...services.skills import _get_skills_dir
-from . import retry, session_meta
+from . import retry, session_meta, session_title
 from .options import build_agent_options
 from priva_common.logging import get_app_logger
 from .permission_coordinator import PermissionCoordinator, registry
@@ -570,14 +570,21 @@ async def agent_run(
         if healed:
             logger.info("[RESUME-GUARD] healed %d orphan tool_use(s) in %s", healed, session_id)
 
+    # Only a brand-new session needs naming, and only once: a retry reuses the
+    # session the first attempt created, and a resumed turn already has whatever
+    # title that session ended up with.
+    title_pending = session_id is None
+
     async def _run_one_attempt() -> None:
-        nonlocal last_model, current_resume_id
+        nonlocal last_model, current_resume_id, title_pending
         async with ClaudeSDKClient(options=options) as client:
             _audit_skill_prompt(prompt, username, session_id)
             if isinstance(effective_prompt, list):
                 await client.query(_make_image_prompt(effective_prompt))
             else:
                 await client.query(effective_prompt)
+            title_task = session_title.spawn(client, prompt) if title_pending else None
+            title_pending = False
             async for message in client.receive_response():
                 if isinstance(message, SystemMessage) and message.subtype == "init":
                     sid = (message.data or {}).get("session_id")
@@ -605,6 +612,12 @@ async def agent_run(
                     new_sid = result_data.get("session_id")
                     if isinstance(new_sid, str) and new_sid:
                         current_resume_id = new_sid
+
+            # Deliberately not in a finally: on the retry path we want to bail
+            # immediately, not spend the settle budget waiting on a title whose
+            # transport is already closing. An abandoned request times out on
+            # its own and is swallowed inside session_title.
+            await session_title.settle(title_task)
 
             # Grace period for CLI subprocess to flush session JSONL writes
             await asyncio.sleep(1)
@@ -882,6 +895,9 @@ async def agent_run_events(
         if healed:
             logger.info("[RESUME-GUARD] healed %d orphan tool_use(s) in %s", healed, session_id)
 
+    # See the matching guard in agent_run: name a brand-new session once.
+    title_pending = session_id is None
+
     async def _run_one_attempt() -> None:
         """Open SDK, query, pump until end-of-turn.
 
@@ -890,7 +906,7 @@ async def agent_run_events(
         on a clean turn (or on a fatal pump exception, which is surfaced
         via a ``stream_error`` emit and not retried).
         """
-        nonlocal stream_id, current_resume_id
+        nonlocal stream_id, current_resume_id, title_pending
         retry_signal: dict | None = None
 
         async with ClaudeSDKClient(options=options) as client:
@@ -899,6 +915,9 @@ async def agent_run_events(
                 await client.query(_make_image_prompt(effective_prompt))
             else:
                 await client.query(effective_prompt)
+
+            title_task = session_title.spawn(client, prompt) if title_pending else None
+            title_pending = False
 
             pump_task = asyncio.create_task(
                 _pump_stream_messages(client, output_queue, username, stream_id, model_tracker)
@@ -1064,6 +1083,8 @@ async def agent_run_events(
                     await pump_task
                 except asyncio.CancelledError:
                     pass
+
+            await session_title.settle(title_task)
 
             await asyncio.sleep(1)
 
