@@ -1,6 +1,6 @@
 ---
 name: remote-agentsandbox
-description: "云端 agent sandbox 的 programmatic 调用：通过网关的 SSE 流式契约把任务交给远端 Priva agent 执行，并展示返回结果。当用户希望把工作委派给远端/托管的 Priva agent sandbox、而不是在本地执行时，使用本技能。网关域名在首次调用时由 AGENT_SANDBOX_GATEWAY_URL 环境变量提供，之后自动持久化复用。一旦建立了远端会话，同一上下文中的后续追问应继续使用本技能；多轮远端会话由本技能自动管理。"
+description: "云端 agent sandbox 的 programmatic 调用：通过网关的 SSE 流式接口把任务交给远端 Priva agent 执行，并展示返回结果。当用户希望把工作委派给远端/托管的 Priva agent sandbox、而不是在本地执行时，使用本技能。网关域名在首次调用时由 AGENT_SANDBOX_GATEWAY_URL 环境变量提供，之后自动持久化复用。一旦建立了远端会话，同一上下文中的后续追问应继续使用本技能；多轮远端会话由本技能自动管理。"
 metadata:
   icon: Server
   icon_color: "#79c0ff"
@@ -9,10 +9,10 @@ metadata:
 # 云端 Agent Sandbox — Programmatic 调用
 
 此技能让你以编程方式调用一个远端的云端 agent sandbox：把任务通过网关的
-SSE 流式契约交给远端 agent 执行，结果以 `result` 事件返回。
+SSE 流式接口交给远端 agent 执行，结果以 `result` 事件返回。
 
 远端 agent 是一个具备完整工具权限的独立 sandbox，你只是它的一个普通 API 客户端——
-这里没有新协议，用的就是运行时标准的 agent run 流式契约。
+这里没有新协议，用的就是运行时标准的 agent run 流式接口。
 
 ## 首次使用配置
 
