@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 
 from ..deps import require_user
 from ..services.temp_files import (
+    MAX_FILE_SIZE,
     delete_temp_file,
     get_file_by_uuid,
     list_temp_files,
@@ -25,7 +26,13 @@ async def upload_file(
     file: UploadFile = File(...),
     user: UserRecord = Depends(require_user),
 ):
-    file_data = await file.read()
+    # Bounded: validate_file() checks the size, but only once the whole body is
+    # already resident. Read one byte past the ceiling so an oversized upload is
+    # rejected without ever being held in memory.
+    file_data = await file.read(MAX_FILE_SIZE + 1)
+    if len(file_data) > MAX_FILE_SIZE:
+        raise HTTPException(
+            413, f"File exceeds the {MAX_FILE_SIZE // (1024 * 1024)}MB upload limit")
     filename = file.filename or "upload"
     validate_file(filename, len(file_data))
     validate_file_content(filename, file_data)

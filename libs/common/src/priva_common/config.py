@@ -160,6 +160,28 @@ class AgentSettings(BaseModel):
     permission_timeout_seconds: int = 600
 
 
+class ServiceIdentitySettings(BaseModel):
+    """Asymmetric workload identity (see priva_common.service_identity).
+
+    ``private_key`` is the control-plane signing key and MUST NOT be mounted
+    into an agent-runner: the whole point of the split is that a pod running
+    untrusted tenant code can verify tokens but cannot mint them. The runner
+    gets ``public_key`` (harmless — it is public) plus an operator-minted,
+    account-scoped service token.
+
+    Both unset => an ephemeral in-process keypair, which works for single-process
+    dev/tests and fails closed across pods.
+    """
+
+    private_key: str | None = None  # PEM (PKCS#8). Control-plane pods only.
+    public_key: str | None = None   # PEM (SubjectPublicKeyInfo). Every pod.
+    # Who this pod claims to be when dialling data-spine / the scheduler API.
+    # Must be one of service_token.CONTROL_PLANE_ROLES for a signing workload.
+    service_name: str = "control-panel"
+    service_token_ttl_seconds: int = 3600  # outbound identity refresh window
+    runner_token_ttl_seconds: int = 60     # per-request control-plane → runner
+
+
 class DataspineSettings(BaseModel):
     """data-spine (durable-state layer) seams. Default = in-process + Postgres.
 
@@ -176,8 +198,15 @@ class DataspineSettings(BaseModel):
     grpc_dsn: str | None = None  # gRPC target (host:port) when transport == "grpc"
     # libpq DSN when backend == "postgres", e.g. postgresql://priva:pw@postgres:5432/priva
     postgres_dsn: str | None = None
-    # HMAC key for the api_key_lookup index. Falls back to auth.jwt_secret when unset.
+    # HMAC key for the api_key_lookup index. data-spine only — it is NEVER
+    # shipped to a runner. No fallback to auth.jwt_secret: collapsing the two
+    # meant one leaked value forged platform logins AND resolved api-key
+    # lookups. Unset => data-spine refuses to start (see service.py).
     api_key_hmac_secret: str | None = None
+    # Pre-minted, account-scoped workload identity injected by the operator into
+    # agent-runner pods (which hold no signing key). Control-plane pods leave
+    # this unset and mint their own from service_identity.private_key.
+    service_token: str | None = None
 
 
 class KubernetesSettings(BaseModel):
@@ -247,6 +276,10 @@ class KubernetesSettings(BaseModel):
     terminal_output_burst_bytes: int = 1024 * 1024
     terminal_output_buffer_bytes: int = 1024 * 1024
     terminal_tmp_size_limit: str = "256Mi"
+    # Runner /tmp cap. Starlette spools multipart uploads here before any route
+    # code runs, so an unbounded emptyDir is a node-level ephemeral-storage DoS.
+    # Must exceed the largest allowed upload (user_files: 100MB).
+    runner_tmp_size_limit: str = "512Mi"
     # Data-plane gateway observability: the admin scrapes the agentgateway pod's
     # Prometheus endpoint for live HTTP request counts. The metrics port is NOT on
     # the Service, so the scrape targets the pod IP directly (label-selected).
@@ -263,6 +296,21 @@ class EdgeSettings(BaseModel):
     jwt_audience: str | None = None
     jwks_url: str | None = None  # remote JWKS for the agentgateway provider (prod)
     extproc_port: int = 9000  # control-panel gRPC ext_proc (EPP) listener agentgateway calls
+    # Browser origins allowed to open a WebSocket. Empty => same-origin only is
+    # not enforceable here, so any Origin is accepted (dev). Set it in prod:
+    # e.g. ["https://priva.example.com"]. A cross-site page still cannot read the
+    # JWT (it rides the subprotocol, not a cookie), so this is defence in depth.
+    allowed_ws_origins: list[str] = Field(default_factory=list)
+    # Hosts this API answers to (Host-header allowlist). Empty => no check (dev).
+    allowed_hosts: list[str] = Field(default_factory=list)
+    # Emit HSTS. Off by default because it is only meaningful (and safe) once TLS
+    # terminates in front of the gateway.
+    hsts_enabled: bool = False
+    # Enforce the CSP instead of shipping it Report-Only. Off by default: the SPA
+    # frames itself, renders agent HTML via srcdoc and spawns data:/blob: workers,
+    # so enforcing an untested policy can white-screen a working app. Watch the
+    # report-only violations, then turn this on.
+    csp_enforce: bool = False
 
 
 class Settings(BaseSettings):
@@ -283,6 +331,7 @@ class Settings(BaseSettings):
     pty: PtySettings = Field(default_factory=PtySettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
     dataspine: DataspineSettings = Field(default_factory=DataspineSettings)
+    service_identity: ServiceIdentitySettings = Field(default_factory=ServiceIdentitySettings)
     kubernetes: KubernetesSettings = Field(default_factory=KubernetesSettings)
     edge: EdgeSettings = Field(default_factory=EdgeSettings)
 

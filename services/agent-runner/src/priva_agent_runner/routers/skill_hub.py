@@ -12,6 +12,7 @@ from priva_common.models.skill_hub import (
 from priva_common.models.skills import SkillFileResponse
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from ..deps import require_user
+from ..services.skills import MAX_UPLOAD_SIZE
 from ..services.skill_hub import (
     delete_hub_skill,
     deliver_hub_skill,
@@ -33,7 +34,14 @@ async def upload_hub_skill_endpoint(
     file: UploadFile = File(...),
     user: UserRecord = Depends(require_user),
 ):
-    file_data = await file.read()
+    # Bounded read: the size check downstream happens AFTER the body is already
+    # materialised, so an unbounded read() here is the memory-exhaustion window.
+    # Ask for one byte past the limit so an oversized upload is rejected without
+    # ever being held whole.
+    file_data = await file.read(MAX_UPLOAD_SIZE + 1)
+    if len(file_data) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            413, f"File exceeds {MAX_UPLOAD_SIZE // (1024 * 1024)}MB size limit")
     result = upload_hub_skill(file_data, file.filename or "upload.zip")
 
     audit = get_audit_logger()

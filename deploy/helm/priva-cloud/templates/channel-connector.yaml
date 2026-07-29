@@ -23,18 +23,37 @@ spec:
     matchLabels: {app: channel-connector}
   template:
     metadata:
+      annotations:
+        # Roll when the identity/credential Secrets change. Env-injected Secrets
+        # are read once at container start, so without this an upgrade that
+        # re-keys anything leaves old and new pods signing/verifying with
+        # different material until something else happens to restart them.
+        checksum/secrets: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       labels: {app: channel-connector}
     spec:
+      securityContext:
+        # Matches USER 10001 in the image. fsGroup makes mounted volumes (e.g.
+        # data-spine's PVC) group-writable for the non-root uid.
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       {{- include "priva-cloud.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: priva-channel-connector
       terminationGracePeriodSeconds: 40   # let SIGTERM close all WS before the kill
       containers:
         - name: channel-connector
           image: {{ include "priva-cloud.image" (dict "svc" .Values.services.channelConnector "root" .) }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["python", "-m", "priva_channel_connector"]
           ports: [{containerPort: 8083, name: http}]
           env:
+            # Workload identity presented to data-spine / the scheduler API.
+            - {name: PRIVA_SERVICE_IDENTITY__SERVICE_NAME, value: "channel-connector"}
             - {name: CONNECTOR_HOST, value: "0.0.0.0"}
             - {name: CONNECTOR_PORT, value: "8083"}
             - {name: CONNECTOR_POLL_SECONDS, value: "10"}
@@ -44,8 +63,8 @@ spec:
             - {name: PRIVA_DATASPINE__GRPC_DSN, value: "data-spine:50051"}
           envFrom:
             - configMapRef: {name: {{ .Values.config.name }}}
-            # jwt_secret / api_key_hmac_secret: mint runner tokens to dial ar pods AND
-            # verify the control-panel's push nudge. (No PRIVA_FERNET_KEY — the connector
+            # service_identity private key: mints runner tokens to dial ar pods AND
+            # verifies the control-panel's push nudge. (No PRIVA_FERNET_KEY — the connector
             # never decrypts; data-spine returns the plaintext app_secret over gRPC.)
             - secretRef: {name: {{ .Values.sharedSecret.name }}}
           {{- with .Values.channelConnector.resources }}

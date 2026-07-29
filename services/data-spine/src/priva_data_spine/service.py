@@ -63,8 +63,17 @@ class AccountService:
         self.settings = settings
 
     def _lookup(self, plaintext: str) -> str:
-        key = (self.settings.dataspine.api_key_hmac_secret or self.settings.auth.jwt_secret).encode()
-        return hmac.new(key, plaintext.encode(), hashlib.sha256).hexdigest()
+        # No fallback to auth.jwt_secret. Collapsing the two meant one leaked
+        # value both forged platform login JWTs and reproduced every api-key
+        # lookup index entry. Helm provisions the two independently; an unset
+        # secret is a mis-provisioned deployment, not a default to paper over.
+        secret = (self.settings.dataspine.api_key_hmac_secret or "").strip()
+        if not secret:
+            raise RuntimeError(
+                "PRIVA_DATASPINE__API_KEY_HMAC_SECRET is not set — refusing to derive the "
+                "api_key lookup index from the platform JWT secret."
+            )
+        return hmac.new(secret.encode(), plaintext.encode(), hashlib.sha256).hexdigest()
 
     def _to_user(self, row: dict | None) -> UserRecord | None:
         if row is None:

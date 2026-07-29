@@ -26,6 +26,7 @@ router = APIRouter(
     tags=["admin-scheduler"],
     dependencies=[Depends(require_admin)],
 )
+from priva_common.service_token import auth_header
 
 
 def _job_out(job) -> dict:
@@ -91,7 +92,7 @@ async def trigger_job(job_id: str, admin: UserRecord = Depends(require_admin)):
     url = f"{get_settings().scheduler.internal_url}/internal/trigger/{job_id}"
     try:
         async with httpx.AsyncClient(trust_env=False, timeout=10.0) as cx:
-            resp = await cx.post(url)
+            resp = await cx.post(url, headers=auth_header())
     except httpx.HTTPError as exc:
         raise HTTPException(502, f"scheduler unreachable: {exc}") from exc
     if resp.status_code == 404:

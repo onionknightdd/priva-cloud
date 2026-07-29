@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from .skills import FileTreeNode
+from .skills import FileTreeNode, SkillScope
 
 
 class HubSkillSummary(BaseModel):
@@ -26,6 +26,13 @@ class HubSkillDetailResponse(BaseModel):
     frontmatter: dict | None = None
     tree: list[FileTreeNode]
     installed: bool = False
+
+
+class HubDeliverRequest(BaseModel):
+    # Install target, mirroring the skill upload/create flow: "personal" →
+    # $CLAUDE_CONFIG_DIR/skills, "workdir" → {cwd}/.claude/skills.
+    scope: SkillScope = "personal"
+    cwd: str | None = None
 
 
 class HubDeliverResponse(BaseModel):

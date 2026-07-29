@@ -33,6 +33,7 @@ from priva_common.models.scheduler import (
     TriggerValidationResponse,
     UpdateJobRequest,
 )
+from priva_common.service_token import auth_header
 
 from ..deps import pinned_account_id, require_account
 from ..services.scheduled_runs.triggers import build_trigger, next_run_time
@@ -190,7 +191,9 @@ async def _set_status(job_id: str, status: str, user: UserRecord) -> ScheduledJo
 async def _post_trigger(job_id: str) -> httpx.Response:
     url = f"{get_settings().scheduler.internal_url}/internal/trigger/{job_id}"
     async with httpx.AsyncClient(trust_env=False, timeout=10.0) as cx:
-        return await cx.post(url)
+        # The operator-injected, account-scoped identity: the scheduler pins the
+        # trigger to this account's own jobs.
+        return await cx.post(url, headers=auth_header())
 
 
 @router.post("/jobs/{job_id}/trigger", status_code=202)

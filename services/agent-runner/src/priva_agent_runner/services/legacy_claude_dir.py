@@ -163,22 +163,32 @@ def migrate_local_hooks_to_settings() -> None:
     CLI run them natively (in SDK runs AND terminal sessions). Idempotent and
     fail-soft per user. See ``hooks.config_manager.migrate_local_hooks``.
     """
+    import os
+
     from priva_common.user_store import get_user_store
 
     from .hooks.config_manager import migrate_local_hooks
 
-    try:
-        users = get_user_store().list_users()
-    except Exception:
-        logger.warning("user enumeration failed; settings.local hooks migration skipped", exc_info=True)
-        return
+    # A per-account pod migrates only its own account: enumerating every account
+    # from the pod that runs untrusted tenant code is exactly the cross-tenant
+    # read data-spine now denies (AccountService/List is control-plane only).
+    pinned = os.environ.get("USERNAME")
+    if pinned:
+        usernames = [pinned]
+    else:
+        try:  # monolith / single-process dev: no pinned account
+            usernames = [u.username for u in get_user_store().list_users()]
+        except Exception:
+            logger.warning("user enumeration failed; settings.local hooks migration skipped",
+                           exc_info=True)
+            return
 
     total = 0
-    for user in users:
+    for username in usernames:
         try:
-            total += migrate_local_hooks(user.username)
+            total += migrate_local_hooks(username)
         except OSError:
-            logger.warning("settings.local hooks migration failed for {}", user.username, exc_info=True)
+            logger.warning("settings.local hooks migration failed for {}", username, exc_info=True)
     if total:
         logger.info(
             "migrated user hooks settings.local.json -> settings.json across {} workdir(s)", total

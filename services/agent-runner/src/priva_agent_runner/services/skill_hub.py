@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-import io
-import os
 import shutil
-import tarfile
-import zipfile
 from pathlib import Path
 
-import yaml
 from fastapi import HTTPException
 
 from priva_common.logging import get_app_logger
@@ -19,8 +14,7 @@ from priva_common.models.skill_hub import (
     HubSkillListResponse,
     HubSkillSummary,
 )
-from priva_common.models.skills import FileTreeNode, SkillFileResponse
-from priva_common.config import get_settings
+from priva_common.models.skills import SkillFileResponse, SkillScope
 from priva_common.paths import resource_dir
 from .skills import (
     MAX_FILE_READ_SIZE,
@@ -29,12 +23,15 @@ from .skills import (
     _count_files,
     _detect_binary,
     _detect_language,
-    _extract_tar,
-    _extract_zip,
+    _list_user_workdirs,
     _parse_frontmatter,
+    _personal_skills_dir,
+    _resolve_skills_dir,
     _safe_resolve,
-    _validate_frontmatter,
     _validate_skill_name,
+    read_archive,
+    validate_bundle,
+    write_bundle,
 )
 
 logger = get_app_logger(__name__)
@@ -86,15 +83,24 @@ def seed_bundled_skills() -> None:
     logger.info("Seeded {} bundled skill(s) into {}", seeded, runtime_dir)
 
 
-def _get_user_skills_dir(username: str) -> Path:
-    settings = get_settings()
-    base = os.path.expanduser(settings.server.work_dir)
-    return Path(base) / username / ".claude" / "skills"
+def _skill_search_dirs(username: str) -> list[Path]:
+    """Every ``.claude/skills`` dir an installed copy could live in: the personal
+    (global) dir plus each of the user's project workdirs. Mirrors the targets the
+    install/create picker offers, so "installed" means "installed anywhere the user
+    could have put it"."""
+    dirs = [_personal_skills_dir()]
+    for cwd in _list_user_workdirs(username):
+        dirs.append(Path(cwd) / ".claude" / "skills")
+    return dirs
 
 
-def _is_installed(name: str, username: str) -> bool:
-    dest = _get_user_skills_dir(username) / name
-    return dest.is_dir() and not dest.is_symlink()
+def _is_installed(name: str, username: str, search_dirs: list[Path] | None = None) -> bool:
+    dirs = search_dirs if search_dirs is not None else _skill_search_dirs(username)
+    for base in dirs:
+        dest = base / name
+        if dest.is_dir() and not dest.is_symlink():
+            return True
+    return False
 
 
 def list_hub_skills(username: str) -> HubSkillListResponse:
@@ -102,6 +108,8 @@ def list_hub_skills(username: str) -> HubSkillListResponse:
     if not _runtime_skills_dir().is_dir():
         return HubSkillListResponse(skills=skills)
 
+    # Enumerate the user's install targets once, not per skill.
+    search_dirs = _skill_search_dirs(username)
     for entry in sorted(_runtime_skills_dir().iterdir()):
         if not entry.is_dir():
             continue
@@ -117,7 +125,7 @@ def list_hub_skills(username: str) -> HubSkillListResponse:
                 icon=meta.get("icon"),
                 icon_color=meta.get("icon_color"),
                 file_count=_count_files(entry),
-                installed=_is_installed(entry.name, username),
+                installed=_is_installed(entry.name, username, search_dirs),
             )
         )
 
@@ -171,13 +179,20 @@ def get_hub_skill_file(name: str, path: str) -> SkillFileResponse:
     )
 
 
-def deliver_hub_skill(name: str, username: str) -> HubDeliverResponse:
+def deliver_hub_skill(
+    name: str,
+    username: str,
+    scope: SkillScope = "personal",
+    cwd: str | None = None,
+) -> HubDeliverResponse:
     _validate_skill_name(name)
     source = _safe_resolve(_runtime_skills_dir(), name)
     if not source.is_dir():
         raise HTTPException(404, f"Bundled skill '{name}' not found")
 
-    dest = _get_user_skills_dir(username) / name
+    # Resolve the target the same way the upload/create flow does: personal →
+    # $CLAUDE_CONFIG_DIR/skills, workdir → {cwd}/.claude/skills.
+    dest = _resolve_skills_dir(scope, cwd) / name
 
     # Remove existing if present (overwrite)
     if dest.exists():
@@ -185,7 +200,10 @@ def deliver_hub_skill(name: str, username: str) -> HubDeliverResponse:
 
     dest.mkdir(parents=True, exist_ok=True)
     shutil.copytree(str(source), str(dest), dirs_exist_ok=True, ignore=_IGNORE)
-    logger.info("Delivered bundled skill '{}' to user '{}'", name, username)
+    logger.info(
+        "Delivered bundled skill '{}' to user '{}' (scope={}, cwd={})",
+        name, username, scope, cwd,
+    )
 
     return HubDeliverResponse(
         name=name,
@@ -197,71 +215,20 @@ def upload_hub_skill(file_data: bytes, filename: str) -> HubDeliverResponse:
     if len(file_data) > MAX_UPLOAD_SIZE:
         raise HTTPException(413, f"File exceeds {MAX_UPLOAD_SIZE // (1024 * 1024)}MB size limit")
 
-    lower_name = filename.lower()
-    if lower_name.endswith(".zip") or lower_name.endswith(".skill"):
-        members, read_file = _extract_zip(file_data)
-    elif lower_name.endswith(".tar.gz") or lower_name.endswith(".tgz"):
-        members, read_file = _extract_tar(file_data, "r:gz")
-    elif lower_name.endswith(".tar"):
-        members, read_file = _extract_tar(file_data, "r:")
-    else:
-        raise HTTPException(400, "Only .zip, .tar, .tar.gz, and .skill files are accepted")
-
-    # Find top-level directory
-    top_dirs = set()
-    for m in members:
-        parts = m.split("/")
-        if parts[0]:
-            top_dirs.add(parts[0])
-        if ".." in parts:
-            raise HTTPException(400, "Archive contains path traversal (..)")
-
-    if len(top_dirs) != 1:
-        raise HTTPException(400, "Archive must contain exactly one top-level directory")
-
-    skill_dir_name = top_dirs.pop()
-    skill_md_path = f"{skill_dir_name}/SKILL.md"
-
-    if skill_md_path not in members:
-        raise HTTPException(400, f"Archive must contain {skill_dir_name}/SKILL.md")
-
-    skill_md_content = read_file(skill_md_path)
-    if skill_md_content is None:
-        raise HTTPException(400, "Could not read SKILL.md from archive")
-
-    text = skill_md_content.decode("utf-8", errors="replace")
-    fm = {}
-    if text.startswith("---"):
-        parts = text.split("---", 2)
-        if len(parts) >= 3:
-            try:
-                fm = yaml.safe_load(parts[1]) or {}
-            except yaml.YAMLError:
-                raise HTTPException(422, "SKILL.md has invalid YAML frontmatter")
-
-    _validate_frontmatter(fm)
+    # Shared pipeline — this route used to carry its own copy of the parse and
+    # extract logic, which kept the weaker `".." in parts` check and a bare
+    # `dest / relative` write. An entry like `demo//tmp/pwn` has no `..`, passes
+    # the prefix test, and resolves to an ABSOLUTE path that discards `dest`.
+    members, read_file = read_archive(file_data, filename)
+    skill_dir_name, fm = validate_bundle(members, read_file)
     skill_name = fm["name"]
 
     dest = _runtime_skills_dir() / skill_name
-
     if dest.exists():
         shutil.rmtree(dest)
-
     dest.mkdir(parents=True, exist_ok=True)
 
-    for member_path in members:
-        if not member_path.startswith(skill_dir_name + "/"):
-            continue
-        relative = member_path[len(skill_dir_name) + 1:]
-        if not relative or member_path.endswith("/"):
-            if relative:
-                (dest / relative).mkdir(parents=True, exist_ok=True)
-            continue
-        content = read_file(member_path)
-        if content is not None:
-            file_dest = dest / relative
-            file_dest.parent.mkdir(parents=True, exist_ok=True)
-            file_dest.write_bytes(content)
+    write_bundle(members, read_file, skill_dir_name, dest)
 
     logger.info("Uploaded bundled skill '{}' to hub", skill_name)
 

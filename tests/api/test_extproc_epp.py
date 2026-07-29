@@ -165,16 +165,49 @@ def test_terminal_blocked_phases_do_not_patch_wake(monkeypatch):
         assert _run(provisioner.wake_terminal_and_wait("acct-1")) is None
 
 
-def test_epp_reads_token_from_query(monkeypatch):
+def test_epp_ignores_a_token_in_the_query_string(monkeypatch):
+    """?token= is no longer accepted: a JWT in the URL lands in gateway/ALB access
+    logs, Referer headers and browser history. The SPA has always used the
+    subprotocol (web/shared/api/wsAuth.js), so nothing legitimate regressed."""
     seen = {}
 
     async def fake_auth(token, xuser):
         seen["token"] = token
-        return _User()
+        return _User() if token else None   # the real resolver rejects an absent token
     monkeypatch.setattr(X, "authenticate_raw_token", fake_auth)
     monkeypatch.setattr(X.provisioner, "wake_and_wait", _awake("10.1.2.3:8091"))
-    _run(X.handle_request_headers(_hh({":path": "/api/agent/ws/run?token=abc123"})))
-    assert seen["token"] == "abc123"
+    resp = _run(X.handle_request_headers(_hh({":path": "/api/agent/ws/run?token=abc123"})))
+    assert seen["token"] is None                       # never fished out of the URL
+    assert resp.immediate_response.status.code == 401   # so the request is unauthenticated
+
+
+def test_epp_rejects_a_cross_origin_websocket(monkeypatch):
+    from priva_common.config import get_settings
+
+    monkeypatch.setattr(X, "authenticate_raw_token", _fake_auth_ok())
+    monkeypatch.setattr(X.provisioner, "wake_and_wait", _awake("10.1.2.3:8091"))
+    edge = get_settings().edge
+    saved = edge.allowed_ws_origins
+    edge.allowed_ws_origins = ["https://priva.example.com"]
+    try:
+        hdrs = {":path": "/api/agent/ws/run", "upgrade": "websocket",
+                "sec-websocket-protocol": "priva.ws.v1, priva.token.jwt"}
+        bad = _run(X.handle_request_headers(_hh({**hdrs, "origin": "https://evil.test"})))
+        assert bad.immediate_response.status.code == 403
+        ok = _run(X.handle_request_headers(
+            _hh({**hdrs, "origin": "https://priva.example.com"})))
+        assert not ok.HasField("immediate_response")
+        # a non-browser client sends no Origin and must still connect
+        plain = _run(X.handle_request_headers(_hh(hdrs)))
+        assert not plain.HasField("immediate_response")
+    finally:
+        edge.allowed_ws_origins = saved
+
+
+def _fake_auth_ok():
+    async def fake_auth(token, xuser):
+        return _User()
+    return fake_auth
 
 
 def test_epp_reads_token_from_subprotocol(monkeypatch):

@@ -18,7 +18,7 @@ import base64
 import datetime
 import ssl
 import tempfile
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -47,6 +47,7 @@ _MODE_OVERRIDE = pm.ProcessingMode(
 
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from priva_common.logging import get_app_logger
+from priva_common.config import get_settings
 from priva_common.runner_token import mint
 from priva_common.user_store import get_user_store
 
@@ -68,12 +69,25 @@ def _headers_to_dict(http_headers) -> dict[str, str]:
     return out
 
 
-def _query_param(path: str, key: str) -> str | None:
-    try:
-        vals = parse_qs(urlparse(path).query).get(key)
-        return vals[0] if vals else None
-    except Exception:
-        return None
+def _is_websocket(headers: dict[str, str]) -> bool:
+    return headers.get("upgrade", "").lower() == "websocket"
+
+
+def _origin_allowed(headers: dict[str, str]) -> bool:
+    """Host-allowlist a WebSocket handshake.
+
+    Defence in depth, not the primary control: the JWT rides the subprotocol
+    rather than a cookie, so a cross-site page cannot make the browser attach
+    it. This blocks the residual case where a token has leaked into an
+    attacker-controlled page. Empty allowlist => unconfigured (dev), allow.
+    """
+    allowed = get_settings().edge.allowed_ws_origins
+    if not allowed:
+        return True
+    origin = headers.get("origin", "")
+    if not origin:
+        return True  # non-browser client (CLI/connector): no Origin to forge
+    return origin in allowed
 
 
 WS_TOKEN_PREFIX = "priva.token."
@@ -171,8 +185,11 @@ async def handle_request_headers(http_headers) -> "ep.ProcessingResponse":
     token = auth[7:] if auth.lower().startswith("bearer ") else None
     if not token:  # WS upgrade: token rides the Sec-WebSocket-Protocol header
         token = _token_from_subprotocol(headers.get("sec-websocket-protocol", ""))
-    if not token:  # WS fallback: a browser can't set Authorization on a WS handshake,
-        token = _query_param(headers.get(":path", ""), "token")  # so it may pass ?token=
+    # NOTE: no ?token= fallback. A JWT in the query string lands in gateway/ALB
+    # access logs, Referer headers and browser history. The SPA has always used
+    # the subprotocol (web/shared/api/wsAuth.js), so nothing legitimate needs it.
+    if _is_websocket(headers) and not _origin_allowed(headers):
+        return _immediate(403, "cross-origin websocket rejected")
     try:
         user = await authenticate_raw_token(token, headers.get("x-user-name"))
     except HTTPException as exc:

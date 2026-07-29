@@ -11,15 +11,52 @@ All nine domains are full, scheduler included (Phase 4a).
 from __future__ import annotations
 
 import json
+from collections import namedtuple
 from typing import TYPE_CHECKING
+
+import grpc
 
 from priva_common.dataplane import converters as cv
 from priva_common.dataplane.client import UNSET, DataplaneClient, RunPage
+from priva_common.service_token import current_token
 
 if TYPE_CHECKING:
     from priva_common.config import Settings
 
 _cache: dict[str, DataplaneClient] = {}
+
+
+class _CallDetails(
+    namedtuple("_CallDetails", ("method", "timeout", "metadata", "credentials",
+                               "wait_for_ready", "compression")),
+    grpc.ClientCallDetails,
+):
+    """grpc.ClientCallDetails is read-only; rebuilding it is the documented way
+    to add metadata from a client interceptor."""
+
+
+class _ServiceAuthInterceptor(grpc.UnaryUnaryClientInterceptor):
+    """Attach this workload's identity to every rpc.
+
+    data-spine denies unauthenticated calls, so this is what keeps control-plane
+    services working — and what pins an agent-runner to the account named in the
+    operator-injected token it carries (see priva_common.service_token).
+    """
+
+    def intercept_unary_unary(self, continuation, client_call_details, request):
+        metadata = list(client_call_details.metadata or ())
+        metadata.append(("authorization", f"Bearer {current_token()}"))
+        return continuation(
+            _CallDetails(
+                client_call_details.method,
+                client_call_details.timeout,
+                metadata,
+                client_call_details.credentials,
+                getattr(client_call_details, "wait_for_ready", None),
+                getattr(client_call_details, "compression", None),
+            ),
+            request,
+        )
 
 
 def build_grpc_client(settings: "Settings") -> DataplaneClient:
@@ -53,7 +90,7 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         scheduler_pb2_grpc,
     )
 
-    channel = grpc.insecure_channel(dsn)
+    channel = grpc.intercept_channel(grpc.insecure_channel(dsn), _ServiceAuthInterceptor())
 
     class _Accounts:
         def __init__(self):

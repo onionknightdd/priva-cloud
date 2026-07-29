@@ -24,6 +24,7 @@ from priva_scheduler.api import create_app
 from priva_scheduler.engine import SchedulerEngine
 
 from .test_engine import ScriptedDispatcher
+from priva_common.service_token import HEADER, mint as mint_service
 
 
 @pytest.fixture
@@ -91,10 +92,24 @@ def test_internal_api_lifespan_and_trigger(dataplane, fast_settings):
 
         # run-now reaches a paused job via the account scan (round-3 one-shot);
         # the ack is fast — the pipeline (wake included) runs detached.
-        resp = http.post("/internal/trigger/j-paused")
+        cp = {HEADER: mint_service("control-panel")}
+        resp = http.post("/internal/trigger/j-paused", headers=cp)
         assert resp.status_code == 202 and resp.json()["status"] == "accepted"
 
-        assert http.post("/internal/trigger/ghost").status_code == 404
+        assert http.post("/internal/trigger/ghost", headers=cp).status_code == 404
+
+        # --- negative: the endpoint used to accept any anonymous in-cluster
+        # caller, which let one tenant fire another tenant's job (and so run an
+        # attacker-authored prompt with the victim's credentials).
+        assert http.post("/internal/trigger/j-paused").status_code == 401
+        assert http.post("/internal/trigger/j-paused",
+                         headers={HEADER: "not-a-token"}).status_code == 401
+        # A tenant token is pinned to its own jobs; a foreign job is 404 (not
+        # 403 — a tenant must not learn which job ids exist).
+        stranger = {HEADER: mint_service("agent-runner", account_id="acc-stranger")}
+        assert http.post("/internal/trigger/j-paused", headers=stranger).status_code == 404
+        owner = {HEADER: mint_service("agent-runner", account_id=account_id)}
+        assert http.post("/internal/trigger/j-paused", headers=owner).status_code == 202
         assert http.get("/metrics").status_code == 200
 
         import time

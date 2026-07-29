@@ -62,8 +62,24 @@ def _render_managed_policy(namespace, logger, *, force=False) -> None:
 @kopf.on.startup()
 def bootstrap_managed_policy(logger, **_):
     """Create the managed-policy ConfigMap once at operator boot, before any pod
-    mounts it — so a cold-started account wakes with the current enforced set."""
-    _render_managed_policy(_tenants_namespace(), logger, force=True)
+    mounts it — so a cold-started account wakes with the current enforced set.
+
+    The runner mounts this ConfigMap with optional:False, so if it is missing no
+    runner pod can start. Log that consequence explicitly rather than leaving a
+    generic warning: a failure here is now an outage, not a degraded mode.
+    """
+    namespace = _tenants_namespace()
+    try:
+        kube.ensure_managed_policy_configmap(namespace, strict=True)
+    except Exception:
+        logger.error(
+            "managed-policy bootstrap FAILED — %s is absent, so runner pods cannot "
+            "start (the policy mount is required, by design). Check data-spine.",
+            kube.MANAGED_POLICY_CM, exc_info=True,
+        )
+        raise
+    global _managed_policy_last_render
+    _managed_policy_last_render = time.monotonic()
 
 
 def _upsert_condition(status, patch, condition_type: str, ok: bool, reason: str, message: str) -> None:

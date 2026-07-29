@@ -31,6 +31,8 @@ def user_from_pb(m) -> UserRecord | None:
     return UserRecord(
         username=m.username,
         password_hash="",  # never carried over the wire (security); auth goes via VerifyPassword
+        # …but its digest is, so a session can still be bound to the credential.
+        password_epoch=m.password_epoch or None,
         role=m.role or "user",
         api_key=m.api_key or None,
         account_id=m.account_id,

@@ -21,6 +21,7 @@ from priva_common.models.auth import UserRecord
 from priva_common.models.scheduler import JobRunRecord
 from priva_data_spine.server import build_server
 from priva_data_spine.service import build_repo
+from priva_common.service_token import HEADER
 
 
 @pytest.fixture
@@ -300,8 +301,9 @@ def test_mcp_interval_create_and_trigger(tools):
         def __init__(self, *a, **kw): ...
         async def __aenter__(self): return self
         async def __aexit__(self, *a): return False
-        async def post(self, url):
+        async def post(self, url, **kw):
             posted.append(url)
+            assert HEADER in (kw.get("headers") or {}), "trigger proxy sent no service token"
             return httpx.Response(202, json={"status": "accepted"})
 
     tools.monkeypatch.setattr(tools.mcp_tools.httpx, "AsyncClient", FakeAsyncClient)

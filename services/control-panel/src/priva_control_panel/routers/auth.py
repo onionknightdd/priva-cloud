@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from priva_common.models.admin import AuditEntryResponse, AuditLogResponse
 from priva_common.models.auth import (
@@ -28,7 +28,7 @@ from ..services.feishu_connector import nudge_reconcile
 from ..services.auth import (
     assert_account_active,
     create_jwt,
-    decode_jwt,
+    client_ip,
     rate_limiter,
     require_user,
     user_record_to_public,
@@ -63,7 +63,7 @@ async def setup_admin(request: SetupRequest):
     if store.has_users():
         raise HTTPException(403, "Setup already completed")
     user = store.create_user(request.username, request.password, role="admin")
-    token = create_jwt(user.username, user.role)
+    token = create_jwt(user.username, user.role, user)
 
     # Provision the per-account agent-runner (operator reconciles the AgentTenant CR).
     _provision_tenant(user)
@@ -88,13 +88,19 @@ async def setup_admin(request: SetupRequest):
 
 
 @router.post("/register", response_model=RegisterResponse)
-async def register(request: RegisterRequest):
+async def register(request: RegisterRequest, http_request: Request):
     """Public self-registration. Stores a pending request (bcrypt password hash +
     requested runner type / resource spec) for an admin to approve. No account is
     created until approval."""
     import bcrypt
 
     from priva_common.dataplane import get_client
+
+    # Unauthenticated and it runs cost-12 bcrypt plus a DB insert per call, so
+    # rate-limit it by source address before doing any of that work.
+    ip = client_ip(http_request)
+    rate_limiter.check(request.username, ip)
+    rate_limiter.record_failure(request.username, ip)
 
     if request.runner_type not in ("auto_scale", "persistent"):
         raise HTTPException(400, "Invalid runner_type")
@@ -130,14 +136,15 @@ async def register(request: RegisterRequest):
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, http_request: Request):
     store = get_user_store()
     settings = get_settings()
 
-    rate_limiter.check(request.username)
+    ip = client_ip(http_request)
+    rate_limiter.check(request.username, ip)
 
     if not store.verify_password(request.username, request.password):
-        rate_limiter.record_failure(request.username)
+        rate_limiter.record_failure(request.username, ip)
         audit = get_audit_logger()
         audit.append(AuditEntry(
             actor=request.username,
@@ -146,7 +153,7 @@ async def login(request: LoginRequest):
         ))
         raise HTTPException(401, "Invalid username or password")
 
-    rate_limiter.reset(request.username)
+    rate_limiter.reset(request.username, ip)
     user = store.get_user(request.username)
 
     # Right password, frozen account: record WHY before refusing, so the audit trail
@@ -166,7 +173,9 @@ async def login(request: LoginRequest):
     if user.username in settings.auth.admins and role != "admin":
         role = "admin"
 
-    token = create_jwt(user.username, role)
+    # password_hash rides along so the token carries its `pwd` epoch: a later
+    # password change invalidates this session (services/auth.py).
+    token = create_jwt(user.username, role, user)
     public = user_record_to_public(user)
     if role != user.role:
         public.role = role
@@ -187,7 +196,7 @@ async def refresh_token(user: UserRecord = Depends(require_user)):
     role = user.role
     if user.username in settings.auth.admins and role != "admin":
         role = "admin"
-    token = create_jwt(user.username, role)
+    token = create_jwt(user.username, role, user)
     public = user_record_to_public(user)
     if role != user.role:
         public.role = role
@@ -431,7 +440,16 @@ async def change_my_password(
         target=user.username,
     ))
 
-    return {"status": "ok"}
+    # The password epoch just changed, so the caller's own token no longer
+    # verifies. Hand back a fresh one — otherwise the user sees a success
+    # response and is silently 401'd out on their very next request.
+    settings = get_settings()
+    refreshed = get_user_store().get_user(user.username)
+    role = (refreshed or user).role
+    if user.username in settings.auth.admins and role != "admin":
+        role = "admin"
+    return {"status": "ok",
+            "access_token": create_jwt(user.username, role, refreshed or user)}
 
 # NOTE: the per-account BYOK creds endpoints (GET/PUT /me/env, /me/env/status) and
 # the model-list proxy moved OFF the control-panel. Creds now live in the account's

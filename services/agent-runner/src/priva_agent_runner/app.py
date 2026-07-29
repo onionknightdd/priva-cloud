@@ -20,6 +20,7 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
 
 from priva_common.config import get_settings
+from priva_common.body_limit import MaxBodySizeMiddleware
 from priva_common.logging import AccessLogMiddleware, configure_logging, get_app_logger, shutdown_logging
 from priva_common.models.auth import UserRecord
 from priva_common.workspace import get_user_workspace
@@ -27,6 +28,12 @@ from priva_common.workspace import get_user_workspace
 from . import activity
 
 logger = get_app_logger(__name__)
+
+# Hard ceiling on any request body reaching this pod. Sits just above the
+# largest per-route limit (user_files' 100MB) so the route-level errors stay the
+# ones users normally see; this exists to stop the multipart parser writing an
+# unbounded body into /tmp before any route code runs.
+MAX_REQUEST_BODY_BYTES = 110 * 1024 * 1024
 
 
 class ActivityMiddleware:
@@ -152,6 +159,9 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(AccessLogMiddleware)
     app.add_middleware(ActivityMiddleware)
+    # Added last => outermost => runs before routing and before the multipart
+    # parser spools anything to /tmp. Per-route read caps only bound memory.
+    app.add_middleware(MaxBodySizeMiddleware, max_bytes=MAX_REQUEST_BODY_BYTES)
 
     # --- Offline Scalar API reference (replaces Swagger UI) ---
     # Served from a vendored, self-contained bundle (no CDN). withDefaultFonts:false

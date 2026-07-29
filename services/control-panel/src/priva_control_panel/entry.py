@@ -13,6 +13,10 @@ import argparse
 import os
 
 
+
+# Per-frame WebSocket ceiling.
+MAX_WS_FRAME_BYTES = 4 * 1024 * 1024
+
 def _set_env(name: str, value: str | None) -> None:
     """Set an env var only when a value was actually provided on the CLI."""
     if value is not None:
@@ -81,6 +85,9 @@ def main(argv: list[str] | None = None) -> int:
         reload=args.reload,
         ws_ping_interval=None,
         ws_ping_timeout=None,
+        # WebSocket frames bypass MaxBodySizeMiddleware entirely (it short-circuits
+        # on non-http scopes), so the per-frame ceiling has to come from the server.
+        ws_max_size=MAX_WS_FRAME_BYTES,
     )
     return 0
 

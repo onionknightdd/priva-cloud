@@ -15,14 +15,27 @@ spec:
     metadata:
       labels: {app: scheduler}
     spec:
+      securityContext:
+        # Matches USER 10001 in the image. fsGroup makes mounted volumes (e.g.
+        # data-spine's PVC) group-writable for the non-root uid.
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       serviceAccountName: priva-scheduler
       containers:
         - name: scheduler
           image: priva/scheduler:dev
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "priva_scheduler"]
           ports: [{containerPort: 8082, name: http}]
           env:
+            # Workload identity presented to data-spine / the scheduler API.
+            - {name: PRIVA_SERVICE_IDENTITY__SERVICE_NAME, value: "scheduler"}
             - {name: SCHEDULER_HOST, value: "0.0.0.0"}
             - {name: SCHEDULER_PORT, value: "8082"}
             - {name: PRIVA_LOG_DIR, value: "/tmp/logs"}
@@ -31,7 +44,7 @@ spec:
             - {name: PRIVA_DATASPINE__GRPC_DSN, value: "data-spine:50051"}
           envFrom:
             - configMapRef: {name: priva-config}
-            # jwt_secret / api_key_hmac_secret: mint the same runner tokens the
+            # service_identity private key: mints the same runner tokens the
             # control-panel edge mints (the pod pins them to its account).
             - secretRef: {name: priva-shared-secret}
           readinessProbe:

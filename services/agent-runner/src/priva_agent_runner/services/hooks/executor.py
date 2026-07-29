@@ -20,6 +20,65 @@ from .env import build_hook_env
 logger = get_app_logger(__name__)
 
 
+
+DEFAULT_HOOK_TIMEOUT = 30
+MAX_HOOK_TIMEOUT = 300            # mirrors the ceiling on HookHandler.timeout
+MAX_HOOK_OUTPUT_BYTES = 256 * 1024
+
+
+async def _communicate_bounded(proc, stdin_data: bytes, limit: int) -> tuple[bytes, bytes]:
+    """asyncio.subprocess.communicate() with a cap on what is kept.
+
+    The stock helper accumulates everything the child writes. The child here is
+    arbitrary shell from the request body, so that is an unbounded-memory
+    primitive; read at most `limit` from each pipe and drop the rest. The child
+    is killed once both pipes are done so a writer that ignores a closed stdout
+    cannot linger.
+    """
+
+    def _kill() -> None:
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+
+    async def _drain(stream) -> bytes:
+        if stream is None:
+            return b""
+        out = bytearray()
+        while len(out) <= limit:
+            chunk = await stream.read(8192)
+            if not chunk:
+                break
+            out.extend(chunk)
+        if len(out) > limit:
+            # Killing here is what unblocks the OTHER pipe: a child that never
+            # writes to stderr never closes it either, so a sibling drain would
+            # wait for EOF forever once this one stopped reading.
+            _kill()
+        return bytes(out[: limit + 1])
+
+    async def _feed() -> None:
+        if proc.stdin is None:
+            return
+        try:
+            proc.stdin.write(stdin_data)
+            await proc.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
+
+    _, stdout, stderr = await asyncio.gather(
+        _feed(), _drain(proc.stdout), _drain(proc.stderr))
+    _kill()
+    await proc.wait()
+    return stdout, stderr
+
 async def test_hook(
     event_type: str,
     handler: HookHandler,
@@ -53,7 +112,9 @@ async def test_hook(
     )
 
     stdin_data = json.dumps(input_json).encode()
-    timeout = handler.timeout or 30
+    # Clamp: `timeout` arrives on the request body, so an unbounded value is a
+    # free "hold a subprocess open forever" primitive.
+    timeout = min(handler.timeout or DEFAULT_HOOK_TIMEOUT, MAX_HOOK_TIMEOUT)
 
     start = time.monotonic()
     try:
@@ -65,8 +126,11 @@ async def test_hook(
             cwd=cwd,
             env=env,
         )
+        # communicate() buffers all of stdout+stderr with no ceiling, and the
+        # command is arbitrary shell from the request — `cat /dev/zero` is an
+        # unbounded-memory primitive. Read bounded amounts instead.
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(input=stdin_data),
+            _communicate_bounded(proc, stdin_data, MAX_HOOK_OUTPUT_BYTES),
             timeout=timeout,
         )
         elapsed_ms = int((time.monotonic() - start) * 1000)

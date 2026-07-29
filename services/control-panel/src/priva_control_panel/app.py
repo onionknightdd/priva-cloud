@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,21 +21,47 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 # Minimal containers may not register web font types; browsers refuse fonts
 # served as application/octet-stream.
 for _ext, _type in ((".woff2", "font/woff2"), (".woff", "font/woff"), (".ttf", "font/ttf"), (".otf", "font/otf")):
     mimetypes.add_type(_type, _ext)
 
+from priva_common.body_limit import MaxBodySizeMiddleware
 from priva_common.config import get_settings
 from priva_common.logging import AccessLogMiddleware, configure_logging, get_app_logger, shutdown_logging
+
+from .security_headers import SecurityHeadersMiddleware
 
 logger = get_app_logger(__name__)
 
 
+# Ceiling on a proxied request body. The control-panel buffers the whole body
+# before relaying it to a runner pod, so without a bound one authenticated caller
+# can pin arbitrary memory in the shared control plane — a blast radius the
+# per-route limits inside the runner never see, because the body never gets
+# there. Sits above the runner's own 100MB file cap so it never fires first.
+MAX_PROXY_BODY_BYTES = 128 * 1024 * 1024
+
+# The unauthenticated docs proxy relays an upstream bundle into this shared
+# process. Bound it, and constrain the path it will fetch: no traversal, no
+# scheme, no absolute path — just an ordinary relative asset name.
+MAX_DOCS_BYTES = 16 * 1024 * 1024
+# A character-class alone does NOT stop traversal: ".." is made entirely of
+# permitted characters. Each segment must also not be "." or "..".
+_DOCS_SEGMENT = re.compile(r"(?!\.{1,2}$)[A-Za-z0-9._~-]+")
+
+
+def _safe_docs_path(sub: str) -> bool:
+    return bool(sub) and all(_DOCS_SEGMENT.fullmatch(seg) for seg in sub.split("/"))
+
 SPA_SHELL_CACHE_CONTROL = "no-cache"
+
 SPA_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 TENANT_SYNC_INTERVAL_SECONDS = 60.0
+
+
 
 
 async def _tenant_sync_loop() -> None:
@@ -114,6 +141,11 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        # Fail loudly if this pod has no signing identity: the fallback is an
+        # ephemeral in-process keypair, which makes every token this service
+        # mints unverifiable by its peers while readiness stays green.
+        from priva_common.service_identity import assert_configured
+        assert_configured(signing=True)
         configure_logging(settings)
 
         # gRPC transport: CP is a data-plane *client* (data-spine runs as its own
@@ -164,6 +196,25 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.add_middleware(AccessLogMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware, hsts=settings.edge.hsts_enabled,
+                       csp_enforce=settings.edge.csp_enforce)
+    # Outermost: refuse an oversized body while it is still arriving, before any
+    # parser or proxy buffer touches it.
+    app.add_middleware(MaxBodySizeMiddleware, max_bytes=MAX_PROXY_BODY_BYTES)
+    if settings.edge.allowed_hosts:
+        # Host-header allowlist (unset => off, so dev/minikube access by IP still
+        # works). Blocks Host-header poisoning of any absolute URL we emit.
+        #
+        # The kubelet dials the readiness probe at the pod IP, so its Host header
+        # can never appear in a hostname allowlist — without these entries,
+        # configuring allowed_hosts at all takes the control-panel permanently
+        # NotReady and with it the SPA, /api/* and the EPP.
+        probe_hosts = ["localhost", "127.0.0.1"]
+        pod_ip = os.environ.get("POD_IP", "").strip()
+        if pod_ip:
+            probe_hosts.append(pod_ip)
+        app.add_middleware(TrustedHostMiddleware,
+                           allowed_hosts=[*settings.edge.allowed_hosts, *probe_hosts])
 
     @app.get("/health", include_in_schema=False)
     async def health():
@@ -208,11 +259,19 @@ def create_app() -> FastAPI:
         endpoint = await asyncio.to_thread(provisioner.any_ready_runner_endpoint)
         if not endpoint:
             return Response("agent sandbox is waking, retry in a moment", status_code=503)
+        # `sub` is attacker-controlled and this route is unauthenticated. httpx
+        # normalises dot segments, so an unguarded join lets an anonymous caller
+        # steer the upstream request off /sandbox/apidocs to any path on the
+        # runner pod. Allow only plain relative asset paths.
+        if sub and not _safe_docs_path(sub):
+            return Response("not found", status_code=404)
         url = f"http://{endpoint}/sandbox/apidocs" + (f"/{sub}" if sub else "")
         try:
             # trust_env=False: in-cluster pod-to-pod hop must not honor any host/system proxy.
             async with httpx.AsyncClient(trust_env=False, timeout=15.0) as cx:
                 r = await cx.get(url)
+                if len(r.content) > MAX_DOCS_BYTES:
+                    return Response("docs bundle too large", status_code=502)
         except Exception as exc:
             return Response(f"docs upstream unavailable: {exc}", status_code=502)
         # Forward caching headers so the browser caches the ~3.7MB Scalar bundle instead
@@ -270,25 +329,41 @@ def create_app() -> FastAPI:
         accept = request.headers.get("accept")
         if accept:
             headers["Accept"] = accept
-        body = await request.body() if method != "GET" else None
+
+        # Relay the request body as a STREAM. Buffering it here meant an upload
+        # was resident in the shared control plane in full before a single byte
+        # reached the pod — the whole allowed size, per concurrent request, in a
+        # process every tenant shares. The ceiling itself is enforced upstream of
+        # this by MaxBodySizeMiddleware, which counts bytes on the ASGI receive
+        # channel, so cutting the buffer here loses no protection.
+        body = request.stream() if method != "GET" else None
+        declared = request.headers.get("content-length")
+        if body is not None and declared and declared.isdigit():
+            # Forward a known length so the pod sees an ordinary sized body
+            # rather than a chunked one (httpx only falls back to
+            # Transfer-Encoding: chunked when the length is unknown), which also
+            # keeps the runner's own cheap Content-Length pre-check working.
+            headers["Content-Length"] = declared
 
         # SSE must not be buffered: the caller needs events as they happen, and an
         # agent run outlives any sane total timeout. Hand it to the streaming path.
         if "text/event-stream" in (accept or "").lower():
-            return await _stream_runner_response(url, headers, body, method)
+            return await _stream_runner_response(url, headers, body, method, sse=True)
 
-        try:
-            # trust_env=False: in-cluster pod-to-pod hop must not honor any host/system proxy.
-            # httpx buffers r.content fully — fine for file-manager previews/uploads.
-            async with httpx.AsyncClient(trust_env=False, timeout=30.0) as cx:
-                r = await cx.request(method, url, headers=headers, content=body)
-        except Exception as exc:
-            return Response(f"runner upstream unavailable: {exc}", status_code=502)
-        return Response(content=r.content, status_code=r.status_code,
-                        media_type=r.headers.get("content-type", "application/json"))
+        # Relayed, not buffered. `r.content` held the pod's ENTIRE response in the
+        # shared control-plane process before answering — and this lane exists to
+        # carry large bodies (file downloads are capped at 100MB, transcripts run
+        # to hundreds of KB), so that was the whole allowed size resident per
+        # concurrent reader, in a process every tenant shares.
+        return await _stream_runner_response(url, headers, body, method)
 
-    async def _stream_runner_response(url: str, headers: dict, body, method: str) -> Response:
-        """Relay an SSE response from the account's pod, chunk by chunk.
+    async def _stream_runner_response(url: str, headers: dict, body, method: str,
+                                      *, sse: bool = False) -> Response:
+        """Relay the pod's response to the caller chunk by chunk.
+
+        Used for every response on this lane. ``sse=True`` additionally disables
+        the read timeout and sets the no-buffering headers a live event stream
+        needs; ordinary responses keep a bounded read timeout.
 
         SSE on the /api/sandbox lane is truncated like any other body: agentgateway
         hardcodes the GIE EPP ext_proc to FullDuplexStreamed and ignores our
@@ -303,7 +378,10 @@ def create_app() -> FastAPI:
         cancels this generator, which closes the upstream connection and lets the
         runner tear the run down.
         """
-        timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+        # read=None for SSE: the gap between two events is the model thinking,
+        # not a stalled socket. Ordinary responses keep a real read timeout.
+        timeout = httpx.Timeout(connect=10.0, read=None if sse else 30.0,
+                                write=30.0, pool=10.0)
         cx = httpx.AsyncClient(trust_env=False, timeout=timeout)
         try:
             req = cx.build_request(method, url, headers=headers, content=body)
@@ -331,12 +409,23 @@ def create_app() -> FastAPI:
                 await r.aclose()
                 await cx.aclose()
 
+        passthru: dict[str, str] = {}
+        if sse:
+            # No intermediary may buffer or cache a live event stream.
+            passthru = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        else:
+            # Forward a known length so the browser still gets a real progress
+            # bar on downloads instead of a chunked response of unknown size.
+            for k in ("content-length", "content-disposition", "cache-control", "etag"):
+                if k in r.headers:
+                    passthru[k] = r.headers[k]
+
         return StreamingResponse(
             relay(),
             status_code=r.status_code,
-            media_type=r.headers.get("content-type", "text/event-stream"),
-            # No intermediary may buffer or cache a live event stream.
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            media_type=r.headers.get(
+                "content-type", "text/event-stream" if sse else "application/json"),
+            headers=passthru,
         )
 
     # Generic large-body-safe read lane: any GET /api/cp-proxy/<path> is proxied to

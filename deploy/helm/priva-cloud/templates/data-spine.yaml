@@ -31,12 +31,29 @@ spec:
     matchLabels: {app: data-spine}
   template:
     metadata:
+      annotations:
+        # Roll when the identity/credential Secrets change. Env-injected Secrets
+        # are read once at container start, so without this an upgrade that
+        # re-keys anything leaves old and new pods signing/verifying with
+        # different material until something else happens to restart them.
+        checksum/secrets: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       labels: {app: data-spine}
     spec:
+      securityContext:
+        # Matches USER 10001 in the image. fsGroup makes mounted volumes (e.g.
+        # data-spine's PVC) group-writable for the non-root uid.
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       {{- include "priva-cloud.imagePullSecrets" . | nindent 6 }}
       containers:
         - name: data-spine
           image: {{ include "priva-cloud.image" (dict "svc" .Values.services.dataSpine "root" .) }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["python", "-m", "priva_data_spine", "serve"]
           ports: [{containerPort: 50051, name: grpc}]
@@ -60,7 +77,9 @@ spec:
             - {name: PRIVA_LOG_DIR, value: "/tmp/logs"}
             - {name: PRIVA_SERVER__WORK_DIR, value: "/data"}
           envFrom:
-            - secretRef: {name: {{ .Values.sharedSecret.name }}}   # api_key_hmac_secret / jwt_secret (lookup parity)
+            # hmac (api_key_lookup index) + fernet (at-rest credential encryption).
+            # NOT the signing key: data-spine verifies service tokens, never mints.
+            - secretRef: {name: priva-data-spine-secret}
           volumeMounts: [{name: data, mountPath: /data}]
           {{- with .Values.dataSpine.resources }}
           resources: {{ toYaml . | nindent 12 }}

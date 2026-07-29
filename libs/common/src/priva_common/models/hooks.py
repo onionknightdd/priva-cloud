@@ -17,7 +17,8 @@ class HookHandler(BaseModel):
     type: Literal["command", "http", "mcp_tool"]
     command: str | None = None
     url: str | None = None
-    timeout: int = 30
+    # Bounded: this is request-supplied and drives a subprocess wait.
+    timeout: int = Field(default=30, ge=1, le=300)
     headers: dict[str, str] | None = None
     allowedEnvVars: list[str] | None = None
 

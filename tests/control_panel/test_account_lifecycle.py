@@ -10,6 +10,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from starlette.requests import Request
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
@@ -318,7 +319,10 @@ def test_login_refuses_a_frozen_account(monkeypatch, tmp_path):
         verify_password=lambda username, password: True,
         get_user=lambda username: frozen))
 
+    # login now takes the raw Request too — the rate limiter keys on the caller's
+    # address as well as the username, so one source cannot lock out an account.
+    http_request = Request({"type": "http", "headers": [], "client": ("10.0.0.1", 1234)})
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(R.login(LoginRequest(username="bob", password="pw")))
+        asyncio.run(R.login(LoginRequest(username="bob", password="pw"), http_request))
 
     assert exc.value.status_code == 403

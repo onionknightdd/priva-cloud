@@ -65,6 +65,16 @@ sharedSecret:
   name: priva-shared-secret
   jwtSecret: ""                 # "" => generate/keep a random 32-byte hex
   apiKeyHmacSecret: ""          # "" => generate/keep a random 32-byte hex
+  # Control-plane RSA signing keypair (runner + service tokens). Leave BOTH empty
+  # to generate and keep a pair. To pin them, supply both — the verify-only pods
+  # (data-spine) get the public half and never the signer:
+  #   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out k.pem
+  #   openssl pkey -in k.pem -pubout
+  # NEVER mounted into an agent-runner; the operator injects only the public half.
+  serviceIdentityPrivateKey: ""
+  serviceIdentityPublicKey: ""
+  # At-rest credential encryption key. "" => generate/keep a valid Fernet key.
+  fernetKey: ""
 
 # ---------------------------------------------------------------------------
 # priva-config ConfigMap (shared non-secret bootstrap env for CP/operator/runner).

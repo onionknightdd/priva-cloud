@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import tarfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -21,6 +22,8 @@ from priva_common.audit_log import AuditEntry, get_audit_logger
 from ..deps import require_user
 from priva_common import skill_exclude as _skill_exclude
 from ..services.skills import (
+    MAX_UPLOAD_SIZE,
+    _validate_skill_name,
     _resolve_skills_dir,
     _safe_resolve,
     delete_skill,
@@ -33,6 +36,10 @@ from ..services.skills import (
 logger = get_app_logger(__name__)
 
 router = APIRouter(prefix="/api/sandbox/resource/skills", tags=["skills"])
+
+# The download packs the whole skill dir into memory. Bound it: the directory is
+# writable by the agent itself, so it is not covered by the upload limits.
+MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 
 
 @router.get("/", response_model=SkillListResponse)
@@ -94,11 +101,28 @@ async def download_skill_endpoint(
     cwd: str | None = None,
     user: UserRecord = Depends(require_user),
 ):
+    _validate_skill_name(name)
     skills_dir = _resolve_skills_dir(scope, cwd)
     _safe_resolve(skills_dir, name)
     skill_dir = skills_dir / name
     if not skill_dir.is_dir():
         raise HTTPException(404, "Skill not found")
+
+    # The archive is built in memory, and nothing bounds what the directory
+    # holds — the upload caps apply to uploads, but the agent's own Write tool
+    # and the user_files upload both write here too. Measure before packing.
+    total = 0
+    for root, _dirs, files in os.walk(skill_dir):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                continue
+    if total > MAX_DOWNLOAD_BYTES:
+        raise HTTPException(
+            413,
+            f"Skill is too large to download ({total // (1024 * 1024)}MB, "
+            f"limit {MAX_DOWNLOAD_BYTES // (1024 * 1024)}MB)")
 
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
@@ -142,7 +166,12 @@ async def upload_skill_endpoint(
     cwd: str | None = Form(None),
     user: UserRecord = Depends(require_user),
 ):
-    file_data = await file.read()
+    # upload_skill() enforces MAX_UPLOAD_SIZE, but only after the body is fully
+    # materialised — read one byte past it instead.
+    file_data = await file.read(MAX_UPLOAD_SIZE + 1)
+    if len(file_data) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            413, f"File exceeds {MAX_UPLOAD_SIZE // (1024 * 1024)}MB size limit")
     skill_name, skill_scope, skill_cwd = upload_skill(
         scope, cwd, file_data, file.filename or "upload.zip", user.username
     )

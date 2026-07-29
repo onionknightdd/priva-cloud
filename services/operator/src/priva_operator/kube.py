@@ -12,6 +12,7 @@ import time
 
 from kubernetes import client, config
 
+from priva_common import service_identity, service_token
 from priva_common.logging import get_app_logger
 from priva_operator import GROUP, PLURAL, VERSION, names
 from priva_operator.storage_backend import MountInfo, get_backend
@@ -223,6 +224,10 @@ def terminal_template_hash(
 
 # --- manifest builders ------------------------------------------------------
 
+def _runner_tmp_size_limit(settings) -> str:
+    return getattr(settings.kubernetes, "runner_tmp_size_limit", "512Mi")
+
+
 def _data_volume(mount_info: MountInfo) -> dict:
     """The shared-export volume source for the runner's /workspace mount."""
     return {"name": "data", "persistentVolumeClaim": {"claimName": mount_info.claim}}
@@ -310,10 +315,28 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                             # NOTE: no IS_SANDBOX — the claude CLI refuses
                             # --dangerously-skip-permissions only as root; running non-root
                             # (runAsUser above) satisfies it without the escape (byte-path.md).
+                            # --- workload identity (replaces priva-shared-secret) ---
+                            # PUBLIC key only: the runner verifies control-plane-minted
+                            # runner tokens and can mint nothing. Public by definition, so
+                            # inlining it is safe.
+                            {"name": "PRIVA_SERVICE_IDENTITY__PUBLIC_KEY",
+                             "value": service_identity.public_key()},
+                            # Account-scoped capability, NOT a signing key. The tenant can
+                            # read this out of their own env and gain only what this account
+                            # already has: data-spine's ACL pins it to account_id and to the
+                            # narrow method set the runner actually uses (data_spine/authz.py).
+                            {"name": "PRIVA_DATASPINE__SERVICE_TOKEN",
+                             "value": service_token.mint("agent-runner", account_id=account_id)},
                         ],
                         "envFrom": [
                             {"configMapRef": {"name": "priva-config"}},
-                            {"secretRef": {"name": "priva-shared-secret"}},
+                            # NO priva-shared-secret. It carries the platform JWT signing
+                            # secret and the api-key HMAC secret; mounting them here put
+                            # them in reach of the tenant's own agent (plain `env`, or
+                            # /proc/self/environ via the file API), which yielded a forged
+                            # `sub: "admin"` login JWT — full platform takeover. The
+                            # terminal pod has always omitted this; the runner was the
+                            # un-fixed twin.
                             # No per-account creds Secret: BYOK creds live in the pod's own
                             # /workspace/.claude/settings.json on the PVC, read by the CLI.
                         ],
@@ -333,11 +356,23 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                     }],
                     "volumes": [
                         _data_volume(mount_info),
-                        {"name": "tmp", "emptyDir": {}},
-                        # optional:True → a pod still starts if the CM isn't created
-                        # yet (fail-open, consistent with the hooks-snapshot policy).
+                        # Bounded: Starlette spools multipart uploads here before any
+                        # route code runs, so an unbounded emptyDir lets a tenant fill
+                        # the node's ephemeral storage and get the pod evicted. The
+                        # terminal pod has always capped its own /tmp.
+                        {"name": "tmp", "emptyDir": {"sizeLimit": _runner_tmp_size_limit(settings)}},
+                        # optional:False → a pod will NOT start without the enforced
+                        # admin hook policy. This mount IS the enforcement: with
+                        # optional:True a data-spine blip during the operator's
+                        # render left the ConfigMap absent, the pod started with an
+                        # empty policy dir, and every enforced hook silently stopped
+                        # firing while the runner still reported Ready — a security
+                        # control that disappears on error is not a control.
+                        # Availability trade-off is deliberate: no policy, no runner.
+                        # The operator creates the CM at startup (reconcile.py
+                        # bootstrap_managed_policy) before any pod mounts it.
                         {"name": MANAGED_POLICY_VOLUME,
-                         "configMap": {"name": MANAGED_POLICY_CM, "optional": True}},
+                         "configMap": {"name": MANAGED_POLICY_CM, "optional": False}},
                     ],
                 },
             },
@@ -345,7 +380,7 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
     }
 
 
-def ensure_managed_policy_configmap(namespace) -> bool:
+def ensure_managed_policy_configmap(namespace, *, strict: bool = False) -> bool:
     """Render the global enforced-hook policy into the shared managed-policy CM.
 
     Reads enforced+enabled command policies from data-spine and renders the
@@ -355,6 +390,10 @@ def ensure_managed_policy_configmap(namespace) -> bool:
     per-account handler costs one read and no write in steady state. Fail-soft:
     a data-spine blip logs and returns (pods fail-open on the optional mount).
     Returns True when a create/replace was performed.
+
+    Fail-soft by default (periodic reconcile), fail-loud under ``strict`` (boot).
+    NOTE: the mount is optional:False since the enforcement hardening — a missing
+    ConfigMap blocks every runner pod, it does not fail open.
     """
     try:
         from priva_common.dataplane import get_client
@@ -364,6 +403,12 @@ def ensure_managed_policy_configmap(namespace) -> bool:
         enforced = [p for p in rows if p.enforced and p.hook_type == "command"]
         data = render.render_config_map_data(enforced)
     except Exception:
+        # strict=True is the startup gate: the runner mounts this ConfigMap with
+        # optional:False, so "render skipped" is no longer a degraded mode — it
+        # means no tenant pod can start. Swallowing it here made the caller's
+        # raise unreachable for the very case its error message names.
+        if strict:
+            raise
         logger.warning("managed-policy render skipped (data-spine unreachable?)", exc_info=True)
         return False
 

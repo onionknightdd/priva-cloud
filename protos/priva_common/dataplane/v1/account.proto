@@ -17,6 +17,12 @@ message Account {
   string created_at = 8;
   string updated_at = 9;
   string agent_runner_type = 10;  // auto_scale | persistent
+  // Opaque digest of the stored password hash. The hash itself is deliberately
+  // never serialized (see converters.user_from_pb), which left the control-plane
+  // unable to bind a session to the credential it was issued for — a password
+  // change revoked nothing. This carries only a one-way digest, so the binding
+  // works without putting the bcrypt hash on the wire.
+  string password_epoch = 11;
 }
 
 message UsernameRef { string username = 1; }

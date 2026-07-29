@@ -15,11 +15,27 @@ spec:
     metadata:
       labels: {app: operator}
     spec:
+      securityContext:
+        # Matches USER 10001 in the image. fsGroup makes mounted volumes (e.g.
+        # data-spine's PVC) group-writable for the non-root uid.
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       serviceAccountName: priva-operator
       containers:
         - name: operator
           image: priva/operator:dev
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "priva_operator"]
+          env:
+            # Workload identity presented to data-spine / the scheduler API.
+            - name: PRIVA_SERVICE_IDENTITY__SERVICE_NAME
+              value: "operator"
           envFrom:
             - configMapRef: {name: priva-config}
+            - secretRef: {name: priva-shared-secret}

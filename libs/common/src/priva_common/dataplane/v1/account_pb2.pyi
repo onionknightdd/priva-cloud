@@ -8,7 +8,7 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class Account(_message.Message):
-    __slots__ = ("account_id", "username", "role", "status", "api_key", "feishu_user_id", "feishu_display_name", "created_at", "updated_at", "agent_runner_type")
+    __slots__ = ("account_id", "username", "role", "status", "api_key", "feishu_user_id", "feishu_display_name", "created_at", "updated_at", "agent_runner_type", "password_epoch")
     ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
     USERNAME_FIELD_NUMBER: _ClassVar[int]
     ROLE_FIELD_NUMBER: _ClassVar[int]
@@ -19,6 +19,7 @@ class Account(_message.Message):
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
     AGENT_RUNNER_TYPE_FIELD_NUMBER: _ClassVar[int]
+    PASSWORD_EPOCH_FIELD_NUMBER: _ClassVar[int]
     account_id: str
     username: str
     role: str
@@ -29,7 +30,8 @@ class Account(_message.Message):
     created_at: str
     updated_at: str
     agent_runner_type: str
-    def __init__(self, account_id: _Optional[str] = ..., username: _Optional[str] = ..., role: _Optional[str] = ..., status: _Optional[str] = ..., api_key: _Optional[str] = ..., feishu_user_id: _Optional[str] = ..., feishu_display_name: _Optional[str] = ..., created_at: _Optional[str] = ..., updated_at: _Optional[str] = ..., agent_runner_type: _Optional[str] = ...) -> None: ...
+    password_epoch: str
+    def __init__(self, account_id: _Optional[str] = ..., username: _Optional[str] = ..., role: _Optional[str] = ..., status: _Optional[str] = ..., api_key: _Optional[str] = ..., feishu_user_id: _Optional[str] = ..., feishu_display_name: _Optional[str] = ..., created_at: _Optional[str] = ..., updated_at: _Optional[str] = ..., agent_runner_type: _Optional[str] = ..., password_epoch: _Optional[str] = ...) -> None: ...
 
 class UsernameRef(_message.Message):
     __slots__ = ("username",)

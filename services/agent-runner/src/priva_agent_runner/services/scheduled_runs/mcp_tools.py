@@ -31,6 +31,7 @@ from priva_common.models.scheduler import (
     ScheduledJobDefinition,
     UserScriptConfig,
 )
+from priva_common.service_token import auth_header
 
 logger = get_app_logger(__name__)
 
@@ -361,7 +362,7 @@ def build_scheduler_tools(username: str) -> list:
         url = f"{get_settings().scheduler.internal_url}/internal/trigger/{job.id}"
         try:
             async with httpx.AsyncClient(trust_env=False, timeout=10.0) as cx:
-                resp = await cx.post(url)
+                resp = await cx.post(url, headers=auth_header())
         except httpx.HTTPError as exc:
             return _text(f"Scheduler unreachable: {exc}", error=True)
         if resp.status_code != 202:

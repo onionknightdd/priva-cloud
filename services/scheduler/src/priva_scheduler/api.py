@@ -10,19 +10,36 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Response
 
 from priva_common.logging import get_app_logger
 from priva_common.metrics import render
+from priva_common.service_token import ServicePrincipal, verify_service
 
 from .engine import SchedulerEngine
 
 logger = get_app_logger(__name__)
 
 
+def _principal(token: str | None) -> ServicePrincipal:
+    """Authenticate an internal caller. Only workloads holding the control-plane
+    signing key can mint one of these, so a role cannot be self-asserted."""
+    if not token:
+        raise HTTPException(401, "missing service token")
+    try:
+        return verify_service(token)
+    except ValueError as exc:
+        raise HTTPException(401, f"invalid service token: {exc}") from exc
+
+
 def create_app(engine: SchedulerEngine) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        # Fail loudly if this pod has no signing identity: the fallback is an
+        # ephemeral in-process keypair, which makes every token this service
+        # mints unverifiable by its peers while readiness stays green.
+        from priva_common.service_identity import assert_configured
+        assert_configured(signing=True)
         await engine.start()
         try:
             yield
@@ -49,15 +66,26 @@ def create_app(engine: SchedulerEngine) -> FastAPI:
         return Response(content=body, media_type=content_type)
 
     @app.post("/internal/trigger/{job_id}", status_code=202)
-    async def trigger(job_id: str):
-        # The pipeline includes the wake (potentially ~a minute) — detach it
-        # so the run-now caller gets a fast ack; StartRun makes the run show
-        # RUNNING in history as soon as the claim wins.
+    async def trigger(job_id: str, x_priva_service_token: str | None = Header(default=None)):
+        # This used to take a bare job_id with no auth at all. Since the
+        # scheduler resolves the job's owner itself, then mints THAT account's
+        # runner token and dials THAT account's pod, an anonymous caller could
+        # make any tenant's runner execute a prompt it had just written into the
+        # victim's job — with the victim's credentials. Identify the caller
+        # first, and pin a tenant caller to its own jobs.
         import asyncio
 
+        principal = _principal(x_priva_service_token)
         exists = await asyncio.to_thread(engine._client.scheduler.get_job, job_id)
         if exists is None:
             raise HTTPException(404, "job not found")
+        if not principal.is_control_plane:
+            owned = await asyncio.to_thread(
+                engine._client.scheduler.list_jobs, principal.account_id)
+            if not any(j.id == job_id for j in owned):
+                logger.warning("DENY trigger {} for {} (job not owned)", job_id, principal)
+                # 404, not 403: a tenant must not be able to probe which job ids exist.
+                raise HTTPException(404, "job not found")
         task = asyncio.create_task(engine.trigger_now(job_id), name=f"trigger-{job_id}")
         task.add_done_callback(_log_trigger_outcome)
         return {"status": "accepted", "job_id": job_id}

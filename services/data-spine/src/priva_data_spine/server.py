@@ -18,6 +18,8 @@ from concurrent import futures
 
 import grpc
 
+from priva_common.crypto import assert_encryption_key_configured
+from priva_common.service_identity import assert_configured as assert_service_identity_configured
 from priva_common.dataplane import converters as cv
 from priva_common.dataplane.v1 import (
     account_pb2,
@@ -43,8 +45,10 @@ from priva_common.dataplane.v1 import (
     scheduler_pb2_grpc,
 )
 from priva_common.logging import get_app_logger
+from priva_common.models.auth import password_epoch
 from priva_common.models.scheduler import JobRunRecord, ScheduledJobDefinition
 
+from .authz import AuthzInterceptor
 from .service import build_inprocess_client, build_repo, describe_store
 
 logger = get_app_logger(__name__)
@@ -70,6 +74,8 @@ def _acct_pb(u) -> account_pb2.Account:
         created_at=_s(u.created_at),
         updated_at=_s(u.updated_at),
         agent_runner_type=u.agent_runner_type or "auto_scale",
+        # Digest only — the bcrypt hash itself must not leave this process.
+        password_epoch=password_epoch(u.password_hash),
     )
 
 
@@ -737,7 +743,17 @@ def build_server(settings, max_workers: int = 16, repo=None) -> grpc.Server:
     # repo injection is for tests (lets the caller close the pool/file); prod
     # callers pass settings only.
     client = build_inprocess_client(repo if repo is not None else build_repo(settings), settings)
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers))
+    # Authenticate + authorize EVERY rpc. Without this the servicers below trust
+    # request.account_id verbatim, so anything that can reach the port owns the
+    # whole fleet (see authz.py).
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=max_workers),
+        interceptors=[AuthzInterceptor(client)],
+        # Unbounded concurrent RPCs queue against a fixed thread pool, so a
+        # caller can pin memory in the single-writer process just by opening
+        # streams. Reject past the pool's depth instead of queueing forever.
+        maximum_concurrent_rpcs=max_workers * 4,
+    )
     account_pb2_grpc.add_AccountServiceServicer_to_server(_AccountServicer(client.accounts), server)
     binding_pb2_grpc.add_BindingServiceServicer_to_server(_BindingServicer(client.bindings), server)
     quota_pb2_grpc.add_QuotaServiceServicer_to_server(_QuotaServicer(client.quota), server)
@@ -761,10 +777,23 @@ def serve(settings=None, host: str = "0.0.0.0", port: int = 50051) -> int:
     from priva_common.config import get_settings
 
     s = settings or get_settings()
+    # data-spine is the only process that encrypts stored credentials. Die at boot
+    # on a missing PRIVA_FERNET_KEY rather than silently writing api keys and
+    # Feishu secrets under the public dev fallback key.
+    assert_encryption_key_configured()
+    # data-spine only VERIFIES service tokens (it never mints), so it must be
+    # given the public half explicitly. Without it the process would fall back to
+    # an ephemeral keypair and reject every caller while the TCP readiness probe
+    # kept the pod marked healthy.
+    assert_service_identity_configured()
     server = build_server(s)
     addr = f"{host}:{port}"
     server.add_insecure_port(addr)
     server.start()
-    logger.info("data-spine gRPC serving on {} ({})", addr, describe_store(s))
+    # Plaintext transport, but every rpc is authenticated + authorized (authz.py).
+    # mTLS is the follow-up; until then the token is what separates the control
+    # plane from tenant runners, not the network.
+    logger.info("data-spine gRPC serving on {} ({}) — service-token authz ENFORCED",
+                addr, describe_store(s))
     server.wait_for_termination()
     return 0

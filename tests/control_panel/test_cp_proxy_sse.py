@@ -154,22 +154,29 @@ def test_sse_response_is_not_cacheable(client):
         assert res.headers["x-accel-buffering"] == "no"
 
 
-def test_non_sse_post_still_buffers(client):
-    """Callers without Accept: text/event-stream keep the plain buffered path.
+def test_non_sse_responses_are_relayed_too(client):
+    """Ordinary responses are relayed as well, not buffered.
 
-    Also the control for the test above: same server, same stalling upstream,
-    only the Accept header differs — and here the first byte cannot arrive until
-    the upstream is done. That contrast is what proves the relay assertion is
-    measuring the proxy and not the harness.
+    This used to be the negative control, asserting the non-SSE path could not
+    answer before the upstream finished. That buffering was itself the problem:
+    the lane exists to carry LARGE bodies (100MB downloads, big transcripts), so
+    `r.content` held the whole thing in the shared control-plane process. Both
+    paths now stream; the SSE assertion above stands on its own, since a
+    buffering proxy cannot physically emit an event before the upstream's stall
+    elapses.
     """
     started = time.monotonic()
-    res = client.post(
-        "/api/cp-proxy/agent/run/stream?slow=1",
-        json={"message": "hi"},
-        headers={"Authorization": "Bearer t"},
-    )
-    elapsed = time.monotonic() - started
+    with client.stream(
+        "POST", "/api/cp-proxy/agent/run/stream?slow=1",
+        json={"message": "hi"}, headers={"Authorization": "Bearer t"},
+    ) as res:
+        assert res.status_code == 200
+        lines = res.iter_lines()
+        first = next(lines)
+        elapsed = time.monotonic() - started
+        body = "\n".join([first, *lines])
 
-    assert res.status_code == 200
-    assert "event: result" in res.text
-    assert elapsed >= STALL_SECONDS
+    assert first == "event: stream_init"
+    assert elapsed < STALL_SECONDS / 2, (
+        f"first byte took {elapsed:.2f}s — the response was buffered")
+    assert "event: result" in body

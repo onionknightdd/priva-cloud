@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import mimetypes
 import os
-import shutil
 import stat
 from urllib.parse import quote
 
@@ -16,6 +15,14 @@ from priva_common.models.admin_files import DirectoryListResponse, FileEntry, Fi
 from ..services.auth import require_admin
 
 logger = get_app_logger(__name__)
+
+# Per-file ceiling for admin uploads (mirrors the agent-runner's user_files cap).
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+class _TooLarge(Exception):
+    """Internal signal: unwinds to a 413 after the partial file is cleaned up."""
 
 router = APIRouter(
     prefix="/api/admin/files",
@@ -215,9 +222,21 @@ async def upload_file(
     if os.path.exists(target_path):
         raise HTTPException(409, f"File already exists: {filename}")
 
+    # Chunked with a running cap — the twin of the agent-runner's user_files
+    # upload. copyfileobj had no ceiling, so repeated admin uploads could fill
+    # the control-plane pod's disk; the partial file is removed on reject.
     try:
+        written = 0
         with open(target_path, "wb") as dest:
-            shutil.copyfileobj(file.file, dest)
+            while chunk := file.file.read(_UPLOAD_CHUNK_BYTES):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise _TooLarge
+                dest.write(chunk)
+    except _TooLarge:
+        os.unlink(target_path)
+        raise HTTPException(
+            413, f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB upload limit")
     except PermissionError:
         raise HTTPException(403, f"Access denied: {real_dir}")
 

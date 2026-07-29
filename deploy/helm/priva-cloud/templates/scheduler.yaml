@@ -16,17 +16,36 @@ spec:
     matchLabels: {app: scheduler}
   template:
     metadata:
+      annotations:
+        # Roll when the identity/credential Secrets change. Env-injected Secrets
+        # are read once at container start, so without this an upgrade that
+        # re-keys anything leaves old and new pods signing/verifying with
+        # different material until something else happens to restart them.
+        checksum/secrets: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       labels: {app: scheduler}
     spec:
+      securityContext:
+        # Matches USER 10001 in the image. fsGroup makes mounted volumes (e.g.
+        # data-spine's PVC) group-writable for the non-root uid.
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       {{- include "priva-cloud.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: priva-scheduler
       containers:
         - name: scheduler
           image: {{ include "priva-cloud.image" (dict "svc" .Values.services.scheduler "root" .) }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["python", "-m", "priva_scheduler"]
           ports: [{containerPort: 8082, name: http}]
           env:
+            # Workload identity presented to data-spine / the scheduler API.
+            - {name: PRIVA_SERVICE_IDENTITY__SERVICE_NAME, value: "scheduler"}
             - {name: SCHEDULER_HOST, value: "0.0.0.0"}
             - {name: SCHEDULER_PORT, value: "8082"}
             - {name: PRIVA_LOG_DIR, value: {{ .Values.config.logDir | quote }}}
@@ -35,7 +54,7 @@ spec:
             - {name: PRIVA_DATASPINE__GRPC_DSN, value: "data-spine:50051"}
           envFrom:
             - configMapRef: {name: {{ .Values.config.name }}}
-            # jwt_secret / api_key_hmac_secret: mint the same runner tokens the
+            # service_identity private key: mints the same runner tokens the
             # control-panel edge mints (the pod pins them to its account).
             - secretRef: {name: {{ .Values.sharedSecret.name }}}
           {{- with .Values.scheduler.resources }}

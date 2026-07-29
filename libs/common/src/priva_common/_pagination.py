@@ -33,6 +33,37 @@ logger = get_app_logger(__name__)
 # Cursor encode / decode
 # ---------------------------------------------------------------------------
 
+
+# A day's JSONL grows with the caller's own activity, and paging read the whole
+# file into memory every request. Records are appended in time order and pages
+# are served newest-first, so only the tail is ever needed.
+MAX_DAILY_SCAN_BYTES = 8 * 1024 * 1024
+
+
+def _tail_lines(f, limit: int) -> list[str]:
+    """Read at most the last `limit` bytes of an open text file, as whole lines.
+
+    Seeks on the underlying BINARY buffer. Seeking a text-mode file to an
+    arbitrary byte offset resets the UTF-8 decoder there, and a boundary landing
+    mid-character raises UnicodeDecodeError — which the callers turn into
+    "drop this whole day's file". With CJK content that is roughly two offsets
+    in three, so a day's audit log would vanish rather than be truncated.
+    """
+    import os as _os
+
+    size = _os.fstat(f.fileno()).st_size
+    if size <= limit:
+        return f.read().splitlines()
+    raw = f.buffer if hasattr(f, "buffer") else f.detach()
+    raw.seek(size - limit)
+    chunk = raw.read()
+    # The offset almost certainly landed mid-record; drop the partial first line.
+    if b"\n" in chunk:
+        chunk = chunk.split(b"\n", 1)[1]
+    else:
+        return []
+    return chunk.decode("utf-8", "replace").splitlines()
+
 def encode_cursor(ts_iso: str, rid: str) -> str:
     """Encode (timestamp ISO string, record id) as an opaque cursor."""
     raw = f"{ts_iso}|{rid}".encode()
@@ -201,7 +232,7 @@ def _read_records_before(
             with open(path, "r") as f:
                 fcntl.flock(f, fcntl.LOCK_SH)
                 try:
-                    lines = f.read().splitlines()
+                    lines = _tail_lines(f, MAX_DAILY_SCAN_BYTES)
                 finally:
                     fcntl.flock(f, fcntl.LOCK_UN)
         except Exception:
@@ -271,7 +302,7 @@ def _read_records_after(
             with open(path, "r") as f:
                 fcntl.flock(f, fcntl.LOCK_SH)
                 try:
-                    lines = f.read().splitlines()
+                    lines = _tail_lines(f, MAX_DAILY_SCAN_BYTES)
                 finally:
                     fcntl.flock(f, fcntl.LOCK_UN)
         except Exception:

@@ -29,7 +29,13 @@ logger = get_app_logger(__name__)
 
 SKILL_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 RESERVED_WORDS = {"anthropic", "claude", "system", "admin", "root"}
-MAX_UPLOAD_SIZE = 3 * 1024 * 1024  # 3MB
+MAX_UPLOAD_SIZE = 3 * 1024 * 1024  # 3MB — the COMPRESSED upload
+# Decompression bounds. The upload cap above says nothing about what an archive
+# expands to, which is the whole trick behind a zip bomb.
+MAX_ARCHIVE_ENTRIES = 2000
+MAX_ENTRY_BYTES = 5 * 1024 * 1024        # one file, uncompressed
+MAX_TOTAL_BYTES = 50 * 1024 * 1024       # whole archive, uncompressed
+MAX_COMPRESSION_RATIO = 200
 MAX_FILE_READ_SIZE = 1 * 1024 * 1024  # 1MB
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 1024
@@ -273,9 +279,20 @@ def _validate_frontmatter(frontmatter: dict) -> None:
 
 
 def _safe_resolve(base: Path, relative: str) -> Path:
-    """Resolve path and verify it's inside base directory."""
+    """Resolve path and verify it's inside base directory.
+
+    Containment is a path-component test, not a string-prefix test: with
+    ``startswith`` a base of ``…/.claude/skills`` also "contains" its sibling
+    ``…/.claude/skills-evil``, so a name like ``../skills-evil/x`` resolved
+    outside the intended tree while passing the check.
+    """
     resolved = (base / relative).resolve()
-    if not str(resolved).startswith(str(base.resolve())):
+    root = base.resolve()
+    # The base itself is NOT a valid target. Permitting it meant name="." (or
+    # "", "./", "a/..") resolved to the skills ROOT, and delete_skill then
+    # rmtree'd every skill the user had — a one-request wipe that the audit log
+    # recorded as an ordinary delete of a skill called ".".
+    if resolved == root or not resolved.is_relative_to(root):
         raise HTTPException(400, "Path traversal detected")
     return resolved
 
@@ -334,6 +351,8 @@ def list_skills(username: str) -> SkillListResponse:
 
 
 def get_skill_detail(scope: SkillScope, cwd: str | None, name: str, username: str) -> SkillDetailResponse:
+    # skill_hub validates the name on every entry point; these three never did.
+    _validate_skill_name(name)
     skills_dir = _resolve_skills_dir(scope, cwd)
     skill_path = _safe_resolve(skills_dir, name)
     if not skill_path.is_dir():
@@ -361,6 +380,8 @@ def get_skill_detail(scope: SkillScope, cwd: str | None, name: str, username: st
 
 
 def get_file_content(scope: SkillScope, cwd: str | None, name: str, path: str, username: str) -> SkillFileResponse:
+    # skill_hub validates the name on every entry point; these three never did.
+    _validate_skill_name(name)
     skills_dir = _resolve_skills_dir(scope, cwd)
     skill_path = _safe_resolve(skills_dir, name)
     if not skill_path.is_dir():
@@ -393,41 +414,63 @@ def upload_skill(
         raise HTTPException(413, f"File exceeds {MAX_UPLOAD_SIZE // (1024*1024)}MB size limit")
 
     # Validate file format and extract
+    members, read_file = read_archive(file_data, filename)
+    skill_dir_name, fm = validate_bundle(members, read_file)
+    skill_name = fm["name"]
+
+    target_dir = _resolve_skills_dir(scope, cwd)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    dest = target_dir / skill_name
+
+    if dest.exists():  # replace an existing skill of the same name
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+
+    write_bundle(members, read_file, skill_dir_name, dest)
+    return skill_name, scope, cwd
+
+
+# --- shared archive pipeline -------------------------------------------------
+# ONE implementation. The Skill Hub used to carry a near-verbatim copy of the
+# block above, and when the traversal guards were tightened here the copy kept
+# the old `".." in parts` check and the bare `dest / relative` write — so the
+# same archive that was rejected on one route still escaped on the other.
+
+
+def read_archive(file_data: bytes, filename: str) -> tuple[list[str], callable]:
+    """Dispatch on the extension. Both extractors enforce the bomb limits."""
     lower_name = filename.lower()
     if lower_name.endswith(".zip") or lower_name.endswith(".skill"):
-        members, read_file = _extract_zip(file_data)
-    elif lower_name.endswith(".tar.gz") or lower_name.endswith(".tgz"):
-        members, read_file = _extract_tar(file_data, "r:gz")
-    elif lower_name.endswith(".tar"):
-        members, read_file = _extract_tar(file_data, "r:")
-    else:
-        raise HTTPException(400, "Only .zip, .tar, .tar.gz, and .skill files are accepted")
+        return _extract_zip(file_data)
+    if lower_name.endswith(".tar.gz") or lower_name.endswith(".tgz"):
+        return _extract_tar(file_data, "r:gz")
+    if lower_name.endswith(".tar"):
+        return _extract_tar(file_data, "r:")
+    raise HTTPException(400, "Only .zip, .tar, .tar.gz, and .skill files are accepted")
 
-    # Find top-level directory and validate structure
+
+def validate_bundle(members: list[str], read_file) -> tuple[str, dict]:
+    """Validate every entry name, resolve the single top-level dir, and parse the
+    SKILL.md frontmatter. Returns ``(top_dir, frontmatter)``."""
     top_dirs = set()
     for m in members:
+        _validate_member_name(m)
         parts = m.split("/")
         if parts[0]:
             top_dirs.add(parts[0])
-        # Path traversal check
-        if ".." in parts:
-            raise HTTPException(400, "Archive contains path traversal (..)")
 
     if len(top_dirs) != 1:
         raise HTTPException(400, "Archive must contain exactly one top-level directory")
 
     skill_dir_name = top_dirs.pop()
     skill_md_path = f"{skill_dir_name}/SKILL.md"
-
     if skill_md_path not in members:
         raise HTTPException(400, f"Archive must contain {skill_dir_name}/SKILL.md")
 
-    # Read and validate SKILL.md frontmatter
     skill_md_content = read_file(skill_md_path)
     if skill_md_content is None:
         raise HTTPException(400, "Could not read SKILL.md from archive")
 
-    # Parse frontmatter
     text = skill_md_content.decode("utf-8", errors="replace")
     fm = {}
     if text.startswith("---"):
@@ -439,36 +482,91 @@ def upload_skill(
                 raise HTTPException(422, "SKILL.md has invalid YAML frontmatter")
 
     _validate_frontmatter(fm)
-    skill_name = fm["name"]
+    return skill_dir_name, fm
 
-    # Extract to target directory
-    target_dir = _resolve_skills_dir(scope, cwd)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    dest = target_dir / skill_name
 
-    # Remove existing if present
-    if dest.exists():
-        shutil.rmtree(dest)
+def write_bundle(members: list[str], read_file, skill_dir_name: str, dest: Path) -> None:
+    """Write the bundle under ``dest``, every destination path contained.
 
-    dest.mkdir(parents=True, exist_ok=True)
-
-    # Write all files
+    _validate_member_name has already rejected the known-bad shapes; resolving
+    each write against ``dest`` catches whatever it missed and any symlink
+    already on disk that would redirect the write out of the tree.
+    """
     for member_path in members:
         if not member_path.startswith(skill_dir_name + "/"):
             continue
         relative = member_path[len(skill_dir_name) + 1 :]
         if not relative or member_path.endswith("/"):
-            # Directory entry
             if relative:
-                (dest / relative).mkdir(parents=True, exist_ok=True)
+                _safe_resolve(dest, relative).mkdir(parents=True, exist_ok=True)
             continue
         content = read_file(member_path)
         if content is not None:
-            file_dest = dest / relative
+            file_dest = _safe_resolve(dest, relative)
             file_dest.parent.mkdir(parents=True, exist_ok=True)
             file_dest.write_bytes(content)
 
-    return skill_name, scope, cwd
+
+def _validate_member_name(name: str) -> None:
+    """Reject archive entry names that can escape the extraction directory.
+
+    A bare ``".." in parts`` check is not enough. ``demo//tmp/pwn`` has no ``..``
+    and passes a ``startswith("demo/")`` prefix test, but stripping the leading
+    ``demo`` leaves ``/tmp/pwn`` — and ``Path("…/demo") / "/tmp/pwn"`` discards
+    the base entirely, writing to an absolute path. Empty components are the bug;
+    the rest below are the neighbouring shapes.
+    """
+    if not name or name in (".", "./"):
+        raise HTTPException(400, "Archive contains an empty entry name")
+    if "\x00" in name:
+        raise HTTPException(400, "Archive entry name contains NUL")
+    if "\\" in name:
+        # Windows-style separators are not split by the POSIX logic below, so a
+        # component like `..\..\x` would slip through the traversal check.
+        raise HTTPException(400, f"Archive entry name contains a backslash: {name}")
+    if name.startswith("/") or (len(name) > 1 and name[1] == ":"):
+        raise HTTPException(400, f"Archive contains an absolute path: {name}")
+    parts = name.split("/")
+    if ".." in parts:
+        raise HTTPException(400, "Archive contains path traversal (..)")
+    # Trailing "" is just the directory-entry marker ("demo/"); an empty part
+    # anywhere else is a doubled separator, i.e. the escape above.
+    if "" in parts[:-1]:
+        raise HTTPException(400, f"Archive entry name has an empty path component: {name}")
+
+
+def _guard_declared(sizes: list[int], compressed_len: int) -> None:
+    """Reject decompression bombs from the archive index, before reading data.
+
+    MAX_UPLOAD_SIZE bounds only the COMPRESSED upload; deflate reaches ~1000:1,
+    so a 3 MB archive within that limit can expand to gigabytes and OOM the pod.
+    """
+    if len(sizes) > MAX_ARCHIVE_ENTRIES:
+        raise HTTPException(400, f"Archive has too many entries (max {MAX_ARCHIVE_ENTRIES})")
+    if any(size > MAX_ENTRY_BYTES for size in sizes):
+        raise HTTPException(
+            400, f"Archive entry exceeds {MAX_ENTRY_BYTES // (1024 * 1024)}MB uncompressed")
+    total = sum(sizes)
+    if total > MAX_TOTAL_BYTES:
+        raise HTTPException(
+            400, f"Archive expands to more than {MAX_TOTAL_BYTES // (1024 * 1024)}MB")
+    if compressed_len and total > compressed_len * MAX_COMPRESSION_RATIO:
+        raise HTTPException(400, "Archive compression ratio looks like a decompression bomb")
+
+
+def _read_bounded(fh, budget: list[int]) -> bytes:
+    """Read one member with a hard cap, decrementing a shared total budget.
+
+    The declared sizes checked above come from attacker-supplied headers and can
+    lie, so the actual read is bounded too: ask for one byte more than allowed
+    and reject if we get it.
+    """
+    allowed = min(MAX_ENTRY_BYTES, budget[0])
+    chunk = fh.read(allowed + 1)
+    if len(chunk) > allowed:
+        raise HTTPException(400, "Archive entry is larger than its declared size")
+    budget[0] -= len(chunk)
+    return chunk
 
 
 def _extract_zip(data: bytes) -> tuple[list[str], callable]:
@@ -477,37 +575,52 @@ def _extract_zip(data: bytes) -> tuple[list[str], callable]:
     except zipfile.BadZipFile:
         raise HTTPException(400, "Invalid zip file")
 
-    members = [info.filename for info in zf.infolist()]
+    infos = zf.infolist()
+    _guard_declared([i.file_size for i in infos], len(data))
+    budget = [MAX_TOTAL_BYTES]
 
     def read_file(path: str) -> bytes | None:
         try:
-            return zf.read(path)
+            with zf.open(path) as fh:
+                return _read_bounded(fh, budget)
         except KeyError:
             return None
 
-    return members, read_file
+    return [i.filename for i in infos], read_file
 
 
 def _extract_tar(data: bytes, mode: str) -> tuple[list[str], callable]:
     try:
         tf = tarfile.open(fileobj=io.BytesIO(data), mode=mode)
-    except (tarfile.TarError, Exception):
+        members = tf.getmembers()
+    except HTTPException:
+        raise
+    except Exception:
         raise HTTPException(400, "Invalid tar archive")
 
-    members = [m.name for m in tf.getmembers()]
+    # tar carries link/device/fifo entries that a plain "is it a file?" check
+    # would silently skip; refuse them outright so an archive cannot smuggle a
+    # symlink into the skill tree.
+    for m in members:
+        if not (m.isfile() or m.isdir()):
+            raise HTTPException(400, f"Archive contains an unsupported entry type: {m.name}")
+    _guard_declared([m.size for m in members], len(data))
+    budget = [MAX_TOTAL_BYTES]
 
     def read_file(path: str) -> bytes | None:
         try:
             member = tf.getmember(path)
-            f = tf.extractfile(member)
-            return f.read() if f else None
-        except (KeyError, AttributeError):
+        except KeyError:
             return None
+        fh = tf.extractfile(member)
+        return _read_bounded(fh, budget) if fh else None
 
-    return members, read_file
+    return [m.name for m in members], read_file
 
 
 def delete_skill(scope: SkillScope, cwd: str | None, name: str, username: str) -> None:
+    # skill_hub validates the name on every entry point; these three never did.
+    _validate_skill_name(name)
     skills_dir = _resolve_skills_dir(scope, cwd)
     skill_path = _safe_resolve(skills_dir, name)
     if not skill_path.is_dir():

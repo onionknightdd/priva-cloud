@@ -25,9 +25,20 @@ spec:
     metadata:
       labels: {app: data-spine}
     spec:
+      securityContext:
+        # Matches USER 10001 in the image. fsGroup makes mounted volumes (e.g.
+        # data-spine's PVC) group-writable for the non-root uid.
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: data-spine
           image: priva/data-spine:dev
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "priva_data_spine", "serve"]
           ports: [{containerPort: 50051, name: grpc}]
@@ -48,7 +59,9 @@ spec:
             - {name: PRIVA_LOG_DIR, value: "/tmp/logs"}
             - {name: PRIVA_SERVER__WORK_DIR, value: "/data"}
           envFrom:
-            - secretRef: {name: priva-shared-secret}   # api_key_hmac_secret / jwt_secret (lookup parity)
+            # hmac (api_key_lookup index) + fernet (at-rest credential encryption).
+            # NOT the signing key: data-spine verifies service tokens, never mints.
+            - secretRef: {name: priva-data-spine-secret}
           volumeMounts: [{name: data, mountPath: /data}]
           readinessProbe:
             tcpSocket: {port: 50051}

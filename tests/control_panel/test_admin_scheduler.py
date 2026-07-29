@@ -15,6 +15,7 @@ from priva_common.models.auth import UserRecord
 from priva_common.models.scheduler import CronTriggerConfig, ScheduledJobDefinition
 from priva_data_spine.server import build_server
 from priva_data_spine.service import build_repo
+from priva_common.service_token import HEADER
 
 ADMIN = UserRecord(username="root", password_hash="x", role="admin")
 
@@ -72,7 +73,10 @@ def test_trigger_proxies_and_maps_errors(harness):
         def __init__(self, *a, **kw): ...
         async def __aenter__(self): return self
         async def __aexit__(self, *a): return False
-        async def post(self, url):
+        async def post(self, url, **kw):
+            # The scheduler's internal API rejects anonymous callers, so the
+            # admin proxy must present this pod's control-plane identity.
+            assert HEADER in (kw.get("headers") or {}), "trigger proxy sent no service token"
             code = 202 if "/j0" in url else 404
             return httpx.Response(code, json={})
 

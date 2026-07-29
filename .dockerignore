@@ -17,3 +17,7 @@ web/user/src
 web/admin/src
 # tests aren't needed in runtime images
 tests/
+# Legacy monolith copy — nothing in services/ imports it, but `COPY . /app`
+# baked all 49 files into every image, carrying its own unreviewed
+# request handlers along as attack surface.
+priva/

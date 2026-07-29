@@ -18,6 +18,16 @@ from ..deps import get_user_workspace, require_user
 
 logger = get_app_logger(__name__)
 
+# Per-file upload ceiling. The volume quota is the backstop, but without a
+# request-level cap one upload can consume the whole account quota (and stall the
+# shared export) before the backstop notices.
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+class _TooLarge(Exception):
+    """Internal signal: unwinds to a 413 after the partial file is cleaned up."""
+
 router = APIRouter(
     prefix="/api/sandbox/files",
     tags=["files"],
@@ -240,9 +250,21 @@ async def upload_file(
     if os.path.exists(target_path):
         raise HTTPException(409, f"File already exists: {filename}")
 
+    # Copy with a running cap. Unbounded, one authenticated request could fill
+    # the account's volume (and the shared export behind it); the partial file is
+    # removed so a rejected upload leaves nothing behind.
     try:
+        written = 0
         with open(target_path, "wb") as dest:
-            shutil.copyfileobj(file.file, dest)
+            while chunk := file.file.read(_UPLOAD_CHUNK_BYTES):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise _TooLarge
+                dest.write(chunk)
+    except _TooLarge:
+        os.unlink(target_path)
+        raise HTTPException(
+            413, f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB upload limit")
     except PermissionError:
         raise HTTPException(403, f"Access denied: {real_dir}")
 

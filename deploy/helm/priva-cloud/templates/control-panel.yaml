@@ -14,25 +14,48 @@ spec:
     matchLabels: {app: control-panel}
   template:
     metadata:
+      annotations:
+        # Roll when the identity/credential Secrets change. Env-injected Secrets
+        # are read once at container start, so without this an upgrade that
+        # re-keys anything leaves old and new pods signing/verifying with
+        # different material until something else happens to restart them.
+        checksum/secrets: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       labels: {app: control-panel}
     spec:
+      securityContext:
+        # Matches USER 10001 in the image. fsGroup makes mounted volumes (e.g.
+        # data-spine's PVC) group-writable for the non-root uid.
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       {{- include "priva-cloud.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: priva-control-panel
       containers:
         - name: control-panel
           image: {{ include "priva-cloud.image" (dict "svc" .Values.services.controlPanel "root" .) }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["python", "-m", "priva_control_panel"]
           ports:
             - {containerPort: 8080, name: http}
             - {containerPort: 9000, name: extproc}
           env:
+            # The kubelet probes at the pod IP, so TrustedHost must accept it.
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            # Workload identity presented to data-spine / the scheduler API.
+            - {name: PRIVA_SERVICE_IDENTITY__SERVICE_NAME, value: "control-panel"}
             - {name: CONTROL_PANEL_HOST, value: "0.0.0.0"}
             - {name: CONTROL_PANEL_PORT, value: "8080"}
             - {name: PRIVA_SERVER__WORK_DIR, value: {{ .Values.controlPanel.workDir | quote }}}
           envFrom:
             - configMapRef: {name: {{ .Values.config.name }}}
-            - secretRef: {name: {{ .Values.sharedSecret.name }}}
+            - secretRef: {name: {{ .Values.sharedSecret.name }}}      # service-identity signing key
+            - secretRef: {name: priva-control-panel-secret}   # platform login JWT secret
           {{- with .Values.controlPanel.resources }}
           resources: {{ toYaml . | nindent 12 }}
           {{- end }}

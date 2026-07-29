@@ -13,22 +13,39 @@ spec:
     metadata:
       labels: {app: control-panel}
     spec:
+      securityContext:
+        # Matches USER 10001 in the image. fsGroup makes mounted volumes (e.g.
+        # data-spine's PVC) group-writable for the non-root uid.
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       serviceAccountName: priva-control-panel
       containers:
         - name: control-panel
           image: priva/control-panel:dev
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "priva_control_panel"]
           ports:
             - {containerPort: 8080, name: http}
             - {containerPort: 9000, name: extproc}
           env:
+            # The kubelet probes at the pod IP, so TrustedHost must accept it.
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            # Workload identity presented to data-spine / the scheduler API.
+            - {name: PRIVA_SERVICE_IDENTITY__SERVICE_NAME, value: "control-panel"}
             - {name: CONTROL_PANEL_HOST, value: "0.0.0.0"}
             - {name: CONTROL_PANEL_PORT, value: "8080"}
             - {name: PRIVA_SERVER__WORK_DIR, value: "/tmp/cp-workspace"}
           envFrom:
             - configMapRef: {name: priva-config}
-            - secretRef: {name: priva-shared-secret}
+            - secretRef: {name: priva-shared-secret}      # service-identity signing key
+            - secretRef: {name: priva-control-panel-secret}   # platform login JWT secret
           readinessProbe:
             httpGet: {path: /health, port: 8080}
             initialDelaySeconds: 3

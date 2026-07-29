@@ -25,6 +25,10 @@ class UserRecord(BaseModel):
     agent_runner_type: str = "auto_scale"  # auto_scale | persistent
     feishu_user_id: str | None = None
     feishu_display_name: str | None = None
+    # Digest of password_hash, computed by data-spine. Over gRPC password_hash is
+    # always "" (never serialized), so this is the ONLY way the control-plane can
+    # tell whether the credential behind a session has since changed.
+    password_epoch: str | None = None
 
 
 class UsageCounts(BaseModel):
@@ -182,10 +186,31 @@ class RegisterResponse(BaseModel):
     request_id: str
 
 
+def password_epoch(password_hash: str | None) -> str:
+    """Opaque digest of a stored password hash, used to bind a session to the
+    credential it was issued under.
+
+    Lives here rather than in the control-panel because data-spine computes it —
+    the bcrypt hash itself is deliberately never serialized over the wire, so the
+    control-plane cannot derive this itself and must be handed the digest.
+    A digest of an already-irreversible hash leaks nothing about the password.
+    """
+    import hashlib
+
+    return hashlib.sha256((password_hash or "").encode()).hexdigest()[:16]
+
+
 class TokenPayload(BaseModel):
     sub: str
     role: str
     exp: float
+    # Hardening claims. `typ` stops a token minted for one purpose being replayed
+    # as another; `pwd` is a digest of the stored password hash, so changing the
+    # password invalidates every token issued before it (see services/auth.py).
+    typ: str | None = None
+    pwd: str | None = None
+    jti: str | None = None
+    iat: float | None = None
 
 
 class ApiKeyResponse(BaseModel):
