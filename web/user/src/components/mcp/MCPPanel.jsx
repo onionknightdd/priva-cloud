@@ -119,11 +119,11 @@ export default function MCPPanel({ backTitle, onBack }) {
         <>
           <MCPServerMeta />
 
-          {/* Server detail — shrinks when tool drawer is open */}
-          <div className="flex-1 flex overflow-hidden" style={{ minWidth: 0 }}>
-            <div className="flex-1 overflow-hidden" style={{ minWidth: 0 }}>
-              <MCPServerDetail />
-            </div>
+          {/* Server detail — shrinks when tool drawer is open. MCPServerDetail must be
+              a direct flex item here: wrapping it in a block box leaves its height
+              auto, so its inner overflow-y-auto list never scrolls and just clips. */}
+          <div className="flex-1 flex overflow-hidden" style={{ minWidth: 0, minHeight: 0 }}>
+            <MCPServerDetail />
 
             {/* Tool drawer — slides in from right, resizable */}
             <div
