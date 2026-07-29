@@ -20,8 +20,10 @@ export const getHubSkillDetail = (name) =>
 export const getHubSkillFile = (name, path) =>
   sandboxRead(`/resource/skill-hub/${encodeURIComponent(name)}/file?path=${encodeURIComponent(path)}`)
 
-export const deliverHubSkill = (name) =>
-  sandboxPost(`/resource/skill-hub/${encodeURIComponent(name)}/deliver`, {})
+// scope 'personal' (cwd null → $CLAUDE_CONFIG_DIR/skills) or 'workdir' (cwd → {cwd}/.claude/skills),
+// mirroring the skill create/upload target picker.
+export const deliverHubSkill = (name, scope = 'personal', cwd = null) =>
+  sandboxPost(`/resource/skill-hub/${encodeURIComponent(name)}/deliver`, { scope, cwd })
 
 // cp-proxy: bundled-skill archives are multipart bodies far past the ~8KB EPP
 // request cap — the direct lane mangles them into a 422 "file field required".

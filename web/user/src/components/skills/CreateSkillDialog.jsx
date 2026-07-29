@@ -59,7 +59,9 @@ export default function CreateSkillDialog({ open, mode = 'create', onConfirm, on
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
             <span className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 14 }}>
-              {mode === 'upload' ? t('skills.uploadSkill') : t('skills.createTitle')}
+              {mode === 'upload' ? t('skills.uploadSkill')
+                : mode === 'install' ? t('skills.installTitle')
+                : t('skills.createTitle')}
             </span>
             <button
               onClick={onCancel}
@@ -74,7 +76,7 @@ export default function CreateSkillDialog({ open, mode = 'create', onConfirm, on
 
           {/* Prompt */}
           <div className="px-4 pt-3 pb-1" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-            {t('skills.createTarget')}
+            {mode === 'install' ? t('skills.installTarget') : t('skills.createTarget')}
           </div>
 
           {/* Options */}

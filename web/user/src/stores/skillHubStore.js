@@ -30,6 +30,8 @@ const useSkillHubStore = create((set, get) => ({
   openHub: () => {
     set({ open: true })
     get().fetchSkills()
+    // The install-target picker's overwrite check reads the installed-skills tree.
+    useSkillsStore.getState().ensureSkillsLoaded()
   },
 
   closeHub: () => {
@@ -96,10 +98,10 @@ const useSkillHubStore = create((set, get) => ({
     set({ fileTreeWidth: width })
   },
 
-  deliverSkill: async (name) => {
+  deliverSkill: async (name, scope = 'personal', cwd = null) => {
     set({ delivering: true })
     try {
-      await hubApi.deliverHubSkill(name)
+      await hubApi.deliverHubSkill(name, scope, cwd)
       set({ delivering: false })
       // Refresh hub skills to update installed status
       get().fetchSkills()

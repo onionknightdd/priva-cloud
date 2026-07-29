@@ -1,13 +1,25 @@
-import { useRef, useEffect, useMemo } from 'react'
+import { useRef, useState, useEffect, useMemo } from 'react'
 import { Search, X, ArrowLeft, Download, Check, Upload, Trash2, Package } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useOverlayTransition from '@shared/motion/useOverlayTransition'
 import useSkillHubStore from '../../stores/skillHubStore'
+import useSkillsStore from '../../stores/skillsStore'
 import useAuthStore from '@shared/stores/authStore'
 import useUiStore from '@shared/stores/uiStore'
 import HubFileTree from './HubFileTree'
 import HubFileViewer from './HubFileViewer'
 import LucideIcon from './LucideIcon'
+import CreateSkillDialog from './CreateSkillDialog'
+
+// Does the chosen install target already hold a skill of this name? Used to decide
+// whether to warn before overwriting. Reads the installed-skills tree (personal +
+// per-workdir groups) the Skills panel maintains.
+function targetHasSkill(scope, cwd, name, personal, groups) {
+  const has = (list) => Array.isArray(list) && list.some((s) => s.name === name)
+  if (scope === 'personal') return has(personal)
+  const group = (groups || []).find((g) => g.cwd === cwd)
+  return group ? has(group.skills) : false
+}
 
 export default function SkillHubModal() {
   const { t } = useTranslation()
@@ -328,20 +340,27 @@ function DetailView({ skill }) {
   const deliverSkill = useSkillHubStore((s) => s.deliverSkill)
   const delivering = useSkillHubStore((s) => s.delivering)
   const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
+  const personalSkills = useSkillsStore((s) => s.personal)
+  const skillGroups = useSkillsStore((s) => s.groups)
 
   const installed = skillDetail?.installed ?? selectedSkill?.installed
+  const [pickerOpen, setPickerOpen] = useState(false)
 
-  const handleInstall = () => {
-    if (installed) {
+  // Install picks a target (personal vs a project) exactly like "Create Skill".
+  const handleTarget = ({ scope, cwd }) => {
+    setPickerOpen(false)
+    const name = selectedSkill.name
+    // Only warn about overwrite if that specific target already has the skill.
+    if (targetHasSkill(scope, cwd, name, personalSkills, skillGroups)) {
       showConfirmDialog({
         title: t('skillHub.overwriteTitle'),
-        message: t('skillHub.overwriteMessage', { name: selectedSkill.name }),
+        message: t('skillHub.overwriteMessage', { name }),
         confirmLabel: t('skillHub.overwrite'),
         danger: false,
-        onConfirm: () => deliverSkill(selectedSkill.name),
+        onConfirm: () => deliverSkill(name, scope, cwd),
       })
     } else {
-      deliverSkill(selectedSkill.name)
+      deliverSkill(name, scope, cwd)
     }
   }
 
@@ -389,7 +408,7 @@ function DetailView({ skill }) {
             transition: 'opacity 150ms ease',
             opacity: delivering ? 0.6 : 1,
           }}
-          onClick={handleInstall}
+          onClick={() => setPickerOpen(true)}
           disabled={delivering}
         >
           <Download size={14} strokeWidth={1.5} />
@@ -402,6 +421,14 @@ function DetailView({ skill }) {
         <HubFileTree />
         <HubFileViewer />
       </div>
+
+      {/* Install-target picker — same component/interaction as "Create Skill" */}
+      <CreateSkillDialog
+        open={pickerOpen}
+        mode="install"
+        onConfirm={handleTarget}
+        onCancel={() => setPickerOpen(false)}
+      />
     </>
   )
 }
