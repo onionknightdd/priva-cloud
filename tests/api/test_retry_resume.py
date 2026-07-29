@@ -10,9 +10,13 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
+from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage
 from claude_agent_sdk._internal.sessions import _canonicalize_path, _get_project_dir
 
+from priva_agent_runner.services.claude_sdk import service
 from priva_agent_runner.services.claude_sdk.retry import strip_synthetic_records
 from priva_agent_runner.services.claude_sdk.session_heal import heal_orphan_tool_uses
 
@@ -162,6 +166,206 @@ class HealOrphanToolUsesTests(unittest.TestCase):
 
     def test_missing_session_id_returns_zero(self) -> None:
         self.assertEqual(heal_orphan_tool_uses(None, self.cwd), 0)
+
+
+class RetryOrchestrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_agent_run_resumes_pending_turn_without_resending_prompt(self) -> None:
+        queries: list[tuple[str | None, str | list[dict]]] = []
+        session_id = SESSION_ID
+
+        class FakeClient:
+            attempts = 0
+
+            def __init__(self, options):
+                self.options = options
+                type(self).attempts += 1
+                self.attempt = type(self).attempts
+
+            async def __aenter__(self):
+                if self.attempt == 2:
+                    raise RuntimeError("transient reconnect failure")
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def query(self, prompt):
+                if isinstance(prompt, str):
+                    submitted: str | list[dict] = prompt
+                else:
+                    submitted = [item async for item in prompt]
+                queries.append((self.options.resume, submitted))
+
+            async def receive_response(self):
+                if self.attempt == 1:
+                    yield SystemMessage("init", {"session_id": session_id})
+                    yield AssistantMessage(
+                        content=[],
+                        model=service.retry.SYNTHETIC_MODEL,
+                        error="server_error",
+                    )
+                    return
+                yield ResultMessage(
+                    subtype="success",
+                    duration_ms=1,
+                    duration_api_ms=1,
+                    is_error=False,
+                    num_turns=1,
+                    session_id=session_id,
+                    result="done",
+                )
+
+        async def fake_build_options(*_args, **_kwargs):
+            return SimpleNamespace(cwd="/tmp", resume=None)
+
+        audit_prompt = Mock()
+        with (
+            patch.object(service, "ClaudeSDKClient", FakeClient),
+            patch.object(service, "build_agent_options", new=fake_build_options),
+            patch.object(service, "_resolve_vision_model", return_value=None),
+            patch.object(service, "_audit_skill_prompt", audit_prompt),
+            patch.object(service, "_audit_run_completed"),
+            patch.object(service, "_track_vision_session"),
+            patch.object(service, "heal_orphan_tool_uses", return_value=0),
+            patch.object(service.retry, "strip_synthetic_records", return_value=0),
+            patch.object(service.retry, "backoff", return_value=0),
+            patch.object(service.retry, "MAX_ATTEMPTS", 3),
+            patch.object(service.session_title, "spawn", return_value=None),
+            patch.object(service.session_title, "settle", new=AsyncMock()),
+            patch.object(service.session_meta, "record_recent_activity", new=AsyncMock()),
+            patch.object(service.session_recap, "spawn"),
+            patch.object(service.asyncio, "sleep", new=AsyncMock()),
+        ):
+            result = await service.agent_run("perform one side effect")
+
+        self.assertEqual(
+            queries,
+            [
+                (None, "perform one side effect"),
+                (session_id, []),
+            ],
+        )
+        self.assertEqual(audit_prompt.call_count, 1)
+        self.assertEqual(result["attempts"], 3)
+        self.assertEqual(result["result"], "done")
+
+    async def test_agent_run_events_resumes_after_completed_tool_without_resending_prompt(
+        self,
+    ) -> None:
+        queries: list[tuple[str | None, str | list[dict]]] = []
+        emitted: list[str] = []
+        session_id = SESSION_ID
+        pump_attempt = 0
+
+        class FakeCoordinator:
+            def __init__(self):
+                self.event_queue = None
+                self.owner_username = None
+                self.session_id = None
+                self.cancelled = False
+
+            def cancel_all(self):
+                self.cancelled = True
+
+        coordinator = FakeCoordinator()
+
+        class FakeClient:
+            def __init__(self, options):
+                self.options = options
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def query(self, prompt):
+                if isinstance(prompt, str):
+                    submitted: str | list[dict] = prompt
+                else:
+                    submitted = [item async for item in prompt]
+                queries.append((self.options.resume, submitted))
+
+        async def fake_build_options(*_args, **_kwargs):
+            return SimpleNamespace(cwd="/tmp", resume=None)
+
+        async def fake_pump(_client, output_queue, *_args, **_kwargs):
+            nonlocal pump_attempt
+            pump_attempt += 1
+            if pump_attempt == 1:
+                await output_queue.put({
+                    "event": "system",
+                    "data": {"subtype": "init", "data": {"session_id": session_id}},
+                })
+                await output_queue.put({
+                    "event": "tool_use",
+                    "data": {
+                        "content": [{"type": "tool_use", "id": "tu_done", "name": "Write"}]
+                    },
+                })
+                await output_queue.put({
+                    "event": "tool_result",
+                    "data": {
+                        "content": [{
+                            "type": "tool_result",
+                            "tool_use_id": "tu_done",
+                            "content": "done",
+                        }]
+                    },
+                })
+                await output_queue.put({
+                    "_retry_signal": "synthetic",
+                    "payload": {"code": "server_error", "message": "API Error"},
+                })
+            else:
+                await output_queue.put({
+                    "event": "result",
+                    "data": {"session_id": session_id, "usage": {}},
+                })
+            await output_queue.put(None)
+
+        async def emit(event: str, _data: dict):
+            emitted.append(event)
+
+        audit_prompt = Mock()
+        with (
+            patch.object(service, "ClaudeSDKClient", FakeClient),
+            patch.object(service, "build_agent_options", new=fake_build_options),
+            patch.object(service, "_pump_stream_messages", new=fake_pump),
+            patch.object(service, "_resolve_vision_model", return_value=None),
+            patch.object(service, "_make_unified_can_use_tool", return_value=None),
+            patch.object(service, "_audit_skill_prompt", audit_prompt),
+            patch.object(service, "_audit_run_completed"),
+            patch.object(service, "_track_vision_session"),
+            patch.object(service, "heal_orphan_tool_uses", return_value=0),
+            patch.object(service.retry, "strip_synthetic_records", return_value=0),
+            patch.object(service.retry, "backoff", return_value=0),
+            patch.object(service.retry, "MAX_ATTEMPTS", 2),
+            patch.object(service.session_title, "spawn", return_value=None),
+            patch.object(service.session_title, "settle", new=AsyncMock()),
+            patch.object(service.session_meta, "record_recent_activity", new=AsyncMock()),
+            patch.object(service.session_recap, "spawn"),
+            patch.object(service.asyncio, "sleep", new=AsyncMock()),
+        ):
+            await service.agent_run_events(
+                "perform one side effect",
+                emit=emit,
+                coordinator_out=[coordinator],
+            )
+
+        self.assertEqual(
+            queries,
+            [
+                (None, "perform one side effect"),
+                (session_id, []),
+            ],
+        )
+        self.assertEqual(audit_prompt.call_count, 1)
+        self.assertEqual(
+            emitted,
+            ["stream_init", "system", "tool_use", "tool_result", "retry_attempt", "result"],
+        )
+        self.assertTrue(coordinator.cancelled)
 
 
 if __name__ == "__main__":

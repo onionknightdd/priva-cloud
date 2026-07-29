@@ -528,6 +528,18 @@ def _format_sse_event(event: str, payload: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
 
 
+async def _resume_without_new_prompt():
+    """Yield no input while a resumed CLI continues its pending turn.
+
+    Claude Code resumes an interrupted/deferred turn during startup when
+    ``options.resume`` points at its transcript.  Passing an empty async
+    iterable keeps the SDK in streaming mode without appending the original
+    user prompt a second time.
+    """
+    if False:
+        yield {}
+
+
 async def agent_run(
     prompt: str,
     session_id: str | None = None,
@@ -574,15 +586,27 @@ async def agent_run(
     # session the first attempt created, and a resumed turn already has whatever
     # title that session ended up with.
     title_pending = session_id is None
+    resume_in_place = False
+    attempt_resumable = False
 
-    async def _run_one_attempt() -> None:
-        nonlocal last_model, current_resume_id, title_pending
+    async def _run_one_attempt(resume_pending_turn: bool) -> None:
+        nonlocal last_model, current_resume_id, title_pending, attempt_resumable
+        # A transport failure while reconnecting does not make the already
+        # persisted pending turn disappear; the next attempt must still resume
+        # it rather than fall back to the original prompt.
+        attempt_resumable = resume_pending_turn
         async with ClaudeSDKClient(options=options) as client:
-            _audit_skill_prompt(prompt, username, session_id)
-            if isinstance(effective_prompt, list):
-                await client.query(_make_image_prompt(effective_prompt))
+            if resume_pending_turn:
+                # `--resume` continues the transcript's pending user/tool-result
+                # turn on startup.  Do not append the original request again.
+                await client.query(_resume_without_new_prompt())
             else:
-                await client.query(effective_prompt)
+                _audit_skill_prompt(prompt, username, session_id)
+                if isinstance(effective_prompt, list):
+                    await client.query(_make_image_prompt(effective_prompt))
+                else:
+                    await client.query(effective_prompt)
+                attempt_resumable = True
             title_task = session_title.spawn(client, prompt) if title_pending else None
             title_pending = False
             async for message in client.receive_response():
@@ -645,11 +669,17 @@ async def agent_run(
                 except Exception:
                     logger.exception("[RETRY] strip_synthetic_records failed")
             messages.clear()
+            if resume_in_place:
+                logger.info(
+                    "[RETRY] resuming pending turn in %s without a new user prompt",
+                    current_resume_id,
+                )
         final_attempts = attempt
         try:
-            await _run_one_attempt()
+            await _run_one_attempt(resume_in_place)
             break
         except retry.RetryableSyntheticError as e:
+            resume_in_place = bool(current_resume_id and attempt_resumable)
             last_error = e.payload
             logger.info(
                 "[RETRY] agent_run attempt %d/%d failed: %s",
@@ -661,6 +691,7 @@ async def agent_run(
         except Exception as e:
             if not retry.should_retry_exception(e):
                 raise
+            resume_in_place = bool(current_resume_id and attempt_resumable)
             last_error = {
                 "code": type(e).__name__,
                 "message": str(e) or repr(e),
@@ -900,8 +931,10 @@ async def agent_run_events(
 
     # See the matching guard in agent_run: name a brand-new session once.
     title_pending = session_id is None
+    resume_in_place = False
+    attempt_resumable = False
 
-    async def _run_one_attempt() -> None:
+    async def _run_one_attempt(resume_pending_turn: bool) -> None:
         """Open SDK, query, pump until end-of-turn.
 
         Raises ``retry.RetryableSyntheticError`` when the pump pushes a
@@ -909,15 +942,25 @@ async def agent_run_events(
         on a clean turn (or on a fatal pump exception, which is surfaced
         via a ``stream_error`` emit and not retried).
         """
-        nonlocal stream_id, current_resume_id, title_pending
+        nonlocal stream_id, current_resume_id, title_pending, attempt_resumable
+        # Preserve native-resume mode across transient reconnect failures.  The
+        # pending turn is already on disk even if this CLI process never starts.
+        attempt_resumable = resume_pending_turn
         retry_signal: dict | None = None
 
         async with ClaudeSDKClient(options=options) as client:
-            _audit_skill_prompt(prompt, username, stream_id)
-            if isinstance(effective_prompt, list):
-                await client.query(_make_image_prompt(effective_prompt))
+            if resume_pending_turn:
+                # Resuming with no new input lets Claude Code continue the
+                # pending transcript turn (including healed tool results)
+                # without creating a duplicate user request.
+                await client.query(_resume_without_new_prompt())
             else:
-                await client.query(effective_prompt)
+                _audit_skill_prompt(prompt, username, stream_id)
+                if isinstance(effective_prompt, list):
+                    await client.query(_make_image_prompt(effective_prompt))
+                else:
+                    await client.query(effective_prompt)
+                attempt_resumable = True
 
             title_task = session_title.spawn(client, prompt) if title_pending else None
             title_pending = False
@@ -1177,9 +1220,14 @@ async def agent_run_events(
                             )
                     except Exception:
                         logger.exception("[RETRY] strip_synthetic_records failed")
+                if resume_in_place:
+                    logger.info(
+                        "[RETRY] resuming pending turn in %s without a new user prompt",
+                        current_resume_id,
+                    )
 
             try:
-                await _run_one_attempt()
+                await _run_one_attempt(resume_in_place)
                 # Success only: a retried-away attempt would recap a transcript
                 # that is about to be rewritten. Fire-and-forget, so the caller
                 # sees no added latency after the last event.
@@ -1188,6 +1236,7 @@ async def agent_run_events(
                 )
                 return
             except retry.RetryableSyntheticError as e:
+                resume_in_place = bool(current_resume_id and attempt_resumable)
                 last_error = e.payload
                 logger.info(
                     "[RETRY] attempt %d/%d failed: %s — %s",
@@ -1206,6 +1255,7 @@ async def agent_run_events(
                     })
                     return
                 await _reset_to_fresh_session(e.payload)
+                resume_in_place = False
                 last_error = e.payload
                 continue
             except asyncio.CancelledError:
@@ -1217,10 +1267,12 @@ async def agent_run_events(
                         and _resume_target_missing(options.resume)):
                     payload = {"code": type(e).__name__, "message": str(e) or repr(e)}
                     await _reset_to_fresh_session(payload)
+                    resume_in_place = False
                     last_error = payload
                     continue
                 if not retry.should_retry_exception(e):
                     raise
+                resume_in_place = bool(current_resume_id and attempt_resumable)
                 last_error = {
                     "code": type(e).__name__,
                     "message": str(e) or repr(e),
