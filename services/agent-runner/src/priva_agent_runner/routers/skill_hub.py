@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from priva_common.logging import get_app_logger
 from priva_common.models.auth import UserRecord
 from priva_common.models.skill_hub import (
+    HubDeliverRequest,
     HubDeliverResponse,
     HubSkillDetailResponse,
     HubSkillListResponse,
@@ -85,9 +86,11 @@ async def get_hub_skill_file_endpoint(
 @router.post("/{name}/deliver", response_model=HubDeliverResponse)
 async def deliver_hub_skill_endpoint(
     name: str,
+    body: HubDeliverRequest | None = None,
     user: UserRecord = Depends(require_user),
 ):
-    result = deliver_hub_skill(name, user.username)
+    req = body or HubDeliverRequest()
+    result = deliver_hub_skill(name, user.username, req.scope, req.cwd)
 
     audit = get_audit_logger()
     audit.append(
@@ -95,6 +98,7 @@ async def deliver_hub_skill_endpoint(
             actor=user.username,
             action="skill_hub.delivered",
             target=name,
+            details={"scope": req.scope, "cwd": req.cwd},
         )
     )
 

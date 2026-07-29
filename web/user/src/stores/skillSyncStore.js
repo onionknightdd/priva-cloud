@@ -39,12 +39,16 @@ function downloadCurl(baseUrl, localApiKey, skill) {
   const output = `${safeArchiveName(skill.name)}.tar.gz`
   const params = new URLSearchParams({ name: skill.name, scope: skill.scope || 'personal' })
   if (skill.cwd) params.set('cwd', skill.cwd)
-  const endpoint = `${baseUrl}/api/sandbox/resource/skills/download?${params.toString()}`
+  // cp-proxy, not the direct sandbox lane: skill tar.gz archives run past the ~8KB
+  // EPP response cap, which the direct lane truncates (mirrors api/skills.js download).
+  const endpoint = `${baseUrl}/api/cp-proxy/resource/skills/download?${params.toString()}`
   return `curl -L -H ${quoteCurl(`Authorization: Bearer ${getLocalBearer(localApiKey)}`)} -o ${quoteCurl(output)} ${quoteCurl(endpoint)}`
 }
 
 function uploadCurl(baseUrl, localApiKey) {
-  const endpoint = `${baseUrl}/api/sandbox/resource/skills/upload`
+  // cp-proxy, not the direct sandbox lane: multipart archive bodies exceed the ~8KB
+  // EPP request cap, which the direct lane mangles into a 422 (mirrors api/skills.js upload).
+  const endpoint = `${baseUrl}/api/cp-proxy/resource/skills/upload`
   return [
     'curl -X POST',
     `  -H ${quoteCurl(`Authorization: Bearer ${getLocalBearer(localApiKey)}`)}`,
