@@ -12,15 +12,18 @@ single gateway rule, distinct from the control-plane /api/* served by control-pa
 
 from __future__ import annotations
 
+import os
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from priva_common.config import get_settings
 from priva_common.body_limit import MaxBodySizeMiddleware
+from priva_common.config import get_settings
+from priva_common import drain_token
 from priva_common.logging import AccessLogMiddleware, configure_logging, get_app_logger, shutdown_logging
 from priva_common.models.auth import UserRecord
 from priva_common.workspace import get_user_workspace
@@ -44,10 +47,25 @@ class ActivityMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] not in ("http", "websocket") or scope.get("path", "").startswith("/health"):
+        path = scope.get("path", "")
+        if (
+            scope["type"] not in ("http", "websocket")
+            or path == "/health"
+            or path == "/internal/drain"
+        ):
             await self.app(scope, receive, send)
             return
-        activity.enter()
+        if not activity.try_enter():
+            if scope["type"] == "websocket":
+                await send({"type": "websocket.close", "code": 1013})
+            else:
+                response = JSONResponse(
+                    {"detail": "runner_draining"},
+                    status_code=503,
+                    headers={"Retry-After": "1"},
+                )
+                await response(scope, receive, send)
+            return
         try:
             await self.app(scope, receive, send)
         finally:
@@ -199,7 +217,7 @@ def create_app() -> FastAPI:
     async def health():
         import asyncio
         import os
-        active, last = activity.snapshot()
+        active, last, revision, draining = activity.state()
 
         # Self-reported downstream connectivity for the admin System Map. Fail-soft
         # and off-loaded to a thread so a slow/unreachable data-spine never stalls
@@ -231,9 +249,43 @@ def create_app() -> FastAPI:
             "account_id": os.environ.get("ACCOUNT_ID"),
             "active_runs": active,
             "last_activity_ts": last,
+            "activity_revision": revision,
+            "draining": draining,
             "deps": deps,
             "volume": volume,
             "time": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @app.post("/internal/drain", include_in_schema=False)
+    async def begin_internal_drain(
+        revision: int | None = None,
+        force: bool = False,
+        x_priva_drain_token: str | None = Header(
+            default=None, alias=drain_token.HEADER
+        ),
+    ):
+        """Close new admission for idle scale-down or forced lifecycle teardown."""
+        configured_capability = os.environ.get(drain_token.ENV, "")
+        capability_ok = bool(
+            configured_capability
+            and x_priva_drain_token
+            and secrets.compare_digest(configured_capability, x_priva_drain_token)
+        )
+        if not capability_ok:
+            raise HTTPException(401, "Invalid drain capability")
+
+        if force:
+            active, current_revision = activity.force_drain()
+        elif revision is None:
+            raise HTTPException(400, "revision is required")
+        elif not activity.begin_drain(revision):
+            raise HTTPException(409, "activity_changed")
+        else:
+            active, _, current_revision, _ = activity.state()
+        return {
+            "draining": True,
+            "active_runs": active,
+            "activity_revision": current_revision,
         }
 
     from .deps import require_user
