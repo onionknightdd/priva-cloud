@@ -19,9 +19,9 @@ venv/
 env/
 ENV/
 
-# uv lock — the dev venv uses requirements.txt + editable installs, not uv sync
-# (uv sync prunes the monolith deps); uv.lock is not the source of truth here.
-uv.lock
+# The uv workspace lock is tracked for reproducible package and CI checks.
+# The monolith dev venv still uses requirements.txt + editable installs; do not
+# use `uv sync` for it because that prunes dependencies outside the workspace.
 
 # ---- Node / Web (priva/web + split web/{user,admin,shared}) ----
 node_modules/
