@@ -32,6 +32,16 @@ from fastapi import HTTPException
 from grpclib.const import Cardinality, Handler
 from grpclib.server import Server
 
+from priva_common.audit_log import AuditEntry, get_audit_logger
+from priva_common.config import get_settings
+from priva_common.logging import get_app_logger
+from priva_common.runner_token import mint as mint_runner_token
+from priva_common.terminal_token import mint as mint_terminal_token
+from priva_common.user_store import get_user_store
+
+from . import provisioner
+from .services.auth import authenticate_raw_token
+
 # Tell agentgateway, in our headers response, to stop sending us the body/trailers
 # (the GIE EPP path buffers the request body for ext_proc; we only need headers, and
 # not consuming the body was dropping it -> the pod saw an empty body -> 422). Header
@@ -44,15 +54,6 @@ _MODE_OVERRIDE = pm.ProcessingMode(
     request_trailer_mode=pm.ProcessingMode.SKIP,
     response_trailer_mode=pm.ProcessingMode.SKIP,
 )
-
-from priva_common.audit_log import AuditEntry, get_audit_logger
-from priva_common.logging import get_app_logger
-from priva_common.config import get_settings
-from priva_common.runner_token import mint
-from priva_common.user_store import get_user_store
-
-from . import provisioner
-from .services.auth import authenticate_raw_token
 
 logger = get_app_logger(__name__)
 
@@ -133,30 +134,89 @@ def _immediate(code: int, message: str) -> "ep.ProcessingResponse":
         status=http_status_pb2.HttpStatus(code=code), body=message.encode()))
 
 
-def _steer(endpoint: str, runner_token: str) -> "ep.ProcessingResponse":
+def _steer(
+    endpoint: str, runner_token: str, *, websocket: bool = False
+) -> "ep.ProcessingResponse":
+    set_headers = [
+        HeaderValueOption(
+            header=HeaderValue(key=DEST_HEADER, raw_value=endpoint.encode()),
+            append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD,
+        ),
+        HeaderValueOption(
+            header=HeaderValue(
+                key=RUNNER_TOKEN_HEADER, raw_value=runner_token.encode()
+            ),
+            append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD,
+        ),
+    ]
+    if websocket:
+        # The browser has to offer the platform JWT as a subprotocol so the EPP
+        # can authenticate the upgrade. Once authenticated, forward only the
+        # actual application protocol; never expose the JWT or admin target to
+        # the tenant pod.
+        set_headers.append(
+            HeaderValueOption(
+                header=HeaderValue(
+                    key="sec-websocket-protocol", raw_value=b"priva.ws.v1"
+                ),
+                append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD,
+            )
+        )
     return ep.ProcessingResponse(
         mode_override=_MODE_OVERRIDE,  # stop the gateway from routing the body through us
         request_headers=ep.HeadersResponse(response=ep.CommonResponse(
-            header_mutation=ep.HeaderMutation(set_headers=[
-                HeaderValueOption(header=HeaderValue(key=DEST_HEADER, raw_value=endpoint.encode()),
-                                  append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD),
-                HeaderValueOption(header=HeaderValue(key=RUNNER_TOKEN_HEADER, raw_value=runner_token.encode()),
-                                  append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD),
-            ]))))
+            header_mutation=ep.HeaderMutation(
+                set_headers=set_headers,
+                # Authentication terminates at the EPP. Strip every
+                # client-controlled platform/internal credential that is not
+                # deliberately overwritten above.
+                remove_headers=[
+                    "authorization",
+                    "x-user-name",
+                    TERMINAL_AUTH_HEADER,
+                ],
+            ))))
 
 
-def _steer_terminal(endpoint: str) -> "ep.ProcessingResponse":
+def _steer_terminal(
+    endpoint: str, terminal_token: str, *, websocket: bool = False
+) -> "ep.ProcessingResponse":
+    set_headers = [
+        HeaderValueOption(
+            header=HeaderValue(key=DEST_HEADER, raw_value=endpoint.encode()),
+            append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD,
+        ),
+        # A signed, short-lived capability bound to the selected account
+        # and pod. OVERWRITE is intentional: a client-supplied value must
+        # never survive the EPP decision.
+        HeaderValueOption(
+            header=HeaderValue(
+                key=TERMINAL_AUTH_HEADER,
+                raw_value=terminal_token.encode(),
+            ),
+            append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD,
+        ),
+    ]
+    if websocket:
+        set_headers.append(
+            HeaderValueOption(
+                header=HeaderValue(
+                    key="sec-websocket-protocol", raw_value=b"priva.ws.v1"
+                ),
+                append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD,
+            )
+        )
     return ep.ProcessingResponse(
         mode_override=_MODE_OVERRIDE,
         request_headers=ep.HeadersResponse(response=ep.CommonResponse(
-            header_mutation=ep.HeaderMutation(set_headers=[
-                HeaderValueOption(header=HeaderValue(key=DEST_HEADER, raw_value=endpoint.encode()),
-                                  append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD),
-                # Fixed trust assertion: only the EPP can add it on the gateway
-                # byte path; destination NetworkPolicy blocks direct tenant access.
-                HeaderValueOption(header=HeaderValue(key=TERMINAL_AUTH_HEADER, raw_value=b"1"),
-                                  append_action=HeaderValueOption.OVERWRITE_IF_EXISTS_OR_ADD),
-            ]))))
+            header_mutation=ep.HeaderMutation(
+                set_headers=set_headers,
+                remove_headers=[
+                    "authorization",
+                    "x-user-name",
+                    RUNNER_TOKEN_HEADER,
+                ],
+            ))))
 
 
 _EMPTY = {
@@ -179,6 +239,7 @@ def _passthrough_body(field: str, http_body) -> "ep.ProcessingResponse":
 async def handle_request_headers(http_headers) -> "ep.ProcessingResponse":
     """Pure-ish EPP decision for one request's headers (unit-testable)."""
     headers = _headers_to_dict(http_headers)
+    has_ws_protocol = bool(headers.get("sec-websocket-protocol"))
     request_path = urlparse(headers.get(":path", "")).path
     is_terminal = request_path == "/api/terminal" or request_path.startswith("/api/terminal/")
     auth = headers.get("authorization", "")
@@ -252,8 +313,20 @@ async def handle_request_headers(http_headers) -> "ep.ProcessingResponse":
         service = "web terminal" if is_terminal else "agent sandbox"
         return _immediate(503, f"{service} is waking, retry in a moment")
     if is_terminal:
-        return _steer_terminal(endpoint)
-    return _steer(endpoint, mint(acct_id, acct_username))
+        pod = urlparse(f"//{endpoint}").hostname
+        if not pod:
+            logger.error("terminal wake returned an invalid endpoint: {}", endpoint)
+            return _immediate(503, "web terminal unavailable, retry shortly")
+        return _steer_terminal(
+            endpoint,
+            mint_terminal_token(acct_id, pod),
+            websocket=has_ws_protocol,
+        )
+    return _steer(
+        endpoint,
+        mint_runner_token(acct_id, acct_username),
+        websocket=has_ws_protocol,
+    )
 
 
 class ExternalProcessor:

@@ -15,6 +15,7 @@ from envoy.service.ext_proc.v3 import external_processor_pb2 as ep
 
 import priva_control_panel.extproc as X
 import priva_common.dataplane as dataplane
+from priva_common.terminal_token import AUDIENCE, verify as verify_terminal_token
 
 
 def _hh(d: dict[str, str]):
@@ -51,6 +52,8 @@ def test_epp_steers_when_authed_and_awake(monkeypatch):
             for h in resp.request_headers.response.header_mutation.set_headers}
     assert hdrs["x-gateway-destination-endpoint"] == "10.1.2.3:8091"
     assert hdrs["x-priva-runner-token"]  # signed token minted for the pod
+    removed = set(resp.request_headers.response.header_mutation.remove_headers)
+    assert {"authorization", "x-user-name", "x-priva-terminal-authorized"} <= removed
 
 
 def test_epp_401_when_unauthed(monkeypatch):
@@ -113,6 +116,7 @@ def test_terminal_epp_steers_to_terminal_without_runner_secret(monkeypatch):
 
     resp = _run(X.handle_request_headers(_hh({
         ":path": "/api/terminal/ws",
+        "upgrade": "websocket",
         "sec-websocket-protocol": "priva.ws.v1, priva.token.jwt.payload.sig",
         # A client-provided value must be overwritten by the EPP.
         "x-priva-terminal-authorized": "attacker-value",
@@ -121,8 +125,19 @@ def test_terminal_epp_steers_to_terminal_without_runner_secret(monkeypatch):
     headers = {h.header.key: h.header.raw_value.decode()
                for h in resp.request_headers.response.header_mutation.set_headers}
     assert headers["x-gateway-destination-endpoint"] == "10.2.3.4:8092"
-    assert headers["x-priva-terminal-authorized"] == "1"
+    terminal_token = headers["x-priva-terminal-authorized"]
+    assert terminal_token != "1"
+    assert terminal_token != "attacker-value"
+    claims = verify_terminal_token(terminal_token)
+    assert claims["typ"] == "terminal"
+    assert claims["aud"] == AUDIENCE
+    assert claims["account_id"] == "acct-1"
+    assert claims["pod"] == "10.2.3.4"
+    assert 0 < claims["exp"] - claims["iat"] <= 30
     assert "x-priva-runner-token" not in headers
+    assert headers["sec-websocket-protocol"] == "priva.ws.v1"
+    removed = set(resp.request_headers.response.header_mutation.remove_headers)
+    assert {"authorization", "x-user-name", "x-priva-runner-token"} <= removed
 
 
 def test_terminal_epp_fails_closed_when_disabled(monkeypatch):
@@ -220,11 +235,17 @@ def test_epp_reads_token_from_subprotocol(monkeypatch):
         return _User()
     monkeypatch.setattr(X, "authenticate_raw_token", fake_auth)
     monkeypatch.setattr(X.provisioner, "wake_and_wait", _awake("10.1.2.3:8091"))
-    _run(X.handle_request_headers(_hh({
+    resp = _run(X.handle_request_headers(_hh({
         ":path": "/api/agent/ws/run",
         "sec-websocket-protocol": "priva.ws.v1, priva.token.jwt.payload.sig",
     })))
     assert seen["token"] == "jwt.payload.sig"
+    mutations = resp.request_headers.response.header_mutation
+    headers = {
+        h.header.key: h.header.raw_value.decode() for h in mutations.set_headers
+    }
+    assert headers["sec-websocket-protocol"] == "priva.ws.v1"
+    assert "jwt.payload.sig" not in headers["sec-websocket-protocol"]
 
 
 def test_token_from_subprotocol_helper():

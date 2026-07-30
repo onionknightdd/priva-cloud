@@ -5,9 +5,16 @@ package main
 
 import (
 	"context"
+	"crypto"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/subtle"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -29,20 +36,28 @@ import (
 
 const (
 	authHeader       = "X-Priva-Terminal-Authorized"
+	drainAuthHeader  = "X-Priva-Drain-Token"
+	terminalAudience = "priva-terminal"
+	terminalTokenTTL = 30 * time.Second
+	tokenClockSkew   = 5 * time.Second
 	maxInputMessage  = 64 * 1024
 	ptyReadChunkSize = 4096
 )
 
 type config struct {
-	listen      string
-	maxSessions int
-	idle        time.Duration
-	lifetime    time.Duration
-	outputRate  int
-	outputBurst int
-	outputBuf   int
-	cwd         string
-	shell       string
+	listen         string
+	maxSessions    int
+	idle           time.Duration
+	lifetime       time.Duration
+	outputRate     int
+	outputBurst    int
+	outputBuf      int
+	cwd            string
+	shell          string
+	authPublicKeys []*rsa.PublicKey
+	accountID      string
+	pod            string
+	drainToken     string
 }
 
 func envInt(key string, fallback int) int {
@@ -53,7 +68,7 @@ func envInt(key string, fallback int) int {
 	return v
 }
 
-func loadConfig() config {
+func loadConfig() (config, error) {
 	listen := os.Getenv("PRIVA_TERMINAL_LISTEN")
 	if listen == "" {
 		listen = "0.0.0.0:8092"
@@ -66,17 +81,236 @@ func loadConfig() config {
 	if shell == "" {
 		shell = "/bin/bash"
 	}
-	return config{
-		listen:      listen,
-		maxSessions: envInt("PRIVA_TERMINAL_MAX_SESSIONS", 2),
-		idle:        time.Duration(envInt("PRIVA_TERMINAL_IDLE_TIMEOUT_SECONDS", 1800)) * time.Second,
-		lifetime:    time.Duration(envInt("PRIVA_TERMINAL_MAX_LIFETIME_SECONDS", 14400)) * time.Second,
-		outputRate:  envInt("PRIVA_TERMINAL_OUTPUT_RATE", 256*1024),
-		outputBurst: envInt("PRIVA_TERMINAL_OUTPUT_BURST", 1024*1024),
-		outputBuf:   envInt("PRIVA_TERMINAL_OUTPUT_BUFFER", 1024*1024),
-		cwd:         cwd,
-		shell:       shell,
+	accountID := strings.TrimSpace(os.Getenv("PRIVA_TERMINAL_ACCOUNT_ID"))
+	if accountID == "" {
+		return config{}, errors.New("PRIVA_TERMINAL_ACCOUNT_ID is required")
 	}
+	pod := strings.TrimSpace(os.Getenv("PRIVA_TERMINAL_POD"))
+	if pod == "" {
+		return config{}, errors.New("PRIVA_TERMINAL_POD is required")
+	}
+	drainToken := strings.TrimSpace(os.Getenv("PRIVA_INTERNAL_DRAIN_TOKEN"))
+	if drainToken == "" {
+		return config{}, errors.New("PRIVA_INTERNAL_DRAIN_TOKEN is required")
+	}
+	publicKey, err := parseRSAPublicKey(
+		[]byte(os.Getenv("PRIVA_SERVICE_IDENTITY__PUBLIC_KEY")),
+	)
+	if err != nil {
+		return config{}, fmt.Errorf("terminal verification key: %w", err)
+	}
+	publicKeys := []*rsa.PublicKey{publicKey}
+	additionalRaw := strings.TrimSpace(
+		os.Getenv("PRIVA_SERVICE_IDENTITY__ADDITIONAL_PUBLIC_KEYS"),
+	)
+	if additionalRaw != "" {
+		var additional []string
+		if err := json.Unmarshal([]byte(additionalRaw), &additional); err != nil {
+			return config{}, fmt.Errorf(
+				"terminal additional verification keys: invalid JSON: %w", err,
+			)
+		}
+		if len(additional) > 8 {
+			return config{}, errors.New(
+				"terminal additional verification keys exceed maximum of 8",
+			)
+		}
+		for index, raw := range additional {
+			key, err := parseRSAPublicKey([]byte(raw))
+			if err != nil {
+				return config{}, fmt.Errorf(
+					"terminal additional verification key %d: %w", index, err,
+				)
+			}
+			publicKeys = append(publicKeys, key)
+		}
+	}
+	return config{
+		listen:         listen,
+		maxSessions:    envInt("PRIVA_TERMINAL_MAX_SESSIONS", 2),
+		idle:           time.Duration(envInt("PRIVA_TERMINAL_IDLE_TIMEOUT_SECONDS", 1800)) * time.Second,
+		lifetime:       time.Duration(envInt("PRIVA_TERMINAL_MAX_LIFETIME_SECONDS", 14400)) * time.Second,
+		outputRate:     envInt("PRIVA_TERMINAL_OUTPUT_RATE", 256*1024),
+		outputBurst:    envInt("PRIVA_TERMINAL_OUTPUT_BURST", 1024*1024),
+		outputBuf:      envInt("PRIVA_TERMINAL_OUTPUT_BUFFER", 1024*1024),
+		cwd:            cwd,
+		shell:          shell,
+		authPublicKeys: publicKeys,
+		accountID:      accountID,
+		pod:            pod,
+		drainToken:     drainToken,
+	}, nil
+}
+
+type tokenHeader struct {
+	Algorithm string `json:"alg"`
+	Type      string `json:"typ"`
+}
+
+type signedClaims struct {
+	Type      string `json:"typ"`
+	Service   string `json:"svc"`
+	AccountID string `json:"account_id"`
+	Pod       string `json:"pod"`
+	Audience  string `json:"aud"`
+	IssuedAt  int64  `json:"iat"`
+	ExpiresAt int64  `json:"exp"`
+}
+
+func parseRSAPublicKey(raw []byte) (*rsa.PublicKey, error) {
+	if strings.TrimSpace(string(raw)) == "" {
+		return nil, errors.New("public key is required")
+	}
+	block, rest := pem.Decode(raw)
+	if block == nil || strings.TrimSpace(string(rest)) != "" {
+		return nil, errors.New("public key must contain one PEM block")
+	}
+
+	var key *rsa.PublicKey
+	switch block.Type {
+	case "PUBLIC KEY":
+		parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("parse PKIX public key: %w", err)
+		}
+		var ok bool
+		key, ok = parsed.(*rsa.PublicKey)
+		if !ok {
+			return nil, errors.New("public key is not RSA")
+		}
+	case "RSA PUBLIC KEY":
+		parsed, err := x509.ParsePKCS1PublicKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("parse PKCS#1 public key: %w", err)
+		}
+		key = parsed
+	case "CERTIFICATE":
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("parse certificate: %w", err)
+		}
+		var ok bool
+		key, ok = cert.PublicKey.(*rsa.PublicKey)
+		if !ok {
+			return nil, errors.New("certificate public key is not RSA")
+		}
+	default:
+		return nil, fmt.Errorf("unsupported PEM block %q", block.Type)
+	}
+	if key.N.BitLen() < 2048 {
+		return nil, fmt.Errorf("RSA public key is too small: %d bits", key.N.BitLen())
+	}
+	return key, nil
+}
+
+func decodeTokenSegment(value string) ([]byte, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return nil, errors.New("invalid base64url token segment")
+	}
+	return decoded, nil
+}
+
+func verifySignedToken(raw string, publicKeys []*rsa.PublicKey) (signedClaims, error) {
+	if len(publicKeys) == 0 {
+		return signedClaims{}, errors.New("verification key is not configured")
+	}
+	parts := strings.Split(raw, ".")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return signedClaims{}, errors.New("token must have three segments")
+	}
+
+	headerJSON, err := decodeTokenSegment(parts[0])
+	if err != nil {
+		return signedClaims{}, err
+	}
+	var header tokenHeader
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		return signedClaims{}, errors.New("invalid token header")
+	}
+	if header.Algorithm != "RS256" {
+		return signedClaims{}, fmt.Errorf("unexpected token algorithm %q", header.Algorithm)
+	}
+	if header.Type != "" && header.Type != "JWT" {
+		return signedClaims{}, fmt.Errorf("unexpected token header type %q", header.Type)
+	}
+
+	signature, err := decodeTokenSegment(parts[2])
+	if err != nil {
+		return signedClaims{}, err
+	}
+	signed := parts[0] + "." + parts[1]
+	digest := sha256.Sum256([]byte(signed))
+	verified := false
+	for _, publicKey := range publicKeys {
+		if publicKey != nil && rsa.VerifyPKCS1v15(
+			publicKey, crypto.SHA256, digest[:], signature,
+		) == nil {
+			verified = true
+			break
+		}
+	}
+	if !verified {
+		return signedClaims{}, errors.New("invalid token signature")
+	}
+
+	claimsJSON, err := decodeTokenSegment(parts[1])
+	if err != nil {
+		return signedClaims{}, err
+	}
+	var claims signedClaims
+	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
+		return signedClaims{}, errors.New("invalid token claims")
+	}
+	now := time.Now()
+	if claims.IssuedAt != 0 && time.Unix(claims.IssuedAt, 0).After(now.Add(tokenClockSkew)) {
+		return signedClaims{}, errors.New("token issued in the future")
+	}
+	if claims.ExpiresAt != 0 &&
+		!now.Before(time.Unix(claims.ExpiresAt, 0).Add(tokenClockSkew)) {
+		return signedClaims{}, errors.New("token expired")
+	}
+	return claims, nil
+}
+
+func (s *server) authorizeTerminal(raw string) error {
+	claims, err := verifySignedToken(raw, s.cfg.authPublicKeys)
+	if err != nil {
+		return err
+	}
+	switch {
+	case claims.Type != "terminal":
+		return errors.New("wrong token type")
+	case claims.Audience != terminalAudience:
+		return errors.New("wrong token audience")
+	case claims.AccountID != s.cfg.accountID:
+		return errors.New("wrong token account")
+	case claims.Pod != s.cfg.pod:
+		return errors.New("wrong token pod")
+	case claims.IssuedAt == 0 || claims.ExpiresAt == 0:
+		return errors.New("terminal token requires iat and exp")
+	case claims.ExpiresAt <= claims.IssuedAt:
+		return errors.New("terminal token expiry must follow issue time")
+	case claims.ExpiresAt-claims.IssuedAt > int64(terminalTokenTTL/time.Second):
+		return errors.New("terminal token TTL exceeds maximum")
+	}
+	return nil
+}
+
+func constantTimeTokenMatch(expected, provided string) bool {
+	if expected == "" || provided == "" {
+		return false
+	}
+	expectedHash := sha256.Sum256([]byte(expected))
+	providedHash := sha256.Sum256([]byte(provided))
+	return subtle.ConstantTimeCompare(expectedHash[:], providedHash[:]) == 1
+}
+
+func (s *server) authorizeDrain(capability string) error {
+	if constantTimeTokenMatch(s.cfg.drainToken, capability) {
+		return nil
+	}
+	return errors.New("valid per-Pod drain capability required")
 }
 
 type server struct {
@@ -84,7 +318,7 @@ type server struct {
 	mu           sync.Mutex
 	sessions     map[string]struct{}
 	revision     uint64
-	drainUntil   time.Time
+	draining     bool
 	lastActivity atomic.Int64
 }
 
@@ -99,12 +333,8 @@ func (s *server) touch() { s.lastActivity.Store(time.Now().Unix()) }
 func (s *server) reserve() (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now()
-	if !s.drainUntil.IsZero() && now.Before(s.drainUntil) {
+	if s.draining {
 		return "", false
-	}
-	if !s.drainUntil.IsZero() {
-		s.drainUntil = time.Time{}
 	}
 	if len(s.sessions) >= s.cfg.maxSessions {
 		return "", false
@@ -133,13 +363,22 @@ func (s *server) release(id string) {
 func (s *server) state() (active int, revision uint64, draining bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.drainUntil.IsZero() && !time.Now().Before(s.drainUntil) {
-		s.drainUntil = time.Time{}
-	}
-	return len(s.sessions), s.revision, !s.drainUntil.IsZero()
+	return len(s.sessions), s.revision, s.draining
 }
 
-func (s *server) health(w http.ResponseWriter, _ *http.Request) {
+func (s *server) health(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// This response includes cross-tenant activity and drain state. The kubelet
+	// probes the TCP socket, while the Operator presents the same per-Pod
+	// capability used by drain; an open-ingress posture therefore does not turn
+	// /health into a tenant enumeration endpoint.
+	if err := s.authorizeDrain(r.Header.Get(drainAuthHeader)); err != nil {
+		http.Error(w, "valid health capability required", http.StatusUnauthorized)
+		return
+	}
 	active, revision, draining := s.state()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -156,23 +395,36 @@ func (s *server) drain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	expected, err := strconv.ParseUint(r.URL.Query().Get("revision"), 10, 64)
-	if err != nil {
-		http.Error(w, "valid revision is required", http.StatusBadRequest)
+	if err := s.authorizeDrain(r.Header.Get(drainAuthHeader)); err != nil {
+		http.Error(w, "valid drain capability required", http.StatusUnauthorized)
 		return
+	}
+	force := r.URL.Query().Get("force") == "true"
+	var expected uint64
+	if !force {
+		var err error
+		expected, err = strconv.ParseUint(r.URL.Query().Get("revision"), 10, 64)
+		if err != nil {
+			http.Error(w, "valid revision is required", http.StatusBadRequest)
+			return
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if expected != s.revision || len(s.sessions) != 0 {
+	if !force && (expected != s.revision || len(s.sessions) != 0) {
 		http.Error(w, "terminal session state changed", http.StatusConflict)
 		return
 	}
-	// A lease prevents an operator crash between drain and Deployment scale from
-	// permanently wedging the still-running pod. reserve() automatically re-opens it.
-	s.drainUntil = time.Now().Add(30 * time.Second)
+	// Permanent for this process lifetime. With force=true, existing sessions
+	// continue but no new reservation can enter. Kubernetes termination can take
+	// longer than a lease (or fail after the scale request); reopening an old
+	// endpoint would then admit a WebSocket into a pod the control plane is
+	// tearing down. Recovery is a fresh pod/process, never a timer.
+	s.draining = true
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"draining": true, "session_revision": s.revision,
+		"active_sessions": len(s.sessions),
 	})
 }
 
@@ -228,9 +480,10 @@ func shellEnv() []string {
 }
 
 func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
-	// The EPP overwrites this header after authentication, and NetworkPolicy
-	// permits ingress only from non-tenant infrastructure (agentgateway).
-	if r.Header.Get(authHeader) != "1" {
+	// The EPP overwrites this header after authentication with a short-lived
+	// capability bound to this account and concrete Pod. NetworkPolicy remains
+	// defense in depth; direct callers cannot manufacture a valid signature.
+	if err := s.authorizeTerminal(r.Header.Get(authHeader)); err != nil {
 		http.Error(w, "terminal authorization required", http.StatusUnauthorized)
 		return
 	}
@@ -463,7 +716,10 @@ func (s *server) terminal(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	cfg := loadConfig()
+	cfg, err := loadConfig()
+	if err != nil {
+		log.Fatal(fmt.Errorf("terminal config: %w", err))
+	}
 	for _, dir := range []string{cfg.cwd, "/workspace/.home", "/workspace/.priva", "/workspace/.claude"} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			log.Fatalf("prepare terminal workspace %s: %v", dir, err)
