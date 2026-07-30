@@ -97,6 +97,17 @@ See `values.yaml` for the full set (replicas, resources, idle/wake timings, stor
 - **Secret rotation:** `priva-shared-secret` is annotated `helm.sh/resource-policy: keep` and
   re-read via `lookup` on upgrade, so JWTs/api-key lookups survive `helm upgrade`. `helm template`
   (no cluster) can't `lookup`, so it emits fresh randoms — fine for diffing, not for applying.
+- **Service-identity rotation is staged, never a one-step replacement.** First add the
+  future public key to `sharedSecret.serviceIdentityAdditionalPublicKeys` while the old
+  keypair remains current, deploy, and wait until all Runner/Terminal templates have
+  converged. Then switch the current private/public pair and keep the old public key in
+  the additional list. Wait again until every dormant template and active runtime has
+  converged to the new current-key generation (this re-mints each Runner's permanent,
+  account-scoped service token), and retain the overlap for at least the longest
+  scheduled run plus control-plane service-token TTL. Remove the old key only after no
+  old runtime or in-flight token remains. The per-Pod
+  drain capability lets the new Operator close admission on a Pod which still trusts the
+  old signer, but it does not replace this verifier-overlap window for FinishRun.
 - **CRD:** templated (not in Helm's install-only `crds/` dir) so `helm upgrade` re-applies schema
   edits. Kept on uninstall to avoid cascading-deleting live `AgentTenant` CRs.
 - **Selectors are verbatim:** pod `app:` labels feed the operator and the InferencePool selector,

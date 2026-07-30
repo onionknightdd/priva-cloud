@@ -12,8 +12,13 @@ def main(argv: list[str] | None = None) -> int:
     import kopf
 
     from priva_common.config import get_settings
+    from priva_common.service_identity import assert_configured
     from priva_operator import reconcile  # noqa: F401 — importing registers the @kopf handlers
 
+    # The operator mints the account-scoped service token embedded in every
+    # Runner and signs authenticated drain calls. A missing/mismatched keypair
+    # must stop the controller before it writes unusable pod templates.
+    assert_configured(signing=True)
     ns = get_settings().kubernetes.namespace_tenants
     # standalone=True: no KopfPeering CRD/RBAC needed (single operator, alpha).
     kopf.run(namespaces=[ns], clusterwide=False, standalone=True)

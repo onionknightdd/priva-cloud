@@ -63,7 +63,7 @@ crds:
 sharedSecret:
   create: true
   name: priva-shared-secret
-  jwtSecret: ""                 # "" => generate/keep a random 32-byte hex
+  jwtSecret: ""                 # "" => generate/keep a random 64-character secret
   apiKeyHmacSecret: ""          # "" => generate/keep a random 32-byte hex
   # Control-plane RSA signing keypair (runner + service tokens). Leave BOTH empty
   # to generate and keep a pair. To pin them, supply both — the verify-only pods
@@ -73,6 +73,9 @@ sharedSecret:
   # NEVER mounted into an agent-runner; the operator injects only the public half.
   serviceIdentityPrivateKey: ""
   serviceIdentityPublicKey: ""
+  # Verification-only overlap ring for staged key rotation. Supply PEM public
+  # keys as a YAML list; never put private keys here.
+  serviceIdentityAdditionalPublicKeys: []
   # At-rest credential encryption key. "" => generate/keep a valid Fernet key.
   fernetKey: ""
 

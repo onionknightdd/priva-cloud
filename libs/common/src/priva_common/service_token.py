@@ -27,8 +27,9 @@ from .service_identity import has_private_key, sign, verify
 
 TOKEN_TYPE = "service"
 
-# Workloads trusted with the full data-spine surface. Membership is asserted by
-# the signature (only control-plane pods can sign), not by anything the caller says.
+# Signing control-plane workloads. Membership is asserted by the signature (only
+# control-plane pods can sign), while data-spine still applies a separate,
+# default-deny method allowlist for each workload.
 CONTROL_PLANE_ROLES = frozenset({
     "control-panel",
     "operator",
@@ -91,13 +92,24 @@ def current_token() -> str:
     if injected:
         return injected
 
+    svc = (settings.service_identity.service_name or "").strip()
+    if svc not in CONTROL_PLANE_ROLES:
+        # Second gate behind assert_configured, for any process that reaches an
+        # outbound call without the boot check. Never fall back to a role name:
+        # data-spine's method allowlist is keyed on it, so a guess grants that
+        # workload's surface.
+        raise RuntimeError(
+            f"PRIVA_SERVICE_IDENTITY__SERVICE_NAME is {svc or 'unset'!r}; cannot mint "
+            f"an outbound service token. Set it to one of {sorted(CONTROL_PLANE_ROLES)}."
+        )
+
     global _cached
     ttl = settings.service_identity.service_token_ttl_seconds
     now = time.time()
     with _lock:
         if _cached is not None and _cached[1] > now:
             return _cached[0]
-        token = mint(settings.service_identity.service_name, ttl_seconds=ttl)
+        token = mint(svc, ttl_seconds=ttl)
         # Refresh at 2/3 of TTL so a long call never rides an expiring token.
         _cached = (token, now + ttl * 2 / 3)
         return token
@@ -124,7 +136,8 @@ def describe_self() -> str:
     if (settings.dataspine.service_token or "").strip():
         return "operator-injected service token"
     kind = "private key" if has_private_key() else "EPHEMERAL key"
-    return f"{settings.service_identity.service_name} ({kind})"
+    svc = (settings.service_identity.service_name or "").strip() or "UNSET service_name"
+    return f"{svc} ({kind})"
 
 
 __all__ = [

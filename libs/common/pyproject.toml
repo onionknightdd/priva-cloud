@@ -15,6 +15,13 @@ dependencies = [
     "loguru",
     # Crypto (crypto.py)
     "cryptography",
+    # Workload identity (service_identity.py / service_token.py). Imported at
+    # MODULE level by data-spine's server.py, so a missing wheel is not a
+    # degraded mode — the pod cannot start at all. It was only ever declared in
+    # the root requirements.txt, which the data-spine/operator images do not
+    # install (their Dockerfiles do `uv pip install -e libs/common -e services/X`),
+    # so those two images shipped without it.
+    "PyJWT[crypto]>=2.13,<3",
     # Wire format (serialization.py) — shared pod↔connector
     "claude-agent-sdk==0.2.116",
     # Redis catalog (redis_catalog.py)

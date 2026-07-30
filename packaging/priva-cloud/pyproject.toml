@@ -41,7 +41,7 @@ dependencies = [
     # agent-runner
     "uvicorn[standard]",
     "websockets",
-    "python-jose[cryptography]",
+    "PyJWT[crypto]>=2.13,<3",
     "python-multipart",
     "mcp>=1.19.0",
     # control-panel

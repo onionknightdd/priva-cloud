@@ -24,19 +24,24 @@ CHART = Path(__file__).resolve().parents[2] / "deploy" / "helm" / "priva-cloud"
 EXPECTED: dict[str, set[str]] = {
     # signs platform login JWTs (services/auth.py) + mints runner tokens
     "control-panel": {"PRIVA_AUTH__JWT_SECRET", "PRIVA_SERVICE_IDENTITY__PRIVATE_KEY",
-                      "PRIVA_SERVICE_IDENTITY__PUBLIC_KEY"},
+                      "PRIVA_SERVICE_IDENTITY__PUBLIC_KEY",
+                      "PRIVA_SERVICE_IDENTITY__ADDITIONAL_PUBLIC_KEYS"},
     # the only process that indexes api keys or encrypts stored credentials.
     # Verifies service tokens with the PUBLIC half — and MUST actually be given
     # it: an earlier revision of this split handed data-spine neither key, so it
     # fell back to an ephemeral in-process keypair and rejected every caller
     # while its TCP readiness probe stayed green.
     "data-spine": {"PRIVA_DATASPINE__API_KEY_HMAC_SECRET", "PRIVA_FERNET_KEY",
-                   "PRIVA_SERVICE_IDENTITY__PUBLIC_KEY"},
+                   "PRIVA_SERVICE_IDENTITY__PUBLIC_KEY",
+                   "PRIVA_SERVICE_IDENTITY__ADDITIONAL_PUBLIC_KEYS"},
     # token minters (the public half rides along in the same Secret)
-    "operator": {"PRIVA_SERVICE_IDENTITY__PRIVATE_KEY", "PRIVA_SERVICE_IDENTITY__PUBLIC_KEY"},
-    "scheduler": {"PRIVA_SERVICE_IDENTITY__PRIVATE_KEY", "PRIVA_SERVICE_IDENTITY__PUBLIC_KEY"},
+    "operator": {"PRIVA_SERVICE_IDENTITY__PRIVATE_KEY", "PRIVA_SERVICE_IDENTITY__PUBLIC_KEY",
+                 "PRIVA_SERVICE_IDENTITY__ADDITIONAL_PUBLIC_KEYS"},
+    "scheduler": {"PRIVA_SERVICE_IDENTITY__PRIVATE_KEY", "PRIVA_SERVICE_IDENTITY__PUBLIC_KEY",
+                  "PRIVA_SERVICE_IDENTITY__ADDITIONAL_PUBLIC_KEYS"},
     "channel-connector": {"PRIVA_SERVICE_IDENTITY__PRIVATE_KEY",
-                          "PRIVA_SERVICE_IDENTITY__PUBLIC_KEY"},
+                          "PRIVA_SERVICE_IDENTITY__PUBLIC_KEY",
+                          "PRIVA_SERVICE_IDENTITY__ADDITIONAL_PUBLIC_KEYS"},
     "postgres": set(),
 }
 
@@ -102,9 +107,9 @@ def test_data_spine_can_actually_verify_control_plane_tokens(rendered):
     """The release-blocking half of the split: least privilege is only correct if
     the verifier is still given something to verify WITH. Sign with the rendered
     private key, verify with the key data-spine is rendered."""
+    import jwt
     from cryptography import x509
     from cryptography.hazmat.primitives import serialization
-    from jose import jwt
 
     secrets = _secret_keys_values(rendered)
     private = secrets["priva-shared-secret"]["PRIVA_SERVICE_IDENTITY__PRIVATE_KEY"]
@@ -126,6 +131,8 @@ def test_the_keypair_halves_are_a_matched_set(rendered):
     shared = secrets["priva-shared-secret"]
     assert shared["PRIVA_SERVICE_IDENTITY__PUBLIC_KEY"] == \
         secrets["priva-data-spine-secret"]["PRIVA_SERVICE_IDENTITY__PUBLIC_KEY"]
+    assert shared["PRIVA_SERVICE_IDENTITY__ADDITIONAL_PUBLIC_KEYS"] == \
+        secrets["priva-data-spine-secret"]["PRIVA_SERVICE_IDENTITY__ADDITIONAL_PUBLIC_KEYS"]
 
 
 def test_the_fernet_key_reaches_only_data_spine(rendered):

@@ -9,9 +9,9 @@ a credential is suspected compromised.
 from __future__ import annotations
 
 import bcrypt
+import jwt
 import pytest
 from fastapi import HTTPException
-from jose import jwt
 
 from priva_common.config import get_settings
 from priva_control_panel.services import auth as A
@@ -36,9 +36,27 @@ def _grpc_rec(epoch: str):
                       account_id="acc-1", status="active", password_epoch=epoch)
 
 
+@pytest.mark.parametrize("secret", [
+    "dev-insecure-change-me",
+    "change-me",
+    "short",
+])
+def test_startup_refuses_placeholder_or_short_jwt_secret(monkeypatch, secret):
+    settings = get_settings()
+    monkeypatch.setattr(settings.auth, "jwt_secret", secret)
+    with pytest.raises(RuntimeError, match="at least 32 bytes"):
+        A.assert_jwt_signing_secret_configured()
+
+
+def test_startup_accepts_256_bit_or_longer_jwt_secret(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings.auth, "jwt_secret", "x" * 32)
+    A.assert_jwt_signing_secret_configured()
+
+
 def test_token_carries_the_hardening_claims():
     token = A.create_jwt("alice", "user", _rec(_hash("pw")))
-    claims = jwt.get_unverified_claims(token)
+    claims = jwt.decode(token, options={"verify_signature": False})
     assert claims["sub"] == "alice" and claims["role"] == "user"
     for required in ("iat", "exp", "iss", "aud", "jti", "typ", "pwd"):
         assert required in claims, f"missing {required}"
@@ -50,8 +68,10 @@ def test_token_carries_the_hardening_claims():
 
 def test_two_tokens_get_distinct_jti():
     rec = _rec(_hash("pw"))
-    a = jwt.get_unverified_claims(A.create_jwt("alice", "user", rec))
-    b = jwt.get_unverified_claims(A.create_jwt("alice", "user", rec))
+    a = jwt.decode(A.create_jwt("alice", "user", rec),
+                   options={"verify_signature": False})
+    b = jwt.decode(A.create_jwt("alice", "user", rec),
+                   options={"verify_signature": False})
     assert a["jti"] != b["jti"]
 
 
@@ -138,7 +158,10 @@ def test_mint_without_a_hash_resolves_it_rather_than_locking_the_account_out(mon
     store = type("S", (), {"get_user": lambda self, u: record})()
     monkeypatch.setattr(A, "get_user_store", lambda: store)
 
-    claims = jwt.get_unverified_claims(A.create_jwt("alice", "user"))
+    claims = jwt.decode(
+        A.create_jwt("alice", "user"),
+        options={"verify_signature": False},
+    )
     assert claims["pwd"] == A.password_epoch(h)
 
 
@@ -159,7 +182,8 @@ async def test_revocation_works_on_the_grpc_transport(monkeypatch):
     monkeypatch.setattr(A, "get_user_store", lambda: store)
 
     token = A.create_jwt("alice", "user", record)
-    assert jwt.get_unverified_claims(token)["pwd"] == "epoch-before"
+    assert jwt.decode(token, options={"verify_signature": False})["pwd"] == \
+        "epoch-before"
     assert (await A.authenticate_raw_token(token)).username == "alice"
 
     record.password_epoch = "epoch-after"        # data-spine reports a new digest
@@ -169,8 +193,8 @@ async def test_revocation_works_on_the_grpc_transport(monkeypatch):
 
 
 def test_a_token_without_an_audience_is_rejected():
-    """python-jose short-circuits its audience check when the claim is absent,
-    so `audience=` alone asserted nothing — require_aud is what enforces it."""
+    """The explicit required-claim set keeps audience mandatory independently
+    of the JWT library's default audience-validation behavior."""
     import time
     settings = get_settings()
     no_aud = jwt.encode(

@@ -166,8 +166,13 @@ class ServiceIdentitySettings(BaseModel):
     ``private_key`` is the control-plane signing key and MUST NOT be mounted
     into an agent-runner: the whole point of the split is that a pod running
     untrusted tenant code can verify tokens but cannot mint them. The runner
-    gets ``public_key`` (harmless — it is public) plus an operator-minted,
-    account-scoped service token.
+    gets ``public_key`` plus ``additional_public_keys`` (both harmless — they
+    are public) and an operator-minted, account-scoped service token.
+
+    ``additional_public_keys`` is the overlap set for a two-stage signer
+    rotation. It may contain the future key before the signer changes, or the
+    previous key while old pods/tokens drain. The current signer always remains
+    ``private_key``; additional keys can verify only and never affect signing.
 
     Both unset => an ephemeral in-process keypair, which works for single-process
     dev/tests and fails closed across pods.
@@ -175,9 +180,20 @@ class ServiceIdentitySettings(BaseModel):
 
     private_key: str | None = None  # PEM (PKCS#8). Control-plane pods only.
     public_key: str | None = None   # PEM (SubjectPublicKeyInfo). Every pod.
+    # JSON env: PRIVA_SERVICE_IDENTITY__ADDITIONAL_PUBLIC_KEYS='["-----BEGIN ..."]'
+    additional_public_keys: list[str] = Field(default_factory=list, max_length=8)
     # Who this pod claims to be when dialling data-spine / the scheduler API.
     # Must be one of service_token.CONTROL_PLANE_ROLES for a signing workload.
-    service_name: str = "control-panel"
+    #
+    # Deliberately EMPTY, not "control-panel". data-spine keys its per-workload
+    # method allowlist (CONTROL_PLANE_ACL) on this name, so a default naming a
+    # real role makes an unconfigured pod silently inherit that role's surface
+    # instead of failing. Measured on the dev cluster: scheduler and
+    # channel-connector Deployments were missing the env, both presented as
+    # "control-panel", and the ACL split was a no-op for every control-plane
+    # workload. An empty name fails closed at boot (assert_configured) and again
+    # at first use (service_token.current_token).
+    service_name: str = ""
     service_token_ttl_seconds: int = 3600  # outbound identity refresh window
     runner_token_ttl_seconds: int = 60     # per-request control-plane → runner
 

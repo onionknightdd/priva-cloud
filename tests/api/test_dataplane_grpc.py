@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 
+import grpc
 import pytest
 
 from priva_common.config import Settings
@@ -59,16 +60,22 @@ def client(backend, tmp_path):
         _cache.clear()
 
 
-def test_accounts_crud_and_lookups(client):
+def test_accounts_crud_and_lookups(client, as_service_identity):
     u = client.accounts.create("alice", "pw", "admin")
     assert u.account_id and u.username == "alice"
     aid = u.account_id
 
+    # AccountService/Get is used by the scheduler/channel connector, not the
+    # control panel. Keep the transport coverage under a real shipped caller.
+    as_service_identity("scheduler")
     assert client.accounts.get(aid).username == "alice"
-    assert client.accounts.get_by_username("alice").account_id == aid
     assert client.accounts.get("missing") is None
+    as_service_identity("control-panel")
+    assert client.accounts.get_by_username("alice").account_id == aid
     assert client.accounts.has_users() is True
-    assert client.accounts.count_admins() == 1
+    with pytest.raises(grpc.RpcError) as count_denied:
+        client.accounts.count_admins()
+    assert count_denied.value.code() == grpc.StatusCode.PERMISSION_DENIED
     assert client.accounts.verify_password("alice", "pw") is True
     assert client.accounts.verify_password("alice", "nope") is False
     assert len(client.accounts.list()) == 1
@@ -77,44 +84,57 @@ def test_accounts_crud_and_lookups(client):
         client.accounts.create("alice", "pw")
 
     client.accounts.delete(aid)
+    as_service_identity("scheduler")
     assert client.accounts.get(aid) is None
 
 
 def test_account_api_key_unset_set_clear(client):
     aid = client.accounts.create("bob", "pw").account_id
     # UNSET (not passed) leaves it absent
-    assert client.accounts.get(aid).api_key is None
+    assert client.accounts.get_by_username("bob").api_key is None
     # set
     client.accounts.update(aid, api_key="sk-key")
-    assert client.accounts.get(aid).api_key == "sk-key"
+    assert client.accounts.get_by_username("bob").api_key == "sk-key"
     assert client.accounts.find_by_api_key("sk-key").account_id == aid
     # clear (None)
     client.accounts.update(aid, api_key=None)
-    assert client.accounts.get(aid).api_key is None
+    assert client.accounts.get_by_username("bob").api_key is None
     assert client.accounts.find_by_api_key("sk-key") is None
 
 
-def test_quota_ensure_and_set(client):
+def test_quota_ensure_and_privileged_update_is_default_denied(
+    client, as_service_identity
+):
     aid = client.accounts.create("dave", "pw").account_id
+    as_service_identity("agent-runner", account_id=aid)
     assert client.quota.ensure(aid).max_concurrent_sessions == 3
-    client.quota.set(aid, max_concurrent_sessions=5, tier="pro")
-    q = client.quota.get(aid)
-    assert q.max_concurrent_sessions == 5 and q.tier == "pro"
+    with pytest.raises(grpc.RpcError) as update_denied:
+        client.quota.set(aid, max_concurrent_sessions=5, tier="pro")
+    assert update_denied.value.code() == grpc.StatusCode.PERMISSION_DENIED
+    assert client.quota.get(aid).max_concurrent_sessions == 3
 
 
-def test_bindings_and_first_run_cas(client):
+def test_bindings_and_first_run_cas(client, as_service_identity):
     aid = client.accounts.create("erin", "pw").account_id
+    as_service_identity("channel-connector")
     b = client.bindings.bind(aid, "sess-1")
     assert b.binding_id
-    assert client.bindings.get_binding(b.binding_id).session_uuid == "sess-1"
     assert len(client.bindings.list_bindings(aid)) == 1
-    assert client.bindings.claim_first_run_im(b.binding_id) is True
-    assert client.bindings.claim_first_run_im(b.binding_id) is False
+    for call in (
+        lambda: client.bindings.get_binding(b.binding_id),
+        lambda: client.bindings.claim_first_run_im(b.binding_id),
+    ):
+        with pytest.raises(grpc.RpcError) as dead_rpc_denied:
+            call()
+        assert dead_rpc_denied.value.code() == grpc.StatusCode.PERMISSION_DENIED
 
 
-def test_admin_health_and_stats(client, backend):
-    client.accounts.create("frank", "pw")
+def test_admin_health_and_stats(client, backend, as_service_identity):
+    aid = client.accounts.create("frank", "pw").account_id
+    # Healthz is called by tenant runners; the control panel uses Readyz/Stats.
+    as_service_identity("agent-runner", account_id=aid)
     assert client.admin.healthz() == "ok"
+    as_service_identity("control-panel")
     ready, _ = client.admin.readyz()
     assert ready is True
     stats = client.admin.stats()

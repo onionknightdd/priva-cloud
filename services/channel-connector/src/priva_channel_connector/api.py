@@ -27,6 +27,10 @@ logger = get_app_logger(__name__)
 def create_app(engine: ReconcileEngine) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        # RunnerDialer mints account-bound runner tokens. Refuse readiness when
+        # this workload cannot produce tokens the Runner verifier accepts.
+        from priva_common.service_identity import assert_configured
+        assert_configured(signing=True)
         await engine.start()
         try:
             yield

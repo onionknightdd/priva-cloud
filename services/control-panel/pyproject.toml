@@ -10,7 +10,7 @@ dependencies = [
     "uvicorn[standard]",
     "httpx",
     "websockets",
-    "python-jose[cryptography]",
+    "PyJWT[crypto]>=2.13,<3",
     "python-multipart",
     "pyyaml",
     "claude-agent-sdk==0.2.116",

@@ -143,6 +143,7 @@ def test_tenant_cannot_overwrite_another_tenants_job(spine, as_identity):
     without an ownership lookup a tenant could rewrite a victim's prompt and let
     the scheduler run it with the victim's own credentials."""
     victim = spine.accounts.create("victim", "pw").account_id
+    as_identity(service_token.mint("agent-runner", account_id=victim))
     spine.scheduler.create_job(victim, _job("victim-job"))
 
     as_identity(service_token.mint("agent-runner", account_id="acc-attacker"))
@@ -259,10 +260,10 @@ def test_tenant_can_ensure_but_not_raise_its_own_quota(spine, as_identity):
     assert _denied(exc)
 
 
-def test_control_plane_keeps_the_full_surface(spine, as_identity):
-    """control-panel / operator / scheduler / channel-connector are the
-    workloads that legitimately act across tenants."""
+def test_scheduler_keeps_its_explicit_cross_tenant_surface(spine, as_identity):
+    """Scheduler keeps only the cross-tenant methods its dispatch loop uses."""
     victim = spine.accounts.create("victim", "pw").account_id
+    as_identity(service_token.mint("agent-runner", account_id=victim))
     spine.scheduler.create_job(victim, _job("victim-job"))
 
     as_identity(service_token.mint("scheduler"))

@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError
 
 from priva_common.logging import get_app_logger
 from priva_common.models.auth import TokenPayload, UserPublic, UserRecord, password_epoch
@@ -19,6 +20,28 @@ security = HTTPBearer(auto_error=False)
 
 
 TOKEN_TYPE = "access"
+_INSECURE_JWT_SECRETS = frozenset({
+    "",
+    "changeme",
+    "change-me",
+    "dev-insecure-change-me",
+})
+
+
+def assert_jwt_signing_secret_configured() -> None:
+    """Refuse to serve login traffic with a guessable HS256 key.
+
+    Helm generates 64 random characters and preserves the value across upgrades.
+    This guard protects non-Helm/package deployments from silently using the
+    repository's development placeholder (or another key below PyJWT's 256-bit
+    recommendation).
+    """
+    secret = get_settings().auth.jwt_secret
+    if secret.strip().lower() in _INSECURE_JWT_SECRETS or len(secret.encode()) < 32:
+        raise RuntimeError(
+            "PRIVA_AUTH__JWT_SECRET must be a non-placeholder secret of at least "
+            "32 bytes; refusing to start the control-panel"
+        )
 
 
 def _edge():
@@ -84,10 +107,9 @@ def decode_jwt(token: str) -> TokenPayload:
         data = jwt.decode(
             token, settings.auth.jwt_secret, algorithms=["HS256"],
             audience=_audience(), issuer=_issuer(),
-            options={"require_exp": True, "require_iat": True,
-                     "require_aud": True, "require_iss": True, "require_sub": True},
+            options={"require": ["exp", "iat", "aud", "iss", "sub"]},
         )
-    except JWTError as e:
+    except PyJWTError as e:
         raise HTTPException(401, "Invalid or expired token") from e
     try:
         payload = TokenPayload(**data)

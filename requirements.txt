@@ -9,7 +9,7 @@ pydantic>=2.10
 pydantic-settings
 bcrypt
 cryptography
-python-jose[cryptography]
+PyJWT[crypto]>=2.13,<3
 httpx
 loguru
 apscheduler>=3.10,<4

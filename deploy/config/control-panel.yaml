@@ -17,7 +17,7 @@ server:
   work_dir: "~/priva_workspace"
 
 auth:
-  jwt_secret: "change-me"        # platform JWT signing; override via Secret/env in cluster
+  jwt_secret: "change-me"        # dev placeholder; startup rejects it — set >=32 random bytes via Secret/env
   admins: ["admin"]
 
 dataspine:

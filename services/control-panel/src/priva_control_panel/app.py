@@ -23,16 +23,16 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-# Minimal containers may not register web font types; browsers refuse fonts
-# served as application/octet-stream.
-for _ext, _type in ((".woff2", "font/woff2"), (".woff", "font/woff"), (".ttf", "font/ttf"), (".otf", "font/otf")):
-    mimetypes.add_type(_type, _ext)
-
 from priva_common.body_limit import MaxBodySizeMiddleware
 from priva_common.config import get_settings
 from priva_common.logging import AccessLogMiddleware, configure_logging, get_app_logger, shutdown_logging
 
 from .security_headers import SecurityHeadersMiddleware
+
+# Minimal containers may not register web font types; browsers refuse fonts
+# served as application/octet-stream.
+for _ext, _type in ((".woff2", "font/woff2"), (".woff", "font/woff"), (".ttf", "font/ttf"), (".otf", "font/otf")):
+    mimetypes.add_type(_type, _ext)
 
 logger = get_app_logger(__name__)
 
@@ -141,6 +141,12 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        # HS256 is safe only when its shared key is unpredictable. Refuse the
+        # checked-in development placeholder and undersized values before any
+        # login endpoint becomes reachable.
+        from .services.auth import assert_jwt_signing_secret_configured
+        assert_jwt_signing_secret_configured()
+
         # Fail loudly if this pod has no signing identity: the fallback is an
         # ephemeral in-process keypair, which makes every token this service
         # mints unverifiable by its peers while readiness stays green.

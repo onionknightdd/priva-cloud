@@ -28,7 +28,8 @@ import threading
 import time
 from typing import Any
 
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError
 
 from .config import get_settings
 from .logging import get_app_logger
@@ -152,6 +153,52 @@ def public_key() -> str:
     return _generate_ephemeral()[1]
 
 
+def _validated_public_key(pem: str) -> str:
+    """Normalize and validate one configured verifier.
+
+    Token verification pins RS256, so accepting an EC key (or a toy RSA key)
+    in the overlap set can only produce a confusing runtime failure. Reject it
+    when the ring is materialized instead.
+    """
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    normalized = _normalize_public(pem.strip())
+    try:
+        key = serialization.load_pem_public_key(normalized.encode())
+    except (TypeError, ValueError) as exc:
+        raise ValueError("service identity public key is not valid PEM") from exc
+    if not isinstance(key, rsa.RSAPublicKey):
+        raise ValueError("service identity public key must be RSA")
+    if key.key_size < 2048:
+        raise ValueError(
+            f"service identity RSA public key is too small: {key.key_size} bits"
+        )
+    return normalized
+
+
+def verification_keys() -> tuple[str, ...]:
+    """Return the ordered, normalized verifier ring (current first).
+
+    Duplicate PEMs are removed after normalization. Keeping the current key
+    first preserves the common one-verification fast path while still allowing
+    old/future signers during an explicitly configured rotation window.
+    """
+    settings = get_settings().service_identity
+    candidates = [public_key(), *(settings.additional_public_keys or [])]
+    result: list[str] = []
+    seen: set[str] = set()
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, str) or not candidate.strip():
+            label = "current" if index == 0 else f"additional[{index - 1}]"
+            raise ValueError(f"service identity {label} public key is empty")
+        normalized = _validated_public_key(candidate)
+        if normalized not in seen:
+            seen.add(normalized)
+            result.append(normalized)
+    return tuple(result)
+
+
 # Opt IN to the ephemeral keypair. Absent => production posture (fail-closed),
 # matching PRIVA_ALLOW_DEV_FERNET. Single-process dev and the test suite set it;
 # nothing in deploy/ does.
@@ -190,6 +237,48 @@ def assert_configured(*, signing: bool = False) -> None:
             "this workload mints tokens but has no PRIVA_SERVICE_IDENTITY__PRIVATE_KEY; "
             "an ephemeral key would make every token it issues unverifiable."
         )
+    if signing:
+        # A signer must also declare WHICH control-plane role it is: data-spine
+        # authorizes each RPC against a per-workload allowlist keyed on this
+        # name. Unset, the pod would mint tokens under some other workload's
+        # identity and inherit its method surface. Local import — service_token
+        # imports this module.
+        from .service_token import CONTROL_PLANE_ROLES
+
+        declared = (s.service_name or "").strip()
+        if declared not in CONTROL_PLANE_ROLES:
+            raise RuntimeError(
+                "PRIVA_SERVICE_IDENTITY__SERVICE_NAME is "
+                f"{declared or 'unset'!r}; a token-minting workload must declare "
+                f"one of {sorted(CONTROL_PLANE_ROLES)}. Refusing to start: "
+                "data-spine keys its per-workload method allowlist on this name."
+            )
+    if signing and has_private_key():
+        # A syntactically valid but mismatched pair is worse than an obvious
+        # missing secret: signers start Ready and mint tokens every verifier
+        # rejects. Deriving also validates that the private half can be parsed;
+        # validating its public half enforces RSA >= 2048 just like every
+        # verification-only member of the ring.
+        from cryptography.exceptions import UnsupportedAlgorithm
+
+        try:
+            derived_public = _validated_public_key(
+                _derive_public((s.private_key or "").strip())
+            )
+        except (TypeError, ValueError, UnsupportedAlgorithm) as exc:
+            raise RuntimeError(
+                "service identity private key is invalid or unsupported"
+            ) from exc
+        if (s.public_key or "").strip():
+            configured_public = _validated_public_key(s.public_key or "")
+            if configured_public != derived_public:
+                raise RuntimeError(
+                    "service identity private/public key pair does not match"
+                )
+    # Parse every member now. A malformed future/old key must crash-loop the
+    # verifier at rollout time, not surface later as intermittent 401s depending
+    # on which signer produced a request.
+    verification_keys()
 
 
 def has_private_key() -> bool:
@@ -214,16 +303,30 @@ def sign(claims: dict[str, Any], *, typ: str, ttl_seconds: int | None) -> str:
     return jwt.encode(payload, private_key(), algorithm=ALGORITHM)
 
 
-def verify(token: str, *, typ: str) -> dict[str, Any]:
+def verify(
+    token: str, *, typ: str, audience: str | None = None
+) -> dict[str, Any]:
     """Verify a token and assert its type. Raises ``ValueError`` on any failure.
 
     The ``typ`` assertion stops cross-use: a short-TTL runner token must never
-    be replayed as a data-spine service identity, and vice versa.
+    be replayed as a data-spine service identity, and vice versa. Token families
+    which carry an ``aud`` claim must pass their expected audience explicitly.
     """
-    try:
-        claims = jwt.decode(token, public_key(), algorithms=[ALGORITHM])
-    except JWTError as exc:
-        raise ValueError(f"invalid token: {exc}") from exc
+    last_error: PyJWTError | None = None
+    claims: dict[str, Any] | None = None
+    for key in verification_keys():
+        try:
+            claims = jwt.decode(
+                token,
+                key,
+                algorithms=[ALGORITHM],
+                audience=audience,
+            )
+            break
+        except PyJWTError as exc:
+            last_error = exc
+    if claims is None:
+        raise ValueError(f"invalid token: {last_error}") from last_error
     if claims.get("typ") != typ:
         raise ValueError(f"wrong token type: expected {typ!r}, got {claims.get('typ')!r}")
     return claims
@@ -237,4 +340,5 @@ __all__ = [
     "public_key",
     "sign",
     "verify",
+    "verification_keys",
 ]

@@ -14,7 +14,8 @@ role or widen its own scope.
 Two trust tiers:
 
 * **control plane** (control-panel / operator / scheduler / channel-connector)
-  — full surface. These are the workloads that legitimately act across tenants.
+  — each workload has its own explicit method allowlist. Merely holding a signed
+  control-plane token does not grant the complete cross-tenant surface.
 * **tenant** (agent-runner) — a narrow allowlist, every entry scoped to the one
   account named in the token. Anything absent from the allowlist is denied.
 
@@ -95,6 +96,89 @@ TENANT_ACL: dict[str, str] = {
     "SchedulerService/FinishRun": _RUN,
 }
 
+# Per-workload control-plane surface, derived from the shipped call sites. This
+# is intentionally default-deny: a future RPC or a new caller must be added here
+# alongside its call-site tests before data-spine serves it.
+CONTROL_PLANE_ACL: dict[str, frozenset[str]] = {
+    # Authentication, admin APIs, provisioning and status views under
+    # services/control-panel/src/priva_control_panel.
+    "control-panel": frozenset({
+        "AccountService/GetByUsername",
+        "AccountService/List",
+        "AccountService/Create",
+        "AccountService/Update",
+        "AccountService/Delete",
+        "AccountService/VerifyPassword",
+        "AccountService/FindByApiKey",
+        "AccountService/HasUsers",
+        "AdminService/Readyz",
+        "AdminService/Stats",
+        "BindingService/ListBindings",
+        "ResourceSpecService/Get",
+        "ResourceSpecService/Set",
+        "ResourceSpecService/List",
+        "RunnerDefaultsService/Get",
+        "RunnerDefaultsService/Set",
+        "NetworkIsolationService/Get",
+        "NetworkIsolationService/Set",
+        "RegistrationService/Create",
+        "RegistrationService/List",
+        "RegistrationService/Get",
+        "RegistrationService/SetStatus",
+        "HookPolicyService/List",
+        "HookPolicyService/Get",
+        "HookPolicyService/Upsert",
+        "HookPolicyService/Delete",
+        "FeishuChannelConfigService/Get",
+        "FeishuChannelConfigService/SetUser",
+        "FeishuChannelConfigService/SetAdmin",
+        "FeishuChannelConfigService/ListEffective",
+        "FeishuChannelConfigService/CreateLinkCode",
+        "FeishuChannelConfigService/UnbindOwner",
+        "FeishuChannelConfigService/GetPlatformConfig",
+        "FeishuChannelConfigService/SetPlatformConfig",
+        "SchedulerService/ListJobs",
+        "SchedulerService/SetJobStatus",
+        "SchedulerService/ListRuns",
+    }),
+    # Network/policy convergence under services/operator/src/priva_operator.
+    "operator": frozenset({
+        "HookPolicyService/List",
+        "RunnerDefaultsService/Get",
+        "NetworkIsolationService/Get",
+    }),
+    # Cross-tenant dispatch and orphan reconciliation under
+    # services/scheduler/src/priva_scheduler.
+    "scheduler": frozenset({
+        "AccountService/Get",
+        "AccountService/List",
+        "SchedulerService/GetJob",
+        "SchedulerService/ListJobs",
+        "SchedulerService/ListActiveJobs",
+        "SchedulerService/StartRun",
+        "SchedulerService/FinishRun",
+        "SchedulerService/RecordRun",
+        "SchedulerService/GetLatestRun",
+        "SchedulerService/ListRuns",
+        "SchedulerService/ClaimJobFire",
+        "SchedulerService/PruneFiresBefore",
+    }),
+    # Per-account Feishu connection and chat binding reconciliation under
+    # services/channel-connector/src/priva_channel_connector.
+    "channel-connector": frozenset({
+        "AccountService/Get",
+        "BindingService/Bind",
+        "BindingService/Rebind",
+        "BindingService/ListBindings",
+        "BindingService/SetDisplay",
+        "FeishuChannelConfigService/Get",
+        "FeishuChannelConfigService/SetStatus",
+        "FeishuChannelConfigService/ListEffective",
+        "FeishuChannelConfigService/GetFeishuSecret",
+        "FeishuChannelConfigService/BindOwnerWithCode",
+    }),
+}
+
 
 def _short(method: str) -> str:
     """``/priva.dataplane.v1.AccountService/Get`` -> ``AccountService/Get``."""
@@ -140,6 +224,13 @@ class AuthzInterceptor(grpc.ServerInterceptor):
     def _authorize(self, short: str, principal: ServicePrincipal, request, context) -> str:
         """Returns the scope kind so the caller knows whether to check the response."""
         if principal.is_control_plane:
+            allowed_methods = CONTROL_PLANE_ACL.get(principal.svc, frozenset())
+            if short not in allowed_methods:
+                logger.warning("DENY {} for {} (not in workload ACL)", short, principal)
+                context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    f"{short} not permitted for this workload",
+                )
             return _NONE
 
         scope = TENANT_ACL.get(short)
@@ -220,4 +311,9 @@ class AuthzInterceptor(grpc.ServerInterceptor):
         )
 
 
-__all__ = ["AuthzInterceptor", "TENANT_ACL", "current_principal"]
+__all__ = [
+    "AuthzInterceptor",
+    "CONTROL_PLANE_ACL",
+    "TENANT_ACL",
+    "current_principal",
+]

@@ -11,7 +11,7 @@ dependencies = [
     "uvicorn[standard]",
     "httpx",
     "websockets",
-    "python-jose[cryptography]",
+    "PyJWT[crypto]>=2.13,<3",
     "python-multipart",
     "pyyaml",
     "mcp>=1.19.0",
