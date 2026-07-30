@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import priva_operator.kube as kube
 
+_REAL_AGENTTENANT_TEARDOWN_STARTED = kube.agenttenant_teardown_started
+
 
 def _cond(ready: bool):
     return SimpleNamespace(type="Ready", status="True" if ready else "False")
@@ -25,7 +27,7 @@ class _FakeCore:
     def __init__(self, pods):
         self._pods = pods
 
-    def list_namespaced_pod(self, namespace, label_selector=None):
+    def list_namespaced_pod(self, namespace, label_selector=None, **_kwargs):
         return SimpleNamespace(items=list(self._pods))
 
 
@@ -63,3 +65,60 @@ def test_ready_without_ip_is_none(monkeypatch):
 def test_no_pods_is_none(monkeypatch):
     _patch_core(monkeypatch, [])
     assert kube.current_ready_pod_ip("ns", "acct") is None
+
+
+class _SelectorCore:
+    def __init__(self, by_app):
+        self._by_app = by_app
+
+    def list_namespaced_pod(self, namespace, label_selector=None, **kwargs):
+        app = "terminal" if "app=terminal" in label_selector else "agent-runner"
+        return SimpleNamespace(items=list(self._by_app.get(app, [])))
+
+
+def test_workload_pods_gone_counts_terminating_pods(monkeypatch):
+    monkeypatch.setattr(
+        kube,
+        "core",
+        lambda: _SelectorCore({
+            "agent-runner": [_pod("10.0.0.5", terminating=True)],
+        }),
+    )
+
+    assert kube.workload_pods_gone("ns", "acct", "agent-runner") is False
+
+
+def test_account_workload_pods_gone_requires_runner_and_terminal_empty(monkeypatch):
+    state = {
+        "agent-runner": [],
+        "terminal": [_pod("10.0.0.8", ready=False, terminating=True)],
+    }
+    monkeypatch.setattr(kube, "core", lambda: _SelectorCore(state))
+
+    assert kube.account_workload_pods_gone("ns", "acct") is False
+    state["terminal"] = []
+    assert kube.account_workload_pods_gone("ns", "acct") is True
+
+
+def test_live_workload_guard_requires_same_active_cr(monkeypatch):
+    state = {
+        "metadata": {"uid": "uid-1"},
+        "spec": {"desiredState": "active"},
+    }
+
+    class _Custom:
+        def get_namespaced_custom_object(self, *_args):
+            return state
+
+    monkeypatch.setattr(kube, "custom", lambda: _Custom())
+
+    guard = _REAL_AGENTTENANT_TEARDOWN_STARTED
+    assert guard("ns", "acct", "uid-1") is False
+    state["spec"]["desiredState"] = "offboarding"
+    assert guard("ns", "acct", "uid-1") is True
+    state["spec"]["desiredState"] = "active"
+    state["metadata"]["uid"] = "uid-2"
+    assert guard("ns", "acct", "uid-1") is True
+    state["metadata"]["uid"] = "uid-1"
+    state["metadata"]["deletionTimestamp"] = "2026-07-29T00:00:00Z"
+    assert guard("ns", "acct", "uid-1") is True

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -74,6 +75,59 @@ def test_allocation_hash_changes_when_total_changes_at_same_percent():
     assert before != after
 
 
+def test_allocation_hash_changes_when_token_verification_key_rotates():
+    settings = _settings(25)
+    defaults = _defaults(25)
+    before = kube.allocation_hash(
+        {}, settings, defaults, "alice", verification_key="public-key-a")
+    after = kube.allocation_hash(
+        {}, settings, defaults, "alice", verification_key="public-key-b")
+
+    assert before != after
+
+
+def test_allocation_hash_covers_the_full_verifier_overlap_ring():
+    settings = _settings(25)
+    defaults = _defaults(25)
+    before = kube.allocation_hash(
+        {},
+        settings,
+        defaults,
+        "alice",
+        verification_key_ring=("current",),
+    )
+    overlap = kube.allocation_hash(
+        {},
+        settings,
+        defaults,
+        "alice",
+        verification_key_ring=("current", "future"),
+    )
+
+    assert before != overlap
+
+
+def test_allocation_hash_tracks_which_overlap_key_is_the_current_signer():
+    settings = _settings(25)
+    defaults = _defaults(25)
+    old_current = kube.allocation_hash(
+        {},
+        settings,
+        defaults,
+        "alice",
+        verification_key_ring=("old-current", "new-future"),
+    )
+    new_current = kube.allocation_hash(
+        {},
+        settings,
+        defaults,
+        "alice",
+        verification_key_ring=("new-future", "old-current"),
+    )
+
+    assert old_current != new_current
+
+
 def test_runner_and_terminal_share_full_allocation_generation():
     runner, terminal = _containers()
     key = "priva.io/allocation-hash"
@@ -105,6 +159,10 @@ def test_terminal_manifest_has_independent_security_and_scratch_boundary():
         "readOnlyRootFilesystem": True,
         "capabilities": {"drop": ["ALL"]},
     }
+    assert container["readinessProbe"]["tcpSocket"] == {"port": 8092}
+    assert container["livenessProbe"]["tcpSocket"] == {"port": 8092}
+    assert "httpGet" not in container["readinessProbe"]
+    assert "httpGet" not in container["livenessProbe"]
     assert "envFrom" not in container
     assert container["command"] == [
         "/usr/bin/prlimit", "--nofile=4096:4096", "--nproc=256:256",
@@ -116,39 +174,68 @@ def test_terminal_manifest_has_independent_security_and_scratch_boundary():
     assert data_mount == {"name": "data", "mountPath": "/workspace", "subPath": "acct"}
 
 
+def test_terminal_manifest_binds_signed_capabilities_to_account_and_pod():
+    runner, terminal = _containers()
+    runner_env = {
+        item["name"]: item
+        for item in runner["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+    container = terminal["spec"]["template"]["spec"]["containers"][0]
+    env = {item["name"]: item for item in container["env"]}
+
+    assert env["PRIVA_TERMINAL_ACCOUNT_ID"]["value"] == "acct"
+    assert env["PRIVA_TERMINAL_POD"]["valueFrom"]["fieldRef"] == {
+        "apiVersion": "v1",
+        "fieldPath": "status.podIP",
+    }
+    public_key = env["PRIVA_SERVICE_IDENTITY__PUBLIC_KEY"]["value"]
+    assert public_key.startswith("-----BEGIN PUBLIC KEY-----")
+    assert "PRIVATE KEY" not in public_key
+    assert json.loads(
+        env["PRIVA_SERVICE_IDENTITY__ADDITIONAL_PUBLIC_KEYS"]["value"]
+    ) == []
+    assert json.loads(
+        runner_env["PRIVA_SERVICE_IDENTITY__ADDITIONAL_PUBLIC_KEYS"]["value"]
+    ) == []
+    assert len(env["PRIVA_INTERNAL_DRAIN_TOKEN"]["value"]) >= 32
+    assert len(runner_env["PRIVA_INTERNAL_DRAIN_TOKEN"]["value"]) >= 32
+    assert (
+        env["PRIVA_INTERNAL_DRAIN_TOKEN"]["value"]
+        != runner_env["PRIVA_INTERNAL_DRAIN_TOKEN"]["value"]
+    )
+
+
+def test_terminal_template_hash_changes_when_verification_key_rotates():
+    settings = _settings()
+    defaults = _defaults()
+    before = kube.terminal_template_hash(
+        {}, settings, defaults, "alice", verification_key="public-key-a")
+    after = kube.terminal_template_hash(
+        {}, settings, defaults, "alice", verification_key="public-key-b")
+
+    assert before != after
+
+
 def test_invalid_non_step_percent_fails_closed():
     assert kube.resolve_terminal_percent(_settings(17), None) == 0
 
 
-def test_terminal_network_policies_only_protect_internal_destinations():
+def test_tenant_isolation_policies_are_not_shipped_as_static_manifests():
+    # They are rendered by the operator from the admin settings now
+    # (tests/operator/test_network_policies.py). A static copy would flap: up.sh
+    # or helm writes it, the operator prunes it 15s later.
     root = Path(__file__).resolve().parents[2]
-    docs = list(yaml.safe_load_all(
-        (root / "deploy/k8s/terminal-networkpolicy.yaml").read_text()))
-    policies = {doc["metadata"]["name"]: doc["spec"] for doc in docs}
+    assert not (root / "deploy/k8s/terminal-networkpolicy.yaml").exists()
+    assert not (root / "deploy/helm/priva-cloud/templates/terminal-networkpolicy.yaml").exists()
 
-    assert set(policies) == {
-        "data-spine-deny-terminal",
-        "redis-deny-terminal",
-        "runner-deny-tenant-peers",
-        "terminal-deny-tenant-peers",
-    }
-    # These are destination-ingress guards, not a default-deny egress policy:
-    # Terminal keeps DNS, internet, and unrelated-site access.
-    assert all(spec["policyTypes"] == ["Ingress"] for spec in policies.values())
-    assert all("egress" not in spec for spec in policies.values())
 
-    data_spine_sources = policies["data-spine-deny-terminal"]["ingress"][0]["from"]
-    redis_sources = policies["redis-deny-terminal"]["ingress"][0]["from"]
-    for sources in (data_spine_sources, redis_sources):
-        expression = sources[0]["podSelector"]["matchExpressions"][0]
-        assert expression == {"key": "app", "operator": "NotIn", "values": ["terminal"]}
+def test_postgres_stays_a_hand_applied_control_plane_boundary():
+    # data-spine→postgres is a control-plane boundary, not a tenant one, so it is
+    # deliberately NOT in the operator's managed set and must not be prunable by it.
+    from priva_operator import netpol
+    assert "postgres-only-data-spine" not in netpol.LEGACY_POLICIES
 
-    for name in ("runner-deny-tenant-peers", "terminal-deny-tenant-peers"):
-        expression = policies[name]["ingress"][0]["from"][0]["podSelector"][
-            "matchExpressions"][0]
-        assert expression == {
-            "key": "app", "operator": "NotIn", "values": ["agent-runner", "terminal"]}
-
+    root = Path(__file__).resolve().parents[2]
     postgres_docs = list(yaml.safe_load_all(
         (root / "deploy/k8s/postgres.yaml").read_text()))
     postgres_policy = next(

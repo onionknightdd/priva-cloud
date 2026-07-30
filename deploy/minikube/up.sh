@@ -5,15 +5,25 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 NS=priva-cloud
-TERMINAL_NETWORK_POLICY_ENABLED="${PRIVA_TERMINAL_NETWORK_POLICY_ENABLED:-1}"
 
-echo "==> 0. Terminal isolation preflight"
+echo "==> 0. tenant isolation preflight"
 bash "$ROOT/deploy/checks/pod-pids-limit.sh"
-if [[ "$TERMINAL_NETWORK_POLICY_ENABLED" == "1" ]]; then
-  bash "$ROOT/deploy/checks/networkpolicy-cni.sh"
-else
-  echo "    WARN: Terminal NetworkPolicy disabled; tenant lateral-network isolation is NOT enforced"
-fi
+# The operator applies the same fail-closed gate at startup. Continuing here
+# would only build everything and then strand the operator in CrashLoopBackOff,
+# while making the warning look like an accepted insecure deployment mode.
+set +e
+bash "$ROOT/deploy/checks/networkpolicy-cni.sh"
+NP_STATUS=$?
+set -e
+case "$NP_STATUS" in
+  0) ;;
+  1) echo "    ERROR: this cluster does NOT enforce NetworkPolicy in both directions." >&2
+     echo "           Refusing deployment because tenant workloads would be unsafe." >&2
+     exit 1 ;;
+  *) echo "    ERROR: NetworkPolicy enforcement could not be determined (see above)." >&2
+     echo "           Refusing deployment until the probe can complete." >&2
+     exit 2 ;;
+esac
 
 echo "==> 1. build + load images"
 "$ROOT/deploy/minikube/build.sh"
@@ -146,6 +156,7 @@ else
 fi
 
 echo "==> 7. control-plane"
+kubectl apply -f deploy/k8s/tenant-networkpolicy-baseline.yaml
 kubectl apply -f deploy/k8s/data-spine.yaml -f deploy/k8s/control-panel.yaml -f deploy/k8s/operator.yaml
 kubectl -n "$NS" rollout restart deployment/data-spine deployment/control-panel deployment/operator
 kubectl -n "$NS" rollout status deploy/data-spine --timeout=120s
@@ -157,12 +168,19 @@ kubectl apply -f deploy/k8s/channel-connector.yaml
 kubectl -n "$NS" rollout restart deployment/channel-connector
 kubectl -n "$NS" rollout status deploy/channel-connector --timeout=120s
 
-echo "==> 7c. selective Terminal NetworkPolicy"
-if [[ "$TERMINAL_NETWORK_POLICY_ENABLED" == "1" ]]; then
-  kubectl apply -f deploy/k8s/terminal-networkpolicy.yaml
-else
-  kubectl delete -f deploy/k8s/terminal-networkpolicy.yaml --ignore-not-found
-fi
+# scheduler was deployed by hand and never added here, so its Deployment kept
+# whatever podspec it was first created with. `rollout restart` does NOT pick up
+# manifest changes, so PRIVA_SERVICE_IDENTITY__SERVICE_NAME never reached the
+# live pod: it presented to data-spine as the default role and, once the
+# per-workload ACL landed, crash-looped on PERMISSION_DENIED.
+echo "==> 7c. scheduler (cross-tenant job dispatch)"
+kubectl apply -f deploy/k8s/scheduler.yaml
+kubectl -n "$NS" rollout restart deployment/scheduler
+kubectl -n "$NS" rollout status deploy/scheduler --timeout=120s
+
+# The Helm/raw baseline above is static default-deny. The operator separately
+# renders the additive allow policies from Sandbox ▸ Isolation and prunes only
+# its old dynamic set.
 
 echo "==> 8. edge: Gateway + InferencePool + HTTPRoute"
 kubectl apply -f deploy/gateway/gateway.yaml -f deploy/gateway/inferencepool.yaml -f deploy/gateway/httproute.yaml

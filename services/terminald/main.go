@@ -460,8 +460,19 @@ func clamp(value, min, max int) int {
 	return value
 }
 
+// Forwarded verbatim into the PTY when the operator sets them. The shell's
+// environment is built from a fixed list precisely so a tenant never inherits
+// terminald's own process env — but that also means anything the pod needs has
+// to be named here. Under egress allowlist mode the container has these and the
+// shell would not, so curl/npm/pip in the Terminal would lose the internet
+// entirely: NetworkPolicy allows only the proxy, and nothing would point at it.
+var forwardedEnv = []string{
+	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+	"http_proxy", "https_proxy", "no_proxy",
+}
+
 func shellEnv() []string {
-	return []string{
+	env := []string{
 		"HOME=/workspace/.home",
 		"USER=app",
 		"LOGNAME=app",
@@ -477,6 +488,12 @@ func shellEnv() []string {
 		"CLAUDE_CONFIG_DIR=/workspace/.claude",
 		"PRIVA_HOOK_DIR=/workspace/.priva/hook-context",
 	}
+	for _, key := range forwardedEnv {
+		if value := os.Getenv(key); value != "" {
+			env = append(env, key+"="+value)
+		}
+	}
+	return env
 }
 
 func (s *server) terminal(w http.ResponseWriter, r *http.Request) {

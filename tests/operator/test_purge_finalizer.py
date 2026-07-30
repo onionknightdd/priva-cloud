@@ -6,7 +6,8 @@ import pytest
 
 import priva_operator.reconcile as reconcile
 
-SPEC = {"accountId": "acct", "username": "alice"}
+SPEC = {"accountId": "acct", "username": "alice", "desiredState": "purge"}
+ACTIVE_SPEC = {"accountId": "acct", "username": "alice", "desiredState": "active"}
 
 
 def _settings():
@@ -25,13 +26,25 @@ def _clean_purge_registry():
 
 
 def _wire(monkeypatch, calls, *, replicas=1, terminal_replicas=1,
-          deprovision=None, claim_present=False):
+          deprovision=None, claim_present=False, pods_gone=True):
     monkeypatch.setattr(reconcile, "get_settings", _settings)
     monkeypatch.setattr(reconcile.kube, "get_replicas", lambda *a: replicas)
     monkeypatch.setattr(reconcile.kube, "get_terminal_replicas", lambda *a: terminal_replicas)
+    monkeypatch.setattr(
+        reconcile.kube,
+        "set_cr_status",
+        lambda *a, **k: calls.append(("status", k.get("phase"))),
+    )
     monkeypatch.setattr(reconcile.kube, "scale", lambda *a: calls.append(("runner", a[-1])))
     monkeypatch.setattr(
         reconcile.kube, "scale_terminal", lambda *a: calls.append(("terminal", a[-1])))
+    monkeypatch.setattr(
+        reconcile.kube,
+        "wait_account_workload_pods_gone",
+        lambda namespace, account_id, **kwargs: (
+            calls.append(("wait-pods", account_id)) or pods_gone
+        ),
+    )
     monkeypatch.setattr(
         reconcile.kube, "delete_export_claim",
         lambda namespace, account_id: calls.append(("claim", account_id)) or claim_present)
@@ -50,6 +63,21 @@ def _wire_converge(monkeypatch, calls):
     """Everything a dormant-tenant tick needs to reach ``ensure_runtime_objects``, so a
     tick the purge record blocked is distinguishable from one that never got that far."""
     monkeypatch.setattr(reconcile, "_render_managed_policy", lambda *a, **k: None)
+    isolation = reconcile._network_isolation_cache
+    monkeypatch.setattr(
+        reconcile, "_render_network_policies", lambda *a, **k: isolation
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "_network_isolation_applied_intent",
+        reconcile.isolation_intent_digest(isolation, _settings()),
+    )
+    monkeypatch.setattr(reconcile, "_network_isolation_dirty", False)
+    monkeypatch.setattr(
+        reconcile.egress_proxy,
+        "render_squid_conf",
+        lambda *_: "test squid config\n",
+    )
     monkeypatch.setattr(
         reconcile, "_runner_defaults",
         lambda spec=None: SimpleNamespace(storage_gb=1, idle_grace_seconds=1800,
@@ -68,10 +96,23 @@ def test_purge_scales_both_deployments_then_reclaims_the_volume(
 ):
     calls = []
     _wire(monkeypatch, calls)
+    monkeypatch.setattr(
+        reconcile,
+        "_force_close_account_admission",
+        lambda *a, **k: calls.append(("force-drain", "acct")),
+    )
 
     reconcile.purge(spec=SPEC, name="acct", namespace="ns", logger=stub_logger)
 
-    assert calls == [("runner", 0), ("terminal", 0), ("deprovision", "acct"), ("claim", "acct")]
+    assert calls == [
+        ("status", "Draining"),
+        ("force-drain", "acct"),
+        ("runner", 0),
+        ("terminal", 0),
+        ("wait-pods", "acct"),
+        ("deprovision", "acct"),
+        ("claim", "acct"),
+    ]
 
 
 def test_purge_tolerates_a_teardown_that_already_ran(monkeypatch, stub_logger):
@@ -80,16 +121,26 @@ def test_purge_tolerates_a_teardown_that_already_ran(monkeypatch, stub_logger):
 
     reconcile.purge(spec=SPEC, name="acct", namespace="ns", logger=stub_logger)
 
-    assert calls == [("deprovision", "acct"), ("claim", "acct")]
+    assert calls == [
+        ("status", "Draining"),
+        ("wait-pods", "acct"),
+        ("deprovision", "acct"),
+        ("claim", "acct"),
+    ]
 
 
-def test_purge_identity_survives_an_incomplete_spec(monkeypatch, stub_logger):
+def test_delete_without_explicit_purge_intent_preserves_storage(
+    monkeypatch, stub_logger,
+):
     calls = []
     _wire(monkeypatch, calls, replicas=-1, terminal_replicas=-1)
 
     reconcile.purge(spec={}, name="acct", namespace="ns", logger=stub_logger)
 
-    assert ("deprovision", "acct") in calls
+    assert ("status", "Draining") in calls
+    assert ("wait-pods", "acct") in calls
+    assert ("deprovision", "acct") not in calls
+    assert ("claim", "acct") not in calls
 
 
 def test_purge_retries_while_the_attempt_budget_remains(monkeypatch, stub_logger):
@@ -120,6 +171,26 @@ def test_purge_reclaims_an_export_claim_the_backend_left_behind(monkeypatch, stu
     reconcile.purge(spec=SPEC, name="acct", namespace="ns", logger=stub_logger)
 
     assert calls.index(("deprovision", "acct")) < calls.index(("claim", "acct"))
+
+
+def test_purge_retries_without_reclaim_while_any_account_pod_remains(
+    monkeypatch, stub_logger,
+):
+    calls = []
+    _wire(monkeypatch, calls, pods_gone=False)
+
+    with pytest.raises(RuntimeError, match="did not terminate"):
+        reconcile.purge(
+            spec=SPEC,
+            name="acct",
+            namespace="ns",
+            logger=stub_logger,
+            retry=0,
+        )
+
+    assert ("wait-pods", "acct") in calls
+    assert ("deprovision", "acct") not in calls
+    assert ("claim", "acct") not in calls
 
 
 def test_purge_blocks_a_racing_timer_from_reprovisioning(
@@ -153,11 +224,13 @@ def test_purge_blocks_a_racing_timer_carrying_the_torn_down_uid(
 ):
     calls = []
     _wire(monkeypatch, calls, replicas=0, terminal_replicas=0)
-    reconcile.purge(spec=SPEC, name="acct", namespace="ns", logger=stub_logger, uid="uid-1")
+    reconcile.purge(
+        spec=SPEC, name="acct", namespace="ns", logger=stub_logger, uid="uid-1")
     _wire_converge(monkeypatch, calls)
 
     reconcile.reconcile_runtime(
-        spec=SPEC, name="acct", namespace="ns", status={"storageGb": 1}, patch=patch_obj,
+        spec=ACTIVE_SPEC, name="acct", namespace="ns",
+        status={"storageGb": 1}, patch=patch_obj,
         logger=stub_logger, uid="uid-1", meta={"uid": "uid-1"},
     )
 
@@ -171,11 +244,18 @@ def test_a_cr_recreated_after_an_out_of_band_delete_converges_again(
     control plane re-creates the CR, and that new object must not inherit the block."""
     calls = []
     _wire(monkeypatch, calls, replicas=0, terminal_replicas=0)
-    reconcile.purge(spec=SPEC, name="acct", namespace="ns", logger=stub_logger, uid="uid-1")
+    reconcile.purge(
+        spec=ACTIVE_SPEC,
+        name="acct",
+        namespace="ns",
+        logger=stub_logger,
+        uid="uid-1",
+    )
     _wire_converge(monkeypatch, calls)
 
     reconcile.reconcile_runtime(
-        spec=SPEC, name="acct", namespace="ns", status={"storageGb": 1}, patch=patch_obj,
+        spec=ACTIVE_SPEC, name="acct", namespace="ns",
+        status={"storageGb": 1}, patch=patch_obj,
         logger=stub_logger, uid="uid-2", meta={"uid": "uid-2"},
     )
 
@@ -213,7 +293,7 @@ def test_a_tick_already_in_flight_when_the_purge_lands_still_bails(
     )
 
     reconcile.reconcile_runtime(
-        spec={**SPEC, "agentRunnerType": "persistent"}, name="acct", namespace="ns",
+        spec={**ACTIVE_SPEC, "agentRunnerType": "persistent"}, name="acct", namespace="ns",
         status={"storageGb": 1}, patch=patch_obj, logger=stub_logger, uid="uid",
     )
 

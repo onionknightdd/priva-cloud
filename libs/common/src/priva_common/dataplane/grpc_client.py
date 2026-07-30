@@ -92,7 +92,27 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         scheduler_pb2_grpc,
     )
 
-    channel = grpc.intercept_channel(grpc.insecure_channel(dsn), _ServiceAuthInterceptor())
+    # This channel must never traverse the tenant egress proxy. Under allowlist
+    # mode the runner pod carries HTTP(S)_PROXY, and grpc's C-core honours it —
+    # the data-spine channel would be CONNECTed to the proxy, rejected by the
+    # allowlist, and the whole runner would fail in a way that impersonates a
+    # data-spine outage.
+    #
+    # Measured in-cluster (grpcio, runner pod), because the behaviour is not what
+    # the variable names suggest — the C-core reads only the LOWERCASE forms:
+    #
+    #   http_proxy   hijacks the channel      HTTP_PROXY   no effect
+    #   https_proxy  hijacks the channel      HTTPS_PROXY  no effect
+    #   no_proxy     rescues it               NO_PROXY     does NOT rescue it
+    #
+    # So relying on NO_PROXY is a trap: tidying the env down to the uppercase
+    # names alone — which is what most guides recommend — silently kills
+    # data-spine for every tenant. enable_http_proxy=0 removes the dependency
+    # outright: verified reachable with all four proxy vars pointed at a dead
+    # address and no no_proxy set at all.
+    channel = grpc.intercept_channel(
+        grpc.insecure_channel(dsn, options=[("grpc.enable_http_proxy", 0)]),
+        _ServiceAuthInterceptor())
 
     class _Accounts:
         def __init__(self):

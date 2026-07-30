@@ -11,7 +11,8 @@ to the dev machine is needed once images are pushed.
 | Kubernetes ≥ 1.29, amd64 nodes | Gateway API v1.5 + built image arch | `kubectl get nodes -o wide` |
 | CephFS CSI StorageClass, **RWX-capable**, `allowVolumeExpansion: true` | per-account export PVCs; PVC expand = quota grow | `kubectl get sc <name> -o yaml` |
 | An RWO StorageClass (ceph-rbd or default) | data-spine SQLite PVC | `kubectl get sc` |
-| Egress to `api.anthropic.com` (or your `ANTHROPIC_BASE_URL` relay) from pods | runners call the Claude API | `kubectl run t --rm -it --image=curlimages/curl -- curl -sI https://api.anthropic.com` |
+| NetworkPolicy ingress **and** egress enforcement | tenant and proxy boundaries | `PRIVA_FACTS_NS=priva-cloud deploy/checks/networkpolicy-cni.sh` (must exit 0) |
+| Egress to `api.anthropic.com` (or your `ANTHROPIC_BASE_URL` relay) through the approved proxy path | runners call the Claude API | validate after install from a policy-selected test workload |
 | Egress to `cr.agentgateway.dev` + GitHub releases (install-time only) | edge prerequisites below | — |
 
 ## 1. Build + push images (from the repo, any machine with docker buildx)
@@ -46,7 +47,9 @@ kubectl -n priva-cloud create secret docker-registry priva-regcred \
   --docker-server=<registry> --docker-username=... --docker-password=...
 
 # EDIT deploy/helm/priva-cloud/values-uat.yaml first: registry, tag, pullSecrets,
-# cephfsStorageClass, dataSpine.storageClassName.
+# cephfsStorageClass, dataSpine.storageClassName, every cluster/node CIDR,
+# NodeLocal DNS (if used), and the digest-pinned egress proxy image.
+PRIVA_FACTS_NS=priva-cloud deploy/checks/networkpolicy-cni.sh
 helm install priva deploy/helm/priva-cloud -n priva-cloud \
   -f deploy/helm/priva-cloud/values-uat.yaml
 ```
@@ -89,5 +92,16 @@ credentials are entered in the SPA Settings after login.
   set kubelet `podPidsLimit` to `1..512` on every node (verify with
   `deploy/checks/pod-pids-limit.sh`). Terminal is disabled by default (`0%`); enable it
   from Admin only after both checks pass.
+- **Node and metadata boundary**: standard NetworkPolicy does not portably block access
+  to the node hosting a pod and `hostNetwork` behavior varies by CNI. Enforce
+  tenant-to-node denies in CNI host policy/node firewalls, prohibit tenant
+  `hostNetwork`/privileged workloads at admission, and disable/restrict instance
+  metadata (prefer workload identity). Add every provider-specific address to
+  `egressBlockedCidrs`.
+- **TLS SNI boundary**: the Ubuntu Squid 6.13 development image cannot use
+  `ssl-bump` (GnuTLS build). It validates CONNECT authority/port and resolved
+  destination IP, but not the encrypted ClientHello SNI. A requirement for
+  authority=SNI needs a pinned OpenSSL Squid build with tested bump rules or a
+  dedicated Envoy egress gateway.
 - The chart intentionally does NOT install Gateway API CRDs / agentgateway (step 2) —
   they're cluster-level and shared.

@@ -1,4 +1,7 @@
 {{- $ns := include "priva-cloud.namespace" . -}}
+{{- if ne (int .Values.services.operator.replicas) 1 -}}
+{{- fail "services.operator.replicas must be exactly 1: the standalone operator has no cross-pod leader election" -}}
+{{- end -}}
 # operator — kopf AgentTenant controller (sole scaler 0<->1). Logs to stderr.
 apiVersion: apps/v1
 kind: Deployment
@@ -21,6 +24,10 @@ spec:
         # re-keys anything leaves old and new pods signing/verifying with
         # different material until something else happens to restart them.
         checksum/secrets: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        # envFrom values are captured at process start. Egress CIDRs, DNS and
+        # proxy settings must take effect on the same Helm upgrade that changes
+        # priva-config; otherwise the operator keeps rendering the old boundary.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
       labels: {app: operator}
     spec:
       securityContext:

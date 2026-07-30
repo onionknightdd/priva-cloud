@@ -20,6 +20,7 @@ dataspine:
 
 agent:
   permission_timeout_seconds: 600   # parked permission await bound
+  network_silence_timeout_seconds: 120  # surface proxy/upstream stalls
 
 pty:
   enabled: false

@@ -49,10 +49,18 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch"]
+    # Required for the fail-closed egress-proxy generation cutover.
+    verbs: ["get", "list", "watch", "delete"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
+  # Tenant-isolation NetworkPolicies are operator-rendered from the admin
+  # settings. delete is required, not optional: turning a switch off has to
+  # remove the object, and the superseded hand-applied policies must be pruned
+  # (policies UNION their allow rules, so a stale one silently widens the new).
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

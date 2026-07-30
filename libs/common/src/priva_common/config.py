@@ -158,6 +158,14 @@ class PtySettings(BaseModel):
 
 class AgentSettings(BaseModel):
     permission_timeout_seconds: int = 600
+    # Bound a Claude CLI stream which emits no events while no tool is running.
+    # This turns an unavailable egress proxy/upstream into a visible error
+    # instead of an endless SSE keepalive stream.
+    network_silence_timeout_seconds: int = Field(
+        default=120,
+        ge=30,
+        le=900,
+    )
 
 
 class ServiceIdentitySettings(BaseModel):

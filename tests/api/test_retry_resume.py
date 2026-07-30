@@ -5,6 +5,7 @@ attempts: stripping synthetic-error rows so the model never sees its own
 error, and healing orphan tool_use blocks so the resumed conversation
 remains structurally valid for the Anthropic API.
 """
+import asyncio
 import json
 import os
 import tempfile
@@ -169,6 +170,67 @@ class HealOrphanToolUsesTests(unittest.TestCase):
 
 
 class RetryOrchestrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_agent_run_surfaces_silence_after_init_without_retrying(self) -> None:
+        session_id = SESSION_ID
+        real_wait_for = asyncio.wait_for
+        wait_calls = 0
+
+        class FakeClient:
+            def __init__(self, options):
+                self.options = options
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def query(self, _prompt):
+                return None
+
+            async def receive_response(self):
+                yield SystemMessage("init", {"session_id": session_id})
+                await asyncio.Event().wait()
+
+        async def fake_build_options(*_args, **_kwargs):
+            return SimpleNamespace(cwd="/tmp", resume=None)
+
+        async def accelerated_wait_for(awaitable, *, timeout):
+            nonlocal wait_calls
+            wait_calls += 1
+            return await real_wait_for(
+                awaitable,
+                timeout=1 if wait_calls == 1 else 0.001,
+            )
+
+        settings = SimpleNamespace(
+            agent=SimpleNamespace(network_silence_timeout_seconds=30)
+        )
+        with (
+            patch.object(service, "ClaudeSDKClient", FakeClient),
+            patch.object(service, "build_agent_options", new=fake_build_options),
+            patch.object(service, "get_settings", return_value=settings),
+            patch.object(service, "_resolve_vision_model", return_value=None),
+            patch.object(service, "_audit_skill_prompt"),
+            patch.object(service, "_audit_run_completed"),
+            patch.object(service, "_track_vision_session"),
+            patch.object(service, "heal_orphan_tool_uses", return_value=0),
+            patch.object(service.session_title, "spawn", return_value=None),
+            patch.object(service.session_title, "settle", new=AsyncMock()),
+            patch.object(service.session_meta, "record_recent_activity", new=AsyncMock()),
+            patch.object(service.session_recap, "spawn"),
+            patch.object(service.asyncio, "wait_for", new=accelerated_wait_for),
+            patch.object(service.asyncio, "sleep", new=AsyncMock()),
+        ):
+            result = await service.agent_run("wait for upstream")
+
+        self.assertEqual(wait_calls, 2)
+        self.assertEqual(result["attempts"], 1)
+        self.assertEqual(result["session_id"], session_id)
+        self.assertTrue(result["is_error"])
+        self.assertEqual(result["retried_due_to"], "NetworkSilenceTimeout")
+        self.assertIn("egress proxy or model upstream", result["result"])
+
     async def test_agent_run_resumes_pending_turn_without_resending_prompt(self) -> None:
         queries: list[tuple[str | None, str | list[dict]]] = []
         session_id = SESSION_ID
@@ -366,6 +428,75 @@ class RetryOrchestrationTests(unittest.IsolatedAsyncioTestCase):
             ["stream_init", "system", "tool_use", "tool_result", "retry_attempt", "result"],
         )
         self.assertTrue(coordinator.cancelled)
+
+    async def test_agent_run_events_emits_fatal_network_silence_error(self) -> None:
+        emitted: list[tuple[str, dict]] = []
+        real_wait_for = asyncio.wait_for
+
+        class FakeCoordinator:
+            event_queue = None
+            owner_username = None
+            session_id = None
+
+            def cancel_all(self):
+                return None
+
+        class FakeClient:
+            def __init__(self, options):
+                self.options = options
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def query(self, _prompt):
+                return None
+
+        async def fake_build_options(*_args, **_kwargs):
+            return SimpleNamespace(cwd="/tmp", resume=None)
+
+        async def silent_pump(*_args, **_kwargs):
+            await asyncio.Event().wait()
+
+        async def accelerated_wait_for(awaitable, *, timeout):
+            return await real_wait_for(awaitable, timeout=0.001)
+
+        async def emit(event: str, data: dict):
+            emitted.append((event, data))
+
+        settings = SimpleNamespace(
+            agent=SimpleNamespace(network_silence_timeout_seconds=30)
+        )
+        with (
+            patch.object(service, "ClaudeSDKClient", FakeClient),
+            patch.object(service, "build_agent_options", new=fake_build_options),
+            patch.object(service, "get_settings", return_value=settings),
+            patch.object(service, "_pump_stream_messages", new=silent_pump),
+            patch.object(service, "_resolve_vision_model", return_value=None),
+            patch.object(service, "_make_unified_can_use_tool", return_value=None),
+            patch.object(service, "should_abort_silent_stream", return_value=True),
+            patch.object(service, "heal_orphan_tool_uses", return_value=0),
+            patch.object(service.session_title, "spawn", return_value=None),
+            patch.object(service.session_title, "settle", new=AsyncMock()),
+            patch.object(service.session_meta, "record_recent_activity", new=AsyncMock()),
+            patch.object(service.session_recap, "spawn"),
+            patch.object(service.asyncio, "wait_for", new=accelerated_wait_for),
+            patch.object(service.asyncio, "sleep", new=AsyncMock()),
+        ):
+            await service.agent_run_events(
+                "wait for upstream",
+                emit=emit,
+                coordinator_out=[FakeCoordinator()],
+            )
+
+        events = [event for event, _ in emitted]
+        self.assertEqual(events, ["stream_init", "keepalive", "stream_error"])
+        error = emitted[-1][1]
+        self.assertEqual(error["code"], "NetworkSilenceTimeout")
+        self.assertTrue(error["fatal"])
+        self.assertIn("egress proxy or model upstream", error["message"])
 
 
 if __name__ == "__main__":

@@ -239,10 +239,9 @@ gateway:
   # otherwise the cloud CCM provisions a second, unwanted LB for it.
   serviceType: ""
 
-# Destination-side isolation for tenant Terminal traffic. Keep enabled outside
-# explicitly insecure, single-user development clusters.
-terminalNetworkPolicy:
-  enabled: true
+# Tenant network isolation is no longer a chart-level flag: the operator renders
+# the NetworkPolicy set from the admin settings (Sandbox ▸ Isolation), so it is
+# runtime-configurable and its live enforcement state is visible in the UI.
 
 # ---------------------------------------------------------------------------
 # Optional cloud Ingress in front of the gateway (TLS at the external LB, all

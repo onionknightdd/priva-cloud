@@ -26,13 +26,13 @@ import asyncio
 import re
 from typing import Any
 
-import httpx
 from claude_agent_sdk import get_session_messages
 
 from priva_common.logging import get_app_logger
 from priva_common.skill_exclude import get_user_yaml_key
 from priva_common.user_env import read_settings_env
 
+from ..http_client import external_async_client
 from . import session_meta
 
 logger = get_app_logger(__name__)
@@ -146,9 +146,9 @@ async def _ask_model(digest: str) -> str:
         # this account simply has no recaps.
         return ""
 
-    # trust_env=False for the same reason the creds probe sets it: a proxy from
-    # the ambient environment must not intercept the account's own gateway.
-    async with httpx.AsyncClient(timeout=_TIMEOUT_SEC, trust_env=False) as client:
+    # The operator's explicit egress proxy is used, while NO_PROXY remains
+    # ignored so a tenant-controlled bypass cannot turn this into a direct call.
+    async with external_async_client(base_url, timeout=_TIMEOUT_SEC) as client:
         resp = await client.post(
             f"{base_url}/v1/messages",
             headers={

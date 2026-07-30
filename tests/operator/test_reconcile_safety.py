@@ -85,6 +85,11 @@ def test_offboarding_closes_runner_and_terminal_state_loop(monkeypatch, patch_ob
     monkeypatch.setattr(R.kube, "get_replicas", lambda *a: 1)
     monkeypatch.setattr(R.kube, "get_terminal_replicas", lambda *a: 1)
     monkeypatch.setattr(R.kube, "set_cr_status", lambda *a, **k: calls.append(("status", k)))
+    monkeypatch.setattr(
+        R,
+        "_force_close_account_admission",
+        lambda *a, **k: calls.append(("force-drain", None)),
+    )
     monkeypatch.setattr(R.kube, "scale", lambda *a: calls.append(("runner", a[-1])))
     monkeypatch.setattr(R.kube, "scale_terminal", lambda *a: calls.append(("terminal", a[-1])))
 
@@ -96,6 +101,9 @@ def test_offboarding_closes_runner_and_terminal_state_loop(monkeypatch, patch_ob
 
     assert ("runner", 0) in calls
     assert ("terminal", 0) in calls
+    assert [kind for kind, _ in calls[:4]] == [
+        "status", "force-drain", "runner", "terminal"
+    ]
     assert patch_obj.status["phase"] == "Offboarding"
     assert patch_obj.status["podIP"] is None
 
@@ -105,8 +113,15 @@ def test_rejected_quota_is_not_retried_for_same_desired_value(
 ):
     monkeypatch.setattr(R, "_runner_defaults", lambda spec=None: _defaults(storage_gb=2))
     monkeypatch.setattr(R, "_render_managed_policy", lambda *a, **k: None)
+    monkeypatch.setattr(
+        R, "_render_network_policies", lambda *a, **k: SimpleNamespace(egress_mode="unrestricted"))
     monkeypatch.setattr(R.kube, "allocation_hash", lambda *a, **k: "desired")
     monkeypatch.setattr(R.kube, "applied_allocation_hash", lambda *a: "desired")
+    # No egress drift either — this test is about the quota retry guard, and the
+    # egress generation is an independent converge trigger that would otherwise
+    # call ensure_runtime_objects and reach the real storage backend.
+    monkeypatch.setattr(R.kube, "egress_generation", lambda *a, **k: "e1:same")
+    monkeypatch.setattr(R.kube, "applied_egress_generation", lambda *a: "e1:same")
     monkeypatch.setattr(R.kube, "get_replicas", lambda *a: 0)
     monkeypatch.setattr(R.kube, "resolve_storage_gb", lambda *a: 2)
     monkeypatch.setattr(

@@ -32,6 +32,7 @@ from priva_common.user_env import (
     write_settings_env,
 )
 from ..deps import require_user
+from ..services.http_client import external_async_client
 
 router = APIRouter(prefix="/api/sandbox/credentials", tags=["credentials"])
 
@@ -106,7 +107,7 @@ async def load_model_list(timeout: float = 15.0) -> list[ModelInfo]:
         raise HTTPException(400, "API credentials not configured. Please set base URL and auth token.")
 
     try:
-        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+        async with external_async_client(base_url, timeout=timeout) as client:
             resp = await client.get(
                 f"{base_url}/v1/models",
                 headers={"Authorization": f"Bearer {auth_token}"},

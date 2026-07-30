@@ -18,6 +18,7 @@ from claude_agent_sdk import (
 )
 from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 
+from priva_common.config import get_settings
 from priva_common.models.agent import PermissionMode
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from ...services.skills import _get_skills_dir
@@ -57,6 +58,58 @@ _BG_IDLE_TIMEOUT = 600
 # short, because a re-invocation starts promptly if it's coming at all (some
 # terminal paths, e.g. TaskStop, produce none).
 _BG_SETTLE_SECONDS = 15
+
+
+class NetworkSilenceError(RuntimeError):
+    """The CLI emitted no event while it was safe to interrupt the stream."""
+
+
+def network_silence_message(timeout_seconds: int) -> str:
+    return (
+        f"Agent produced no events for {timeout_seconds} seconds while no "
+        "foreground tool was running; the egress proxy or model upstream may "
+        "be unavailable"
+    )
+
+
+def should_abort_silent_stream(
+    *,
+    draining_background: bool,
+    outstanding_tool_count: int,
+    waiting_for_permission: bool = False,
+    idle_seconds: float,
+    timeout_seconds: int,
+) -> bool:
+    """Only abort silence at a clean model/network boundary.
+
+    Long foreground tools and background workflows have their own lifecycle
+    bounds. Interrupting either here could terminate valid tenant work.
+    """
+    return (
+        not draining_background
+        and outstanding_tool_count == 0
+        and not waiting_for_permission
+        and idle_seconds >= timeout_seconds
+    )
+
+
+def observe_tool_lifecycle(
+    event_data: dict | None,
+    outstanding_tool_uses: set[str],
+) -> None:
+    """Update foreground tool IDs from one serialized SDK event."""
+    data = event_data or {}
+    content = data.get("content")
+    if not isinstance(content, list):
+        return
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type == "tool_use" and block.get("id"):
+            outstanding_tool_uses.add(block["id"])
+        elif block_type == "tool_result" and block.get("tool_use_id"):
+            outstanding_tool_uses.discard(block["tool_use_id"])
 
 
 def should_stop_bg_drain(outstanding_count: int, idle_seconds: float) -> bool:
@@ -576,6 +629,9 @@ async def agent_run(
     # agent_run_events. See the explanation there.
     current_resume_id: str | None = session_id
     effective_prompt = _build_prompt_with_images(prompt, images, attachments)
+    silence_timeout = int(
+        get_settings().agent.network_silence_timeout_seconds
+    )
 
     if session_id:
         healed = heal_orphan_tool_uses(session_id, options.cwd)
@@ -609,7 +665,43 @@ async def agent_run(
                 attempt_resumable = True
             title_task = session_title.spawn(client, prompt) if title_pending else None
             title_pending = False
-            async for message in client.receive_response():
+            response_iter = client.receive_response().__aiter__()
+            outstanding_tool_uses: set[str] = set()
+            workflow_tracker = WorkflowDrainTracker()
+            while True:
+                try:
+                    if outstanding_tool_uses:
+                        # Foreground tools may legitimately be quiet for a long
+                        # time and have their own lifecycle/cancellation bounds.
+                        message = await anext(response_iter)
+                    else:
+                        wait_seconds = (
+                            _BG_IDLE_TIMEOUT
+                            if workflow_tracker.outstanding_count
+                            else silence_timeout
+                        )
+                        message = await asyncio.wait_for(
+                            anext(response_iter),
+                            timeout=wait_seconds,
+                        )
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError as exc:
+                    wait_seconds = (
+                        _BG_IDLE_TIMEOUT
+                        if workflow_tracker.outstanding_count
+                        else silence_timeout
+                    )
+                    raise NetworkSilenceError(
+                        network_silence_message(wait_seconds)
+                    ) from exc
+
+                event_label = get_event_label(message)
+                if event_label is not None:
+                    event_data = serialize_message(message)
+                    workflow_tracker.observe(event_label, event_data)
+                    observe_tool_lifecycle(event_data, outstanding_tool_uses)
+
                 if isinstance(message, SystemMessage) and message.subtype == "init":
                     sid = (message.data or {}).get("session_id")
                     if isinstance(sid, str) and sid:
@@ -688,6 +780,16 @@ async def agent_run(
             if attempt == retry.MAX_ATTEMPTS:
                 break
             continue
+        except NetworkSilenceError as e:
+            # Retrying the CLI ten times would turn a visible two-minute
+            # boundary back into a long silent outage. Return one explicit
+            # error result; the next user action can retry after the proxy heals.
+            last_error = {
+                "code": "NetworkSilenceTimeout",
+                "message": str(e),
+            }
+            logger.warning("[STREAM] {}", e)
+            break
         except Exception as e:
             if not retry.should_retry_exception(e):
                 raise
@@ -711,7 +813,10 @@ async def agent_run(
         # All retries failed — return an error result so callers can
         # see a final outcome instead of a silent empty payload.
         result_data = {
-            "session_id": session_id,
+            # system.init may already have created and persisted a brand-new
+            # session before the upstream went silent. Return that ID so the
+            # caller can keep/retry the transcript instead of orphaning it.
+            "session_id": current_resume_id or session_id,
             "is_error": True,
             "result": last_error.get("message") or "Retries exhausted",
             "api_error_status": last_error.get("api_error_status"),
@@ -923,6 +1028,9 @@ async def agent_run_events(
 
     effective_prompt = _build_prompt_with_images(prompt, images, attachments)
     model_tracker: list[str | None] = [model_override]
+    silence_timeout = int(
+        get_settings().agent.network_silence_timeout_seconds
+    )
 
     if session_id:
         healed = heal_orphan_tool_uses(session_id, options.cwd)
@@ -978,6 +1086,7 @@ async def agent_run_events(
             # give-up window is measured from here. Seeded to "now" so the first
             # drain window starts at end-of-turn, not at process start.
             last_event_ts = time.monotonic()
+            silence_aborted = False
 
             async def _flush_next_queued() -> bool:
                 """Pop one queued user message and submit it as a new turn."""
@@ -1006,11 +1115,32 @@ async def agent_run_events(
                         item = await asyncio.wait_for(output_queue.get(), timeout=2.0)
                     except asyncio.TimeoutError:
                         await emit("keepalive", {})
+                        idle = time.monotonic() - last_event_ts
+                        if should_abort_silent_stream(
+                            draining_background=draining_bg,
+                            outstanding_tool_count=len(outstanding_tool_uses),
+                            waiting_for_permission=bool(
+                                coordinator
+                                and getattr(coordinator, "pending", None)
+                            ),
+                            idle_seconds=idle,
+                            timeout_seconds=silence_timeout,
+                        ):
+                            message = network_silence_message(silence_timeout)
+                            logger.warning("[STREAM] {}", message)
+                            retry_signal = {
+                                "_retry_signal": "fatal",
+                                "payload": {
+                                    "code": "NetworkSilenceTimeout",
+                                    "message": message,
+                                },
+                            }
+                            silence_aborted = True
+                            break
                         # Only relevant once we're keeping the CLI alive purely to
                         # drain background tasks (an idle gap during a normal turn
                         # is just the model thinking).
                         if draining_bg:
-                            idle = time.monotonic() - last_event_ts
                             outstanding = wf_tracker.outstanding_count
                             if should_stop_bg_drain(outstanding, idle):
                                 if outstanding:
@@ -1085,17 +1215,10 @@ async def agent_run_events(
 
                     # Track tool_use lifecycle so we only interrupt at a
                     # clean boundary (no in-flight parallel tools).
-                    evt_data = item.get("data") or {}
-                    evt_content = evt_data.get("content")
-                    if isinstance(evt_content, list):
-                        for block in evt_content:
-                            if not isinstance(block, dict):
-                                continue
-                            btype = block.get("type")
-                            if btype == "tool_use" and block.get("id"):
-                                outstanding_tool_uses.add(block["id"])
-                            elif btype == "tool_result" and block.get("tool_use_id"):
-                                outstanding_tool_uses.discard(block["tool_use_id"])
+                    observe_tool_lifecycle(
+                        item.get("data"),
+                        outstanding_tool_uses,
+                    )
 
                     if item["event"] == "result":
                         new_sid = item["data"].get("session_id")
@@ -1129,6 +1252,12 @@ async def agent_run_events(
                     await pump_task
                 except asyncio.CancelledError:
                     pass
+                if silence_aborted:
+                    # The cancelled pump's finally block publishes a terminal
+                    # None. Do not let that stale sentinel make a later turn
+                    # look like a clean, empty response.
+                    while not output_queue.empty():
+                        output_queue.get_nowait()
 
             await session_title.settle(title_task)
 

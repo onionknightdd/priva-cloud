@@ -16,6 +16,7 @@ from priva_agent_runner.services.claude_sdk.service import (
     _BG_SETTLE_SECONDS,
     WorkflowDrainTracker,
     classify_bg_task_event,
+    should_abort_silent_stream,
     should_stop_bg_drain,
 )
 
@@ -151,6 +152,41 @@ class TestShouldStopBgDrain:
 
     def test_settle_is_much_shorter_than_idle_window(self) -> None:
         assert _BG_SETTLE_SECONDS < _BG_IDLE_TIMEOUT
+
+
+class TestNetworkSilenceGuard:
+    def test_clean_model_wait_is_bounded(self) -> None:
+        assert should_abort_silent_stream(
+            draining_background=False,
+            outstanding_tool_count=0,
+            idle_seconds=120,
+            timeout_seconds=120,
+        )
+
+    def test_foreground_tool_is_never_killed_by_network_guard(self) -> None:
+        assert not should_abort_silent_stream(
+            draining_background=False,
+            outstanding_tool_count=1,
+            idle_seconds=3600,
+            timeout_seconds=120,
+        )
+
+    def test_background_drain_keeps_its_separate_idle_policy(self) -> None:
+        assert not should_abort_silent_stream(
+            draining_background=True,
+            outstanding_tool_count=0,
+            idle_seconds=3600,
+            timeout_seconds=120,
+        )
+
+    def test_user_permission_wait_uses_its_longer_permission_timeout(self) -> None:
+        assert not should_abort_silent_stream(
+            draining_background=False,
+            outstanding_tool_count=0,
+            waiting_for_permission=True,
+            idle_seconds=3600,
+            timeout_seconds=120,
+        )
 
 
 def _from(evt: dict) -> tuple[str, dict]:
