@@ -64,6 +64,11 @@ export const updatePlugin = (id, data) => putJSON(`/admin/system/plugin/${encode
 export const getRunnerDefaults = () => getJSON('/admin/runner-defaults')
 export const updateRunnerDefaults = (data) => putJSON('/admin/runner-defaults', data)
 
+// Sandbox ▸ Isolation. The GET carries live cluster status alongside the stored
+// settings: the panel reports what is actually in force, not what was asked for.
+export const getNetworkIsolation = () => getJSON('/admin/network-isolation')
+export const updateNetworkIsolation = (data) => putJSON('/admin/network-isolation', data)
+
 // Configurations ▸ Channels: platform-wide channel settings — today the global
 // group-chat kill switch (composes with each user's own opt-in).
 export const getChannelPlatformConfig = () => getJSON('/admin/channel-platform')

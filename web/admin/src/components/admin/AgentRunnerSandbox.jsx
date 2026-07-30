@@ -5,6 +5,7 @@ import { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/
 import Dropdown from '@shared/components/shared/Dropdown'
 import { getRunnerDefaults, updateRunnerDefaults } from '@shared/api/admin'
 import RuntimeHooks from './RuntimeHooks'
+import NetworkIsolation from './NetworkIsolation'
 
 // Agent Runner Sandbox — the platform-wide GLOBAL defaults for per-account agent-runner
 // pods. An account inherits each value here unless it carries a per-account override
@@ -37,8 +38,7 @@ const FIELD_LABEL_WIDTH = 240
 const FIELD_BOX_WIDTH = 260
 
 // field id == the runner-defaults API key. type 'int' renders a number input + a unit
-// label OUTSIDE the box; 'segment' a greyed-out (next-phase) control. CPU is
-// millicores end-to-end (digit-only UI).
+// label OUTSIDE the box. CPU is millicores end-to-end (digit-only UI).
 const GROUPS = [
   {
     id: 'lifecycle',
@@ -71,13 +71,14 @@ const GROUPS = [
       { id: 'terminal_scale_down_grace_seconds', labelKey: 'admin.terminalScaleDownGrace', type: 'int', unit: 's', hintKey: 'admin.terminalScaleDownGraceHint' },
     ],
   },
+  // Isolation owns its own fetch + saves: unlike the rest of this panel it must
+  // report LIVE cluster state (is the policy actually applied, does the CNI even
+  // enforce), not just echo a stored value.
   {
     id: 'isolation',
     labelKey: 'admin.sandboxIsolation',
     icon: ShieldCheck,
-    fields: [
-      { id: 'egress', labelKey: 'admin.sandboxNetworkEgress', type: 'segment', disabled: true, options: [{ value: 'allow', labelKey: 'admin.allow' }, { value: 'deny', labelKey: 'admin.deny' }], hintKey: 'admin.sandboxNetworkEgressHint' },
-    ],
+    custom: true,
   },
   // Runtime is a custom section (admin hook policies) — it owns its own data
   // fetch, staged per-group saves, and drawer, so it has no form `fields` and
@@ -90,13 +91,12 @@ const GROUPS = [
   },
 ]
 
-// Persistable API keys per group (egress is not persisted this phase; runtime
-// has its own save path).
+// Persistable API keys per group. Isolation and Runtime are custom sections that
+// own their own fetch and save paths, so they have no entry here.
 const GROUP_KEYS = {
   lifecycle: ['idle_grace_seconds', 'min_alive_after_wake_seconds'],
   resources: ['cpu_millicores', 'memory_mb', 'storage_gb'],
   terminal: ['terminal_resource_percent', 'terminal_max_sessions', 'terminal_idle_timeout_seconds', 'terminal_max_lifetime_seconds', 'terminal_scale_down_grace_seconds'],
-  isolation: [],
   runtime: [],
 }
 
@@ -132,7 +132,6 @@ export default function AgentRunnerSandbox() {
         terminal_idle_timeout_seconds: d.terminal_idle_timeout_seconds,
         terminal_max_lifetime_seconds: d.terminal_max_lifetime_seconds,
         terminal_scale_down_grace_seconds: d.terminal_scale_down_grace_seconds,
-        egress: 'allow',
       }
       setValues(v)
       setBaseline(v)
@@ -215,32 +214,7 @@ export default function AgentRunnerSandbox() {
     )
 
     let control
-    if (f.type === 'segment') {
-      control = (
-        <div className="flex gap-2" style={{ opacity: f.disabled ? 0.5 : 1 }}>
-          {f.options.map((opt) => {
-            const on = (val ?? 'allow') === opt.value
-            return (
-              <span
-                key={opt.value}
-                className="flex items-center gap-2 px-3 py-2 text-sm"
-                style={{
-                  background: on ? 'var(--bg-elevated)' : 'var(--bg-surface)',
-                  border: `1px solid ${on ? 'var(--blue)' : 'var(--border)'}`,
-                  borderRadius: 4,
-                  color: on ? 'var(--text-primary)' : 'var(--text-secondary)',
-                  fontWeight: on ? 600 : 400,
-                  cursor: 'not-allowed',
-                }}
-              >
-                {on && <Check size={14} strokeWidth={1.5} style={{ color: 'var(--blue)' }} />}
-                {t(opt.labelKey)}
-              </span>
-            )
-          })}
-        </div>
-      )
-    } else if (f.type === 'percentage') {
+    if (f.type === 'percentage') {
       control = (
         <Dropdown
           size="sm"
@@ -430,7 +404,7 @@ export default function AgentRunnerSandbox() {
                         <Icon size={16} strokeWidth={1.5} style={{ color: 'var(--text-secondary)' }} />
                         <h3 className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 14, margin: 0 }}>{t(g.labelKey)}</h3>
                       </div>
-                      <RuntimeHooks />
+                      {g.id === 'isolation' ? <NetworkIsolation /> : <RuntimeHooks />}
                     </section>
                   )
                 }
