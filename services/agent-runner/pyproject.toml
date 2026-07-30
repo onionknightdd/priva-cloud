@@ -14,7 +14,7 @@ dependencies = [
     "PyJWT[crypto]>=2.13,<3",
     "python-multipart",
     "pyyaml",
-    "mcp>=1.19.0",
+    "mcp>=1.28.1,<2",
     "apscheduler>=3.10,<4",  # trigger validation + next_run_time (user scheduler API)
 ]
 

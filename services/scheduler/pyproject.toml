@@ -11,7 +11,7 @@ dependencies = [
     "httpx",                 # dial the runner pod (admission POST)
     "kubernetes",            # waker: patch AgentTenant spec.wake + poll status
     "grpcio",                # dataplane transport (client side)
-    "python-jose",           # runner-token minting (priva_common.runner_token)
+    "PyJWT[crypto]>=2.13,<3",  # runner-token minting (priva_common.runner_token)
 ]
 
 [project.entry-points."priva_cloud.services"]

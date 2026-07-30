@@ -13,7 +13,7 @@ PyJWT[crypto]>=2.13,<3
 httpx
 loguru
 apscheduler>=3.10,<4
-mcp>=1.19.0
+mcp>=1.28.1,<2
 websockets
 ruff
 pandas
@@ -24,14 +24,14 @@ python-docx
 python-pptx
 markitdown[pptx]
 speechrecognition==3.14.3
-Pillow
+Pillow>=12.3.0
 beautifulsoup4
 ebooklib
 lxml
 defusedxml
 openpyxl
 pdfplumber
-pypdf
+pypdf>=6.14.2
 reportlab
 PyMuPDF
 scalar_fastapi

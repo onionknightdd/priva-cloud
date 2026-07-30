@@ -8,6 +8,44 @@ import autoprefixer from 'autoprefixer'
 // User "agent run" SPA. Shares dumb components/infra from ../shared via the @shared alias.
 const API_TARGET = process.env.VITE_API_TARGET || 'http://localhost:8081'
 
+function hardenExcelJsBrowserBundle() {
+  return {
+    name: 'priva-harden-exceljs-browser-bundle',
+    enforce: 'pre',
+    transform(code, id) {
+      const normalizedId = id.replaceAll('\\', '/')
+      if (!normalizedId.endsWith('/exceljs/dist/exceljs.min.js')) return null
+
+      // The fork's browserified Node compatibility shims contain two dynamic
+      // code paths which workbook preview does not need. The ASN.1 caller
+      // already catches runInThisContext failures and uses a normal function;
+      // string callbacks to setImmediate are not used. Pinning the package and
+      // failing the build if either signature moves avoids silently restoring
+      // eval/new Function after a dependency update.
+      const vmEval =
+        'Script.prototype.runInThisContext=function(){return eval(this.code)}'
+      const stringCallback = 'e=new Function(""+e)'
+      if (!code.includes(vmEval) || !code.includes(stringCallback)) {
+        throw new Error(
+          'ExcelJS browser hardening signatures changed; review the pinned bundle',
+        )
+      }
+      return {
+        code: code
+          .replace(
+            vmEval,
+            'Script.prototype.runInThisContext=function(){throw new Error("dynamic code disabled")}',
+          )
+          .replace(
+            stringCallback,
+            'e=(()=>{throw new TypeError("string callbacks disabled")})()',
+          ),
+        map: null,
+      }
+    },
+  }
+}
+
 export default defineConfig({
   base: '/',
   root: __dirname,
@@ -29,6 +67,7 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    hardenExcelJsBrowserBundle(),
     viteStaticCopy({
       targets: [
         {
