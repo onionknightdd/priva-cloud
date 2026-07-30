@@ -48,6 +48,10 @@ _ACCEPTED_TTL_SECONDS = 3600
 # detail keeps enough to be useful in the UI's inline expand.
 _SUMMARY_CHARS = 200
 _ERROR_CHARS = 2000
+# Once execution has ended, keep its registry/activity slot until data-spine
+# durably acknowledges FinishRun. This retry cadence applies after the existing
+# short burst and deliberately fails closed during a data-spine outage.
+_FINISH_RETRY_SECONDS = 8
 
 _STATUS_TO_RECORD = {"success": "completed", "error": "error", "cancelled": "aborted"}
 
@@ -141,12 +145,19 @@ async def _execute(
         else:
             await _execute_builtin(record, req, user, cwd, outcome)
     except asyncio.CancelledError:
-        # Process shutdown — finalize synchronously (an await here would
-        # re-raise and drop the writes); FinishRun is single-attempt
-        # best-effort, the scheduler's sweep covers a lost outcome.
+        # Process shutdown/task cancellation cannot wait forever for data-spine:
+        # make one synchronous persistence attempt, then explicitly close the
+        # local record either way. A failed write is owned by the scheduler's
+        # stale-running sweep. This is the exceptional cleanup path; leaving a
+        # completed task holding activity forever would wedge this pod.
         outcome["status"] = "cancelled"
+        persisted = _write_finish(req, user, outcome, _elapsed_ms(started), attempts=1)
+        if not persisted:
+            logger.error(
+                "[SCHED] cancelled run {} not persisted; scheduler sweep owns cleanup",
+                req.run_id,
+            )
         _close_record(state, req, outcome)
-        _write_finish(req, user, outcome, _elapsed_ms(started), attempts=1)
         raise
     except Exception as exc:
         logger.exception("[SCHED] run {} failed", req.run_id)
@@ -154,8 +165,16 @@ async def _execute(
             outcome["error_message"] = (str(exc) or type(exc).__name__)[:_ERROR_CHARS]
         outcome["status"] = "error"
 
+    duration_ms = _elapsed_ms(started)
+    while not await asyncio.to_thread(_write_finish, req, user, outcome, duration_ms):
+        # Keep the RunRecord live: it owns both the per-job overlap guard and the
+        # pod activity slot. Releasing either before FinishRun commits re-opens a
+        # run/scale-down window in which the terminal outcome can be lost.
+        logger.error(
+            "[SCHED] FinishRun {} still pending — retaining activity slot", req.run_id,
+        )
+        await asyncio.sleep(_FINISH_RETRY_SECONDS)
     _close_record(state, req, outcome)
-    await asyncio.to_thread(_write_finish, req, user, outcome, _elapsed_ms(started))
     logger.info(
         "[SCHED] run end run_id={} status={} reason={}",
         req.run_id, outcome["status"], outcome.get("error_message"),
@@ -320,9 +339,10 @@ def _write_finish(
     outcome: dict,
     duration_ms: int,
     attempts: int = 3,
-) -> None:
+) -> bool:
     """The pod-owned outcome write (D13). Sync — call via to_thread from the
-    normal path; the cancellation path calls it directly with attempts=1."""
+    normal path; the cancellation path calls it directly with attempts=1.
+    Returns only after the write is acknowledged, otherwise False."""
     rec = JobRunRecord(
         run_id=req.run_id,
         job_id=req.job_id,
@@ -340,7 +360,7 @@ def _write_finish(
     for attempt in range(1, attempts + 1):
         try:
             get_client().scheduler.finish_run(rec)
-            return
+            return True
         except Exception:
             logger.warning(
                 "[SCHED] FinishRun {} attempt {}/{} failed",
@@ -349,5 +369,6 @@ def _write_finish(
             if attempt < attempts:
                 time.sleep(min(2 ** attempt, 8))
     logger.error(
-        "[SCHED] FinishRun {} lost — the scheduler sweep will age it out", req.run_id,
+        "[SCHED] FinishRun {} retry batch exhausted", req.run_id,
     )
+    return False

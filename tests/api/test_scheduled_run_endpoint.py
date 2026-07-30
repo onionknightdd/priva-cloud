@@ -167,6 +167,86 @@ def test_user_script_error_exit_code(harness):
     assert "boom" in rec.result_summary
 
 
+def test_finish_is_persisted_before_registry_and_activity_slots_are_released(harness):
+    """A data-spine write in flight must keep both scale-down and overlap fenced."""
+    from priva_agent_runner import activity
+    from priva_agent_runner.services.claude_sdk.run_registry import run_registry
+
+    finish_entered = threading.Event()
+    allow_finish = threading.Event()
+    active_before = activity.state()[0]
+
+    def blocking_finish(rec):
+        finish_entered.set()
+        assert allow_finish.wait(timeout=5)
+        harness.fake.finishes.append(rec)
+
+    harness.fake.scheduler.finish_run = blocking_finish
+    body = _script_job("print('done')", "r-persist-order", "job-persist-order")
+    assert harness.client.post("/api/sandbox/agent/scheduled-run", json=body).status_code == 202
+    assert finish_entered.wait(timeout=5)
+
+    # Execution is over, but FinishRun has not committed. Both guards remain.
+    record = run_registry.get(run_id="r-persist-order")
+    assert record is not None and record.status == "running"
+    assert harness.executor.live_run_for_job("job-persist-order") == "r-persist-order"
+    assert activity.state()[0] == active_before + 1
+
+    allow_finish.set()
+    assert _wait(lambda: harness.executor.live_run_for_job("job-persist-order") is None)
+    assert record.status == "completed"
+    assert activity.state()[0] == active_before
+
+
+def test_cancelled_task_cleans_local_slots_when_finish_persistence_fails(
+    env, monkeypatch,
+):
+    """Shutdown cancellation delegates DB repair to the sweep but never leaks slots."""
+    from priva_agent_runner import activity
+    from priva_agent_runner.services.scheduled_runs import executor
+    from priva_common.models.scheduler import ScheduledRunRequest
+
+    entered = None
+
+    async def blocked_builtin(record, req, user, cwd, outcome):
+        entered.set()
+        await asyncio.Event().wait()
+
+    def fail_finish(_record):
+        raise RuntimeError("data-spine unavailable")
+
+    async def go():
+        nonlocal entered
+        entered = asyncio.Event()
+        executor._accepted.clear()
+        executor._live_by_job.clear()
+        monkeypatch.setattr(executor, "_execute_builtin", blocked_builtin)
+        monkeypatch.setattr(
+            executor,
+            "get_client",
+            lambda: SimpleNamespace(
+                scheduler=SimpleNamespace(finish_run=fail_finish),
+            ),
+        )
+
+        active_before = activity.state()[0]
+        req = ScheduledRunRequest.model_validate(
+            _script_job("print('never')", "r-cancel-persist", "job-cancel-persist"),
+        )
+        record = executor.start(req, USER, str(env / "ws"))
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        assert activity.state()[0] == active_before + 1
+
+        record.task.cancel()
+        result = await asyncio.gather(record.task, return_exceptions=True)
+        assert isinstance(result[0], asyncio.CancelledError)
+        assert record.status == "aborted"
+        assert executor.live_run_for_job(req.job_id) is None
+        assert activity.state()[0] == active_before
+
+    asyncio.run(go())
+
+
 def test_job_overlap_409_and_abort_records_cancelled(harness):
     sleeper = _script_job("import time; time.sleep(60)", "r-a", "job-x", timeout=120)
     assert harness.client.post("/api/sandbox/agent/scheduled-run", json=sleeper).status_code == 202
