@@ -78,6 +78,8 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         feishu_channel_config_pb2_grpc,
         hook_policy_pb2,
         hook_policy_pb2_grpc,
+        network_isolation_pb2,
+        network_isolation_pb2_grpc,
         quota_pb2,
         quota_pb2_grpc,
         registration_pb2,
@@ -444,6 +446,45 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
             req.update_mask.extend(mask)
             return cv.runner_defaults_from_pb(self._s.Set(req))
 
+    class _NetworkIsolation:
+        def __init__(self):
+            self._s = network_isolation_pb2_grpc.NetworkIsolationServiceStub(channel)
+
+        def get(self):
+            return cv.network_isolation_from_pb(self._s.Get(
+                common_pb2.Empty(),
+                timeout=settings.dataspine.network_isolation_rpc_timeout_seconds,
+            ))
+
+        def set(self, *, runner_deny_internal=None, terminal_deny_internal=None,
+                deny_tenant_peers=None, egress_mode=None, egress_allowlist=None):
+            req = network_isolation_pb2.SetNetworkIsolationRequest()
+            mask: list[str] = []
+            if runner_deny_internal is not None:
+                req.runner_deny_internal = runner_deny_internal
+                mask.append("runner_deny_internal")
+            if terminal_deny_internal is not None:
+                req.terminal_deny_internal = terminal_deny_internal
+                mask.append("terminal_deny_internal")
+            if deny_tenant_peers is not None:
+                req.deny_tenant_peers = deny_tenant_peers
+                mask.append("deny_tenant_peers")
+            if egress_mode is not None:
+                req.egress_mode = egress_mode
+                mask.append("egress_mode")
+            if egress_allowlist is not None:
+                # Whole-list replace. An empty list is a legitimate value (it means
+                # "deny everything" under allowlist mode), which is exactly why the
+                # mask is appended outside the truthiness of the list itself.
+                for e in egress_allowlist:
+                    req.egress_allowlist.add(host=e.host, port=e.port)
+                mask.append("egress_allowlist")
+            req.update_mask.extend(mask)
+            return cv.network_isolation_from_pb(self._s.Set(
+                req,
+                timeout=settings.dataspine.network_isolation_rpc_timeout_seconds,
+            ))
+
     class _Registrations:
         def __init__(self):
             self._s = registration_pb2_grpc.RegistrationServiceStub(channel)
@@ -635,6 +676,7 @@ def build_grpc_client(settings: "Settings") -> DataplaneClient:
         admin=_Admin(),
         resource_specs=_ResourceSpecs(),
         runner_defaults=_RunnerDefaults(),
+        network_isolation=_NetworkIsolation(),
         registrations=_Registrations(),
         hook_policies=_HookPolicies(),
         feishu_configs=_FeishuConfigs(),

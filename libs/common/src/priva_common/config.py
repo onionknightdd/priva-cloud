@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import ClassVar, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -212,6 +212,14 @@ class DataspineSettings(BaseModel):
     backend: Literal["sqlite", "postgres"] = "postgres"
     sqlite_path: str = "~/priva_workspace/.priva.dataspine.db"
     grpc_dsn: str | None = None  # gRPC target (host:port) when transport == "grpc"
+    # The Operator's isolation snapshot fallback is useful only if a black-holed
+    # data-spine read eventually returns control. Keep this security-critical RPC
+    # deadline short and explicit rather than inheriting gRPC's infinite default.
+    network_isolation_rpc_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        le=30,
+    )
     # libpq DSN when backend == "postgres", e.g. postgresql://priva:pw@postgres:5432/priva
     postgres_dsn: str | None = None
     # HMAC key for the api_key_lookup index. data-spine only — it is NEVER
@@ -301,6 +309,88 @@ class KubernetesSettings(BaseModel):
     # the Service, so the scrape targets the pod IP directly (label-selected).
     gateway_name: str = "priva-gateway"  # Gateway resource name => pod label selector
     gateway_metrics_port: int = 15020  # agentgateway data-plane Prometheus /metrics port
+    # --- tenant network isolation (operator-rendered NetworkPolicy) -------------
+    # Cluster ranges are explicit deployment inputs. They are kept separate from
+    # the general blocked set so operators can audit a cluster/CNI migration
+    # without reverse-engineering one opaque "internal" list.
+    cluster_pod_cidrs: list[str] = ["10.244.0.0/16"]
+    cluster_service_cidrs: list[str] = ["10.96.0.0/12"]
+    cluster_node_cidrs: list[str] = ["192.168.49.0/24"]
+    # Resolver Service/listener IPs. The default is kube-dns in the default
+    # 10.96/12 service range; real clusters must supply their actual ClusterIP
+    # and any NodeLocal DNSCache listener. CoreDNS is also selected by pod label
+    # so this remains correct across CNI pre-/post-DNAT policy evaluation.
+    dns_ip_cidrs: list[str] = ["10.96.0.10/32"]
+    # Refuse to create/wake tenant workloads until the functional ingress+egress
+    # probe has recorded a positive verdict in priva-cluster-facts. Setting this
+    # false is suitable only for a single-tenant local developer cluster.
+    network_policy_probe_required: bool = True
+    # A historical success is not permanent proof: CNI upgrades/config changes
+    # can silently remove enforcement while the ConfigMap remains. Re-run the
+    # functional probe before this TTL expires and after every network change.
+    network_policy_probe_max_age_seconds: int = Field(
+        default=7 * 24 * 60 * 60,
+        ge=300,
+        le=30 * 24 * 60 * 60,
+    )
+    # The proxy and the public-internet ipBlock both reject non-public address
+    # space. 100.64/10 includes Volcengine's 100.96.0.96 metadata endpoint;
+    # 169.254/16 includes the conventional 169.254.169.254 endpoint. Cluster
+    # pod/service/node CIDRs above are merged into this list by the renderer.
+    egress_blocked_cidrs: list[str] = [
+        "0.0.0.0/8",
+        "10.0.0.0/8",
+        "100.64.0.0/10",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "224.0.0.0/4",
+        "240.0.0.0/4",
+    ]
+    # Deprecated compatibility input. Existing installations that already set
+    # this environment variable remain protected; new deployments should use the
+    # explicit cluster_*_cidrs and egress_blocked_cidrs fields above.
+    egress_internal_cidrs: list[str] = []
+    # The proxy is always present and is the only public-egress path in every
+    # mode. A same-namespace short name keeps namespace_tenants configurable.
+    egress_proxy_host: str = "priva-egress-proxy"
+    egress_proxy_port: int = 3128
+    # Pin + mirror this for prod. Squid was chosen over Envoy/tinyproxy because
+    # its allowlist maps one-to-one onto the admin UI's list and its failure mode
+    # is a visible 403 rather than a silently wide match.
+    egress_proxy_image: str = "ubuntu/squid:latest"
+    # Keep this deliberately narrow: platform-internal clients (data-spine gRPC
+    # and scheduler HTTP) disable environment proxies explicitly, so they do not
+    # need a broad `.svc` bypass that tenant-launched tools could inherit.
+    egress_no_proxy: str = "localhost,127.0.0.1"
+
+    @model_validator(mode="after")
+    def _require_shared_control_and_tenant_namespace(self):
+        # The current NetworkPolicy peer selectors and namespaced RBAC are
+        # intentionally built for one namespace. Silently accepting a split
+        # makes same-labelled tenant pods stand in for control-plane peers while
+        # the real data-spine/scheduler no longer match. Reject it until every
+        # peer and RoleBinding is namespace-qualified end to end.
+        if self.namespace_system != self.namespace_tenants:
+            raise ValueError(
+                "separate system/tenant namespaces are not supported by the "
+                "current isolation/RBAC model"
+            )
+        required_topology = (
+            "cluster_pod_cidrs",
+            "cluster_service_cidrs",
+            "cluster_node_cidrs",
+            "dns_ip_cidrs",
+            "egress_blocked_cidrs",
+        )
+        missing = [name for name in required_topology if not getattr(self, name)]
+        if missing:
+            raise ValueError(
+                "tenant isolation topology must not be empty: "
+                + ", ".join(missing)
+            )
+        return self
 
 
 class EdgeSettings(BaseModel):

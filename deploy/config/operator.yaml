@@ -8,6 +8,7 @@ app_name: "Priva operator"
 dataspine:
   transport: "grpc"     # fetch wrapped credential bundles to inject at wake
   grpc_dsn: "data-spine.priva-cloud.svc.cluster.local:50051"
+  network_isolation_rpc_timeout_seconds: 5
 
 kubernetes:
   in_cluster: true
@@ -18,5 +19,28 @@ kubernetes:
   runner_service_port: 8091
   idle_grace_seconds: 1800
   min_alive_after_wake_seconds: 1800
+  # Replace these with the cluster's real topology. The operator merges all
+  # cluster ranges into the proxy/public-egress destination deny set.
+  cluster_pod_cidrs: ["10.244.0.0/16"]
+  cluster_service_cidrs: ["10.96.0.0/12"]
+  cluster_node_cidrs: ["192.168.49.0/24"]
+  # kube-dns Service IP plus any NodeLocal/custom resolver listeners.
+  dns_ip_cidrs: ["10.96.0.10/32"]
+  network_policy_probe_required: true
+  network_policy_probe_max_age_seconds: 604800
+  egress_blocked_cidrs:
+    - "0.0.0.0/8"
+    - "10.0.0.0/8"
+    - "100.64.0.0/10"
+    - "127.0.0.0/8"
+    - "169.254.0.0/16"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "224.0.0.0/4"
+    - "240.0.0.0/4"
+  egress_proxy_host: "priva-egress-proxy.priva-cloud.svc"
+  egress_proxy_port: 3128
+  egress_proxy_image: "ubuntu/squid:latest"  # dev only; pin a trusted digest in prod
+  egress_no_proxy: "localhost,127.0.0.1"
 
 # logging.* defaults are fine.

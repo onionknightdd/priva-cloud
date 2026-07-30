@@ -141,6 +141,13 @@ class Repository(ABC):
     def runner_defaults_seed(self, values: dict) -> dict: ...
     @abstractmethod
     def runner_defaults_upsert(self, fields: dict) -> dict: ...
+    # network_isolation (single row, id=1)
+    @abstractmethod
+    def network_isolation_get(self) -> dict | None: ...
+    @abstractmethod
+    def network_isolation_seed(self, values: dict) -> dict: ...
+    @abstractmethod
+    def network_isolation_upsert(self, fields: dict) -> dict: ...
     # channel_platform_config (single row, id=1)
     @abstractmethod
     def channel_platform_get(self) -> dict | None: ...
@@ -576,6 +583,38 @@ class SqliteRepo(Repository):
             tuple(fields[c] for c in cols),
         )
         return self.runner_defaults_get()
+
+    # network_isolation (single row id=1) -------------------------------------
+    # Seeded (not default-on-read) because egress_allowlist has a non-scalar
+    # shipped default: a row created by an unrelated field's write would silently
+    # take the column DEFAULT '[]' and wipe it.
+    _NETISO_COLS = ("runner_deny_internal", "terminal_deny_internal",
+                    "deny_tenant_peers", "egress_mode", "egress_allowlist")
+
+    def network_isolation_get(self):
+        return self._one("SELECT * FROM network_isolation WHERE id = 1")
+
+    def network_isolation_seed(self, values):
+        cols = list(self._NETISO_COLS)
+        ph = ", ".join("?" for _ in cols)
+        self._write(
+            f"INSERT OR IGNORE INTO network_isolation (id, {', '.join(cols)}) "
+            f"VALUES (1, {ph})",
+            tuple(values[c] for c in cols),
+        )
+        return self.network_isolation_get()
+
+    def network_isolation_upsert(self, fields):
+        cols = [c for c in self._NETISO_COLS if c in fields]
+        if not cols:
+            return self.network_isolation_get()
+        sets = ", ".join(f"{c} = ?" for c in cols)
+        self._write(
+            f"UPDATE network_isolation SET {sets}, "
+            f"updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = 1",
+            tuple(fields[c] for c in cols),
+        )
+        return self.network_isolation_get()
 
     # channel_platform_config (single row id=1) -------------------------------
     _CHANNEL_PLATFORM_COLS = ("group_chat_disabled", "updated_by")
@@ -1057,6 +1096,33 @@ class PgRepo(Repository):
             tuple(fields[c] for c in cols),
         )
         return self.runner_defaults_get()
+
+    # network_isolation (single row id=1) -------------------------------------
+    _NETISO_COLS = SqliteRepo._NETISO_COLS
+
+    def network_isolation_get(self):
+        return self._one("SELECT * FROM network_isolation WHERE id = 1")
+
+    def network_isolation_seed(self, values):
+        cols = list(self._NETISO_COLS)
+        ph = ", ".join("%s" for _ in cols)
+        self._write(
+            f"INSERT INTO network_isolation (id, {', '.join(cols)}) "
+            f"VALUES (1, {ph}) ON CONFLICT (id) DO NOTHING",
+            tuple(values[c] for c in cols),
+        )
+        return self.network_isolation_get()
+
+    def network_isolation_upsert(self, fields):
+        cols = [c for c in self._NETISO_COLS if c in fields]
+        if not cols:
+            return self.network_isolation_get()
+        sets = ", ".join(f"{c} = %s" for c in cols)
+        self._write(
+            f"UPDATE network_isolation SET {sets}, updated_at = {self._NOW} WHERE id = 1",
+            tuple(fields[c] for c in cols),
+        )
+        return self.network_isolation_get()
 
     # channel_platform_config (single row id=1) -------------------------------
     _CHANNEL_PLATFORM_COLS = SqliteRepo._CHANNEL_PLATFORM_COLS

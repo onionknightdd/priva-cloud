@@ -19,6 +19,29 @@ image:
 
 config:
   kubernetes:
+    # REQUIRED: set the real UAT cluster ranges. Do not inherit the minikube
+    # defaults into a VPC cluster. Add provider metadata ranges to
+    # egressBlockedCidrs and NodeLocal/custom DNS addresses to dnsIpCidrs.
+    clusterPodCidrs: []                 # <-- EDIT
+    clusterServiceCidrs: []             # <-- EDIT
+    clusterNodeCidrs: []                # <-- EDIT
+    dnsIpCidrs: []                       # <-- EDIT: kube-dns + NodeLocal/custom /32s
+    # RFC2544 is safe to block on a real cluster; Docker/minikube alone uses it
+    # as a synthetic public-DNS range.
+    egressBlockedCidrs:
+      - 0.0.0.0/8
+      - 10.0.0.0/8
+      - 100.64.0.0/10
+      - 127.0.0.0/8
+      - 169.254.0.0/16
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 198.18.0.0/15
+      - 224.0.0.0/4
+      - 240.0.0.0/4
+    # Mirror and pin the reviewed proxy image. This placeholder deliberately
+    # cannot pull until the deployment owner replaces it with a real digest.
+    egressProxyImage: "registry.example.com/security/squid@sha256:0000000000000000000000000000000000000000000000000000000000000000" # <-- EDIT
     # UAT storage: per-account RWX PVCs on the cluster's CephFS CSI StorageClass —
     # 1 PVC = 1 subvolume, size IS the quota, PVC expand = quota grow.
     storageBackend: cephfs

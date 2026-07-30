@@ -21,6 +21,31 @@
 # Ask the SRE to keep the ALB idle timeout comfortably high — the app streams
 # SSE (/api/sandbox/.../run/stream) and WebSockets (web terminal).
 
+config:
+  kubernetes:
+    # REQUIRED: obtain these from the VKE cluster/VPC configuration. VPC-CNI
+    # does not make an accepted NetworkPolicy proof that traffic is filtered.
+    clusterPodCidrs: []                 # <-- EDIT
+    clusterServiceCidrs: []             # <-- EDIT
+    clusterNodeCidrs: []                # <-- EDIT (include every VPC node subnet)
+    # VKE's documented instance-metadata endpoint is inside CGNAT space and is
+    # already covered by 100.64.0.0/10 in the base list. Keep the /32 explicit
+    # here so a future deny-list override cannot accidentally drop it.
+    egressBlockedCidrs:
+      - 0.0.0.0/8
+      - 10.0.0.0/8
+      - 100.64.0.0/10
+      - 100.96.0.96/32
+      - 127.0.0.0/8
+      - 169.254.0.0/16
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 198.18.0.0/15
+      - 224.0.0.0/4
+      - 240.0.0.0/4
+    # REQUIRED: kube-dns Service /32 plus any NodeLocal DNS listener /32.
+    dnsIpCidrs: []                       # <-- EDIT
+
 gateway:
   # agentgateway's provisioned Service defaults to LoadBalancer; on VKE the CCM
   # would try to create a CLB for it. ClusterIP is enough with pass-through

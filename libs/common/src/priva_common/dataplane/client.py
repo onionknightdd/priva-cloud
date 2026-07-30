@@ -27,6 +27,9 @@ __all__ = [
     "RunPage",
     "ResourceSpecRecord",
     "RunnerDefaultsRecord",
+    "NetworkIsolationRecord",
+    "EgressAllowEntryRecord",
+    "EGRESS_MODES",
     "PendingRegistrationRecord",
     "HookPolicyRecord",
     "FeishuChannelConfigRecord",
@@ -38,6 +41,7 @@ __all__ = [
     "AdminClient",
     "ResourceSpecClient",
     "RunnerDefaultsClient",
+    "NetworkIsolationClient",
     "RegistrationClient",
     "HookPolicyClient",
     "FeishuChannelConfigClient",
@@ -167,6 +171,51 @@ class RunnerDefaultsRecord(BaseModel):
     terminal_idle_timeout_seconds: int = 1800
     terminal_max_lifetime_seconds: int = 14400
     terminal_scale_down_grace_seconds: int = 120
+    updated_at: str | None = None
+
+
+class EgressAllowEntryRecord(BaseModel):
+    """One allowlist destination, matched against the proxy's HTTP/CONNECT
+    authority. Always a domain, never an IP: a NetworkPolicy CIDR cannot express
+    a CDN-fronted name, which is the whole reason the egress proxy exists.
+    A leading dot matches subdomains; every grant names one concrete TCP port."""
+    host: str
+    port: int = Field(default=443, ge=1, le=65535)
+
+
+# Seeded into `allowlist` mode so flipping the switch does not instantly strand
+# every agent. An empty allowlist is indistinguishable from deny_all, and the
+# first thing a starved runner does is hang silently (the CLI has no proxy
+# timeout) — so the default carries what a runner provably needs today.
+# This set is a starting point, not a proof: confirm it by running the proxy in
+# permissive logging mode and reading which hosts actually get requested.
+_DEFAULT_EGRESS_ALLOWLIST = [
+    EgressAllowEntryRecord(host=".anthropic.com"),          # model API + CLI telemetry
+    EgressAllowEntryRecord(host="registry.npmjs.org"),      # MCP servers / plugins
+    EgressAllowEntryRecord(host="pypi.org"),
+    EgressAllowEntryRecord(host="files.pythonhosted.org"),
+    EgressAllowEntryRecord(host="mirrors.tuna.tsinghua.edu.cn"),  # runner's PIP_INDEX_URL
+    EgressAllowEntryRecord(host="github.com"),
+    EgressAllowEntryRecord(host="codeload.github.com"),
+]
+
+EGRESS_MODES = ("unrestricted", "allowlist", "deny_all")
+
+
+class NetworkIsolationRecord(BaseModel):
+    """Platform-wide tenant network isolation. These defaults seed the singleton
+    row atomically; an existing row is never overwritten during an upgrade.
+
+    The deny_* flags and egress_mode are rendered by the operator into
+    NetworkPolicy objects. Proxy env vars alone are not a control — tenant bash
+    can unset them — so `allowlist` mode is only meaningful while the policy that
+    denies direct egress is actually enforced by the CNI."""
+    runner_deny_internal: bool = True
+    terminal_deny_internal: bool = True
+    deny_tenant_peers: bool = True
+    egress_mode: str = "allowlist"
+    egress_allowlist: list[EgressAllowEntryRecord] = Field(
+        default_factory=lambda: list(_DEFAULT_EGRESS_ALLOWLIST))
     updated_at: str | None = None
 
 
@@ -411,6 +460,19 @@ class RunnerDefaultsClient(Protocol):
     ) -> RunnerDefaultsRecord: ...
 
 
+class NetworkIsolationClient(Protocol):
+    def get(self) -> NetworkIsolationRecord: ...  # static defaults when never set
+    def set(
+        self,
+        *,
+        runner_deny_internal: bool | None = None,
+        terminal_deny_internal: bool | None = None,
+        deny_tenant_peers: bool | None = None,
+        egress_mode: str | None = None,
+        egress_allowlist: list[EgressAllowEntryRecord] | None = None,
+    ) -> NetworkIsolationRecord: ...
+
+
 class HookPolicyClient(Protocol):
     """Errors (mapped to gRPC codes by the server, back to these by the client):
     upsert(expect="create") raises ValueError on id collision; upsert(expect=
@@ -459,6 +521,7 @@ class DataplaneClient:
     admin: AdminClient
     resource_specs: ResourceSpecClient
     runner_defaults: RunnerDefaultsClient
+    network_isolation: NetworkIsolationClient
     registrations: RegistrationClient
     hook_policies: HookPolicyClient
     feishu_configs: FeishuChannelConfigClient

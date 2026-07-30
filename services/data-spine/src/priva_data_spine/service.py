@@ -16,12 +16,15 @@ import bcrypt
 
 from priva_common.crypto import decrypt_value, encrypt_value
 from priva_common.dataplane import (
+    EGRESS_MODES,
     BindingRecord,
     ChannelPlatformConfigRecord,
     DataplaneClient,
+    EgressAllowEntryRecord,
     FeishuChannelConfigRecord,
     FeishuSecretRecord,
     HookPolicyRecord,
+    NetworkIsolationRecord,
     PendingRegistrationRecord,
     QuotaRecord,
     ResourceSpecRecord,
@@ -31,11 +34,14 @@ from priva_common.dataplane import (
     set_inprocess_handlers,
 )
 from priva_common.hook_seeds import HOOK_SEEDS, content_hash as hook_content_hash
+from priva_common.logging import get_app_logger
 from priva_common._pagination import compute_cursors, decode_cursor
 from priva_common.models.auth import UserRecord
 from priva_common.models.scheduler import JobRunRecord, ScheduledJobDefinition
 
 from .repo import PgRepo, Repository, SqliteRepo
+
+logger = get_app_logger(__name__)
 
 
 def _now_iso() -> str:
@@ -823,6 +829,94 @@ class ChannelPlatformConfigService:
         return rec
 
 
+# --- NetworkIsolation --------------------------------------------------------
+
+class NetworkIsolationService:
+    """ADMIN-only platform-wide tenant network isolation — a single row (id=1),
+    rendered by the operator into NetworkPolicy objects.
+
+    Seeded rather than default-on-read: egress_allowlist has a non-scalar shipped
+    default, so a row created by a write to any OTHER field would take the column
+    DEFAULT '[]' and silently strand every agent the moment allowlist mode is
+    turned on. Seeding writes the full default record first."""
+
+    def __init__(self, repo: Repository):
+        self.repo = repo
+
+    @staticmethod
+    def _seed_values() -> dict:
+        d = NetworkIsolationRecord()
+        return {
+            "runner_deny_internal": 1 if d.runner_deny_internal else 0,
+            "terminal_deny_internal": 1 if d.terminal_deny_internal else 0,
+            "deny_tenant_peers": 1 if d.deny_tenant_peers else 0,
+            "egress_mode": d.egress_mode,
+            "egress_allowlist": json.dumps([e.model_dump() for e in d.egress_allowlist]),
+        }
+
+    @staticmethod
+    def _to_record(row: dict) -> NetworkIsolationRecord:
+        def secure_bool(name: str) -> bool:
+            value = row.get(name)
+            return True if value is None else bool(value)
+
+        try:
+            entries = json.loads(row.get("egress_allowlist") or "[]")
+            allowlist = [EgressAllowEntryRecord(**entry) for entry in entries]
+        except (TypeError, ValueError):
+            # This is a security policy, so corruption must narrow access. Falling
+            # back to the shipped convenience list would silently re-open several
+            # public domains an admin may have removed. An empty list makes
+            # allowlist mode deny all until the row is repaired and re-saved.
+            logger.error("network_isolation.egress_allowlist is invalid; "
+                         "failing closed with an empty allowlist")
+            allowlist = []
+        return NetworkIsolationRecord(
+            runner_deny_internal=secure_bool("runner_deny_internal"),
+            terminal_deny_internal=secure_bool("terminal_deny_internal"),
+            deny_tenant_peers=secure_bool("deny_tenant_peers"),
+            # A missing/corrupt scalar must narrow access. Valid persisted rows
+            # still preserve an administrator's explicit unrestricted choice.
+            egress_mode=row.get("egress_mode") or "deny_all",
+            egress_allowlist=allowlist,
+            updated_at=row.get("updated_at"),
+        )
+
+    def get(self) -> NetworkIsolationRecord:
+        row = self.repo.network_isolation_get()
+        if row is None:
+            row = self.repo.network_isolation_seed(self._seed_values())
+        return self._to_record(row)
+
+    def set(self, *, runner_deny_internal=None, terminal_deny_internal=None,
+            deny_tenant_peers=None, egress_mode=None,
+            egress_allowlist=None) -> NetworkIsolationRecord:
+        if self.repo.network_isolation_get() is None:
+            self.repo.network_isolation_seed(self._seed_values())
+        fields: dict = {}
+        if runner_deny_internal is not None:
+            fields["runner_deny_internal"] = 1 if runner_deny_internal else 0
+        if terminal_deny_internal is not None:
+            fields["terminal_deny_internal"] = 1 if terminal_deny_internal else 0
+        if deny_tenant_peers is not None:
+            fields["deny_tenant_peers"] = 1 if deny_tenant_peers else 0
+        if egress_mode is not None:
+            if egress_mode not in EGRESS_MODES:
+                raise ValueError(f"egress_mode must be one of {EGRESS_MODES}")
+            fields["egress_mode"] = egress_mode
+        if egress_allowlist is not None:
+            # `is not None` (not truthiness): an empty list is a real value under
+            # allowlist mode and must be storable. Rebuild boundary records here
+            # so in-process callers cannot bypass the API/gRPC port constraints.
+            validated_allowlist = [
+                EgressAllowEntryRecord(host=entry.host, port=entry.port)
+                for entry in egress_allowlist
+            ]
+            fields["egress_allowlist"] = json.dumps(
+                [entry.model_dump() for entry in validated_allowlist])
+        return self._to_record(self.repo.network_isolation_upsert(fields))
+
+
 # --- RunnerDefaults ---------------------------------------------------------
 
 class RunnerDefaultsService:
@@ -1214,6 +1308,7 @@ def build_inprocess_client(repo: Repository, settings) -> DataplaneClient:
         admin=AdminService(repo, settings),
         resource_specs=ResourceSpecService(repo),
         runner_defaults=RunnerDefaultsService(repo, settings),
+        network_isolation=NetworkIsolationService(repo),
         registrations=RegistrationService(repo),
         hook_policies=HookPolicyService(repo),
         feishu_configs=FeishuChannelConfigService(repo),

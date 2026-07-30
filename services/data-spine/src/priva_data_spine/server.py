@@ -20,7 +20,7 @@ import grpc
 
 from priva_common.crypto import assert_encryption_key_configured
 from priva_common.service_identity import assert_configured as assert_service_identity_configured
-from priva_common.dataplane import converters as cv
+from priva_common.dataplane import EgressAllowEntryRecord, converters as cv
 from priva_common.dataplane.v1 import (
     account_pb2,
     account_pb2_grpc,
@@ -33,6 +33,8 @@ from priva_common.dataplane.v1 import (
     feishu_channel_config_pb2_grpc,
     hook_policy_pb2,
     hook_policy_pb2_grpc,
+    network_isolation_pb2,
+    network_isolation_pb2_grpc,
     quota_pb2,
     quota_pb2_grpc,
     registration_pb2,
@@ -175,6 +177,20 @@ def _rdefaults_pb(r) -> runner_defaults_pb2.RunnerDefaults:
         terminal_idle_timeout_seconds=r.terminal_idle_timeout_seconds,
         terminal_max_lifetime_seconds=r.terminal_max_lifetime_seconds,
         terminal_scale_down_grace_seconds=r.terminal_scale_down_grace_seconds,
+        updated_at=r.updated_at or "",
+    )
+
+
+def _netiso_pb(r) -> network_isolation_pb2.NetworkIsolation:
+    return network_isolation_pb2.NetworkIsolation(
+        runner_deny_internal=r.runner_deny_internal,
+        terminal_deny_internal=r.terminal_deny_internal,
+        deny_tenant_peers=r.deny_tenant_peers,
+        egress_mode=r.egress_mode,
+        egress_allowlist=[
+            network_isolation_pb2.EgressAllowEntry(host=e.host, port=e.port)
+            for e in r.egress_allowlist
+        ],
         updated_at=r.updated_at or "",
     )
 
@@ -521,6 +537,38 @@ class _RunnerDefaultsServicer(runner_defaults_pb2_grpc.RunnerDefaultsServiceServ
         return _rdefaults_pb(self.svc.set(**kw))
 
 
+class _NetworkIsolationServicer(network_isolation_pb2_grpc.NetworkIsolationServiceServicer):
+    def __init__(self, svc):
+        self.svc = svc
+
+    def Get(self, request, context):
+        return _netiso_pb(self.svc.get())
+
+    def Set(self, request, context):
+        mask = set(request.update_mask)
+        kw = {}
+        if "runner_deny_internal" in mask:
+            kw["runner_deny_internal"] = request.runner_deny_internal
+        if "terminal_deny_internal" in mask:
+            kw["terminal_deny_internal"] = request.terminal_deny_internal
+        if "deny_tenant_peers" in mask:
+            kw["deny_tenant_peers"] = request.deny_tenant_peers
+        if "egress_mode" in mask:
+            kw["egress_mode"] = request.egress_mode
+        try:
+            if "egress_allowlist" in mask:
+                # Named in the mask but empty on the wire is a real "clear the
+                # list", not an omission. Validate inside the error-mapping
+                # boundary so invalid ports are INVALID_ARGUMENT, never UNKNOWN.
+                kw["egress_allowlist"] = [
+                    EgressAllowEntryRecord(host=e.host, port=e.port)
+                    for e in request.egress_allowlist
+                ]
+            return _netiso_pb(self.svc.set(**kw))
+        except ValueError as exc:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+
+
 class _HookPolicyServicer(hook_policy_pb2_grpc.HookPolicyServiceServicer):
     def __init__(self, svc):
         self.svc = svc
@@ -764,6 +812,8 @@ def build_server(settings, max_workers: int = 16, repo=None) -> grpc.Server:
         _FeishuChannelConfigServicer(client.feishu_configs, client.channel_platform), server)
     runner_defaults_pb2_grpc.add_RunnerDefaultsServiceServicer_to_server(
         _RunnerDefaultsServicer(client.runner_defaults), server)
+    network_isolation_pb2_grpc.add_NetworkIsolationServiceServicer_to_server(
+        _NetworkIsolationServicer(client.network_isolation), server)
     registration_pb2_grpc.add_RegistrationServiceServicer_to_server(
         _RegistrationServicer(client.registrations), server)
     hook_policy_pb2_grpc.add_HookPolicyServiceServicer_to_server(

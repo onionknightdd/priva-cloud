@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package priva.dataplane.v1;
+
+import "priva_common/dataplane/v1/common.proto";
+
+// network_isolation — platform-wide tenant network isolation (the admin "Agent
+// Runner Sandbox ▸ Isolation" panel). A single row seeded with the complete
+// shipped record so non-scalar defaults are persisted atomically.
+//
+// Two independent layers, both rendered by the operator into NetworkPolicy:
+//
+//   Tenant boundary (L3/L4) — which in-cluster peers a tenant pod may dial.
+//     Runner and Terminal BOTH execute tenant-controlled code; the older policy
+//     set modelled only Terminal as hostile and let agent-runner through, which
+//     is why runner_deny_internal exists as its own flag.
+//
+//   Egress — how tenant pods reach the internet. The proxy enforces the domain
+//     allowlist; the NetworkPolicy is what makes the proxy unavoidable. Proxy env
+//     vars are NOT a control on their own: the agent's bash can unset them.
+//
+// The proxy environment and L3/L4 topology stay present across every mode:
+//   "unrestricted" — the proxy admits every public destination
+//   "allowlist"    — the proxy admits only egress_allowlist
+//   "deny_all"     — tenant can reach the proxy for an immediate local 403, while
+//                    the proxy has no egress and denies every destination
+// There is deliberately no denylist mode: default-allow is a policy control, not
+// isolation, and sharing one list across both defaults would let a mode switch
+// silently reinterpret "allow these four" as "block only these four".
+message NetworkIsolation {
+  bool runner_deny_internal = 1;
+  bool terminal_deny_internal = 2;
+  bool deny_tenant_peers = 3;
+  string egress_mode = 4;
+  repeated EgressAllowEntry egress_allowlist = 5;
+  string updated_at = 6;
+}
+
+// One allowlist destination. `host` is matched against the HTTP/CONNECT
+// authority, so it is always a domain and never an IP — a NetworkPolicy CIDR
+// cannot express a CDN-fronted name, which is the entire reason the proxy exists.
+// A leading dot (".example.com") matches subdomains. Every entry grants one
+// concrete TCP port in the inclusive range 1..65535.
+//
+// In-cluster dependencies are NOT entries here: NetworkPolicy names them
+// explicitly and platform clients disable proxy handling. Surfacing them as
+// removable public allowlist rows would conflate two trust boundaries.
+message EgressAllowEntry {
+  string host = 1;
+  int32 port = 2;
+}
+
+// Partial update: only fields named in update_mask are applied.
+message SetNetworkIsolationRequest {
+  bool runner_deny_internal = 1;
+  bool terminal_deny_internal = 2;
+  bool deny_tenant_peers = 3;
+  string egress_mode = 4;
+  repeated EgressAllowEntry egress_allowlist = 5;
+  repeated string update_mask = 6;
+}
+
+service NetworkIsolationService {
+  rpc Get(Empty) returns (NetworkIsolation);
+  rpc Set(SetNetworkIsolationRequest) returns (NetworkIsolation);
+}

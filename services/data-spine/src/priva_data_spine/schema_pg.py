@@ -259,6 +259,19 @@ DDL: tuple[str, ...] = (
       updated_at          TEXT NOT NULL DEFAULT {NOW}
     )
     """,
+    # 12 ── network_isolation (mirror of schema.py #12) ------------------------
+    f"""
+    CREATE TABLE IF NOT EXISTS network_isolation (
+      id                     BIGINT PRIMARY KEY CHECK (id = 1),
+      runner_deny_internal   BIGINT NOT NULL DEFAULT 1 CHECK (runner_deny_internal IN (0,1)),
+      terminal_deny_internal BIGINT NOT NULL DEFAULT 1 CHECK (terminal_deny_internal IN (0,1)),
+      deny_tenant_peers      BIGINT NOT NULL DEFAULT 1 CHECK (deny_tenant_peers IN (0,1)),
+      egress_mode            TEXT NOT NULL DEFAULT 'allowlist'
+                             CHECK (egress_mode IN ('unrestricted','allowlist','deny_all')),
+      egress_allowlist       TEXT NOT NULL DEFAULT '[]',
+      updated_at             TEXT NOT NULL DEFAULT {NOW}
+    )
+    """,
 )
 
 # Idempotent column additions for DBs created before a column existed (mirror of

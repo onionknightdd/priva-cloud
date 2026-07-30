@@ -15,6 +15,32 @@ image:
 
 config:
   kubernetes:
+    # REQUIRED: replace these with the cluster's actual ranges before install.
+    # Empty is safer than inheriting minikube's wrong ranges, but a production
+    # release is not complete until Pod, Service and node/VPC ranges are covered.
+    clusterPodCidrs: []                 # <-- EDIT
+    clusterServiceCidrs: []             # <-- EDIT
+    clusterNodeCidrs: []                # <-- EDIT
+    # Production also blocks RFC2544 benchmarking space. It is omitted from the
+    # Docker/minikube base because Docker Desktop maps public DNS into 198.18/15.
+    # Extend this list with provider metadata/control-plane ranges.
+    egressBlockedCidrs:
+      - 0.0.0.0/8
+      - 10.0.0.0/8
+      - 100.64.0.0/10
+      - 127.0.0.0/8
+      - 169.254.0.0/16
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 198.18.0.0/15
+      - 224.0.0.0/4
+      - 240.0.0.0/4
+    # REQUIRED: kube-dns Service /32 plus any NodeLocal/custom listener /32s.
+    dnsIpCidrs: []                       # <-- EDIT
+    # Pull the egress proxy from a trusted mirror and pin an immutable digest.
+    # The intentionally non-pullable placeholder makes an unedited deployment
+    # fail closed instead of silently running ubuntu/squid:latest.
+    egressProxyImage: "registry.example.com/security/squid@sha256:0000000000000000000000000000000000000000000000000000000000000000" # <-- EDIT
     # Longer idle/wake than the demo defaults — fewer cold starts under real traffic.
     idleGraceSeconds: 600
     minAliveAfterWakeSeconds: 120

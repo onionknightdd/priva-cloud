@@ -282,12 +282,35 @@ DDL: tuple[str, ...] = (
       updated_at          TEXT NOT NULL DEFAULT {NOW}
     ) STRICT
     """,
+    # 12 ── network_isolation --------------------------------------------------
+    # ADMIN-only platform-wide tenant network isolation. Single row (id=1),
+    # rendered by the operator into NetworkPolicy objects.
+    #
+    # Column defaults fail closed for any direct insert that bypasses the service.
+    # The seeded egress_allowlist is NOT duplicated here — the service seeds the
+    # row from NetworkIsolationRecord's defaults, keeping that list single-sourced
+    # in priva_common (and therefore shared with the operator's renderer).
+    #
+    # egress_allowlist is a JSON array of {host, port} — the locked wire
+    # convention for JSON-blob columns is TEXT.
+    f"""
+    CREATE TABLE IF NOT EXISTS network_isolation (
+      id                     INTEGER PRIMARY KEY CHECK (id = 1),
+      runner_deny_internal   INTEGER NOT NULL DEFAULT 1 CHECK (runner_deny_internal IN (0,1)),
+      terminal_deny_internal INTEGER NOT NULL DEFAULT 1 CHECK (terminal_deny_internal IN (0,1)),
+      deny_tenant_peers      INTEGER NOT NULL DEFAULT 1 CHECK (deny_tenant_peers IN (0,1)),
+      egress_mode            TEXT NOT NULL DEFAULT 'allowlist'
+                             CHECK (egress_mode IN ('unrestricted','allowlist','deny_all')),
+      egress_allowlist       TEXT NOT NULL DEFAULT '[]',
+      updated_at             TEXT NOT NULL DEFAULT {NOW}
+    ) STRICT
+    """,
 )
 
 TABLES = (
     "account", "channel_binding", "quota", "scheduled_job", "job_run_record", "job_fire",
     "account_resource_spec", "pending_registration", "runner_defaults", "hook_policy",
-    "feishu_channel_config", "channel_platform_config",
+    "feishu_channel_config", "channel_platform_config", "network_isolation",
 )
 
 # Idempotent column additions for DBs created before a column existed. CREATE

@@ -26,6 +26,7 @@ _TABLES: tuple[tuple[str, str], ...] = (
     ("account_resource_spec", "account_id"),
     ("pending_registration", "request_id"),
     ("runner_defaults", "id"),
+    ("network_isolation", "id"),
     ("hook_policy", "id"),
 )
 

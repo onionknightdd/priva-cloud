@@ -21,6 +21,8 @@ from priva_common.models.admin import (
     PresetPromptUpdate,
     ResourceUsageAccountEntry,
     ResourceUsageResponse,
+    NetworkIsolationResponse,
+    NetworkIsolationUpdate,
     RunnerDefaultsResponse,
     RunnerDefaultsUpdate,
     RetryableToolEntry,
@@ -90,6 +92,96 @@ def _runner_defaults_response(d) -> RunnerDefaultsResponse:
         terminal_memory_mb=terminal_memory_mb,
         updated_at=d.updated_at,
     )
+
+
+def normalise_allowlist(entries):
+    """Validate + normalise allowlist rows on their way to the proxy config.
+
+    Every rejection here is a squid failure mode that would otherwise surface far
+    from its cause: a blank host renders ``acl ... dstdomain`` with no argument and
+    squid refuses to start, taking every agent's egress with it; a URL instead of a
+    domain is matched literally, so the admin sees the host listed and believes it
+    is allowed while nothing matches.
+    """
+    from priva_common.dataplane import EgressAllowEntryRecord
+    from priva_common.network_isolation import normalize_egress_domain
+
+    seen: set[tuple[str, int]] = set()
+    out = []
+    for entry in entries:
+        try:
+            host = normalize_egress_domain(getattr(entry, "host", None))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        raw_port = getattr(entry, "port", None)
+        try:
+            port = int(raw_port)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, f"invalid port for {host}: {raw_port}") from exc
+        if port < 1 or port > 65535:
+            raise HTTPException(400, f"invalid port for {host}: {raw_port}")
+        if (host, port) in seen:
+            continue
+        seen.add((host, port))
+        out.append(EgressAllowEntryRecord(host=host, port=port))
+    return out
+
+
+def _isolation_response(record) -> NetworkIsolationResponse:
+    from ..services import isolation_status
+    return NetworkIsolationResponse(
+        runner_deny_internal=record.runner_deny_internal,
+        terminal_deny_internal=record.terminal_deny_internal,
+        deny_tenant_peers=record.deny_tenant_peers,
+        egress_mode=record.egress_mode,
+        egress_allowlist=[{"host": e.host, "port": e.port} for e in record.egress_allowlist],
+        updated_at=record.updated_at,
+        status=isolation_status.collect(record),
+    )
+
+
+@router.get("/network-isolation", response_model=NetworkIsolationResponse)
+async def get_network_isolation():
+    from priva_common.dataplane import get_client
+    return _isolation_response(get_client().network_isolation.get())
+
+
+@router.put("/network-isolation", response_model=NetworkIsolationResponse)
+async def update_network_isolation(
+    request: NetworkIsolationUpdate,
+    current_user: UserRecord = Depends(require_admin),
+):
+    """The operator converges within one reconcile tick (<=15s); NetworkPolicy
+    takes effect immediately, while any stale pod template is replaced at the
+    first active-run/session-free boundary."""
+    import asyncio
+
+    from priva_common.dataplane import EGRESS_MODES, get_client
+
+    kw: dict = {}
+    for field in ("runner_deny_internal", "terminal_deny_internal", "deny_tenant_peers"):
+        value = getattr(request, field)
+        if value is not None:
+            kw[field] = bool(value)
+    if request.egress_mode is not None:
+        if request.egress_mode not in EGRESS_MODES:
+            raise HTTPException(400, f"egress_mode must be one of {list(EGRESS_MODES)}")
+        kw["egress_mode"] = request.egress_mode
+    if request.egress_allowlist is not None:
+        kw["egress_allowlist"] = normalise_allowlist(request.egress_allowlist)
+
+    client = get_client()
+    if not kw:
+        return _isolation_response(client.network_isolation.get())
+    record = await asyncio.to_thread(lambda: client.network_isolation.set(**kw))
+    get_audit_logger().append(AuditEntry(
+        actor=current_user.username,
+        action="admin.network_isolation_changed",
+        target="network_isolation",
+        details={k: (v if not isinstance(v, list) else [e.host for e in v])
+                 for k, v in kw.items()},
+    ))
+    return _isolation_response(record)
 
 
 @router.get("/runner-defaults", response_model=RunnerDefaultsResponse)

@@ -13,9 +13,11 @@ import json
 from priva_common.dataplane.client import (
     BindingRecord,
     ChannelPlatformConfigRecord,
+    EgressAllowEntryRecord,
     FeishuChannelConfigRecord,
     FeishuSecretRecord,
     HookPolicyRecord,
+    NetworkIsolationRecord,
     PendingRegistrationRecord,
     QuotaRecord,
     ResourceSpecRecord,
@@ -155,6 +157,23 @@ def runner_defaults_from_pb(m) -> RunnerDefaultsRecord:
         terminal_idle_timeout_seconds=m.terminal_idle_timeout_seconds,
         terminal_max_lifetime_seconds=m.terminal_max_lifetime_seconds,
         terminal_scale_down_grace_seconds=m.terminal_scale_down_grace_seconds,
+        updated_at=m.updated_at or None,
+    )
+
+
+def network_isolation_from_pb(m) -> NetworkIsolationRecord:
+    # Singleton with static defaults — always populated server-side, no None case.
+    # egress_allowlist is passed through verbatim (including empty): in allowlist
+    # mode an empty list really does mean "deny everything", and silently
+    # substituting the seed defaults here would re-open egress an admin closed.
+    return NetworkIsolationRecord(
+        runner_deny_internal=m.runner_deny_internal,
+        terminal_deny_internal=m.terminal_deny_internal,
+        deny_tenant_peers=m.deny_tenant_peers,
+        egress_mode=m.egress_mode,
+        egress_allowlist=[
+            EgressAllowEntryRecord(host=e.host, port=e.port) for e in m.egress_allowlist
+        ],
         updated_at=m.updated_at or None,
     )
 

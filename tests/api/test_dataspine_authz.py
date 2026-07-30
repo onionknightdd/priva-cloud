@@ -20,6 +20,8 @@ from priva_common import service_token
 from priva_common.config import Settings, get_settings
 from priva_common.dataplane.grpc_client import _cache, build_grpc_client
 from priva_common.models.scheduler import CronTriggerConfig, ScheduledJobDefinition
+from priva_common.service_token import ServicePrincipal
+from priva_data_spine.authz import AuthzInterceptor
 from priva_data_spine.server import build_server
 from priva_data_spine.service import build_repo
 
@@ -270,6 +272,89 @@ def test_scheduler_keeps_its_explicit_cross_tenant_surface(spine, as_identity):
     assert any(a.account_id == victim for a in spine.accounts.list())
     assert [acct for acct, _ in spine.scheduler.list_active_jobs()] == [victim]
     assert spine.scheduler.get_job("victim-job") is not None
+
+
+def test_operator_token_cannot_call_unrelated_global_rpc(spine, as_identity):
+    """A drain-path credential leak must not turn into fleet account access."""
+    as_identity(service_token.mint("operator"))
+
+    # The operator's real reconcile reads remain available.
+    assert spine.network_isolation.get().egress_mode == "allowlist"
+    assert spine.runner_defaults.get() is not None
+    assert isinstance(spine.hook_policies.list(enabled_only=True), list)
+
+    # Merely being a signed control-plane workload is no longer a wildcard.
+    with pytest.raises(grpc.RpcError) as exc:
+        spine.accounts.list()
+    assert _denied(exc)
+
+    with pytest.raises(grpc.RpcError) as exc:
+        spine.admin.stats()
+    assert _denied(exc)
+
+
+def test_future_control_plane_method_is_denied_until_explicitly_allowed():
+    class Aborted(Exception):
+        def __init__(self, code, detail):
+            self.code = code
+            self.detail = detail
+
+    class Context:
+        @staticmethod
+        def abort(code, detail):
+            raise Aborted(code, detail)
+
+    with pytest.raises(Aborted) as denied:
+        AuthzInterceptor(client=None)._authorize(
+            "FutureService/NewPrivilegedRPC",
+            ServicePrincipal(svc="control-panel"),
+            object(),
+            Context(),
+        )
+    assert denied.value.code == grpc.StatusCode.PERMISSION_DENIED
+    assert "not permitted" in denied.value.detail
+
+
+def test_network_isolation_is_method_scoped_by_control_plane_workload(spine, as_identity):
+    """Only the two workloads with real call sites get the minimum permissions:
+    control-panel may administer posture; operator may only read it to converge.
+    """
+    as_identity(service_token.mint("control-panel"))
+    assert spine.network_isolation.get().egress_mode == "allowlist"
+    assert spine.network_isolation.set(egress_mode="deny_all").egress_mode == "deny_all"
+
+    as_identity(service_token.mint("operator"))
+    assert spine.network_isolation.get().egress_mode == "deny_all"
+    with pytest.raises(grpc.RpcError) as exc:
+        spine.network_isolation.set(egress_mode="unrestricted")
+    assert _denied(exc)
+
+
+@pytest.mark.parametrize("svc", ["scheduler", "channel-connector"])
+def test_unrelated_control_plane_workloads_cannot_access_network_isolation(
+    spine, as_identity, svc,
+):
+    as_identity(service_token.mint(svc))
+
+    with pytest.raises(grpc.RpcError) as exc:
+        spine.network_isolation.get()
+    assert _denied(exc)
+
+    with pytest.raises(grpc.RpcError) as exc:
+        spine.network_isolation.set(egress_mode="unrestricted")
+    assert _denied(exc)
+
+
+def test_tenant_cannot_read_or_change_network_isolation(spine, as_identity):
+    as_identity(service_token.mint("agent-runner", account_id="acc-attacker"))
+
+    with pytest.raises(grpc.RpcError) as exc:
+        spine.network_isolation.get()
+    assert _denied(exc)
+
+    with pytest.raises(grpc.RpcError) as exc:
+        spine.network_isolation.set(egress_mode="unrestricted")
+    assert _denied(exc)
 
 
 # --- the password epoch must survive the WIRE, not just the model --------------

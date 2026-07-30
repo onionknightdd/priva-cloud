@@ -9,7 +9,9 @@ TEST_POSTGRES_DSN is set (e.g. postgresql://postgres:test@127.0.0.1:5433/priva).
 
 from __future__ import annotations
 
+import json
 import os
+from types import SimpleNamespace
 
 import grpc
 import pytest
@@ -17,7 +19,7 @@ import pytest
 from priva_common.config import Settings
 from priva_common.dataplane.grpc_client import _cache, build_grpc_client
 from priva_data_spine.server import build_server
-from priva_data_spine.service import build_repo
+from priva_data_spine.service import NetworkIsolationService, build_repo
 
 PG_DSN = os.environ.get("TEST_POSTGRES_DSN")
 _pg_param = pytest.param(
@@ -159,3 +161,114 @@ def test_runner_defaults_terminal_policy_round_trip(client):
     assert updated.terminal_idle_timeout_seconds == 900
     assert updated.terminal_max_lifetime_seconds == 7200
     assert updated.terminal_scale_down_grace_seconds == 60
+
+
+def test_network_isolation_seeds_a_secure_functional_default(client):
+    seeded = client.network_isolation.get()
+    assert seeded.runner_deny_internal is True
+    assert seeded.terminal_deny_internal is True
+    assert seeded.deny_tenant_peers is True
+    assert seeded.egress_mode == "allowlist"
+    assert {entry.host for entry in seeded.egress_allowlist} >= {
+        ".anthropic.com",
+        "registry.npmjs.org",
+        "pypi.org",
+    }
+
+
+def test_corrupt_egress_allowlist_fails_closed():
+    record = NetworkIsolationService._to_record({
+        "runner_deny_internal": 1,
+        "terminal_deny_internal": 1,
+        "deny_tenant_peers": 1,
+        "egress_mode": "allowlist",
+        "egress_allowlist": "{not-json",
+    })
+    assert record.egress_mode == "allowlist"
+    assert record.egress_allowlist == []
+
+
+@pytest.mark.parametrize("port", [0, -1, 65536])
+def test_persisted_invalid_egress_port_fails_closed(port):
+    record = NetworkIsolationService._to_record({
+        "runner_deny_internal": 1,
+        "terminal_deny_internal": 1,
+        "deny_tenant_peers": 1,
+        "egress_mode": "allowlist",
+        "egress_allowlist": json.dumps([
+            {"host": "api.example.com", "port": port},
+        ]),
+    })
+    assert record.egress_allowlist == []
+
+
+def test_network_isolation_grpc_rejects_zero_port(client):
+    with pytest.raises(grpc.RpcError) as exc:
+        client.network_isolation.set(egress_allowlist=[
+            SimpleNamespace(host="api.example.com", port=0),
+        ])
+    assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_network_isolation_client_applies_configured_rpc_deadline(monkeypatch):
+    from priva_common.dataplane.v1 import (
+        network_isolation_pb2,
+        network_isolation_pb2_grpc,
+    )
+
+    calls: list[float | None] = []
+
+    class Stub:
+        def __init__(self, _channel):
+            pass
+
+        def Get(self, _request, timeout=None):
+            calls.append(timeout)
+            return network_isolation_pb2.NetworkIsolation(
+                runner_deny_internal=True,
+                terminal_deny_internal=True,
+                deny_tenant_peers=True,
+                egress_mode="deny_all",
+            )
+
+    monkeypatch.setattr(
+        network_isolation_pb2_grpc,
+        "NetworkIsolationServiceStub",
+        Stub,
+    )
+    settings = Settings()
+    settings.dataspine.grpc_dsn = "127.0.0.1:1"
+    settings.dataspine.network_isolation_rpc_timeout_seconds = 2.5
+    _cache.clear()
+    try:
+        record = build_grpc_client(settings).network_isolation.get()
+    finally:
+        _cache.clear()
+
+    assert record.egress_mode == "deny_all"
+    assert calls == [2.5]
+
+
+def test_network_isolation_service_rejects_zero_port(tmp_path):
+    settings = Settings()
+    settings.dataspine.backend = "sqlite"
+    settings.dataspine.sqlite_path = str(tmp_path / "service.db")
+    repo = build_repo(settings)
+    try:
+        service = NetworkIsolationService(repo)
+        with pytest.raises(ValueError):
+            service.set(egress_allowlist=[
+                SimpleNamespace(host="api.example.com", port=0),
+            ])
+    finally:
+        repo.close()
+
+
+def test_missing_isolation_scalars_fail_closed():
+    record = NetworkIsolationService._to_record({
+        "egress_allowlist": "[]",
+    })
+    assert record.runner_deny_internal is True
+    assert record.terminal_deny_internal is True
+    assert record.deny_tenant_peers is True
+    assert record.egress_mode == "deny_all"

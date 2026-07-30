@@ -9,6 +9,7 @@ metadata:
 data:
   PRIVA_DATASPINE__TRANSPORT: "grpc"
   PRIVA_DATASPINE__GRPC_DSN: "data-spine.priva-cloud.svc.cluster.local:50051"
+  PRIVA_DATASPINE__NETWORK_ISOLATION_RPC_TIMEOUT_SECONDS: "5"
   PRIVA_LOG_DIR: "/tmp/logs"
   PRIVA_KUBERNETES__IN_CLUSTER: "true"
   PRIVA_KUBERNETES__NAMESPACE_SYSTEM: "priva-cloud"
@@ -33,6 +34,19 @@ data:
   PRIVA_KUBERNETES__TERMINAL_OUTPUT_BURST_BYTES: "1048576"
   PRIVA_KUBERNETES__TERMINAL_OUTPUT_BUFFER_BYTES: "1048576"
   PRIVA_KUBERNETES__TERMINAL_TMP_SIZE_LIMIT: "256Mi"
+  # Tenant egress boundary. Complex pydantic-settings env values are JSON.
+  PRIVA_KUBERNETES__CLUSTER_POD_CIDRS: '["10.244.0.0/16"]'
+  PRIVA_KUBERNETES__CLUSTER_SERVICE_CIDRS: '["10.96.0.0/12"]'
+  PRIVA_KUBERNETES__CLUSTER_NODE_CIDRS: '["192.168.49.0/24"]'
+  PRIVA_KUBERNETES__EGRESS_BLOCKED_CIDRS: '["0.0.0.0/8","10.0.0.0/8","100.64.0.0/10","127.0.0.0/8","169.254.0.0/16","172.16.0.0/12","192.168.0.0/16","224.0.0.0/4","240.0.0.0/4"]'
+  PRIVA_KUBERNETES__DNS_IP_CIDRS: '["10.96.0.10/32"]'
+  PRIVA_KUBERNETES__NETWORK_POLICY_PROBE_REQUIRED: "true"
+  PRIVA_KUBERNETES__NETWORK_POLICY_PROBE_MAX_AGE_SECONDS: "604800"
+  PRIVA_KUBERNETES__EGRESS_PROXY_HOST: "priva-egress-proxy.priva-cloud.svc"
+  PRIVA_KUBERNETES__EGRESS_PROXY_PORT: "3128"
+  # Development only; production must pin a reviewed image by immutable digest.
+  PRIVA_KUBERNETES__EGRESS_PROXY_IMAGE: "ubuntu/squid:latest"
+  PRIVA_KUBERNETES__EGRESS_NO_PROXY: "localhost,127.0.0.1"
   # Shared-RWX-export storage model: each runner subPaths into one RWX export; the
   # per-account volume quota is enforced by the backend (XFS prjquota in dev via the
   # quota-manager). dev=nfs_xfs, prod=cephfs.

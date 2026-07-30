@@ -14,3 +14,10 @@ exclude = ["services/terminald"]
 [tool.uv]
 # The root is a workspace anchor only — not an installable package.
 package = false
+
+[tool.ruff.lint.per-file-ignores]
+# protoc intentionally places dependency imports after its runtime-version
+# bootstrap, and some imports exist only to register descriptors as a side
+# effect. Keep generated wire code byte-for-byte reproducible.
+"**/*_pb2.py" = ["E402", "F401"]
+"**/*_pb2_grpc.py" = ["F401"]

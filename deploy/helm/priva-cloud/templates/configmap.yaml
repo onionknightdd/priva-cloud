@@ -11,6 +11,7 @@ metadata:
 data:
   PRIVA_DATASPINE__TRANSPORT: {{ .Values.config.dataspine.transport | quote }}
   PRIVA_DATASPINE__GRPC_DSN: {{ .Values.config.dataspine.grpcDsn | replace "{ns}" $ns | quote }}
+  PRIVA_DATASPINE__NETWORK_ISOLATION_RPC_TIMEOUT_SECONDS: {{ .Values.config.dataspine.networkIsolationRpcTimeoutSeconds | quote }}
   PRIVA_LOG_DIR: {{ .Values.config.logDir | quote }}
   PRIVA_KUBERNETES__IN_CLUSTER: {{ .Values.config.kubernetes.inCluster | quote }}
   PRIVA_KUBERNETES__NAMESPACE_SYSTEM: {{ $ns | quote }}
@@ -32,9 +33,21 @@ data:
   PRIVA_KUBERNETES__TERMINAL_MAX_LIFETIME_SECONDS: {{ .Values.config.kubernetes.terminalMaxLifetimeSeconds | quote }}
   PRIVA_KUBERNETES__TERMINAL_SCALE_DOWN_GRACE_SECONDS: {{ .Values.config.kubernetes.terminalScaleDownGraceSeconds | quote }}
   PRIVA_KUBERNETES__TERMINAL_OUTPUT_RATE_LIMIT_BYTES_PER_SEC: {{ .Values.config.kubernetes.terminalOutputRateBytesPerSec | quote }}
-  PRIVA_KUBERNETES__TERMINAL_OUTPUT_BURST_BYTES: {{ .Values.config.kubernetes.terminalOutputBurstBytes | quote }}
-  PRIVA_KUBERNETES__TERMINAL_OUTPUT_BUFFER_BYTES: {{ .Values.config.kubernetes.terminalOutputBufferBytes | quote }}
+  PRIVA_KUBERNETES__TERMINAL_OUTPUT_BURST_BYTES: {{ printf "%.0f" .Values.config.kubernetes.terminalOutputBurstBytes | quote }}
+  PRIVA_KUBERNETES__TERMINAL_OUTPUT_BUFFER_BYTES: {{ printf "%.0f" .Values.config.kubernetes.terminalOutputBufferBytes | quote }}
   PRIVA_KUBERNETES__TERMINAL_TMP_SIZE_LIMIT: {{ .Values.config.kubernetes.terminalTmpSizeLimit | quote }}
+  # Tenant egress boundary. Pydantic complex env values must be JSON strings.
+  PRIVA_KUBERNETES__CLUSTER_POD_CIDRS: {{ .Values.config.kubernetes.clusterPodCidrs | toJson | quote }}
+  PRIVA_KUBERNETES__CLUSTER_SERVICE_CIDRS: {{ .Values.config.kubernetes.clusterServiceCidrs | toJson | quote }}
+  PRIVA_KUBERNETES__CLUSTER_NODE_CIDRS: {{ .Values.config.kubernetes.clusterNodeCidrs | toJson | quote }}
+  PRIVA_KUBERNETES__EGRESS_BLOCKED_CIDRS: {{ .Values.config.kubernetes.egressBlockedCidrs | toJson | quote }}
+  PRIVA_KUBERNETES__DNS_IP_CIDRS: {{ .Values.config.kubernetes.dnsIpCidrs | toJson | quote }}
+  PRIVA_KUBERNETES__NETWORK_POLICY_PROBE_REQUIRED: {{ .Values.config.kubernetes.networkPolicyProbeRequired | quote }}
+  PRIVA_KUBERNETES__NETWORK_POLICY_PROBE_MAX_AGE_SECONDS: {{ .Values.config.kubernetes.networkPolicyProbeMaxAgeSeconds | quote }}
+  PRIVA_KUBERNETES__EGRESS_PROXY_HOST: {{ .Values.config.kubernetes.egressProxyHost | replace "{ns}" $ns | quote }}
+  PRIVA_KUBERNETES__EGRESS_PROXY_PORT: {{ .Values.config.kubernetes.egressProxyPort | quote }}
+  PRIVA_KUBERNETES__EGRESS_PROXY_IMAGE: {{ .Values.config.kubernetes.egressProxyImage | quote }}
+  PRIVA_KUBERNETES__EGRESS_NO_PROXY: {{ .Values.config.kubernetes.egressNoProxy | replace "{ns}" $ns | quote }}
   # Shared-RWX-export storage model: each runner subPaths into one RWX export; the
   # per-account volume quota is enforced by the backend. dev=nfs_xfs, prod=cephfs.
   PRIVA_KUBERNETES__STORAGE_BACKEND: {{ .Values.config.kubernetes.storageBackend | quote }}

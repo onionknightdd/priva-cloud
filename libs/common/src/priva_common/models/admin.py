@@ -407,3 +407,82 @@ class SensitivePatternsResponse(BaseModel):
 class SensitivePatternsUpdate(BaseModel):
     enable: bool = False
     patterns: list[SensitivePatternEntry] = []
+
+
+class EgressAllowEntryModel(BaseModel):
+    """One allowlist destination. Always a domain: the proxy matches the CONNECT
+    target, and a NetworkPolicy CIDR cannot express a CDN-fronted name. A grant
+    always names one concrete TCP port."""
+    host: str
+    port: int = Field(default=443, ge=1, le=65535)
+
+
+class IsolationBoundaryStatus(BaseModel):
+    """desired vs applied for one boundary.
+
+    They are separate because they fail separately: `applied=False` while
+    `desired=True` means the operator did not write the object (it is down, or
+    lost its networkpolicies RBAC) — drift that is otherwise invisible, since the
+    settings row still reads exactly as the admin left it. `applied=None` means
+    control-panel could not look, which must not render as "nothing is in force".
+    """
+    key: str
+    desired: bool
+    applied: bool | None = None
+
+
+class IsolationEnforcement(BaseModel):
+    """Whether the CNI actually drops the packet. Measured, never inferred from
+    the plugin's name — `state` is "true"/"false"/"unknown" and `checked_at` is
+    when the probe last ran, so a stale verdict is visibly stale."""
+    state: str = "unknown"
+    checked_at: str | None = None
+    cni: str | None = None
+    address_family: str | None = None
+    cluster_uid: str | None = None
+    stale: bool = False
+
+
+class IsolationProxyStatus(BaseModel):
+    """`present=None` means the lookup failed, not that the proxy is absent.
+    When `required` is true and this is unhealthy, every agent hangs with no
+    output and no error — hence its own row in the panel."""
+    required: bool = False
+    present: bool | None = None
+    ready: int = 0
+    desired: int = 0
+    applied: bool | None = None
+
+
+class NetworkIsolationStatus(BaseModel):
+    enforcement: IsolationEnforcement = Field(default_factory=IsolationEnforcement)
+    boundaries: list[IsolationBoundaryStatus] = Field(default_factory=list)
+    proxy: IsolationProxyStatus = Field(default_factory=IsolationProxyStatus)
+    # Superseded hand-applied policies still in the namespace. Policies UNION
+    # their allow rules, so a leftover permissive one quietly widens the new set.
+    legacy_present: list[str] | None = None
+    # Additional policies whose allow rules select a tenant runtime or the egress
+    # proxy. None means the control plane could not list policies; an empty list
+    # means it measured no conflict.
+    conflicting_policies: list[str] | None = Field(default_factory=list)
+
+
+class NetworkIsolationResponse(BaseModel):
+    runner_deny_internal: bool = False
+    terminal_deny_internal: bool = False
+    deny_tenant_peers: bool = False
+    egress_mode: str = "unrestricted"
+    egress_allowlist: list[EgressAllowEntryModel] = Field(default_factory=list)
+    updated_at: str | None = None
+    status: NetworkIsolationStatus = Field(default_factory=NetworkIsolationStatus)
+
+
+class NetworkIsolationUpdate(BaseModel):
+    """Partial update — only the provided fields are applied. An empty
+    `egress_allowlist` is a real value (deny everything under allowlist mode),
+    which is why it is distinguished from the field being absent."""
+    runner_deny_internal: bool | None = None
+    terminal_deny_internal: bool | None = None
+    deny_tenant_peers: bool | None = None
+    egress_mode: str | None = None
+    egress_allowlist: list[EgressAllowEntryModel] | None = None

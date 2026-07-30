@@ -88,6 +88,7 @@ config:
     transport: grpc
     # {host} is filled with the install namespace at render time.
     grpcDsn: "data-spine.{ns}.svc.cluster.local:50051"
+    networkIsolationRpcTimeoutSeconds: 5
   logDir: /tmp/logs
   kubernetes:
     inCluster: true
@@ -112,6 +113,51 @@ config:
     terminalOutputBurstBytes: 1048576
     terminalOutputBufferBytes: 1048576
     terminalTmpSizeLimit: 256Mi
+    # Tenant egress boundary. These values are consumed by the operator when it
+    # renders NetworkPolicy and the always-on egress proxy.
+    #
+    # CIDR lists are serialized into the ConfigMap as JSON because pydantic-settings
+    # expects complex environment values in JSON form. Replace the cluster ranges in
+    # every real environment; the defaults match the minikube development topology.
+    clusterPodCidrs:
+      - 10.244.0.0/16
+    clusterServiceCidrs:
+      - 10.96.0.0/12
+    clusterNodeCidrs:
+      - 192.168.49.0/24
+    # Public egress must never be able to resolve/rebind into local, private,
+    # link-local, CGNAT/metadata, multicast, or reserved address space. The
+    # operator also folds every cluster*Cidrs entry into this deny set.
+    egressBlockedCidrs:
+      - 0.0.0.0/8
+      - 10.0.0.0/8
+      - 100.64.0.0/10
+      - 127.0.0.0/8
+      - 169.254.0.0/16
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 224.0.0.0/4
+      - 240.0.0.0/4
+    # kube-dns Service plus optional NodeLocal/custom resolver listeners. CoreDNS
+    # is also selected by namespace+pod labels; do not put arbitrary resolvers here.
+    dnsIpCidrs:
+      - 10.96.0.10/32
+    # Gate tenant pod create/wake on deploy/checks/networkpolicy-cni.sh having
+    # measured both ingress and egress enforcement. Disable only for a trusted,
+    # single-tenant local developer cluster.
+    networkPolicyProbeRequired: true
+    # Probe success expires; refresh at least weekly and after every CNI/network
+    # change. Expiry blocks new wakes and quiesces already-running tenant pods.
+    networkPolicyProbeMaxAgeSeconds: 604800
+    # {ns} is filled with the Helm release namespace in the ConfigMap template.
+    egressProxyHost: "priva-egress-proxy.{ns}.svc"
+    egressProxyPort: 3128
+    # Development default only. Production overlays must pin a reviewed image by
+    # immutable digest and mirror it into the deployment's trusted registry.
+    egressProxyImage: ubuntu/squid:latest
+    # Internal data-spine/scheduler clients disable HTTP proxy handling explicitly;
+    # do not create DNS bypasses here, especially broad ".svc" suffixes.
+    egressNoProxy: "localhost,127.0.0.1"
     # Shared-RWX-export storage model. dev=nfs_xfs, prod=cephfs.
     storageBackend: nfs_xfs
     exportClaimName: priva-export
