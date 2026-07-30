@@ -422,7 +422,7 @@ async def disable_user(
     if existing is None:
         raise HTTPException(404, f"User '{username}' not found")
 
-    if existing.status == "purged":
+    if existing.status in ("offboarding", "purged"):
         raise HTTPException(400, "Account is being purged")
 
     # Last admin protection
@@ -468,7 +468,7 @@ async def enable_user(
     if existing is None:
         raise HTTPException(404, f"User '{username}' not found")
 
-    if existing.status == "purged":
+    if existing.status in ("offboarding", "purged"):
         raise HTTPException(400, "Account is being purged")
 
     try:
@@ -583,9 +583,10 @@ async def delete_user(
     """Purge an account — irreversible, and allowed while it is awake (force-kill).
 
     Ordered so no failure can resurrect the account: the row is tombstoned
-    ``purged`` FIRST (which already revokes every token and stops the scheduler /
-    gateway), THEN the AgentTenant CR is deleted, which hands teardown to the
-    operator's finalizer (pods to zero, storage deprovisioned, export PVC removed).
+    ``offboarding`` FIRST (which already revokes every token and stops the scheduler /
+    gateway), THEN a finalized AgentTenant CR is deleted, which hands teardown to the
+    operator (pods to zero, storage deprovisioned, export PVC removed), and only after
+    Kubernetes accepts that request does the row advance to ``purged``.
     The row itself is reaped by the ``sync_all_tenants`` sweep once the CR is gone, so
     a crash anywhere in between resumes instead of rolling back. Returns 202 — the
     account shows as PURGING until the sweep releases the username."""
@@ -602,7 +603,7 @@ async def delete_user(
         raise HTTPException(400, "Cannot remove the last admin")
 
     try:
-        store.update_user(username, status="purged")
+        store.update_user(username, status="offboarding")
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -618,7 +619,13 @@ async def delete_user(
 
     from ..provisioner import delete_tenant
     try:
-        await asyncio.to_thread(delete_tenant, existing.account_id)
+        await asyncio.to_thread(
+            delete_tenant, existing.account_id, existing.username
+        )
+        # This second durable stage means ``purged + CR absent`` can only mean a
+        # finalized delete was requested and has completed. If this write fails,
+        # the offboarding row remains revoked and the periodic sweep retries.
+        store.update_user(username, status="purged")
     except Exception as exc:
         # The tombstone stands: the account stays purged and sync_all_tenants re-issues
         # the CR delete, but the admin must know the runtime is not gone yet.

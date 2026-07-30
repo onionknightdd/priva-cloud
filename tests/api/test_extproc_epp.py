@@ -304,3 +304,45 @@ def test_warm_path_liveness(monkeypatch):
     result = _run(P.wake_and_wait("acct-1"))
     assert state["patched"] == 1  # probe failed -> re-wake patched spec.wake
     assert result == "10.0.0.9:8091"  # operator-healed status returned after re-wake
+
+
+def test_warm_path_rechecks_phase_after_liveness_probe(monkeypatch):
+    P = X.provisioner
+    P._wake_tasks.clear()
+    statuses = iter([
+        {"phase": "Running", "podIP": "10.0.0.9"},
+        {"phase": "Draining", "podIP": "10.0.0.9"},
+    ])
+    monkeypatch.setattr(P, "_status", lambda _account_id: next(statuses))
+
+    async def alive(_ip, _port):
+        return True
+
+    monkeypatch.setattr(P, "_alive", alive)
+    monkeypatch.setattr(
+        P,
+        "_patch_wake",
+        lambda _account_id: (_ for _ in ()).throw(
+            AssertionError("a concurrent drain must not be re-woken")
+        ),
+    )
+
+    assert _run(P.wake_and_wait("acct-1")) is None
+
+
+def test_terminal_drive_rechecks_drain_before_patching(monkeypatch):
+    P = X.provisioner
+    monkeypatch.setattr(
+        P,
+        "_status",
+        lambda _account_id: {"terminal": {"phase": "Draining"}},
+    )
+    monkeypatch.setattr(
+        P,
+        "_patch_terminal_wake",
+        lambda _account_id: (_ for _ in ()).throw(
+            AssertionError("a draining terminal must not be re-woken")
+        ),
+    )
+
+    assert _run(P._drive_terminal_wake("acct-1")) is None

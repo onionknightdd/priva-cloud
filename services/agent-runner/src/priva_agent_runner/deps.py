@@ -46,6 +46,12 @@ def _resolve(token: str | None) -> UserRecord:
         raise HTTPException(403, "Unknown account")
     if expected and getattr(user, "account_id", None) not in (None, expected):
         raise HTTPException(403, "Runner token account mismatch")
+    # Runner tokens intentionally remain valid until their signing key rotates.
+    # Account lifecycle is therefore a live authorization decision, not a token
+    # expiry decision: disabling/purging an account must fence an already-issued
+    # token at the final runner boundary.
+    if getattr(user, "status", None) != "active":
+        raise HTTPException(403, "Account is not active")
     return user
 
 

@@ -29,15 +29,19 @@ def _defaults() -> dict:
 
 
 class _ExistingCustom:
-    def __init__(self, spec):
+    def __init__(self, spec, *, finalizers=None):
         self.spec = spec
+        self.finalizers = finalizers or []
         self.patches = []
 
     def create_namespaced_custom_object(self, *args):
         raise P.client.ApiException(status=409)
 
     def get_namespaced_custom_object(self, *args):
-        return {"spec": self.spec}
+        return {
+            "metadata": {"finalizers": self.finalizers},
+            "spec": self.spec,
+        }
 
     def patch_namespaced_custom_object(self, *args):
         self.patches.append(args[-1])
@@ -54,11 +58,14 @@ def test_ensure_tenant_repairs_identity_after_already_exists(monkeypatch):
 
     P.ensure_tenant("acct-1", "alice", runtime_defaults=_defaults())
 
-    assert custom.patches == [{"spec": {
-        "accountId": "acct-1",
-        "username": "alice",
-        "runtimeDefaults": _defaults(),
-    }}]
+    assert custom.patches == [{
+        "metadata": {"finalizers": [P.AGENTTENANT_FINALIZER]},
+        "spec": {
+            "accountId": "acct-1",
+            "username": "alice",
+            "runtimeDefaults": _defaults(),
+        },
+    }]
     # The selective patch must not reset lifecycle or resource overrides.
     assert "desiredState" not in custom.patches[0]["spec"]
     assert "resources" not in custom.patches[0]["spec"]
@@ -66,7 +73,9 @@ def test_ensure_tenant_repairs_identity_after_already_exists(monkeypatch):
 
 def test_ensure_tenant_does_not_patch_complete_object(monkeypatch):
     spec = {"accountId": "acct-1", "username": "alice", "runtimeDefaults": _defaults()}
-    custom = _ExistingCustom(spec)
+    custom = _ExistingCustom(
+        spec, finalizers=[P.AGENTTENANT_FINALIZER]
+    )
     monkeypatch.setattr(P, "get_settings", _settings)
     monkeypatch.setattr(P, "_custom", lambda: custom)
 
@@ -90,10 +99,14 @@ def test_periodic_sync_recreates_deleted_cr_with_username(monkeypatch):
         runner_defaults=SimpleNamespace(get=lambda: defaults),
         resource_specs=SimpleNamespace(list=lambda: []),
     )
-    store = SimpleNamespace(list_users=lambda: [SimpleNamespace(
+    user = SimpleNamespace(
         account_id="acct-1", username="alice", status="active",
         agent_runner_type="auto_scale",
-    )])
+    )
+    store = SimpleNamespace(
+        list_users=lambda: [user],
+        get_user=lambda username: user if username == "alice" else None,
+    )
     created = []
     monkeypatch.setattr(dataplane, "get_client", lambda: dp)
     monkeypatch.setattr(user_store, "get_user_store", lambda: store)

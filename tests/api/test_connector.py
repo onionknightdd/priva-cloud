@@ -6,8 +6,6 @@ import os
 import sys
 import uuid
 
-import pytest
-
 # priva_channel_connector isn't pip-installed (its lark_oapi dep isn't in the venv);
 # add its src to the path. lark_oapi is imported lazily, so these modules import fine.
 _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -478,7 +476,12 @@ def test_render_card_running_no_text_is_thinking_only():
 def test_render_card_dots_cycle():
     from priva_channel_connector.cards import render_card
     from priva_channel_connector.sse import StreamState
-    foot = lambda d: render_card(StreamState(), final=False, dots=d)["body"]["elements"][-1]["content"]
+
+    def foot(d):
+        return render_card(
+            StreamState(), final=False, dots=d
+        )["body"]["elements"][-1]["content"]
+
     assert foot(1).count(".") == 1 and foot(2).count(".") == 2 and foot(3).count(".") == 3
 
 
@@ -864,6 +867,39 @@ def test_reconcile_tears_down_a_disabled_account():
     asyncio.run(go())
 
 
+def test_reconcile_rechecks_account_at_the_actual_arm_boundary():
+    async def go():
+        client = FakeClient(effective=[_cfg("A", "dA1")], secrets={"A": _secret("A")})
+        real_get = client.accounts.get
+        reads = 0
+
+        def disable_during_arm(account_id):
+            nonlocal reads
+            reads += 1
+            account = real_get(account_id)
+            # desired-set filter + first _arm read pass; final pre-start read fails
+            if reads >= 3:
+                account.status = "disabled"
+            return account
+
+        client.accounts.get = disable_during_arm
+        created = []
+        eng = ReconcileEngine(
+            client,
+            _transport_factory(created),
+            FakeDialer(RunOutcome()),
+            poll_seconds=999,
+        )
+
+        await eng.reconcile_once()
+
+        assert eng.armed_count == 0
+        assert created == []
+        assert ("A", "disabled", None) in client.feishu_configs.status_calls
+
+    asyncio.run(go())
+
+
 def test_reconcile_parks_on_undecryptable_secret():
     async def go():
         client = FakeClient(
@@ -922,10 +958,60 @@ def test_dial_sends_dm_disallowed_tools():
         return True
 
     async def go():
-        d = RunnerDialer(waker=fake_wake, transport=httpx.MockTransport(handler))
+        d = RunnerDialer(
+            account_getter=lambda account_id: UserRecord(
+                username=f"user-{account_id}",
+                password_hash="h",
+                account_id=account_id,
+                status="active",
+            ),
+            waker=fake_wake,
+            transport=httpx.MockTransport(handler),
+        )
         return await d.run("A", "user-A", prompt="hi")
 
     out = asyncio.run(go())
     assert captured["disallowed_tools"] == list(_DM_DISALLOWED_TOOLS)
     assert captured["enable_permission_feedback"] is True
     assert out.session_id == "s1"
+
+
+def test_dial_rechecks_account_after_wake_and_skips_http_when_disabled():
+    import httpx
+    from priva_channel_connector.dial import RunnerDialer
+
+    reads = 0
+    woke = []
+    requests = []
+
+    def account_getter(account_id):
+        nonlocal reads
+        reads += 1
+        return UserRecord(
+            username=f"user-{account_id}",
+            password_hash="h",
+            account_id=account_id,
+            status="active" if reads == 1 else "disabled",
+        )
+
+    async def fake_wake(account_id):
+        woke.append(account_id)
+        return True
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200)
+
+    async def go():
+        dialer = RunnerDialer(
+            account_getter=account_getter,
+            waker=fake_wake,
+            transport=httpx.MockTransport(handler),
+        )
+        return await dialer.run("A", "user-A", prompt="hi")
+
+    out = asyncio.run(go())
+
+    assert woke == ["A"]
+    assert requests == []
+    assert out.is_error is True and out.error_text == "account_disabled"

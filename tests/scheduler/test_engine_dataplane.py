@@ -53,9 +53,13 @@ def _create_job(client, account_id, job_id="j1", status="active"):
     ))
 
 
-def test_full_fire_pipeline_over_grpc(dataplane, fast_settings):
+def test_full_fire_pipeline_over_grpc(
+    dataplane, fast_settings, as_service_identity
+):
     account_id = dataplane.accounts.create("carol", "pw").account_id
+    as_service_identity("agent-runner", account_id=account_id)
     _create_job(dataplane, account_id)
+    as_service_identity("scheduler")
 
     dispatcher = ScriptedDispatcher("accepted")
     engine = SchedulerEngine(dataplane, dispatcher, replica_id="itest-a")
@@ -79,9 +83,13 @@ def test_full_fire_pipeline_over_grpc(dataplane, fast_settings):
     assert asyncio.run(engine.fire(account_id, "j1", manual=True)) == "dispatched"
 
 
-def test_internal_api_lifespan_and_trigger(dataplane, fast_settings):
+def test_internal_api_lifespan_and_trigger(
+    dataplane, fast_settings, as_service_identity
+):
     account_id = dataplane.accounts.create("dave", "pw").account_id
+    as_service_identity("agent-runner", account_id=account_id)
     _create_job(dataplane, account_id, job_id="j-paused", status="paused")
+    as_service_identity("scheduler")
 
     engine = SchedulerEngine(dataplane, ScriptedDispatcher("accepted"), replica_id="itest-api")
     app = create_app(engine)

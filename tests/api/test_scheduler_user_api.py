@@ -43,12 +43,13 @@ def dataplane(tmp_path):
 
 
 @pytest.fixture
-def harness(dataplane, tmp_path, monkeypatch):
+def harness(dataplane, tmp_path, monkeypatch, as_service_identity):
     from priva_agent_runner.routers import scheduler_jobs as router_mod
 
     monkeypatch.setenv("PRIVA_HOME", str(tmp_path / "home"))
     account_id = dataplane.accounts.create("carol", "pw").account_id
     user = UserRecord(username="carol", password_hash="x", account_id=account_id)
+    as_service_identity("agent-runner", account_id=account_id)
 
     monkeypatch.setattr(router_mod, "get_client", lambda: dataplane)
 
@@ -60,6 +61,7 @@ def harness(dataplane, tmp_path, monkeypatch):
         yield SimpleNamespace(
             http=http, dataplane=dataplane, account_id=account_id,
             user=user, router_mod=router_mod, monkeypatch=monkeypatch,
+            as_identity=as_service_identity,
         )
 
 
@@ -111,11 +113,14 @@ def test_create_rejects_invalid_cron(harness):
 
 
 def test_ownership_fence_hides_foreign_jobs(harness):
+    harness.as_identity("control-panel")
     other = harness.dataplane.accounts.create("mallory", "pw").account_id
+    harness.as_identity("agent-runner", account_id=other)
     from priva_common.models.scheduler import CronTriggerConfig, ScheduledJobDefinition
     foreign = harness.dataplane.scheduler.create_job(other, ScheduledJobDefinition(
         id="foreign1", name="not yours", prompt="x",
         trigger=CronTriggerConfig(expr="0 9 * * *"), timezone="UTC"))
+    harness.as_identity("agent-runner", account_id=harness.account_id)
 
     assert harness.http.get("/api/sandbox/scheduler/jobs").json()["total"] == 0
     for method, path in (
@@ -125,6 +130,7 @@ def test_ownership_fence_hides_foreign_jobs(harness):
     ):
         assert getattr(harness.http, method)(path).status_code == 404
     # …and it's still alive under its own account
+    harness.as_identity("agent-runner", account_id=other)
     assert harness.dataplane.scheduler.get_job(foreign.id) is not None
 
 
@@ -195,11 +201,13 @@ def test_trigger_proxies_scheduler_internal_api(harness):
 def test_runs_listing_with_filters(harness):
     job_id = harness.http.post(
         "/api/sandbox/scheduler/jobs", json=_cron_job()).json()["id"]
+    harness.as_identity("scheduler")
     for i, status in enumerate(["success", "error", "skipped"]):
         harness.dataplane.scheduler.record_run(harness.account_id, JobRunRecord(
             run_id=f"r{i}", job_id=job_id, job_name="Daily briefing", username="carol",
             started_at=f"2026-07-1{i}T09:00:00.000Z", status=status,
             error_message="boom" if status == "error" else None))
+    harness.as_identity("agent-runner", account_id=harness.account_id)
 
     page = harness.http.get("/api/sandbox/scheduler/runs").json()
     assert [r["run_id"] for r in page["runs"]] == ["r2", "r1", "r0"]
@@ -222,10 +230,12 @@ def test_run_timestamps_carry_utc_offset(harness):
     displayed run history in UTC wall-clock. Legacy naive rows are stamped UTC."""
     job_id = harness.http.post(
         "/api/sandbox/scheduler/jobs", json=_cron_job()).json()["id"]
+    harness.as_identity("scheduler")
     harness.dataplane.scheduler.record_run(harness.account_id, JobRunRecord(
         run_id="naive", job_id=job_id, job_name="Daily briefing", username="carol",
         started_at="2026-07-12T09:00:00.000000",  # legacy naive-UTC row
         finished_at="2026-07-12T09:01:00.000000", status="success"))
+    harness.as_identity("agent-runner", account_id=harness.account_id)
 
     (run,) = harness.http.get("/api/sandbox/scheduler/runs").json()["runs"]
     for field in ("started_at", "finished_at"):
@@ -236,12 +246,13 @@ def test_run_timestamps_carry_utc_offset(harness):
 
 
 @pytest.fixture
-def tools(dataplane, monkeypatch):
+def tools(dataplane, monkeypatch, as_service_identity):
     from priva_agent_runner.services.scheduled_runs import mcp_tools
 
     account_id = dataplane.accounts.create("carol", "pw").account_id
     monkeypatch.setenv("ACCOUNT_ID", account_id)
     monkeypatch.setattr(mcp_tools, "get_client", lambda: dataplane)
+    as_service_identity("agent-runner", account_id=account_id)
 
     by_name = {t.name: t for t in mcp_tools.build_scheduler_tools("carol")}
     assert set(by_name) == {
@@ -252,6 +263,7 @@ def tools(dataplane, monkeypatch):
     return SimpleNamespace(
         by_name=by_name, dataplane=dataplane, account_id=account_id,
         mcp_tools=mcp_tools, monkeypatch=monkeypatch,
+        as_identity=as_service_identity,
     )
 
 
@@ -313,13 +325,17 @@ def test_mcp_interval_create_and_trigger(tools):
 
 
 def test_mcp_tools_scoped_to_own_account(tools):
+    tools.as_identity("control-panel")
     other = tools.dataplane.accounts.create("mallory", "pw").account_id
+    tools.as_identity("agent-runner", account_id=other)
     from priva_common.models.scheduler import CronTriggerConfig, ScheduledJobDefinition
     foreign = tools.dataplane.scheduler.create_job(other, ScheduledJobDefinition(
         id="foreign2", name="secret job", prompt="x",
         trigger=CronTriggerConfig(expr="0 9 * * *"), timezone="UTC"))
+    tools.as_identity("agent-runner", account_id=tools.account_id)
 
     assert "No scheduled jobs" in _run(tools.by_name["scheduler_list_jobs"], {})
     # a guessed foreign job_id resolves to nothing — delete can't cross tenants
     assert "ERROR" in _run(tools.by_name["scheduler_delete_job"], {"job_id": foreign.id})
+    tools.as_identity("agent-runner", account_id=other)
     assert tools.dataplane.scheduler.get_job(foreign.id) is not None

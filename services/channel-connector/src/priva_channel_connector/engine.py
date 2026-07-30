@@ -138,11 +138,23 @@ class ReconcileEngine:
             await self._set_status(aid, "error", None, "secret_undecryptable")
             return
         account = await asyncio.to_thread(self._client.accounts.get, aid)
+        if account is None or account.status != "active":
+            logger.info("feishu not armed (account inactive): account={}", aid)
+            await self._set_status(aid, "disabled", None, None)
+            return
+        await self._set_status(aid, "connecting", None, None)
+        # Secret fetch and status write are blocking data-plane round trips. A
+        # disable may land between the reconcile filter and the actual WS arm,
+        # so re-read at the closest point before transport.start().
+        account = await asyncio.to_thread(self._client.accounts.get, aid)
+        if account is None or account.status != "active":
+            logger.info("feishu arm fenced by account transition: account={}", aid)
+            await self._set_status(aid, "disabled", None, None)
+            return
         worker = AppWorker(
             self._client, self._dialer, self._router, cfg, secret, account,
             self._transport_factory, self._status_cb(aid),
         )
-        await self._set_status(aid, "connecting", None, None)
         try:
             await worker.start()
         except Exception as exc:

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import Literal, Protocol
+from typing import Callable, Literal, Protocol
 
 import httpx
 
@@ -35,7 +35,12 @@ from . import wake
 
 logger = get_app_logger(__name__)
 
-DispatchResult = Literal["accepted", "job_overlap", "concurrency_cap"]
+DispatchResult = Literal[
+    "accepted",
+    "job_overlap",
+    "concurrency_cap",
+    "account_inactive",
+]
 
 # 429 re-admission cadence inside the D16 window.
 _ADMISSION_RETRY_DELAYS = (5.0, 10.0, 20.0, 30.0)
@@ -58,10 +63,32 @@ class Dispatcher(Protocol):
 class WakeDialDispatcher:
     """v1: CR-patch wake → poll Ready → POST to ``ar-{account}`` (design §4)."""
 
-    def __init__(self, *, waker=None, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        *,
+        account_getter: Callable[[str], object | None],
+        waker=None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
         # Both seams exist for tests: a fake waker and an httpx MockTransport.
+        self._account_getter = account_getter
         self._waker = waker or wake.wake_and_wait
         self._transport = transport
+
+    async def _account_is_active(self, account_id: str) -> bool:
+        """Live lifecycle fence immediately before every wake/POST attempt.
+
+        A read failure is not evidence that an account is allowed to execute,
+        so this gate fails closed and lets a later scheduler fire retry.
+        """
+        try:
+            account = await asyncio.to_thread(self._account_getter, account_id)
+        except Exception:
+            logger.warning(
+                "dispatch account status read failed account={}", account_id, exc_info=True,
+            )
+            return False
+        return account is not None and getattr(account, "status", None) == "active"
 
     def _url(self, account_id: str) -> str:
         s = get_settings()
@@ -101,8 +128,14 @@ class WakeDialDispatcher:
                     )
                     await asyncio.sleep(delay)
 
+                if not await self._account_is_active(account_id):
+                    return "account_inactive"
                 if not await self._waker(account_id):
                     continue  # wake didn't come up in time — next attempt re-wakes
+                # Wake polling can span the admin-disable transition. Re-read
+                # immediately before minting a token and sending the request.
+                if not await self._account_is_active(account_id):
+                    return "account_inactive"
 
                 try:
                     resp = await self._post(cx, account_id, username, frame)
@@ -146,6 +179,8 @@ class WakeDialDispatcher:
                 if loop.time() + delay > deadline:
                     return "concurrency_cap"
                 await asyncio.sleep(delay)
+                if not await self._account_is_active(account_id):
+                    return "account_inactive"
                 try:
                     retry_resp = await self._post(cx, account_id, username, frame)
                 except (httpx.ConnectError, httpx.TimeoutException, httpx.TransportError):

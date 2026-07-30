@@ -84,8 +84,11 @@ async def wake_and_wait(account_id: str) -> bool:
     """
     s = get_settings()
     try:
-        if _running(await asyncio.to_thread(_status, account_id)):
+        status = await asyncio.to_thread(_status, account_id)
+        if _running(status):
             return True
+        if status.get("phase") in {"Draining", "DrainingLegacy"}:
+            return False
         await asyncio.to_thread(_patch_wake, account_id)
     except client.ApiException as exc:
         logger.warning("wake patch failed account={}: {}", account_id, exc)

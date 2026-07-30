@@ -19,6 +19,7 @@ from kubernetes import client, config
 
 from priva_common.config import get_settings
 from priva_common.logging import get_app_logger
+from priva_common.tenant_lifecycle import AGENTTENANT_FINALIZER
 
 logger = get_app_logger(__name__)
 
@@ -32,8 +33,15 @@ _terminal_wake_tasks: dict[str, "asyncio.Task[str | None]"] = {}
 GROUP = "priva.io"
 VERSION = "v1alpha1"
 PLURAL = "agenttenants"
-
 _loaded = False
+_RESTART_POD_TIMEOUT_SECONDS = 60.0
+_RESTART_POD_POLL_SECONDS = 0.25
+_RESTART_DRAINING = "draining"
+_RESTART_WAKING = "waking"
+# Keep a durable purge marker for several sync ticks after the CR disappears.
+# Otherwise a pass that captured an older active snapshot can recreate the CR
+# after the account row was reaped, leaving an orphan runtime/storage allocation.
+_PURGED_ROW_REAP_GRACE_SECONDS = 300.0
 
 
 def _load() -> None:
@@ -70,6 +78,35 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _purge_reap_grace_elapsed(user) -> bool:
+    """Whether a real data-spine tombstone is old enough to hard-delete."""
+    updated_at = getattr(user, "updated_at", None)
+    if not isinstance(updated_at, datetime):
+        # Compatibility for old embedders/test records that predate updated_at.
+        return True
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - updated_at).total_seconds()
+    return age >= _PURGED_ROW_REAP_GRACE_SECONDS
+
+
+def _get_tenant_live(account_id: str) -> dict | None:
+    """Point-read one CR; a namespace-wide list snapshot is not deletion proof."""
+    s = get_settings()
+    try:
+        return _custom().get_namespaced_custom_object(
+            GROUP,
+            VERSION,
+            s.kubernetes.namespace_tenants,
+            PLURAL,
+            account_id,
+        )
+    except client.ApiException as exc:
+        if exc.status == 404:
+            return None
+        raise
+
+
 def _runtime_defaults_spec(defaults: Any | None = None) -> dict:
     """Serialize the platform defaults into the AgentTenant desired-state snapshot.
 
@@ -100,9 +137,9 @@ def _runtime_defaults_spec(defaults: Any | None = None) -> dict:
 def _desired_state_for(status: str | None) -> str:
     """Account lifecycle status → CR ``spec.desiredState``.
 
-    Anything but ``active`` quiesces the account's pods (the operator's
-    ``_quiesce_if_inactive`` scales Runner + Terminal to zero). A purge is expressed by
-    DELETING the CR (the operator's teardown finalizer), never by this field.
+    Anything but ``active`` quiesces the account's pods. This mapper is used for
+    ordinary ensure/repair only; destructive purge explicitly writes
+    ``desiredState=purge`` immediately before deleting the finalized CR.
     """
     return "active" if (status or "active") == "active" else "offboarding"
 
@@ -145,6 +182,7 @@ def _repair_existing_tenant(account_id: str, username: str, runtime_defaults: di
     ns = s.kubernetes.namespace_tenants
     obj = _custom().get_namespaced_custom_object(GROUP, VERSION, ns, PLURAL, account_id)
     current = obj.get("spec") or {}
+    metadata = obj.get("metadata") or {}
     existing_account_id = current.get("accountId")
     if existing_account_id and existing_account_id != account_id:
         raise ValueError(
@@ -155,10 +193,20 @@ def _repair_existing_tenant(account_id: str, username: str, runtime_defaults: di
         "username": username,
         "runtimeDefaults": runtime_defaults,
     }
-    if all(current.get(key) == value for key, value in wanted.items()):
+    finalizers = list(metadata.get("finalizers") or [])
+    finalizer_missing = AGENTTENANT_FINALIZER not in finalizers
+    if all(current.get(key) == value for key, value in wanted.items()) and not finalizer_missing:
         return False
+    if finalizer_missing:
+        finalizers.append(AGENTTENANT_FINALIZER)
     _custom().patch_namespaced_custom_object(
-        GROUP, VERSION, ns, PLURAL, account_id, {"spec": wanted})
+        GROUP,
+        VERSION,
+        ns,
+        PLURAL,
+        account_id,
+        {"metadata": {"finalizers": finalizers}, "spec": wanted},
+    )
     logger.info("repaired AgentTenant identity/defaults account={} username={}", account_id, username)
     return True
 
@@ -189,7 +237,11 @@ def ensure_tenant(account_id: str, username: str, *, status: str | None = None,
     body = {
         "apiVersion": f"{GROUP}/{VERSION}",
         "kind": "AgentTenant",
-        "metadata": {"name": account_id, "namespace": ns},
+        "metadata": {
+            "name": account_id,
+            "namespace": ns,
+            "finalizers": [AGENTTENANT_FINALIZER],
+        },
         "spec": spec,
     }
     try:
@@ -221,12 +273,33 @@ def sync_all_tenants(*, defaults: Any | None = None) -> dict[str, int]:
     resources = {row.account_id: row for row in dp.resource_specs.list()}
     existing = {item.get("metadata", {}).get("name"): item for item in list_tenants()}
     counts = {"created": 0, "repaired": 0, "unchanged": 0, "skipped": 0, "purged": 0}
-    for user in get_user_store().list_users():
+    store = get_user_store()
+    for user in store.list_users():
         account_id = user.account_id
         if not account_id:
             counts["skipped"] += 1
             continue
         obj = existing.get(account_id)
+        if user.status == "offboarding":
+            # ``offboarding`` is the crash-safe revoked-before-delete stage.
+            # Always materialize a finalized purge tombstone, even if the CR is
+            # currently absent; only after Kubernetes accepts its delete do we
+            # advance the row to ``purged``. A crash at any instruction repeats
+            # an idempotent deprovision rather than mistaking "never started"
+            # for "finalizer completed".
+            try:
+                delete_tenant(account_id, user.username)
+                store.update_user(user.username, status="purged")
+                logger.info(
+                    "purge finalizer requested account={} username={}",
+                    account_id,
+                    user.username,
+                )
+                counts["skipped"] += 1
+            except Exception as exc:
+                logger.warning("purge sweep failed account={}: {}", account_id, exc)
+                counts["skipped"] += 1
+            continue
         if user.status == "purged":
             # A purge that keeps failing must not abort the pass — every other account
             # still has to be created / repaired / converged on this tick.
@@ -234,13 +307,27 @@ def sync_all_tenants(*, defaults: Any | None = None) -> dict[str, int]:
                 if obj is not None:
                     # Never re-create, and re-issue the delete: this is the retry for a
                     # purge whose CR delete failed (or never ran) after the tombstone.
-                    delete_tenant(account_id)
+                    delete_tenant(account_id, user.username)
+                    counts["skipped"] += 1
+                elif not _purge_reap_grace_elapsed(user):
+                    # Let any sync pass holding an older "active" snapshot
+                    # finish and observe the durable tombstone first.
                     counts["skipped"] += 1
                 else:
-                    dp.accounts.delete(account_id)
-                    logger.info("purge complete, account row reaped account={} username={}",
-                                account_id, user.username)
-                    counts["purged"] += 1
+                    # The list above is only a snapshot. Prove the CR is still
+                    # absent at the destructive decision point.
+                    live_obj = _get_tenant_live(account_id)
+                    if live_obj is not None:
+                        delete_tenant(account_id, user.username)
+                        counts["skipped"] += 1
+                    else:
+                        dp.accounts.delete(account_id)
+                        logger.info(
+                            "purge complete, account row reaped account={} username={}",
+                            account_id,
+                            user.username,
+                        )
+                        counts["purged"] += 1
             except Exception as exc:
                 logger.warning("purge sweep failed account={}: {}", account_id, exc)
                 counts["skipped"] += 1
@@ -271,6 +358,23 @@ def sync_all_tenants(*, defaults: Any | None = None) -> dict[str, int]:
         if user.status != "active":
             counts["skipped"] += 1
             continue
+        # Re-read the authoritative account immediately before CREATE. The list
+        # captured at the start of this pass may predate disable/offboarding.
+        try:
+            live_user = store.get_user(user.username)
+        except Exception as exc:
+            logger.warning(
+                "account status recheck failed account={}: {}", account_id, exc
+            )
+            counts["skipped"] += 1
+            continue
+        if (
+            live_user is None
+            or live_user.account_id != account_id
+            or live_user.status != "active"
+        ):
+            counts["skipped"] += 1
+            continue
         resource = resources.get(account_id)
         ensure_tenant(
             account_id,
@@ -282,7 +386,39 @@ def sync_all_tenants(*, defaults: Any | None = None) -> dict[str, int]:
             storage_gb=(resource.volume_gb if resource else None),
             runtime_defaults=runtime_defaults,
         )
-        counts["created"] += 1
+        # Close the remaining status-read → CR-create window. A concurrent purge
+        # carries explicit destructive intent, so fold a stale create back into
+        # the finalized delete protocol. A disable only quiesces it.
+        try:
+            live_user = store.get_user(user.username)
+        except Exception as exc:
+            logger.warning(
+                "post-create account status recheck failed account={}: {}",
+                account_id,
+                exc,
+            )
+            counts["skipped"] += 1
+            continue
+        same_account = (
+            live_user is not None and live_user.account_id == account_id
+        )
+        if same_account and live_user.status in ("offboarding", "purged"):
+            delete_tenant(account_id, user.username)
+            counts["skipped"] += 1
+        elif same_account and live_user.status != "active":
+            set_tenant_desired_state(account_id, "offboarding")
+            counts["skipped"] += 1
+        elif not same_account:
+            # A missing/mismatched DB row alone is not authorization to destroy
+            # storage. Keep the finalized CR and make the orphan visible.
+            logger.error(
+                "orphan AgentTenant detected after create account={} username={}",
+                account_id,
+                user.username,
+            )
+            counts["skipped"] += 1
+        else:
+            counts["created"] += 1
     logger.info("AgentTenant account sync complete {}", counts)
     return counts
 
@@ -337,21 +473,108 @@ def set_tenant_desired_state(account_id: str, desired_state: str) -> None:
     logger.info("patched AgentTenant desiredState account={} state={}", account_id, desired_state)
 
 
-def delete_tenant(account_id: str) -> None:
-    """Purge: delete the account's AgentTenant CR.
+def delete_tenant(account_id: str, username: str | None = None) -> None:
+    """Purge: mark destructive intent, then delete the account's AgentTenant CR.
 
-    The deletion is the trigger for the operator's teardown finalizer (scale Runner +
-    Terminal to zero, deprovision the account's storage, delete the export PVC); the
-    Deployments/Services then go with owner-ref GC. An already-absent CR is SUCCESS, so
-    a purge interrupted anywhere can simply be re-issued. Blocking kube call."""
+    ``spec.desiredState=purge`` is committed first so the delete finalizer can
+    distinguish this authorized account purge from an accidental/out-of-band CR
+    deletion. Only the former may destroy storage. If the CR is absent, this
+    creates a finalized purge tombstone first, so "not found" is never confused
+    with proof that teardown completed. Blocking kube call.
+    """
     s = get_settings()
     ns = s.kubernetes.namespace_tenants
+    api = _custom()
     try:
-        _custom().delete_namespaced_custom_object(GROUP, VERSION, ns, PLURAL, account_id)
+        obj = api.get_namespaced_custom_object(
+            GROUP, VERSION, ns, PLURAL, account_id
+        )
     except client.ApiException as exc:
         if exc.status != 404:
             raise
-        return
+        if not username:
+            raise RuntimeError(
+                "AgentTenant is absent; username is required to create a "
+                "finalized purge tombstone"
+            ) from exc
+        body = {
+            "apiVersion": f"{GROUP}/{VERSION}",
+            "kind": "AgentTenant",
+            "metadata": {
+                "name": account_id,
+                "namespace": ns,
+                "finalizers": [AGENTTENANT_FINALIZER],
+            },
+            "spec": {
+                "accountId": account_id,
+                "username": username,
+                "desiredState": "purge",
+            },
+        }
+        try:
+            api.create_namespaced_custom_object(
+                GROUP, VERSION, ns, PLURAL, body
+            )
+        except client.ApiException as create_exc:
+            if create_exc.status != 409:
+                raise
+            # GET→CREATE is a race. Never interpret AlreadyExists as proof that
+            # the winner carries our destructive-intent marker: it may be an
+            # ordinary active CR created by the periodic repair loop. Re-read
+            # and patch that concrete object before issuing DELETE.
+            try:
+                obj = api.get_namespaced_custom_object(
+                    GROUP, VERSION, ns, PLURAL, account_id
+                )
+            except client.ApiException as read_exc:
+                raise RuntimeError(
+                    "AgentTenant creation conflicted, but the winning object "
+                    "could not be read and marked for purge"
+                ) from read_exc
+        else:
+            obj = None  # The object we created already has marker + finalizer.
+
+    if obj is not None:
+        metadata = obj.get("metadata") or {}
+        current = obj.get("spec") or {}
+        if metadata.get("deletionTimestamp"):
+            # Kubernetes forbids adding a new finalizer after deletion starts.
+            # Do not bless an out-of-band delete as a completed account purge:
+            # keep the account offboarding and let the next sweep create a
+            # fresh finalized tombstone after this object disappears.
+            if (
+                current.get("desiredState") != "purge"
+                or AGENTTENANT_FINALIZER not in (metadata.get("finalizers") or [])
+            ):
+                raise RuntimeError(
+                    "AgentTenant is already deleting without the finalized "
+                    "purge marker"
+                )
+        else:
+            finalizers = list(metadata.get("finalizers") or [])
+            if AGENTTENANT_FINALIZER not in finalizers:
+                finalizers.append(AGENTTENANT_FINALIZER)
+            api.patch_namespaced_custom_object(
+                GROUP,
+                VERSION,
+                ns,
+                PLURAL,
+                account_id,
+                {
+                    "metadata": {"finalizers": finalizers},
+                    "spec": {"desiredState": "purge"},
+                },
+            )
+    try:
+        api.delete_namespaced_custom_object(
+            GROUP, VERSION, ns, PLURAL, account_id
+        )
+    except client.ApiException as exc:
+        # Safe idempotency only after this invocation proved/installed both the
+        # purge marker and finalizer. Disappearance here means another delete
+        # completed the same authorized teardown.
+        if exc.status != 404:
+            raise
     logger.info("deleted AgentTenant account={}", account_id)
 
 
@@ -638,12 +861,56 @@ def _status(account_id: str) -> dict:
         raise
 
 
-def _patch_wake(account_id: str) -> None:
+def _patch_wake(account_id: str, requested_at: str | None = None) -> None:
     """Patch the only scale-up trigger (spec.wake.requestedAt); the operator does the rest."""
     s = get_settings()
     ns = s.kubernetes.namespace_tenants
     _custom().patch_namespaced_custom_object(
-        GROUP, VERSION, ns, PLURAL, account_id, {"spec": {"wake": {"requestedAt": _now_iso()}}})
+        GROUP, VERSION, ns, PLURAL, account_id,
+        {"spec": {"wake": {"requestedAt": requested_at or _now_iso()}}},
+    )
+
+
+def _restart_pending(status: dict) -> dict | None:
+    pending = status.get("restartPending")
+    return pending if isinstance(pending, dict) and pending else None
+
+
+def _patch_restart_status(
+    account_id: str,
+    pending: dict | None,
+    *,
+    route_gate: bool,
+) -> bool:
+    """Persist one restart checkpoint through the CR status subresource.
+
+    ``pending=None`` clears the marker via JSON merge-patch. A missing CR means
+    there is no restart target; callers must not mutate the Deployment without
+    the durable route gate.
+    """
+    s = get_settings()
+    ns = s.kubernetes.namespace_tenants
+    fields: dict[str, Any] = {"restartPending": pending}
+    if route_gate:
+        # While the old process may still exist, use the platform-wide
+        # Draining phase so every wake source (EPP, scheduler, connector and
+        # Operator) recognizes the gate. Once the physical zero boundary has
+        # been crossed, Zero safely permits the one intended wake.
+        phase = (
+            "Draining"
+            if pending and pending.get("stage") == _RESTART_DRAINING
+            else "Zero"
+        )
+        fields.update(phase=phase, podIP=None, readyReplicas=0)
+    try:
+        _custom().patch_namespaced_custom_object_status(
+            GROUP, VERSION, ns, PLURAL, account_id, {"status": fields},
+        )
+    except client.ApiException as exc:
+        if exc.status == 404:
+            return False
+        raise
+    return True
 
 
 async def _alive(pod_ip: str, port: int) -> bool:
@@ -676,6 +943,11 @@ async def _drive_wake(account_id: str) -> str | None:
     s = get_settings()
     port = s.kubernetes.runner_service_port
     try:
+        status = await asyncio.to_thread(_status, account_id)
+        if _restart_pending(status):
+            return None
+        if status.get("phase") in {"Draining", "DrainingLegacy"}:
+            return None
         await asyncio.to_thread(_patch_wake, account_id)
     except client.ApiException as exc:
         logger.warning("wake patch failed account={}: {}", account_id, exc)
@@ -684,6 +956,8 @@ async def _drive_wake(account_id: str) -> str | None:
     deadline = time.monotonic() + float(s.kubernetes.wake_hold_seconds)
     while time.monotonic() < deadline:
         st = await asyncio.to_thread(_status, account_id)
+        if _restart_pending(st):
+            return None
         if st.get("phase") == "Running" and st.get("podIP"):
             return f"{st['podIP']}:{port}"
         await asyncio.sleep(0.5)
@@ -703,9 +977,27 @@ async def wake_and_wait(account_id: str) -> str | None:
 
     # Warm path: trust status, but verify the pod is actually answering (#1/#2).
     st = await asyncio.to_thread(_status, account_id)
+    if _restart_pending(st):
+        return None
+    if st.get("phase") in {"Draining", "DrainingLegacy"}:
+        return None
     if st.get("phase") == "Running" and st.get("podIP"):
-        if await _alive(st["podIP"], port):
-            return f"{st['podIP']}:{port}"
+        candidate_ip = st["podIP"]
+        if await _alive(candidate_ip, port):
+            # The liveness request itself gives a concurrent idle timer enough
+            # time to enter Draining. Re-read the routing authority before
+            # returning the endpoint; otherwise a warm-path request can be sent
+            # to a pod whose admission gate just closed.
+            fresh = await asyncio.to_thread(_status, account_id)
+            if _restart_pending(fresh):
+                return None
+            if (
+                fresh.get("phase") == "Running"
+                and fresh.get("podIP") == candidate_ip
+            ):
+                return f"{candidate_ip}:{port}"
+            if fresh.get("phase") in {"Draining", "DrainingLegacy"}:
+                return None
         logger.info("warm-path liveness probe failed account={}; re-waking", account_id)
 
     # Cold / dead path: coalesce concurrent wakes for the same account onto one Task.
@@ -739,6 +1031,13 @@ async def _drive_terminal_wake(account_id: str) -> str | None:
     s = get_settings()
     port = s.kubernetes.terminal_service_port
     try:
+        terminal = (
+            await asyncio.to_thread(_status, account_id)
+        ).get("terminal") or {}
+        if terminal.get("phase") in {
+            "PendingRunnerRestart", "Draining", "DrainingLegacy",
+        }:
+            return None
         await asyncio.to_thread(_patch_terminal_wake, account_id)
     except client.ApiException as exc:
         logger.warning("terminal wake patch failed account={}: {}", account_id, exc)
@@ -765,8 +1064,20 @@ async def wake_terminal_and_wait(account_id: str) -> str | None:
     }:
         return None
     if terminal.get("phase") == "Running" and terminal.get("podIP"):
-        if await _alive(terminal["podIP"], port):
-            return f"{terminal['podIP']}:{port}"
+        candidate_ip = terminal["podIP"]
+        if await _alive(candidate_ip, port):
+            fresh = (
+                await asyncio.to_thread(_status, account_id)
+            ).get("terminal") or {}
+            if (
+                fresh.get("phase") == "Running"
+                and fresh.get("podIP") == candidate_ip
+            ):
+                return f"{candidate_ip}:{port}"
+            if fresh.get("phase") in {
+                "PendingRunnerRestart", "Draining", "DrainingLegacy",
+            }:
+                return None
 
     task = _terminal_wake_tasks.get(account_id)
     if task is None or task.done():
@@ -861,65 +1172,94 @@ def shutdown_runner(account_id: str) -> int:
 
 
 def force_restart_pod(account_id: str) -> int:
-    """Admin: force a *converging* restart of an awake account runner.
+    """Admin: force a converging, retry-safe restart of an awake runner.
 
     Deleting a Pod alone only recreates it from the Deployment's existing template.
     That is insufficient after an admin changes inherited resources or the
     Runner/Terminal allocation percentage: the replacement would still use the old
     template. Use the same safe lifecycle as a cold wake instead:
 
-    1. mark the CR not-routable;
-    2. scale the Deployment to zero and wait for the old Pod to leave;
-    3. patch ``spec.wake`` so the operator converges the full dormant template before
-       scaling it back to one.
+    ``status.restartPending`` is the durable state machine:
 
-    The admin action is already protected by a destructive confirmation dialog and
-    may terminate an in-flight run. No-op (returns 0) when the runner is already
-    dormant or absent. Returns the number of old, non-terminating Pods observed.
+    * ``draining``: route-gated, scale to zero, wait for *every* selected Pod
+      (including Terminating) to disappear;
+    * ``waking``: zero boundary crossed; re-patch the marker's stable wake token
+      and clear the marker only after that patch succeeds.
+
+    Persisting ``waking`` before the wake closes both crash windows: a retry after
+    scale-to-zero continues even though replicas is already 0, while a retry after
+    wake/failed-clear never scales the replacement Pod down again.
     """
     s = get_settings()
     ns = s.kubernetes.namespace_tenants
     name = f"ar-{account_id}"
-    try:
-        dep = _apps().read_namespaced_deployment(name, ns)
-    except client.ApiException as exc:
-        if exc.status == 404:
-            return 0
-        raise
+    pending = _restart_pending(_status(account_id))
 
-    if int(getattr(dep.spec, "replicas", 0) or 0) <= 0:
-        return 0
-
-    selector = f"app=agent-runner,priva.io/account-id={account_id}"
-    pods = _core().list_namespaced_pod(ns, label_selector=selector)
-    old_pods = sum(
-        1 for pod in pods.items if pod.metadata.deletion_timestamp is None)
-
-    _mark_status_zero(account_id)
-    _apps().patch_namespaced_deployment_scale(
-        name, ns, {"spec": {"replicas": 0}})
-
-    # Do not fire wake while the old Pod is still present: waiting makes the
-    # zero-to-one boundary explicit and prevents a new allocation from overlapping
-    # the old 100%-Runner cgroup during percentage changes.
-    deadline = time.monotonic() + 60.0
-    while time.monotonic() < deadline:
+    if pending is None:
         try:
-            remaining = _core().list_namespaced_pod(
-                ns, label_selector=selector).items
+            dep = _apps().read_namespaced_deployment(name, ns)
         except client.ApiException as exc:
             if exc.status == 404:
-                remaining = []
-            else:
-                raise
-        if not remaining:
-            break
-        time.sleep(0.25)
-    else:
-        raise RuntimeError(
-            f"timed out waiting for old agent-runner Pod to stop: {account_id}")
+                return 0
+            raise
+        running = int(getattr(dep.spec, "replicas", 0) or 0)
+        if running <= 0:
+            return 0
+        pending = {
+            "requestedAt": _now_iso(),
+            "stage": _RESTART_DRAINING,
+            "oldPods": running,
+        }
+        # The marker and route gate must commit before touching the Deployment.
+        if not _patch_restart_status(account_id, pending, route_gate=True):
+            return 0
 
-    _custom().patch_namespaced_custom_object(
-        GROUP, VERSION, ns, PLURAL, account_id,
-        {"spec": {"wake": {"requestedAt": _now_iso()}}})
+    stage = pending.get("stage")
+    old_pods = max(0, int(pending.get("oldPods") or 0))
+    requested_at = str(pending.get("requestedAt") or "")
+    if not requested_at:
+        raise RuntimeError(f"invalid restartPending marker for {account_id}: no requestedAt")
+
+    if stage == _RESTART_DRAINING:
+        try:
+            _apps().patch_namespaced_deployment_scale(
+                name, ns, {"spec": {"replicas": 0}})
+        except client.ApiException as exc:
+            if exc.status != 404:
+                raise
+
+        # Do not fire wake while any old Pod remains. Kubernetes keeps a
+        # Terminating Pod in this list, so checking list emptiness (rather than
+        # deletionTimestamp) proves a real zero boundary.
+        selector = f"app=agent-runner,priva.io/account-id={account_id}"
+        deadline = time.monotonic() + _RESTART_POD_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                remaining = _core().list_namespaced_pod(
+                    ns, label_selector=selector).items
+            except client.ApiException as exc:
+                if exc.status == 404:
+                    remaining = []
+                else:
+                    raise
+            if not remaining:
+                break
+            time.sleep(_RESTART_POD_POLL_SECONDS)
+        else:
+            raise RuntimeError(
+                f"timed out waiting for old agent-runner Pod to stop: {account_id}")
+
+        # Checkpoint before issuing wake. If wake succeeds and the subsequent
+        # clear fails, retries start here and cannot kill the replacement Pod.
+        pending = {**pending, "stage": _RESTART_WAKING}
+        if not _patch_restart_status(account_id, pending, route_gate=True):
+            return old_pods
+        stage = _RESTART_WAKING
+
+    if stage != _RESTART_WAKING:
+        raise RuntimeError(
+            f"invalid restartPending stage for {account_id}: {stage!r}")
+
+    _patch_wake(account_id, requested_at)
+    _patch_restart_status(account_id, None, route_gate=False)
     return old_pods

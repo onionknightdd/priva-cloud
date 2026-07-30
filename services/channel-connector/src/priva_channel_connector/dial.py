@@ -9,7 +9,9 @@ so the minted ``X-Priva-Runner-Token`` authenticates the call with no extra lane
 
 from __future__ import annotations
 
+import asyncio
 import json
+from typing import Callable
 
 import httpx
 
@@ -31,10 +33,27 @@ _DM_DISALLOWED_TOOLS = ("mcp__priva_File__*",)
 
 
 class RunnerDialer:
-    def __init__(self, *, waker=None, transport: "httpx.AsyncBaseTransport | None" = None):
+    def __init__(
+        self,
+        *,
+        account_getter: Callable[[str], object | None],
+        waker=None,
+        transport: "httpx.AsyncBaseTransport | None" = None,
+    ):
         # Both seams exist for tests: a fake waker and an httpx MockTransport.
+        self._account_getter = account_getter
         self._waker = waker or wake.wake_and_wait
         self._transport = transport
+
+    async def _account_is_active(self, account_id: str) -> bool:
+        try:
+            account = await asyncio.to_thread(self._account_getter, account_id)
+        except Exception:
+            logger.warning(
+                "dial account status read failed account={}", account_id, exc_info=True,
+            )
+            return False
+        return account is not None and getattr(account, "status", None) == "active"
 
     def _url(self, account_id: str) -> str:
         s = get_settings()
@@ -69,9 +88,19 @@ class RunnerDialer:
         ``/permission/respond``; the SSE stays open (the run is paused) until answered."""
         if state is None:
             state = StreamState()
+        if not await self._account_is_active(account_id):
+            state.is_error = True
+            state.error_text = "account_disabled"
+            return state
         if do_wake and not await self._waker(account_id):
             state.is_error = True
             state.error_text = "wake_failed"
+            return state
+        # Waking can span an account-disable transition. Check again at the
+        # closest point before minting the runner token and opening the stream.
+        if not await self._account_is_active(account_id):
+            state.is_error = True
+            state.error_text = "account_disabled"
             return state
 
         body = AgentRunRequest(

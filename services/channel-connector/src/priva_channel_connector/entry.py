@@ -38,7 +38,12 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging(settings)
     _quiet_noisy_loggers()
 
-    engine = ReconcileEngine(get_client(), make_lark_transport, RunnerDialer())
+    client = get_client()
+    engine = ReconcileEngine(
+        client,
+        make_lark_transport,
+        RunnerDialer(account_getter=client.accounts.get),
+    )
     app = create_app(engine)
 
     uvicorn.run(app, host=config.api_host(), port=config.api_port(), log_config=None, access_log=False)

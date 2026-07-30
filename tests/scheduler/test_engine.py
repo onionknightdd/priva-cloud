@@ -164,6 +164,38 @@ def test_fire_account_disabled_skips_without_wake(fake_client, fast_settings):
     assert rec.status == "skipped" and rec.error_message == "account_disabled"
 
 
+def test_fire_rechecks_account_after_start_run_before_dispatch(fake_client, fast_settings):
+    engine, dispatcher = make_engine(fake_client)
+    fake_client.scheduler.jobs["j1"] = ("acct-1", make_job("j1"))
+    real_get = fake_client.accounts.get
+    reads = 0
+
+    def disable_between_checks(account_id):
+        nonlocal reads
+        reads += 1
+        account = real_get(account_id)
+        if reads == 2:
+            account.status = "disabled"
+        return account
+
+    fake_client.accounts.get = disable_between_checks
+
+    assert asyncio.run(engine.fire("acct-1", "j1")) == "skipped_inactive"
+    assert not dispatcher.calls
+    (fin,) = fake_client.scheduler.finishes
+    assert fin.status == "skipped" and fin.error_message == "account_disabled"
+
+
+def test_dispatcher_inactive_verdict_finishes_started_run(fake_client, fast_settings):
+    engine, dispatcher = make_engine(fake_client, verdict="account_inactive")
+    fake_client.scheduler.jobs["j1"] = ("acct-1", make_job("j1"))
+
+    assert asyncio.run(engine.fire("acct-1", "j1")) == "skipped_inactive"
+    assert len(dispatcher.calls) == 1
+    (fin,) = fake_client.scheduler.finishes
+    assert fin.status == "skipped" and fin.error_message == "account_disabled"
+
+
 def test_fire_overlap_skips_before_dispatch(fake_client, fast_settings):
     engine, dispatcher = make_engine(fake_client)
     fake_client.scheduler.jobs["j1"] = ("acct-1", make_job("j1"))

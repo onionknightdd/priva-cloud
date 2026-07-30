@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor
 
+import grpc
 import pytest
 
 from priva_common.config import Settings
@@ -82,7 +83,8 @@ def _defn(job_id: str, *, cron: str = "0 9 * * 1-5", prompt: str = "daily briefi
     )
 
 
-def test_job_crud_roundtrip(client, account):
+def test_job_crud_roundtrip(client, account, as_service_identity):
+    as_service_identity("agent-runner", account_id=account)
     created = client.scheduler.create_job(account, _defn("j1"))
     assert created.id == "j1" and created.status == "active"
     assert created.trigger.type == "cron" and created.trigger.expr == "0 9 * * 1-5"
@@ -92,11 +94,15 @@ def test_job_crud_roundtrip(client, account):
 
     got = client.scheduler.get_job("j1")
     assert got.name == "job j1" and got.timezone == "Asia/Shanghai"
+    as_service_identity("scheduler")
     assert client.scheduler.get_job("missing") is None
+    as_service_identity("agent-runner", account_id=account)
 
     updated = client.scheduler.update_job("j1", _defn("j1", cron="0 18 * * 5", prompt="weekly"))
     assert updated.trigger.expr == "0 18 * * 5" and updated.prompt == "weekly"
-    assert client.scheduler.update_job("missing", _defn("missing")) is None
+    with pytest.raises(grpc.RpcError) as missing_update:
+        client.scheduler.update_job("missing", _defn("missing"))
+    assert missing_update.value.code() == grpc.StatusCode.PERMISSION_DENIED
 
     # interval trigger shape survives the wire too
     ivl = ScheduledJobDefinition(
@@ -108,16 +114,22 @@ def test_job_crud_roundtrip(client, account):
 
     paused = client.scheduler.set_job_status("j2", "paused")
     assert paused.status == "paused"
+    as_service_identity("scheduler")
     active = client.scheduler.list_active_jobs()
     assert [(a, j.id) for a, j in active] == [(account, "j1")]
 
+    as_service_identity("agent-runner", account_id=account)
     assert client.scheduler.delete_job("j2") is True
-    assert client.scheduler.delete_job("j2") is False
+    with pytest.raises(grpc.RpcError) as missing_delete:
+        client.scheduler.delete_job("j2")
+    assert missing_delete.value.code() == grpc.StatusCode.PERMISSION_DENIED
 
 
-def test_run_lifecycle_and_skip_record(client, account):
+def test_run_lifecycle_and_skip_record(client, account, as_service_identity):
+    as_service_identity("agent-runner", account_id=account)
     client.scheduler.create_job(account, _defn("j1"))
 
+    as_service_identity("scheduler")
     born = client.scheduler.start_run(account, JobRunRecord(
         run_id="r1", job_id="j1", job_name="job j1", username="", status="running",
         session_id="sess-9"))
@@ -147,9 +159,14 @@ def test_run_lifecycle_and_skip_record(client, account):
         finished_at="2026-07-13T09:00:00.000Z", error_message="already_running"))
     assert skipped.status == "skipped" and skipped.error_message == "already_running"
 
+    # Run-history reads are performed by the owning runner/control-panel path,
+    # not by the scheduler workload itself.
+    as_service_identity("agent-runner", account_id=account)
     assert client.scheduler.get_run(account, "r1").result_summary == "wrote notes/daily.md"
     assert client.scheduler.get_run(account, "missing") is None
-    assert client.scheduler.get_run("other-account", "r1") is None  # ownership-safe
+    with pytest.raises(grpc.RpcError) as cross_tenant:
+        client.scheduler.get_run("other-account", "r1")
+    assert cross_tenant.value.code() == grpc.StatusCode.PERMISSION_DENIED
 
     page = client.scheduler.list_runs(account, limit=10)
     assert [r.run_id for r in page.runs] == ["r2", "r1", "r0"]  # newest-first
@@ -159,12 +176,18 @@ def test_run_lifecycle_and_skip_record(client, account):
     assert [r.run_id for r in only_skipped.runs] == ["r2"]
     assert only_skipped.total is None  # filtered => total unknown (-1 on the wire)
 
-    deleted = client.scheduler.delete_runs_before(account, "2099-01-01")
-    assert set(deleted) == {"r0", "r1", "r2"}
+    # No shipped workload owns the destructive bulk-delete RPC. It remains
+    # default-denied until a concrete maintenance caller is introduced.
+    as_service_identity("scheduler")
+    with pytest.raises(grpc.RpcError) as delete_denied:
+        client.scheduler.delete_runs_before(account, "2099-01-01")
+    assert delete_denied.value.code() == grpc.StatusCode.PERMISSION_DENIED
 
 
-def test_run_keyset_pagination(client, account):
+def test_run_keyset_pagination(client, account, as_service_identity):
+    as_service_identity("agent-runner", account_id=account)
     client.scheduler.create_job(account, _defn("j1"))
+    as_service_identity("scheduler")
     for i in range(5):
         client.scheduler.record_run(account, JobRunRecord(
             run_id=f"r{i}", job_id="j1", job_name="job j1", username="",
@@ -175,9 +198,11 @@ def test_run_keyset_pagination(client, account):
     assert [r.run_id for r in second.runs] == ["r2", "r1"]
 
 
-def test_claim_fire_exactly_once(client, account):
+def test_claim_fire_exactly_once(client, account, as_service_identity):
+    as_service_identity("agent-runner", account_id=account)
     client.scheduler.create_job(account, _defn("j1"))
 
+    as_service_identity("scheduler")
     assert client.scheduler.claim_fire("j1", 1780000000, "replica-a") is True
     assert client.scheduler.claim_fire("j1", 1780000000, "replica-b") is False  # lost
     assert client.scheduler.claim_fire("j1", 1780000060, "replica-b") is True   # next fire
@@ -189,8 +214,10 @@ def test_claim_fire_exactly_once(client, account):
     assert client.scheduler.claim_fire("j1", 1780000000, "replica-c") is True
 
 
-def test_claim_fire_concurrent_single_winner(client, account):
+def test_claim_fire_concurrent_single_winner(client, account, as_service_identity):
+    as_service_identity("agent-runner", account_id=account)
     client.scheduler.create_job(account, _defn("j1"))
+    as_service_identity("scheduler")
     epoch = 1780009999
 
     with ThreadPoolExecutor(max_workers=8) as pool:

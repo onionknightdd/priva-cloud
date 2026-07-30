@@ -7,6 +7,7 @@ API so the CR patch/delete ordering is asserted without a cluster.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -35,12 +36,31 @@ class _FakeCustom:
     def __init__(self):
         self.patches: list[tuple[str, dict]] = []
         self.deleted: list[str] = []
+        self.created: list[dict] = []
         self.missing: set[str] = set()
+
+    def get_namespaced_custom_object(self, group, version, ns, plural, name):
+        if name in self.missing:
+            raise P.client.ApiException(status=404)
+        return {
+            "metadata": {
+                "name": name,
+                "finalizers": [P.AGENTTENANT_FINALIZER],
+            },
+            "spec": {"accountId": name, "username": "bob"},
+        }
 
     def patch_namespaced_custom_object(self, group, version, ns, plural, name, body):
         if name in self.missing:
             raise P.client.ApiException(status=404)
         self.patches.append((name, body))
+
+    def create_namespaced_custom_object(self, group, version, ns, plural, body):
+        name = body["metadata"]["name"]
+        if name not in self.missing:
+            raise P.client.ApiException(status=409)
+        self.missing.discard(name)
+        self.created.append(body)
 
     def delete_namespaced_custom_object(self, group, version, ns, plural, name):
         if name in self.missing:
@@ -131,6 +151,11 @@ def test_delete_tombstones_the_row_and_drops_the_cr(harness):
     assert r.json() == {"status": "purging", "account_id": harness.bob}
     # The row survives as a tombstone; the sweep reaps it once the CR is gone.
     assert harness.dataplane.accounts.get_by_username("bob").status == "purged"
+    assert harness.custom.patches[-1] == (
+        harness.bob, {
+            "metadata": {"finalizers": [P.AGENTTENANT_FINALIZER]},
+            "spec": {"desiredState": "purge"},
+        })
     assert harness.custom.deleted == [harness.bob]
     assert harness.nudges == [harness.bob]
 
@@ -174,8 +199,23 @@ def _sync_fakes(monkeypatch, users, tenants):
         accounts=SimpleNamespace(delete=reaped.append),
     )
     monkeypatch.setattr(dataplane, "get_client", lambda: dp)
-    monkeypatch.setattr(user_store, "get_user_store",
-                        lambda: SimpleNamespace(list_users=lambda: users))
+
+    def update_user(username, *, status):
+        user = next(item for item in users if item.username == username)
+        user.status = status
+        return user
+
+    monkeypatch.setattr(
+        user_store,
+        "get_user_store",
+        lambda: SimpleNamespace(
+            list_users=lambda: users,
+            get_user=lambda username: next(
+                (item for item in users if item.username == username), None
+            ),
+            update_user=update_user,
+        ),
+    )
     monkeypatch.setattr(P, "list_tenants", lambda: tenants)
     return reaped
 
@@ -195,6 +235,7 @@ def _user(account_id, username, status):
 def test_sync_reaps_the_tombstone_row_once_the_cr_is_gone(monkeypatch):
     reaped = _sync_fakes(monkeypatch, [_user("acct-1", "alice", "purged")], [])
     monkeypatch.setattr(P, "ensure_tenant", lambda *a, **k: pytest.fail("resurrected"))
+    monkeypatch.setattr(P, "_get_tenant_live", lambda account_id: None)
 
     result = P.sync_all_tenants()
 
@@ -202,18 +243,101 @@ def test_sync_reaps_the_tombstone_row_once_the_cr_is_gone(monkeypatch):
     assert result["purged"] == 1 and result["created"] == 0
 
 
+def test_sync_keeps_a_fresh_purged_row_for_the_race_grace_period(monkeypatch):
+    user = _user("acct-1", "alice", "purged")
+    user.updated_at = datetime.now(timezone.utc)
+    reaped = _sync_fakes(monkeypatch, [user], [])
+    monkeypatch.setattr(
+        P,
+        "_get_tenant_live",
+        lambda account_id: pytest.fail(
+            "grace must precede the live absence proof"
+        ),
+    )
+
+    result = P.sync_all_tenants()
+
+    assert reaped == []
+    assert result["skipped"] == 1 and result["purged"] == 0
+
+
+def test_sync_rechecks_live_cr_before_reaping_a_purged_row(monkeypatch):
+    user = _user("acct-1", "alice", "purged")
+    reaped = _sync_fakes(monkeypatch, [user], [])
+    live = _tenant("acct-1", "alice", desired_state="purge")
+    monkeypatch.setattr(P, "_get_tenant_live", lambda account_id: live)
+    deleted: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        P,
+        "delete_tenant",
+        lambda account_id, username: deleted.append((account_id, username)),
+    )
+
+    result = P.sync_all_tenants()
+
+    assert reaped == []
+    assert deleted == [("acct-1", "alice")]
+    assert result["skipped"] == 1 and result["purged"] == 0
+
+
+def test_sync_rechecks_account_status_before_recreating_a_missing_cr(monkeypatch):
+    import priva_common.user_store as user_store
+
+    snapshot = _user("acct-1", "alice", "active")
+    live = _user("acct-1", "alice", "purged")
+    _sync_fakes(monkeypatch, [snapshot], [])
+    monkeypatch.setattr(
+        user_store,
+        "get_user_store",
+        lambda: SimpleNamespace(
+            list_users=lambda: [snapshot],
+            get_user=lambda username: live,
+        ),
+    )
+    monkeypatch.setattr(P, "ensure_tenant", lambda *a, **k: pytest.fail("resurrected"))
+
+    result = P.sync_all_tenants()
+
+    assert result["created"] == 0 and result["skipped"] == 1
+
+
 def test_sync_reissues_the_cr_delete_while_the_tombstone_still_has_one(monkeypatch):
     reaped = _sync_fakes(monkeypatch, [_user("acct-1", "alice", "purged")],
                          [_tenant("acct-1", "alice")])
     monkeypatch.setattr(P, "ensure_tenant", lambda *a, **k: pytest.fail("resurrected"))
     deleted: list[str] = []
-    monkeypatch.setattr(P, "delete_tenant", deleted.append)
+    monkeypatch.setattr(
+        P, "delete_tenant", lambda account_id, username: deleted.append(account_id)
+    )
 
     result = P.sync_all_tenants()
 
     assert deleted == ["acct-1"]
     assert reaped == []  # the row outlives the CR
     assert result["purged"] == 0
+
+
+def test_sync_records_finalized_delete_request_before_reaping_account(monkeypatch):
+    user = _user("acct-1", "alice", "offboarding")
+    reaped = _sync_fakes(monkeypatch, [user], [])
+    requested = []
+    monkeypatch.setattr(
+        P,
+        "delete_tenant",
+        lambda account_id, username: requested.append((account_id, username)),
+    )
+
+    first = P.sync_all_tenants()
+
+    assert user.status == "purged"
+    assert requested == [("acct-1", "alice")]
+    assert reaped == []
+    assert first["purged"] == 0
+
+    monkeypatch.setattr(P, "_get_tenant_live", lambda account_id: None)
+    second = P.sync_all_tenants()
+    assert reaped == ["acct-1"]
+    assert second["purged"] == 1
 
 
 def test_sync_converges_desired_state_for_a_disabled_account(monkeypatch):
@@ -255,24 +379,110 @@ def test_ensure_tenant_creates_a_non_active_account_quiesced(monkeypatch):
                     runtime_defaults={"idleGraceSeconds": 1800})
 
     assert created[0]["spec"]["desiredState"] == "offboarding"
+    assert created[0]["metadata"]["finalizers"] == [P.AGENTTENANT_FINALIZER]
 
 
-def test_delete_tenant_treats_an_absent_cr_as_success(monkeypatch):
+def test_delete_tenant_recreates_a_finalized_tombstone_when_cr_is_absent(monkeypatch):
     custom = _FakeCustom()
     custom.missing.add("acct-1")
     monkeypatch.setattr(P, "get_settings", _kube_settings)
     monkeypatch.setattr(P, "_custom", lambda: custom)
 
-    P.delete_tenant("acct-1")
+    P.delete_tenant("acct-1", "alice")
 
-    assert custom.deleted == []
+    assert custom.created[0]["spec"] == {
+        "accountId": "acct-1",
+        "username": "alice",
+        "desiredState": "purge",
+    }
+    assert custom.created[0]["metadata"]["finalizers"] == [
+        P.AGENTTENANT_FINALIZER
+    ]
+    assert custom.deleted == ["acct-1"]
+
+
+def test_delete_tenant_marks_the_winner_of_a_create_race_before_delete(monkeypatch):
+    events: list[tuple[str, object]] = []
+    reads = 0
+
+    class ConflictCustom:
+        def get_namespaced_custom_object(self, *args):
+            nonlocal reads
+            reads += 1
+            if reads == 1:
+                raise P.client.ApiException(status=404)
+            events.append(("read-winner", args[-1]))
+            return {
+                "metadata": {"name": "acct-1", "finalizers": []},
+                "spec": {
+                    "accountId": "acct-1",
+                    "username": "alice",
+                    "desiredState": "active",
+                },
+            }
+
+        def create_namespaced_custom_object(self, *args):
+            events.append(("create-conflict", args[-1]))
+            raise P.client.ApiException(status=409)
+
+        def patch_namespaced_custom_object(self, *args):
+            events.append(("patch", args[-1]))
+
+        def delete_namespaced_custom_object(self, *args):
+            events.append(("delete", args[-1]))
+
+    monkeypatch.setattr(P, "get_settings", _kube_settings)
+    monkeypatch.setattr(P, "_custom", ConflictCustom)
+
+    P.delete_tenant("acct-1", "alice")
+
+    assert [event[0] for event in events] == [
+        "create-conflict",
+        "read-winner",
+        "patch",
+        "delete",
+    ]
+    assert events[2][1] == {
+        "metadata": {"finalizers": [P.AGENTTENANT_FINALIZER]},
+        "spec": {"desiredState": "purge"},
+    }
+
+
+def test_delete_tenant_does_not_bless_an_unmarked_inflight_delete(monkeypatch):
+    class DeletingCustom:
+        def get_namespaced_custom_object(self, *args):
+            return {
+                "metadata": {
+                    "name": "acct-1",
+                    "deletionTimestamp": "2026-07-29T00:00:00Z",
+                    "finalizers": [],
+                },
+                "spec": {
+                    "accountId": "acct-1",
+                    "username": "alice",
+                    "desiredState": "active",
+                },
+            }
+
+        def patch_namespaced_custom_object(self, *args):
+            pytest.fail("must not add a finalizer after deletion starts")
+
+        def delete_namespaced_custom_object(self, *args):
+            pytest.fail("must not treat an unmarked deletion as purge")
+
+    monkeypatch.setattr(P, "get_settings", _kube_settings)
+    monkeypatch.setattr(P, "_custom", DeletingCustom)
+
+    with pytest.raises(RuntimeError, match="already deleting"):
+        P.delete_tenant("acct-1", "alice")
 
 
 # --- access revocation (no expiry wait) -------------------------------------
 
 def _auth_settings(global_api_key: str = ""):
     return SimpleNamespace(auth=SimpleNamespace(
-        jwt_secret="s3cret", jwt_expire_hours=1, global_api_key=global_api_key,
+        jwt_secret="test-only-jwt-secret-0123456789abcdef",
+        jwt_expire_hours=1, global_api_key=global_api_key,
         enable_anonymous=False, admins=[]))
 
 

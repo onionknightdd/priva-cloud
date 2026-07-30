@@ -264,6 +264,16 @@ class SchedulerEngine:
             if jitter:
                 await asyncio.sleep(jitter)
 
+        # The first lifecycle check preceded StartRun and optional jitter. Fence
+        # the actual delivery as well so an admin disable in that window cannot
+        # wake or dial the tenant pod. WakeDialDispatcher repeats this before
+        # every network retry.
+        latest_account = await asyncio.to_thread(c.accounts.get, account_id)
+        if latest_account is None or latest_account.status != "active":
+            await self._finish(job, run_id, "skipped", "account_disabled")
+            SCHEDULER_FIRES.labels(outcome="skipped_inactive").inc()
+            return "skipped_inactive"
+
         t0 = time.monotonic()
         try:
             verdict = await self._dispatcher.dispatch(account_id, account.username, frame)
@@ -282,6 +292,10 @@ class SchedulerEngine:
             await self._finish(job, run_id, "skipped", "already_running")
             SCHEDULER_FIRES.labels(outcome="skipped_busy").inc()
             return "skipped_busy"
+        if verdict == "account_inactive":
+            await self._finish(job, run_id, "skipped", "account_disabled")
+            SCHEDULER_FIRES.labels(outcome="skipped_inactive").inc()
+            return "skipped_inactive"
         # concurrency_cap (D16: the ≤2 min re-admit already happened downstream)
         await self._finish(job, run_id, "skipped", "concurrency_cap")
         SCHEDULER_FIRES.labels(outcome="skipped_cap").inc()

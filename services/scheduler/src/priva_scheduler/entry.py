@@ -26,9 +26,10 @@ def main(argv: list[str] | None = None) -> int:
     settings = get_settings()
     configure_logging(settings)
 
+    client = get_client()
     engine = SchedulerEngine(
-        get_client(),
-        WakeDialDispatcher(),
+        client,
+        WakeDialDispatcher(account_getter=client.accounts.get),
         replica_id=os.environ.get("HOSTNAME", "scheduler-0"),
     )
     app = create_app(engine)

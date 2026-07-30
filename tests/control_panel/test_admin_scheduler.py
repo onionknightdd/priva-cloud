@@ -21,7 +21,7 @@ ADMIN = UserRecord(username="root", password_hash="x", role="admin")
 
 
 @pytest.fixture
-def harness(tmp_path, monkeypatch):
+def harness(tmp_path, monkeypatch, as_service_identity):
     s = Settings()
     s.dataspine.backend = "sqlite"
     s.dataspine.sqlite_path = str(tmp_path / "ds.db")
@@ -41,10 +41,15 @@ def harness(tmp_path, monkeypatch):
     app.dependency_overrides[mod.require_admin] = lambda: ADMIN
 
     account_id = dataplane.accounts.create("carol", "pw").account_id
+    # Jobs are tenant-owned writes in production. Seed them through the same
+    # account-scoped agent-runner identity, then restore the control-panel
+    # identity used by the admin oversight endpoints below.
+    as_service_identity("agent-runner", account_id=account_id)
     for i, status in enumerate(["active", "active", "paused"]):
         dataplane.scheduler.create_job(account_id, ScheduledJobDefinition(
             id=f"j{i}", name=f"job {i}", prompt="x", status=status,
             trigger=CronTriggerConfig(expr="0 9 * * *"), timezone="UTC"))
+    as_service_identity("control-panel")
 
     with TestClient(app) as http:
         yield SimpleNamespace(http=http, dataplane=dataplane, account_id=account_id, mod=mod, monkeypatch=monkeypatch)
