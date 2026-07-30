@@ -1,0 +1,43 @@
+name: Squid egress integration
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/squid-egress-integration.yml"
+      - "deploy/checks/squid-egress-integration.sh"
+      - "libs/common/**"
+      - "services/operator/**"
+      - "pyproject.toml"
+      - "uv.lock"
+  push:
+    paths:
+      - ".github/workflows/squid-egress-integration.yml"
+      - "deploy/checks/squid-egress-integration.sh"
+      - "libs/common/**"
+      - "services/operator/**"
+      - "pyproject.toml"
+      - "uv.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: squid-egress-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  squid-egress:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # actions/checkout v4.2.2, pinned so a mutable tag cannot alter the job.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install pinned uv
+        run: |
+          python3 -m pip install --disable-pip-version-check --user uv==0.11.22
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      - name: Parse and exercise rendered Squid policy
+        run: deploy/checks/squid-egress-integration.sh
