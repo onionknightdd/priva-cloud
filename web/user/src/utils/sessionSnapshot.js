@@ -44,6 +44,7 @@ function pickTaskState(s) {
     taskOrder: s.taskOrder,
     todos: s.todos,
     todoWriteInfo: s.todoWriteInfo,
+    sdkTaskTracker: s.sdkTaskTracker,
     activeTaskId: s.activeTaskId,
     activeTodoId: s.activeTodoId,
     activeSubagentId: s.activeSubagentId,

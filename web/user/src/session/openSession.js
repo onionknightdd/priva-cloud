@@ -61,10 +61,10 @@ function applyUiSnapshot(ui) {
   }
 }
 
-function canvasTabFor({ fileBrowserTabs, fileOps, messages }) {
+function canvasTabFor({ fileBrowserTabs, fileOps, messages, sdkTaskTracker }) {
   if (fileBrowserTabs.length > 0) return 'file-browser'
   if (fileOps.length > 0) return 'changes'
-  if (hasCanvasInspectorItems(messages)) return 'tasks'
+  if (hasCanvasInspectorItems(messages, sdkTaskTracker)) return 'tasks'
   return null
 }
 
@@ -117,7 +117,7 @@ export async function openSession(sessionOrId, opts = {}) {
   try {
     const data = await fetchSessionMessages(sessionId)
     if (token !== selectToken) return false
-    const { messages, fileOps, fileBrowserTabs, tasks, subagentContent } =
+    const { messages, fileOps, fileBrowserTabs, tasks, sdkTaskTracker, subagentContent } =
       transformSessionMessages(data.messages || [])
 
     const rt = ensureRuntime(sessionId)
@@ -137,11 +137,12 @@ export async function openSession(sessionOrId, opts = {}) {
     for (const op of fileOps) fileOpsSlice.getState().addFileOp(op)
     fileBrowserSlice.getState().setTabs(fileBrowserTabs)
     for (const task of tasks) taskSlice.getState().addTask(task)
+    taskSlice.getState().hydrateSdkTaskTracker(sdkTaskTracker)
 
     if (token !== selectToken) return false
     snapshotActiveUi()
     setActiveKey(sessionId)
-    const tab = canvasTabFor({ fileBrowserTabs, fileOps, messages })
+    const tab = canvasTabFor({ fileBrowserTabs, fileOps, messages, sdkTaskTracker })
     applyUiSnapshot(tab ? { canvasVisible: true, activeCanvasTab: tab, canvasOpenTabs: [tab] } : null)
     useSidebarStore.getState().setActiveSessionId(rowId)
     statusStore.markSeen(sessionId)

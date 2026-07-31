@@ -37,6 +37,7 @@ import {
 import { getSplitParams } from '../utils/splitMode'
 import { parseTaskNotification } from '../utils/taskNotification'
 import { refreshSessionRecap } from '../utils/sessionRecap'
+import { isSdkTaskToolName } from '../utils/sdkTaskTracker'
 
 // Max characters of background-shell output kept in the task store; only the
 // tail is retained beyond this.
@@ -219,7 +220,15 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     : String(message).replace(/\s+/g, ' ').slice(0, 120)
   console.info('[TAB:%s] %s sessionId=%s prompt=%s', tabId, attach ? 'attachStream' : 'sendMessage', sessionIdAtSend, promptPreview)
 
-  const { addTask, updateTask, setTodos, setTodoWriteInfo } = S.tasks()
+  const {
+    addTask,
+    updateTask,
+    setTodos,
+    setTodoWriteInfo,
+    beginSdkTaskRound,
+    recordSdkTaskToolUse,
+    recordSdkTaskToolResult,
+  } = S.tasks()
   const { setLastResult } = useUiStore.getState()
   const { addFileOp, updateFileOp, incrementRound } = S.fileOps()
   void updateFileOp
@@ -228,6 +237,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   if (!attach) {
     setLastUserPrompt({ message, permissionMode, attachments, attachmentsMeta, images })
     clearRetryState()
+    beginSdkTaskRound({ title: message, startedAt: Date.now() })
 
     // Add user message (with attachment info for display)
     const userMsg = {
@@ -493,6 +503,13 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
           const meaningful = content.some((b) => b.type === 'image'
             || (b.type === 'text' && b.text.trim() && !b.text.includes('<local-command-stdout>')))
           if (meaningful) {
+            beginSdkTaskRound({
+              title: content
+                .filter((block) => block.type === 'text')
+                .map((block) => block.text)
+                .join(' ') || 'Image prompt',
+              startedAt: Date.now(),
+            })
             S.chat().addMessage({ role: 'user', content, uuid: data.uuid, timestamp: Date.now() })
             S.chat().addMessage({ role: 'assistant', content: [], timestamp: Date.now() })
           }
@@ -658,6 +675,13 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
             return base
           })
 
+        const sdkTaskBlocks = toolBlocks.filter((block) => isSdkTaskToolName(block.name))
+        for (const block of sdkTaskBlocks) {
+          hiddenToolIds.add(block.id)
+          recordSdkTaskToolUse(block)
+        }
+        if (sdkTaskBlocks.length > 0) fxShowCanvas('tasks')
+
         for (const block of toolBlocks) {
           if (isGeneratedToolName(block.name)) generatedToolIds.add(block.id)
           if (FILE_TOOL_NAMES.has(block.name)) {
@@ -675,8 +699,11 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         // Subagent tool_use frame: route tool_use blocks into the subagent's
         // bucket so they render nested inside their SubagentFrame.
         if (data.parent_tool_use_id) {
-          if (toolBlocks.length > 0) {
-            S.chat().appendToSubagentContent(data.parent_tool_use_id, toolBlocks)
+          const visibleSubagentBlocks = toolBlocks.filter(
+            (block) => !isSdkTaskToolName(block.name),
+          )
+          if (visibleSubagentBlocks.length > 0) {
+            S.chat().appendToSubagentContent(data.parent_tool_use_id, visibleSubagentBlocks)
           }
           break
         }
@@ -691,6 +718,10 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
           const messageBlocks = []
 
           for (const block of toolBlocks) {
+            // Claude Agent SDK task management is represented exclusively by
+            // the Composer capsule and the Canvas aggregate tracker.
+            if (isSdkTaskToolName(block.name)) continue
+
             // Workflow → live multi-phase status card. Seed the workflow store
             // (idempotent — task_started may arrive before or after this),
             // render inline as a WorkflowCard, and reveal the canvas mirror.
@@ -871,12 +902,16 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
           }
 
           // Add blocks to message content
-          if (messageBlocks.length > 0) {
+          if (messageBlocks.length > 0 || sdkTaskBlocks.length > 0) {
             const newContent = [...lastMsg.content, ...messageBlocks]
             S.chatSet({
               messages: [
                 ...msgs.slice(0, lastIdx),
-                { ...lastMsg, content: newContent },
+                {
+                  ...lastMsg,
+                  content: newContent,
+                  ...(sdkTaskBlocks.length > 0 ? { hasSdkTaskActivity: true } : {}),
+                },
               ],
             })
           }
@@ -943,6 +978,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         // Process all result blocks
         for (const rb of allResultBlocks) {
           const isToolResultError = isErroredToolResult(rb, data.tool_use_result)
+          recordSdkTaskToolResult(rb.tool_use_id, rb, data.tool_use_result)
           const pendingFileTab = pendingToolFileTabs.get(rb.tool_use_id)
           const handledPendingFile = Boolean(pendingFileTab)
           if (pendingFileTab) {
@@ -1508,6 +1544,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         const images = queued?.images || []
         const attachmentsMeta = queued?.attachmentsMeta || null
 
+        beginSdkTaskRound({ title: text || 'Image prompt', startedAt: Date.now() })
         const userMsg = { role: 'user', content: [], timestamp: Date.now() }
         for (const img of images) {
           userMsg.content.push({

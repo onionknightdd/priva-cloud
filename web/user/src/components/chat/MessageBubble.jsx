@@ -32,6 +32,7 @@ import { getToolDisplayName } from '../../utils/generatedTool'
 import { parseSelectedXlsx } from '../../utils/selectedXlsx'
 import { parseSelectedFile } from '../../utils/selectedFile'
 import DrawIcon from '@shared/components/shared/DrawIcon'
+import { isSdkTaskToolName } from '../../utils/sdkTaskTracker'
 
 const ASSISTANT_MESSAGE_GAP = 6
 const ASSISTANT_META_MARGIN_TOP = -6
@@ -1065,7 +1066,19 @@ export default memo(function MessageBubble({
   const isStreaming = streamingProp || false
 
   // Extract content
-  const contentBlocks = message.content || []
+  // SDK task-management tools live only in the Composer/Canvas trackers.
+  // Keep this guard for retained runtimes and older snapshots in addition to
+  // filtering them at live-ingest and replay-transform time.
+  const rawContentBlocks = message.content || []
+  const hadSdkTaskActivity = Boolean(
+    message.hasSdkTaskActivity ||
+    rawContentBlocks.some(
+      (block) => block?.type === 'tool_use' && isSdkTaskToolName(block.name),
+    ),
+  )
+  const contentBlocks = rawContentBlocks.filter(
+    (block) => !(block?.type === 'tool_use' && isSdkTaskToolName(block.name)),
+  )
   const textBlocks = contentBlocks.filter((b) => b.type === 'text')
   const imageBlocks = contentBlocks.filter((b) => b.type === 'image')
   const toolBlocks = contentBlocks.filter((b) => b.type === 'tool_use')
@@ -1113,7 +1126,8 @@ export default memo(function MessageBubble({
   const tooltipSetAtRef = useRef(0)
 
   const hasMetadata = Boolean(message.duration || message.inputTokens != null || message.agentLoops != null)
-  const shouldHideBubble = !isUser && !hasContent && !hasTools && !hasThinkingContent && !isStreaming && !hasMetadata
+  const shouldHideBubble = !isUser && !hasContent && !hasTools && !hasThinkingContent
+    && !isStreaming && (!hasMetadata || hadSdkTaskActivity)
 
   useEffect(() => {
     if (isUser || shouldHideBubble) return

@@ -11,17 +11,25 @@ import { getSplitParams } from '../../utils/splitMode'
 import { applySessionSnapshot, sessionSnapshot, subscribeSessionSnapshot } from '../../utils/sessionSnapshot'
 import { stopSessionStream } from '../../hooks/useSSE'
 
-function hydrateCanvas(parsed, fileOps, fileBrowserTabs, tasks, { embedded = false } = {}) {
+function hydrateCanvas(
+  parsed,
+  fileOps,
+  fileBrowserTabs,
+  tasks,
+  sdkTaskTracker,
+  { embedded = false } = {},
+) {
   const fileOpsStore = useFileOpsStore.getState()
   for (const op of fileOps) fileOpsStore.addFileOp(op)
   useFileBrowserStore.getState().setTabs(fileBrowserTabs)
   const taskStore = useTaskStore.getState()
   for (const task of tasks) taskStore.addTask(task)
+  taskStore.hydrateSdkTaskTracker(sdkTaskTracker)
   const canvasTab = fileBrowserTabs.length > 0
     ? 'file-browser'
     : fileOps.length > 0
       ? 'changes'
-      : hasCanvasInspectorItems(parsed)
+      : hasCanvasInspectorItems(parsed, sdkTaskTracker)
         ? 'tasks'
         : null
   if (canvasTab) {
@@ -74,9 +82,16 @@ export default function EmbeddedSessionLoader() {
     fetchSessionMessages(sessionId)
       .then((data) => {
         if (cancelled) return
-        const { messages, fileOps, fileBrowserTabs, tasks, subagentContent } = transformSessionMessages(data.messages || [])
+        const {
+          messages,
+          fileOps,
+          fileBrowserTabs,
+          tasks,
+          sdkTaskTracker,
+          subagentContent,
+        } = transformSessionMessages(data.messages || [])
         useChatStore.getState().loadSession(sessionId, messages, null, subagentContent, data.add_dirs || [])
-        hydrateCanvas(messages, fileOps, fileBrowserTabs, tasks, { embedded: true })
+        hydrateCanvas(messages, fileOps, fileBrowserTabs, tasks, sdkTaskTracker, { embedded: true })
         window.setTimeout(() => { suppressPublishRef.current = false }, 250)
       })
       .catch((err) => {

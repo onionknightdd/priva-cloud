@@ -1,5 +1,5 @@
 import { fetchRunningSessions, fetchSessionMessages } from '../api/sessions'
-import { transformSessionMessages } from '../utils/sessionTransform'
+import { hasCanvasInspectorItems, transformSessionMessages } from '../utils/sessionTransform'
 import { ensureRuntime, getSlice, hasRuntime } from '../stores/runtime/registry'
 import { attachToRunningSession } from '../hooks/useSSE'
 import { getSplitParams } from '../utils/splitMode'
@@ -53,18 +53,36 @@ export async function restoreRunningSessions() {
             : head
         }
       }
-      const { messages, fileOps, fileBrowserTabs, tasks, subagentContent } =
+      const { messages, fileOps, fileBrowserTabs, tasks, sdkTaskTracker, subagentContent } =
         transformSessionMessages(rows)
 
       const rt = ensureRuntime(sessionId)
       rt.meta.sidebarRowId = sessionId
       const chat = getSlice(sessionId, 'chat')
-      getSlice(sessionId, 'tasks').getState().clearTasks()
+      const taskSlice = getSlice(sessionId, 'tasks')
+      taskSlice.getState().clearTasks()
       getSlice(sessionId, 'fileOps').getState().clearFileOps()
       chat.getState().loadSession(sessionId, messages, null, subagentContent, data.add_dirs || [])
       for (const op of fileOps) getSlice(sessionId, 'fileOps').getState().addFileOp(op)
       getSlice(sessionId, 'fileBrowser').getState().setTabs(fileBrowserTabs)
-      for (const task of tasks) getSlice(sessionId, 'tasks').getState().addTask(task)
+      for (const task of tasks) taskSlice.getState().addTask(task)
+      taskSlice.getState().hydrateSdkTaskTracker(sdkTaskTracker)
+      const canvasTab = fileBrowserTabs.length > 0
+        ? 'file-browser'
+        : fileOps.length > 0
+          ? 'changes'
+          : hasCanvasInspectorItems(messages, sdkTaskTracker)
+            ? 'tasks'
+            : null
+      if (canvasTab) {
+        rt.meta.ui = {
+          ...(rt.meta.ui || {}),
+          canvasVisible: true,
+          canvasMinimized: false,
+          activeCanvasTab: canvasTab,
+          canvasOpenTabs: [canvasTab],
+        }
+      }
 
       attachToRunningSession(sessionId, { sinceSeq: 0 })
     } catch (err) {

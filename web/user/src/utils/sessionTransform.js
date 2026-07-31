@@ -11,6 +11,14 @@ import {
   shouldOpenToolFileInBrowser,
 } from './fileArtifacts'
 import { parseTaskNotification } from './taskNotification'
+import {
+  beginSdkTaskRound,
+  createSdkTaskTrackerState,
+  hasSdkTaskTrackerRounds,
+  isSdkTaskToolName,
+  recordSdkTaskToolResult,
+  recordSdkTaskToolUse,
+} from './sdkTaskTracker'
 
 // Monotonic counter for `_cid` (stable React list keys). 's-' prefix keeps
 // load-path ids distinct from chatStore's live 'c-' ids.
@@ -90,6 +98,7 @@ function getUserReplayMetadata(msg) {
 const HIDDEN_TOOLS = new Set([
   'Write', 'Edit', 'TaskOutput', 'TaskStop',
   'BashOutput', 'KillBash', 'ExitPlanMode', 'AskUserQuestion',
+  'TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList',
 ])
 
 /**
@@ -211,6 +220,10 @@ export function transformSessionMessages(sdkMessages) {
   const fileOps = []
   const fileBrowserTabs = []
   const tasks = []
+  let sdkTaskTracker = createSdkTaskTrackerState()
+  // Main-thread tool id -> conversation round. Sidechain task tools use their
+  // parent Agent/Task id to land in the same round during historical replay.
+  const toolRoundMap = {}
   // Subagent content map: parent_tool_use_id -> flat array of content blocks
   const subagentContent = {}
 
@@ -226,6 +239,20 @@ export function transformSessionMessages(sdkMessages) {
           out.push(block)
         } else if (block.type === 'tool_use') {
           const result = resultMap[block.id]
+          if (isSdkTaskToolName(block.name)) {
+            sdkTaskTracker = recordSdkTaskToolUse(sdkTaskTracker, block, {
+              roundId: toolRoundMap[parentId] || sdkTaskTracker.currentRoundId,
+            })
+            if (result) {
+              sdkTaskTracker = recordSdkTaskToolResult(
+                sdkTaskTracker,
+                block.id,
+                result,
+                result.tool_use_result || result.toolUseResult,
+              )
+            }
+            continue
+          }
           const isError = result?.is_error || false
           const fileTab = shouldOpenToolFileInBrowser(block, result)
             ? fileTabFromToolUse(block, FILE_SOURCE_PAST)
@@ -268,12 +295,17 @@ export function transformSessionMessages(sdkMessages) {
       const content = []
       if (imageBlocks.length > 0) content.push(...imageBlocks)
       if (text.trim()) content.push({ type: 'text', text })
+      sdkTaskTracker = beginSdkTaskRound(sdkTaskTracker, {
+        title: text || 'Image prompt',
+        startedAt: getUserReplayMetadata(msg).timestamp,
+      })
       messages.push({ role: 'user', content, uuid: msg.uuid, ...getUserReplayMetadata(msg) })
 
     } else if (msg.type === 'assistant') {
       const rawBlocks = getContentBlocks(msg)
       const outputBlocks = []
       const replayMetadata = getAssistantReplayMetadata(msg)
+      let hasSdkTaskActivity = false
 
       for (const block of rawBlocks) {
         if (block.type === 'thinking') {
@@ -292,6 +324,23 @@ export function transformSessionMessages(sdkMessages) {
         const result = resultMap[block.id]
         const isError = result?.is_error || false
         const status = isError ? 'error' : 'success'
+        toolRoundMap[block.id] = sdkTaskTracker.currentRoundId
+
+        if (isSdkTaskToolName(block.name)) {
+          hasSdkTaskActivity = true
+          sdkTaskTracker = recordSdkTaskToolUse(sdkTaskTracker, block)
+          if (result) {
+            sdkTaskTracker = recordSdkTaskToolResult(
+              sdkTaskTracker,
+              block.id,
+              result,
+              result.tool_use_result || result.toolUseResult,
+            )
+          }
+          // SDK task tools are represented only by Composer/Canvas trackers.
+          // They never create a message-flow card or placeholder.
+          continue
+        }
         const fileTab = shouldOpenToolFileInBrowser(block, result)
           ? fileTabFromToolUse(block, FILE_SOURCE_PAST)
           : null
@@ -389,11 +438,17 @@ export function transformSessionMessages(sdkMessages) {
       const prev = messages[messages.length - 1]
       if (prev && prev.role === 'assistant') {
         prev.content = [...prev.content, ...outputBlocks]
+        if (hasSdkTaskActivity) prev.hasSdkTaskActivity = true
         const { timestamp, ...restMetadata } = replayMetadata
         Object.assign(prev, restMetadata)
         if (prev.timestamp == null && timestamp != null) prev.timestamp = timestamp
       } else {
-        messages.push({ role: 'assistant', content: outputBlocks, ...replayMetadata })
+        messages.push({
+          role: 'assistant',
+          content: outputBlocks,
+          ...(hasSdkTaskActivity ? { hasSdkTaskActivity: true } : {}),
+          ...replayMetadata,
+        })
       }
     }
   }
@@ -404,11 +459,18 @@ export function transformSessionMessages(sdkMessages) {
     if (!m._cid) m._cid = `s-${++cidCounter}`
   }
 
-  return { messages, fileOps, fileBrowserTabs, tasks, subagentContent }
+  return {
+    messages,
+    fileOps,
+    fileBrowserTabs,
+    tasks,
+    sdkTaskTracker,
+    subagentContent,
+  }
 }
 
-export function hasCanvasInspectorItems(messages) {
-  return messages.some((msg) => (
+export function hasCanvasInspectorItems(messages, sdkTaskTracker = null) {
+  return hasSdkTaskTrackerRounds(sdkTaskTracker) || messages.some((msg) => (
     msg.role === 'assistant' &&
     Array.isArray(msg.content) &&
     msg.content.some((block) => (

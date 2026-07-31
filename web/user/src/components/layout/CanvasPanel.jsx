@@ -8,6 +8,7 @@ import CanvasHeader from '../canvas/CanvasHeader'
 import CanvasTabMenu from '../canvas/CanvasTabMenu'
 import SubagentInspector from '../canvas/SubagentInspector'
 import WorkflowTree from '../canvas/WorkflowTree'
+import SdkTaskTrackerPanel from '../canvas/SdkTaskTrackerPanel'
 import FileOpsPanel from '../canvas/FileOpsPanel'
 import FileBrowserPanel from '../canvas/FileBrowserPanel'
 import PlanReviewPanel from '../canvas/PlanReviewPanel'
@@ -140,6 +141,7 @@ export default function CanvasPanel() {
           // Default inspector view: live workflows + execution artifacts grouped
           // by conversation turn. Both render null when empty (zero layout cost).
           <div className="flex-1 overflow-y-auto overflow-x-hidden">
+            <SdkTaskTrackerPanel />
             <WorkflowTree />
             <SubagentInspector />
           </div>

@@ -1,5 +1,11 @@
 import { createStore } from 'zustand/vanilla'
 import { makeFacade, registerSliceFactory } from './runtime/registry'
+import {
+  beginSdkTaskRound as reduceBeginSdkTaskRound,
+  createSdkTaskTrackerState,
+  recordSdkTaskToolResult as reduceSdkTaskToolResult,
+  recordSdkTaskToolUse as reduceSdkTaskToolUse,
+} from '../utils/sdkTaskTracker'
 
 // One task slice per session runtime — see runtime/registry.js.
 export const createTaskStore = (getSibling) => createStore((set) => ({
@@ -9,6 +15,11 @@ export const createTaskStore = (getSibling) => createStore((set) => ({
   taskOrder: [],
   todos: [],
   todoWriteInfo: null,  // { tool_use_id, name, input, status, startTime, endTime, result }
+  // Claude Agent SDK TaskCreate / TaskUpdate / TaskGet / TaskList tracker.
+  // This is deliberately separate from background shell tasks above:
+  // messages never render these tool calls; Composer and Canvas consume the
+  // round-aware aggregate below.
+  sdkTaskTracker: createSdkTaskTrackerState(),
 
   // Focus ids for two-way click-to-scroll between the message card timeline
   // and Canvas inspectors. Each setter scrolls the target element via a
@@ -61,12 +72,34 @@ export const createTaskStore = (getSibling) => createStore((set) => ({
     todoWriteInfo: { ...(s.todoWriteInfo || {}), ...info },
   })),
 
+  beginSdkTaskRound: (round) => set((s) => ({
+    sdkTaskTracker: reduceBeginSdkTaskRound(s.sdkTaskTracker, round),
+  })),
+
+  recordSdkTaskToolUse: (block, options) => set((s) => ({
+    sdkTaskTracker: reduceSdkTaskToolUse(s.sdkTaskTracker, block, options),
+  })),
+
+  recordSdkTaskToolResult: (toolUseId, resultBlock, toolUseResult) => set((s) => ({
+    sdkTaskTracker: reduceSdkTaskToolResult(
+      s.sdkTaskTracker,
+      toolUseId,
+      resultBlock,
+      toolUseResult,
+    ),
+  })),
+
+  hydrateSdkTaskTracker: (tracker) => set({
+    sdkTaskTracker: tracker || createSdkTaskTrackerState(),
+  }),
+
   clearTasks: () => {
     // Workflows are part of the same per-session transient run state — clear
     // them at every session boundary (new chat / session switch / load).
     getSibling('workflow').getState().clear()
     set({
       tasks: {}, taskOrder: [], todos: [], todoWriteInfo: null,
+      sdkTaskTracker: createSdkTaskTrackerState(),
       activeTaskId: null, activeTodoId: null, activeSubagentId: null,
       subagentFocusTargetId: null, subagentFocusRevision: 0,
       inspectorFocusTarget: null, inspectorFocusRevision: 0,
@@ -87,6 +120,7 @@ export const createTaskStore = (getSibling) => createStore((set) => ({
 
   reset: () => set({
     tasks: {}, taskOrder: [], todos: [], todoWriteInfo: null,
+    sdkTaskTracker: createSdkTaskTrackerState(),
     activeTaskId: null, activeTodoId: null, activeSubagentId: null,
     subagentFocusTargetId: null, subagentFocusRevision: 0,
     inspectorFocusTarget: null, inspectorFocusRevision: 0,
