@@ -1,4 +1,4 @@
-import { Suspense, useEffect } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { FileDiff, FolderTree, PanelRight, SquareTerminal, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
@@ -10,6 +10,7 @@ import useFileBrowserStore from '../../stores/fileBrowserStore'
 import useWorkflowStore from '../../stores/workflowStore'
 import useUiStore from '@shared/stores/uiStore'
 import useSplitStore from '../../stores/splitStore'
+import { renameSession as apiRenameSession } from '../../api/sessions'
 import CopyButton from '@shared/components/shared/CopyButton'
 import MessageListBoundary from './MessageListBoundary'
 import ChatInput from './ChatInput'
@@ -319,12 +320,21 @@ export default function ChatPanel() {
   const changeOpsCount = useFileOpsStore((s) => s.fileOps.filter((op) => op.type === 'write' || op.type === 'edit').length)
   const splitPaneCount = useSplitStore((s) => s.panes.length)
   const closePane = useSplitStore((s) => s.closePane)
+  const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
   const activeSidebarSession = sidebarSessions.find((s) => s.sessionId === sessionId || s.id === sessionId)
   const sessionTitle = activeSidebarSession?.name || (sessionId ? sessionId : '')
+  const [renamingSessionTitle, setRenamingSessionTitle] = useState(false)
+  const [sessionTitleDraft, setSessionTitleDraft] = useState('')
+  const sessionTitleHandledRef = useRef(false)
   const isEmpty = messages.length === 0
   // First-page bootstrap: wake the sandbox and learn the workspace via the
   // agent-runner's /api/health (drives the waking/ready toasts in client.js).
   useEffect(() => { fetchHealth() }, [fetchHealth])
+  useEffect(() => {
+    setRenamingSessionTitle(false)
+    setSessionTitleDraft('')
+    sessionTitleHandledRef.current = false
+  }, [sessionId])
   // cwd comes entirely from the agent-runner: the active session's cwd, else the
   // /api/health workspace. Empty until one resolves — CwdIndicator then shows '~'.
   const activeCwd = activeSidebarSession?.cwd || agentWorkspace || ''
@@ -384,6 +394,41 @@ export default function ChatPanel() {
       closePane(activePaneId)
     }
   }
+  const startSessionTitleRename = () => {
+    if (!sessionId) return
+    sessionTitleHandledRef.current = false
+    setSessionTitleDraft(sessionTitle)
+    setRenamingSessionTitle(true)
+  }
+  const cancelSessionTitleRename = () => {
+    sessionTitleHandledRef.current = true
+    setRenamingSessionTitle(false)
+    setSessionTitleDraft('')
+  }
+  const commitSessionTitleRename = async () => {
+    if (!sessionId || sessionTitleHandledRef.current) return
+    sessionTitleHandledRef.current = true
+    const trimmed = sessionTitleDraft.trim()
+    setRenamingSessionTitle(false)
+    setSessionTitleDraft('')
+    if (!trimmed || trimmed === sessionTitle) return
+    try {
+      await apiRenameSession(sessionId, trimmed)
+      useSidebarStore.setState((state) => ({
+        sessions: state.sessions.map((row) => (
+          row.id === sessionId || row.sessionId === sessionId
+            ? { ...row, name: trimmed, customTitle: trimmed }
+            : row
+        )),
+      }))
+    } catch (err) {
+      showConfirmDialog({
+        title: t('sidebar.renameFailed'),
+        message: String(err?.message || err),
+        confirmLabel: t('confirm.ok'),
+      })
+    }
+  }
   // The chat header is a permanent fixture — rendered in both the empty/welcome
   // state and the active conversation. The session name is simply empty when no
   // session is active.
@@ -396,14 +441,63 @@ export default function ChatPanel() {
         background: 'var(--bg-surface)',
       }}
     >
-      <div className="flex items-center gap-1 min-w-0" style={{ marginRight: 12 }}>
-        <span
-          className="truncate"
-          style={{ color: 'var(--text-secondary)', fontSize: 13, minWidth: 0 }}
-          title={sessionTitle}
-        >
-          {sessionTitle}
-        </span>
+      <div className="flex flex-1 items-center gap-1 min-w-0" style={{ marginRight: 12 }}>
+        {renamingSessionTitle ? (
+          <input
+            type="text"
+            autoFocus
+            aria-label={t('sidebar.rename')}
+            value={sessionTitleDraft}
+            onChange={(event) => setSessionTitleDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commitSessionTitleRename()
+              } else if (event.key === 'Escape') {
+                event.preventDefault()
+                cancelSessionTitleRename()
+              }
+            }}
+            onBlur={commitSessionTitleRename}
+            className="flex-1 min-w-0"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border)',
+              borderRadius: 2,
+              color: 'var(--text-primary)',
+              outline: 'none',
+              fontSize: 13,
+              padding: '2px 4px',
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            disabled={!sessionId}
+            className="flex-1 min-w-0 truncate"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-secondary)',
+              cursor: sessionId ? 'pointer' : 'default',
+              fontSize: 13,
+              minWidth: 0,
+              padding: 0,
+              textAlign: 'left',
+              transition: 'color 150ms ease',
+            }}
+            title={sessionId ? `${sessionTitle}\n${t('sidebar.rename')}` : sessionTitle}
+            onClick={startSessionTitleRename}
+            onMouseEnter={(event) => {
+              if (sessionId) event.currentTarget.style.color = 'var(--text-primary)'
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.color = 'var(--text-secondary)'
+            }}
+          >
+            {sessionTitle}
+          </button>
+        )}
         {sessionId && (
           <span className="flex-shrink-0" title={t('sidebar.copySessionId')}>
             <CopyButton content={sessionId} inline />
