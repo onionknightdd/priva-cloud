@@ -19,6 +19,7 @@ import RecentActivities from './RecentActivities'
 import QuickActionChips from './QuickActionChips'
 import RewindBanner from './RewindBanner'
 import SessionRecap from './SessionRecap'
+import TaskProgressCapsule from './TaskProgressCapsule'
 import { getSplitParams, isSplitPane } from '../../utils/splitMode'
 import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 
@@ -606,6 +607,11 @@ export default function ChatPanel() {
           <MessageList />
         </Suspense>
       </MessageListBoundary>
+      <div className="flex-shrink-0" style={{ background: 'var(--bg-base)' }}>
+        <div style={{ maxWidth: 900, width: '80%', margin: '0 auto' }}>
+          <TaskProgressCapsule />
+        </div>
+      </div>
       <SessionRecap />
       <ChatInput cwd={activeCwd} cwdPlacement="below" />
     </div>

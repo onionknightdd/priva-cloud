@@ -23,7 +23,6 @@ import CheckpointToggle from './CheckpointToggle'
 import DirectoryPicker from '../shared/DirectoryPicker'
 import { setSessionAddDirs } from '../../api/sessions'
 import QueuedMessagesStack from './QueuedMessagesStack'
-import TaskProgressCapsule from './TaskProgressCapsule'
 import { buildSelectedXlsxXml } from '../../utils/selectedXlsx'
 import { buildSelectedFileXml } from '../../utils/selectedFile'
 import { popIn, pressTick } from '@shared/motion/waapiMicro'
@@ -863,8 +862,6 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
           entries={queuedUserMessages}
           style={{ marginBottom: 8 }}
         />
-
-        <TaskProgressCapsule />
 
         {lifecyclePendingComposerItems.length > 0 ? (
           lifecyclePendingComposerItems.map(({ key, item, present }) => (
