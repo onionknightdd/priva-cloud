@@ -1,4 +1,4 @@
-import { sandboxRead, getAuthHeaders, fetchWithWake, SANDBOX_BASE } from '@shared/api/client'
+import { sandboxPost, sandboxRead, getAuthHeaders, fetchWithWake, SANDBOX_BASE } from '@shared/api/client'
 import { getToken } from '@shared/api/tokenStore'
 
 function buildFileQuery(path, cacheBustKey = null) {
@@ -12,6 +12,10 @@ function buildFileQuery(path, cacheBustKey = null) {
 // sandboxRead: big directories (node_modules-scale) run well past the ~8KB EPP cap.
 export function listDirectory(path) {
   return sandboxRead(`/files/list?path=${encodeURIComponent(path)}`)
+}
+
+export function createDirectory(directory, name) {
+  return sandboxPost('/files/mkdir', { directory, name })
 }
 
 // sandboxRead: text previews carry up to 1MB of file content in JSON.

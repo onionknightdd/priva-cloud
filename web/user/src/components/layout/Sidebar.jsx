@@ -1436,6 +1436,7 @@ export default function Sidebar() {
         <DirectoryPicker
           open={cwdPickerOpen}
           multiple={false}
+          allowCreate
           title={t('picker.cwdTitle')}
           initialPath={activeCwd || '/'}
           onConfirm={(path) => { setCwdPickerOpen(false); handleNewChatHere(path) }}

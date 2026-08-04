@@ -83,7 +83,13 @@
     "go": "Go",
     "use": "Use",
     "cancel": "Cancel",
-    "selectedCount": "{{count}} selected"
+    "selectedCount": "{{count}} selected",
+    "newFolder": "New folder",
+    "newFolderTitle": "Create folder",
+    "folderNamePlaceholder": "Folder name",
+    "folderNameRequired": "Enter a folder name",
+    "createIn": "Create in {{path}}",
+    "create": "Create"
   },
   "chat": {
     "placeholder": "Use / to select a skill\nUse @ to attach an uploaded file",

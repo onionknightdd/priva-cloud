@@ -794,6 +794,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
       <DirectoryPicker
         open={cwdPickerOpen}
         multiple={false}
+        allowCreate
         title={t('picker.cwdTitle')}
         initialPath={cwd || '/'}
         initialSelected={displayCwd || null}

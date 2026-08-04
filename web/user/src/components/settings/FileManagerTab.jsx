@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Folder, FileText, Download, Upload, ChevronRight, Search, ArrowUp, ArrowDown, Copy, Sparkles } from 'lucide-react'
+import { Folder, FolderPlus, FileText, Download, Upload, ChevronRight, Search, ArrowUp, ArrowDown, Copy, Sparkles } from 'lucide-react'
 import { getFileIcon } from '../../utils/fileIcons'
 import { useTranslation } from 'react-i18next'
 import OptimizePopup from '../shared/OptimizePopup'
@@ -12,6 +12,7 @@ import safeStorage from '@shared/utils/safeStorage'
 import { formatDateTime } from '../../utils/formatTime'
 import DrawIcon from '@shared/components/shared/DrawIcon'
 import FilePreviewRenderer, { detectFileLanguage } from '../shared/FilePreviewRenderer'
+import CreateDirectoryDialog from '../shared/CreateDirectoryDialog'
 
 function formatSize(bytes) {
   if (bytes == null) return ''
@@ -91,6 +92,7 @@ export default function FileManagerTab() {
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const fileInputRef = useRef(null)
+  const [createDirectoryOpen, setCreateDirectoryOpen] = useState(false)
 
   // Resizable file list width (default 50%)
   const [fileListWidth, setFileListWidth] = useState(() => (
@@ -248,6 +250,11 @@ export default function FileManagerTab() {
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
+
+  const handleDirectoryCreated = useCallback(() => {
+    setCreateDirectoryOpen(false)
+    fetchDir(resolvedPath || '~')
+  }, [fetchDir, resolvedPath])
 
   // Text selection detection for "Ask for Priva"
   useEffect(() => {
@@ -442,6 +449,24 @@ export default function FileManagerTab() {
         >
           <Upload size={12} strokeWidth={1.5} />
           <span>{t('settings.fileManagerUpload')}</span>
+        </button>
+        <button
+          className="flex items-center justify-center px-2 py-1 flex-shrink-0"
+          style={{
+            background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+            borderRadius: 4, cursor: resolvedPath ? 'pointer' : 'not-allowed',
+            color: resolvedPath ? 'var(--text-secondary)' : 'var(--text-dim)',
+            transition: 'border-color 150ms ease',
+          }}
+          type="button"
+          onClick={() => { setTooltip(null); setCreateDirectoryOpen(true) }}
+          disabled={!resolvedPath}
+          title={t('picker.newFolder')}
+          aria-label={t('picker.newFolder')}
+          onMouseEnter={(e) => { if (resolvedPath) e.currentTarget.style.borderColor = 'var(--blue)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)' }}
+        >
+          <FolderPlus size={14} strokeWidth={1.5} />
         </button>
 
         <div className="flex-1" />
@@ -759,6 +784,13 @@ export default function FileManagerTab() {
         />,
         document.body
       )}
+
+      <CreateDirectoryDialog
+        open={createDirectoryOpen}
+        parentPath={resolvedPath}
+        onCreated={handleDirectoryCreated}
+        onCancel={() => setCreateDirectoryOpen(false)}
+      />
     </div>
   )
 }

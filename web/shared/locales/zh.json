@@ -83,7 +83,13 @@
     "go": "前往",
     "use": "使用",
     "cancel": "取消",
-    "selectedCount": "已选 {{count}} 个"
+    "selectedCount": "已选 {{count}} 个",
+    "newFolder": "新建文件夹",
+    "newFolderTitle": "新建文件夹",
+    "folderNamePlaceholder": "文件夹名称",
+    "folderNameRequired": "请输入文件夹名称",
+    "createIn": "创建到 {{path}}",
+    "create": "创建"
   },
   "chat": {
     "placeholder": "输入 / 选择技能\n输入 @ 附加已上传文件",

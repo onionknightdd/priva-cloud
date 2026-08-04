@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  X, Folder, FolderOpen, ChevronRight, Check, CornerDownLeft,
+  X, Folder, FolderOpen, FolderPlus, ChevronRight, Check, CornerDownLeft,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { listDirectory } from '../../api/userFiles'
 import useOverlayTransition from '@shared/motion/useOverlayTransition'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import CreateDirectoryDialog from './CreateDirectoryDialog'
 
 // Center-modal directory picker. Lazy-loads directories (dirs only) from the
 // agent-runner FS via listDirectory. Two modes:
@@ -27,6 +28,7 @@ export default function DirectoryPicker({
   open,
   title,
   multiple = false,
+  allowCreate = false,
   initialPath = '/',
   initialSelected = null,
   onConfirm,
@@ -39,6 +41,7 @@ export default function DirectoryPicker({
   const [multi, setMulti] = useState(new Set())
   const [pathInput, setPathInput] = useState('')
   const [pathError, setPathError] = useState(null)
+  const [createParentPath, setCreateParentPath] = useState(null)
 
   const loadDir = useCallback((path) => {
     setCache((c) => (c[path]?.dirs || c[path]?.loading ? c : { ...c, [path]: { loading: true } }))
@@ -65,6 +68,7 @@ export default function DirectoryPicker({
     setMulti(new Set(multiple && Array.isArray(initialSelected) ? initialSelected : []))
     setPathInput('')
     setPathError(null)
+    setCreateParentPath(null)
   }, [open, initialPath, initialSelected, multiple, loadDir])
 
   const toggleExpand = (path) => {
@@ -104,6 +108,19 @@ export default function DirectoryPicker({
   const confirm = () => {
     if (multiple) onConfirm(Array.from(multi))
     else if (single) onConfirm(single)
+  }
+
+  const handleDirectoryCreated = (created) => {
+    const createdPath = created?.path
+    if (!createdPath) {
+      setCreateParentPath(null)
+      return
+    }
+    const chain = chainTo(createdPath)
+    setExpanded((current) => ({ ...current, ...Object.fromEntries(chain.map((path) => [path, true])) }))
+    chain.forEach(loadDir)
+    choose(createdPath)
+    setCreateParentPath(null)
   }
 
   const { mounted, panelRef, backdropRef } = useOverlayTransition({ open, variant: 'scale' })
@@ -211,15 +228,30 @@ export default function DirectoryPicker({
           <span className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 14 }}>
             {title || t('picker.title')}
           </span>
-          <button
-            type="button"
-            onClick={onCancel}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', transition: 'color 150ms ease' }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-          >
-            <X size={16} strokeWidth={1.5} />
-          </button>
+          <div className="flex items-center gap-1">
+            {allowCreate && (
+              <button
+                type="button"
+                onClick={() => setCreateParentPath(single || initialPath || '/')}
+                title={t('picker.newFolder')}
+                aria-label={t('picker.newFolder')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', transition: 'color 150ms ease' }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+              >
+                <FolderPlus size={14} strokeWidth={1.5} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onCancel}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', transition: 'color 150ms ease' }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+            >
+              <X size={16} strokeWidth={1.5} />
+            </button>
+          </div>
         </div>
 
         {/* Path input */}
@@ -293,5 +325,17 @@ export default function DirectoryPicker({
     </div>
   )
 
-  return typeof document === 'undefined' ? modal : createPortal(modal, document.body)
+  const content = (
+    <>
+      {modal}
+      <CreateDirectoryDialog
+        open={Boolean(createParentPath)}
+        parentPath={createParentPath || ''}
+        onCreated={handleDirectoryCreated}
+        onCancel={() => setCreateParentPath(null)}
+      />
+    </>
+  )
+
+  return typeof document === 'undefined' ? content : createPortal(content, document.body)
 }

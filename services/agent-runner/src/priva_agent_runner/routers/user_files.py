@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import mimetypes
 import os
-import shutil
 import stat
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from priva_common.logging import get_app_logger
 from priva_common.models.admin_files import DirectoryListResponse, FileEntry, FilePreviewResponse
@@ -27,6 +27,12 @@ _UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 class _TooLarge(Exception):
     """Internal signal: unwinds to a 413 after the partial file is cleaned up."""
+
+
+class CreateDirectoryRequest(BaseModel):
+    directory: str
+    name: str
+
 
 router = APIRouter(
     prefix="/api/sandbox/files",
@@ -142,6 +148,37 @@ async def list_directory(
     parent = os.path.dirname(real_path) if real_path != "/" else None
 
     return DirectoryListResponse(path=real_path, parent=parent, entries=entries)
+
+
+@router.post("/mkdir", status_code=201)
+async def create_directory(
+    request: CreateDirectoryRequest,
+    user: UserRecord = Depends(require_user),
+):
+    name = request.name.strip()
+    if (
+        not name
+        or name in {".", ".."}
+        or any(separator in name for separator in ("/", "\\", "\x00"))
+    ):
+        raise HTTPException(400, "Directory name must be a single path segment")
+
+    real_dir = _canonicalize(request.directory, base=get_user_workspace(user))
+    if not os.path.isdir(real_dir):
+        raise HTTPException(400, f"Not a directory: {real_dir}")
+
+    target_path = os.path.join(real_dir, name)
+    try:
+        os.mkdir(target_path)
+    except FileExistsError:
+        raise HTTPException(409, f"Path already exists: {name}")
+    except PermissionError:
+        raise HTTPException(403, f"Access denied: {real_dir}")
+    except OSError as error:
+        raise HTTPException(400, f"Could not create directory: {error.strerror or error}")
+
+    logger.info("User {} created directory: {}", user.username, target_path)
+    return {"path": target_path, "name": name}
 
 
 @router.get("/download")
