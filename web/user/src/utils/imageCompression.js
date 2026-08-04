@@ -1,21 +1,80 @@
 const MAX_DIMENSION = 2048
 const QUALITY_LADDER = [0.8, 0.65, 0.5, 0.35]
 const MAX_SCALE_STEPS = 2
+const DEFAULT_MAX_BYTES = 5 * 1024 * 1024
+
+const INPUT_IMAGE_MEDIA_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml',
+  'image/bmp',
+])
+
+const MEDIA_TYPE_ALIASES = new Map([
+  ['image/jpg', 'image/jpeg'],
+  ['image/svg', 'image/svg+xml'],
+  ['image/x-bmp', 'image/bmp'],
+  ['image/x-ms-bmp', 'image/bmp'],
+  ['image/x-windows-bmp', 'image/bmp'],
+])
+
+const EXTENSION_MEDIA_TYPES = new Map([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.webp', 'image/webp'],
+  ['.svg', 'image/svg+xml'],
+  ['.bmp', 'image/bmp'],
+])
+
+const RASTERIZE_TO_PNG_TYPES = new Set(['image/svg+xml', 'image/bmp'])
+
+function normalizedMediaType(raw) {
+  const value = String(raw || '').trim().toLowerCase()
+  return MEDIA_TYPE_ALIASES.get(value) || value
+}
+
+export function resolveImageMediaType(file) {
+  const declared = normalizedMediaType(file?.type)
+  if (INPUT_IMAGE_MEDIA_TYPES.has(declared)) return declared
+
+  const name = String(file?.name || '').toLowerCase()
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 ? (EXTENSION_MEDIA_TYPES.get(name.slice(dot)) || null) : null
+}
+
+export function isSupportedImageFile(file) {
+  return resolveImageMediaType(file) !== null
+}
+
+export function requiresImageRasterization(file) {
+  return RASTERIZE_TO_PNG_TYPES.has(resolveImageMediaType(file))
+}
 
 /**
  * Process an image file: read as base64, compress if over maxBytes.
  * @param {File} file
- * @param {number} maxBytes - max decoded size in bytes (default 3MB)
+ * @param {number} maxBytes - max decoded size in bytes (default 5 MiB)
  * @returns {Promise<{base64: string, mediaType: string, finalSize: number}>}
  */
-export async function processImage(file, maxBytes = 3 * 1024 * 1024) {
+export async function processImage(file, maxBytes = DEFAULT_MAX_BYTES) {
+  const mediaType = resolveImageMediaType(file)
+  if (!mediaType) throw new Error('Unsupported image type')
+
+  // Claude accepts PNG/JPEG/GIF/WebP image blocks. SVG and BMP are supported
+  // by rasterizing them to PNG in-browser before the multimodal request.
+  const mustRasterize = RASTERIZE_TO_PNG_TYPES.has(mediaType)
+
   // Fast path: small enough already — no pixel decode at all.
-  if (file.size <= maxBytes) {
+  if (!mustRasterize && file.size <= maxBytes) {
     const base64 = await blobToBase64(file)
-    return { base64, mediaType: file.type, finalSize: Math.floor(base64.length * 3 / 4) }
+    return { base64, mediaType, finalSize: file.size }
   }
 
-  return compressImage(file, maxBytes, file.type)
+  return compressImage(file, maxBytes, mediaType, mustRasterize ? 'image/png' : null)
 }
 
 function blobToBase64(blob) {
@@ -82,9 +141,11 @@ async function probeDimensions(file) {
   return null
 }
 
-async function compressImage(file, maxBytes, mimeType) {
-  // PNG can't be quality-compressed, convert to JPEG
-  const outputType = mimeType === 'image/png' ? 'image/jpeg' : mimeType
+async function compressImage(file, maxBytes, mimeType, forcedOutputType) {
+  // Preserve SVG/BMP rasterization as PNG; oversized native PNG becomes JPEG.
+  // Canvas cannot encode animated GIF, so an oversized GIF becomes a PNG first frame.
+  const outputType = forcedOutputType
+    || (mimeType === 'image/png' ? 'image/jpeg' : mimeType === 'image/gif' ? 'image/png' : mimeType)
 
   let source = null
   const canvas = document.createElement('canvas')

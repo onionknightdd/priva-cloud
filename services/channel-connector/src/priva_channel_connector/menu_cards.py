@@ -88,7 +88,7 @@ def _footer(max_images: int, max_image_bytes: int) -> dict:
 
 
 def welcome_card(*, open_id: str, chat_type: str = "p2p", union_id: str = "",
-                 max_images: int = 5, max_image_bytes: int = 3 * 1024 * 1024) -> dict:
+                 max_images: int = 5, max_image_bytes: int = 5 * 1024 * 1024) -> dict:
     """`/link` 绑定成功的回执卡。"""
     return _card("✅ 绑定成功", "green", [
         _md("你已成为该机器人的所有者，直接发消息即可对话。以下是特殊指令："),
@@ -102,7 +102,7 @@ def welcome_card(*, open_id: str, chat_type: str = "p2p", union_id: str = "",
 
 
 def help_card(*, open_id: str, chat_type: str = "p2p", union_id: str = "",
-              max_images: int = 5, max_image_bytes: int = 3 * 1024 * 1024) -> dict:
+              max_images: int = 5, max_image_bytes: int = 5 * 1024 * 1024) -> dict:
     """`/help` 唤起的使用指南卡（使用中唤起 → 保留完整指令集）。"""
     return _card("🤖 使用指南", "blue", [
         _md("直接发消息即可对话。以下是特殊指令："),

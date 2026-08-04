@@ -61,9 +61,9 @@ _EMOJI_DONE = "CheckMark"
 _EMOJI_ERROR = "CrossMark"
 
 # Inbound image caps mirror the runner's own validator (routers/agent.py): >5 images or
-# >3MB decoded would 400/413 the whole dial, so enforce here and note what was skipped.
+# >5 MiB decoded would 400/413 the whole dial, so enforce here and note what was skipped.
 _MAX_IMAGES = 5
-_MAX_IMAGE_BYTES = 3 * 1024 * 1024
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 # Image-only DM: AgentRunRequest.message requires non-empty text (same fallback role as
 # the web SPA's 'Describe the uploaded image(s).', user-ruled Chinese for the DM channel).
 _IMAGE_FALLBACK_PROMPT = "请描述图片内容。"

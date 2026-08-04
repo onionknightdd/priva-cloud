@@ -40,7 +40,7 @@ lark_oapi WS 长连接（Model B：**连接 == 账号**，用户自建应用）�
 - 字节经 `GET /im/v1/messages/{mid}/resources/{key}?type=image` 拉取
   （**需应用开通 `im:resource` 权限**），魔数嗅探 PNG/JPEG/GIF/WEBP（恰好是
   runner 白名单）。
-- worker 编排：≤5 张、单张解码后 ≤3MB（与 runner 校验一致），超限/失败以中文
+- worker 编排：≤5 张、单张解码后 ≤5MB（与 runner 校验一致），超限/失败以中文
   附注折进 prompt，不阻断 run；纯图片消息兜底文案 **"请描述图片内容。"**
 - 透传 `AgentRunRequest.images` —— 与 web SPA 完全同一条 lane，runner 侧
   校验/vision-model/content blocks 零改动。
@@ -264,7 +264,7 @@ CP 只读接口：`GET /api/auth/me/feishu-sessions`（激活在前、按时间�
 │ `/help`  查看使用指南                        │
 │                                            │
 │ 所有指令的输出不会出现在对话的上下文中。       │
-│ 📷 支持直接发送图片：最多 5 张，单张 ≤ 3MB    │
+│ 📷 支持直接发送图片：最多 5 张，单张 ≤ 5MB    │
 │ 访问模式与会话管理请前往网页控制台 · 飞书设置  │
 ├────────────────────────────────────────────┤
 │ [🆕 开始新对话]                             │

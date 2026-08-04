@@ -37,7 +37,7 @@ export async function listUploadedFiles(date) {
   return sandboxRead(`/agent-attachments/${query}`)
 }
 
-// cp-proxy: attachment bodies run up to 3MB — far past the ~8KB EPP response cap.
+// cp-proxy: attachment bodies run up to 5MB — far past the ~8KB EPP response cap.
 export async function downloadFile(uuid) {
   const init = { headers: { ...getAuthHeaders() } }
   let res

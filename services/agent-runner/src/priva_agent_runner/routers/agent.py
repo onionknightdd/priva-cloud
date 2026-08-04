@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import re
 from pathlib import Path
@@ -76,8 +78,10 @@ from priva_common.metrics import AGENT_RUNS_FINISHED, AGENT_RUNS_STARTED
 import os
 
 
+# Claude-native image block types. The web client rasterizes SVG/BMP to PNG
+# before this boundary because the provider does not accept those MIME types.
 _ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
-_MAX_IMAGE_SIZE = 3 * 1024 * 1024  # 3MB decoded
+_MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MiB decoded
 _MAX_IMAGES = 5
 
 
@@ -170,8 +174,10 @@ def _validate_images(images: list[ImageItem] | None) -> list[dict] | None:
     for img in images:
         if img.media_type not in _ALLOWED_IMAGE_TYPES:
             raise HTTPException(400, f"Unsupported image type: {img.media_type}")
-        # base64 is ~4/3 of original, estimate decoded size
-        decoded_size = len(img.data) * 3 // 4
+        try:
+            decoded_size = len(base64.b64decode(img.data, validate=True))
+        except (binascii.Error, ValueError):
+            raise HTTPException(400, "Invalid base64 image data") from None
         if decoded_size > _MAX_IMAGE_SIZE:
             raise HTTPException(413, f"Image exceeds {_MAX_IMAGE_SIZE // (1024*1024)}MB limit")
         validated.append({"data": img.data, "media_type": img.media_type})

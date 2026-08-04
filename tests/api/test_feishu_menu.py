@@ -66,7 +66,7 @@ def _value(button):
 # --- 渲染 -------------------------------------------------------------------
 def test_welcome_card_shape():
     card = menu_cards.welcome_card(open_id="ou_x", union_id="on_x", max_images=5,
-                                   max_image_bytes=3 * 1024 * 1024)
+                                   max_image_bytes=5 * 1024 * 1024)
     assert card["schema"] == "2.0"
     assert card["header"]["template"] == "green" and "绑定成功" in card["header"]["title"]["content"]
     # 欢迎卡只带 🆕（裁定 2026-07-24：刚绑定，clear/compact 无意义）
@@ -74,7 +74,7 @@ def test_welcome_card_shape():
     assert len(btns) == 1
     assert _value(btns[0]) == {"act": "menu", "cmd": "/new", "uid": "ou_x", "ct": "p2p", "un": "on_x"}
     body = " ".join(e.get("content", "") for e in card["body"]["elements"])
-    assert "/help" in body and "5 张" in body and "3MB" in body
+    assert "/help" in body and "5 张" in body and "5MB" in body
     assert "/clear" not in body and "/compact" not in body
     # 与使用指南卡同一套文案：无别名、同一句上下文说明
     assert "以下是特殊指令" in body and "不会出现在对话的上下文中" in body
@@ -91,6 +91,7 @@ def test_help_card_shape():
     assert "/compact" in body and "所有者" not in body   # 指南卡不含所有者行
     assert "会话 id" in body                             # /info 说明已更新
     assert "不会出现在对话的上下文中" in body            # 实测：/context 不累积进会话
+    assert "5MB" in body
 
 
 # --- /link 回执 -------------------------------------------------------------

@@ -26,7 +26,7 @@ curl -X POST /api/files/upload \
 **请求**：`multipart/form-data`，字段名为 `file`。
 
 **限制**：
-- 单个文件最大 3MB
+- 单个文件最大 5MB
 - 支持格式：docx、xlsx、pptx、pdf、txt、csv、json、md、py、js、ts、jpg、png、gif、webp 等
 
 **响应**：

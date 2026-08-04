@@ -189,7 +189,7 @@ def test_oversize_image_skipped_with_note():
         {"k-big": (big, "image/jpeg"), "k-ok": (_PNG, "image/png")})
     call = dialer.calls[0]
     assert [i["media_type"] for i in call["images"]] == ["image/png"]
-    assert "看看" in call["prompt"] and "3MB" in call["prompt"]
+    assert "看看" in call["prompt"] and "5MB" in call["prompt"]
 
 
 def test_more_than_five_images_capped():

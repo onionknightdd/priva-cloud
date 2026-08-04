@@ -7,7 +7,7 @@ import useSkillsStore, { flattenSkillsForPicker } from '../../stores/skillsStore
 import { NATIVE_COMMANDS } from '../../constants/nativeCommands'
 import { uploadFile, deleteUploadedFile, listUploadedFiles } from '../../api/files'
 import { listDirectory } from '../../api/userFiles'
-import { processImage } from '../../utils/imageCompression'
+import { processImage, resolveImageMediaType } from '../../utils/imageCompression'
 import SkillPicker, { getFilteredSkills } from '../chat/SkillPicker'
 import FilePicker, { getFilteredFiles } from '../chat/FilePicker'
 import useOverlayTransition from '@shared/motion/useOverlayTransition'
@@ -31,12 +31,7 @@ const ALLOWED_EXTENSIONS = new Set([
   '.env', '.dockerfile',
 ])
 
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
 const EXPAND_BUTTON_GUTTER = 40
-
-function isImageFile(name) {
-  return IMAGE_EXTENSIONS.has(getFileExtension(name))
-}
 
 function getFileExtension(name) {
   const idx = name.lastIndexOf('.')
@@ -546,14 +541,19 @@ export default function PromptComposer({
       const file = files[i]
 
       // Image files: process client-side as base64
-      if (isImageFile(file.name) || file.type.startsWith('image/')) {
+      const imageMediaType = resolveImageMediaType(file)
+      if (imageMediaType || file.type.startsWith('image/')) {
+        if (!imageMediaType) {
+          addFileWarning(`${t('chat.unsupportedType')}: "${file.name}"`)
+          continue
+        }
         if (file.size > MAX_FILE_SIZE * 2) {
           addFileWarning(`${t('chat.imageTooLarge')}: "${file.name}"`)
           continue
         }
         const id = `img-${Date.now()}-${i}`
         const previewUrl = URL.createObjectURL(file)
-        addAttachment({ id, name: file.name, size: file.size, status: 'processing', isImage: true, mediaType: file.type, previewUrl })
+        addAttachment({ id, name: file.name, size: file.size, status: 'processing', isImage: true, mediaType: imageMediaType, previewUrl })
         try {
           const { base64, mediaType, finalSize } = await processImage(file, MAX_FILE_SIZE)
           updateAttachment(id, { status: 'done', base64Data: base64, mediaType, size: finalSize })

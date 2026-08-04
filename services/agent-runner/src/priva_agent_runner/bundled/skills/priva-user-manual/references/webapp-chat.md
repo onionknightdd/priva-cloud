@@ -88,10 +88,10 @@
 - 图片自动压缩处理
 
 **限制：**
-- 单个文件最大 3MB
+- 单个文件最大 5MB
 - 单次最多 5 个文件
 - 支持格式：docx、xlsx、pptx、pdf、txt、csv、json、md、py、js、ts、html、css、sh、sql 等代码文件
-- 图片格式：png、jpg、jpeg、gif、webp
+- 图片格式：png、jpg、jpeg、gif、webp、svg、bmp（svg/bmp 发送前会转为 png）
 
 **上传后：**
 - **普通文件**：显示为带左侧青色边框的标签，包含文件名、大小和 × 移除按钮
