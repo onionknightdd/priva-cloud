@@ -306,6 +306,7 @@ export function transformSessionMessages(sdkMessages) {
       const outputBlocks = []
       const replayMetadata = getAssistantReplayMetadata(msg)
       let hasSdkTaskActivity = false
+      let hiddenQuestionCount = 0
 
       for (const block of rawBlocks) {
         if (block.type === 'thinking') {
@@ -418,7 +419,21 @@ export function transformSessionMessages(sdkMessages) {
           // status === 'answered'. Null (declined / no recorded answer) ->
           // stays hidden, matching prior behaviour.
           const answered = buildAnsweredAskUserBlock(block, result)
-          if (answered) outputBlocks.push(answered)
+          if (answered) {
+            outputBlocks.push(answered)
+          } else {
+            const questions = block.input?.questions
+            hiddenQuestionCount += Array.isArray(questions) && questions.length > 0
+              ? questions.length
+              : 1
+          }
+          continue
+        }
+
+        // ExitPlanMode is represented by an interactive plan-approval prompt
+        // live, but the tool itself is hidden from the transcript UI.
+        if (block.name === 'ExitPlanMode') {
+          hiddenQuestionCount += 1
           continue
         }
 
@@ -439,6 +454,9 @@ export function transformSessionMessages(sdkMessages) {
       if (prev && prev.role === 'assistant') {
         prev.content = [...prev.content, ...outputBlocks]
         if (hasSdkTaskActivity) prev.hasSdkTaskActivity = true
+        if (hiddenQuestionCount > 0) {
+          prev.summaryQuestionCount = (Number(prev.summaryQuestionCount) || 0) + hiddenQuestionCount
+        }
         const { timestamp, ...restMetadata } = replayMetadata
         Object.assign(prev, restMetadata)
         if (prev.timestamp == null && timestamp != null) prev.timestamp = timestamp
@@ -447,6 +465,7 @@ export function transformSessionMessages(sdkMessages) {
           role: 'assistant',
           content: outputBlocks,
           ...(hasSdkTaskActivity ? { hasSdkTaskActivity: true } : {}),
+          ...(hiddenQuestionCount > 0 ? { summaryQuestionCount: hiddenQuestionCount } : {}),
           ...replayMetadata,
         })
       }

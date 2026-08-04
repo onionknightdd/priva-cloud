@@ -33,6 +33,11 @@ import { parseSelectedXlsx } from '../../utils/selectedXlsx'
 import { parseSelectedFile } from '../../utils/selectedFile'
 import DrawIcon from '@shared/components/shared/DrawIcon'
 import { isSdkTaskToolName } from '../../utils/sdkTaskTracker'
+import {
+  findFinalResultBlockIndexes,
+  resultTextFromBlocks,
+  summarizeResponseExecution,
+} from '../../utils/responseSummary'
 
 const ASSISTANT_MESSAGE_GAP = 6
 const ASSISTANT_META_MARGIN_TOP = -6
@@ -1052,6 +1057,7 @@ function getToolSectionKey(run, startIndex) {
 export default memo(function MessageBubble({
   message,
   isStreaming: streamingProp,
+  responseStreaming = false,
   isLatestAssistantMessage = false,
   latestAssistantRefreshKey = 0,
   onSendAnswer,
@@ -1087,7 +1093,10 @@ export default memo(function MessageBubble({
   const textContent = textBlocks.map((b) => b.text).join('\n').replace(/<think>[\s\S]*?<\/think>/g, '').trim()
 
   const askUserBlocks = contentBlocks.filter((b) => b.type === 'ask_user')
-  const hasContent = Boolean(textContent && textContent.trim())
+  const hasContent = Boolean(
+    (textContent && textContent.trim())
+    || (!isUser && typeof message.resultText === 'string' && message.resultText.trim()),
+  )
   const hasTools = toolBlocks.length > 0 || canvasRefBlocks.length > 0 || fileRefBlocks.length > 0 || askUserBlocks.length > 0
   const hasThinkingContent = !isUser && contentHasThinking(contentBlocks)
   const hasUserReferenceContent = isUser && (
@@ -1100,6 +1109,7 @@ export default memo(function MessageBubble({
   const isErrorMessage = !isUser && (message.is_synthetic === true || message.error === true)
   const hasCollapsibleToolSection = !isUser && contentBlocks.some(isCollapsibleToolBlock)
   const [collapsedToolSections, setCollapsedToolSections] = useState({})
+  const [processExpanded, setProcessExpanded] = useState(false)
   const [lightboxImage, setLightboxImage] = useState(null)
 
   const personalSkills = useSkillsStore((s) => s.personal)
@@ -1111,6 +1121,7 @@ export default memo(function MessageBubble({
     [personalSkills, skillGroups]
   )
   const fileOps = useFileOpsStore((s) => s.fileOps)
+  const subagentContent = useChatStore((s) => s.subagentContent)
   const latestTodoWriteId = useTaskStore((s) => s.todoWriteInfo?.tool_use_id || null)
 
   useEffect(() => {
@@ -1126,6 +1137,35 @@ export default memo(function MessageBubble({
   const tooltipSetAtRef = useRef(0)
 
   const hasMetadata = Boolean(message.duration || message.inputTokens != null || message.agentLoops != null)
+  const finalResultIndexes = findFinalResultBlockIndexes(contentBlocks, message.resultText)
+  const finalResultIndexSet = new Set(finalResultIndexes)
+  const streamedResultText = typeof message.resultText === 'string' && message.resultText.trim()
+    ? resultTextFromBlocks([{ type: 'text', text: message.resultText }], [0])
+    : ''
+  const finalResultText = streamedResultText || resultTextFromBlocks(contentBlocks, finalResultIndexes)
+  const hasCompletedResult = message.resultReceived === true || message.duration != null
+  const canCollapseResponse = !isUser
+    && !isStreaming
+    && !responseStreaming
+    && !message.responseInterrupted
+    && message.resultIsError !== true
+    && !isErrorMessage
+    && hasCompletedResult
+    && Boolean(finalResultText)
+  const executionSummary = summarizeResponseExecution({
+    contentBlocks,
+    subagentContent,
+    fileOps,
+    durationMs: message.duration,
+    additionalQuestionCount: message.summaryQuestionCount,
+  })
+  const executionSummaryText = t('chat.executionSummary', {
+    duration: executionSummary.duration,
+    readFiles: executionSummary.readFiles,
+    editedFiles: executionSummary.editedFiles,
+    commands: executionSummary.commands,
+    questions: executionSummary.questions,
+  })
   const shouldHideBubble = !isUser && !hasContent && !hasTools && !hasThinkingContent
     && !isStreaming && (!hasMetadata || hadSdkTaskActivity)
 
@@ -1421,6 +1461,7 @@ export default memo(function MessageBubble({
   }
 
   const renderedContent = []
+  const renderedProcessContent = []
   for (let i = 0; i < contentBlocks.length; i++) {
     const block = contentBlocks[i]
     if (isCollapsibleToolBlock(block)) {
@@ -1442,7 +1483,7 @@ export default memo(function MessageBubble({
       const sectionKey = getToolSectionKey(run, runStartIndex)
       const isCollapsed = collapsedToolSections[sectionKey] ?? !isStreaming
 
-      renderedContent.push(
+      const renderedToolRun = (
         <ToolRunSection
           key={`tool-run-${sectionKey}`}
           collapsed={isCollapsed}
@@ -1457,11 +1498,33 @@ export default memo(function MessageBubble({
           getChildKey={(toolBlock, runIndex) => `tree-child-${toolBlock.id || runStartIndex + runIndex}`}
         />
       )
+      renderedContent.push(renderedToolRun)
+      renderedProcessContent.push(renderedToolRun)
       continue
     }
 
     const rendered = renderBlock(block, i)
-    if (rendered) renderedContent.push(rendered)
+    if (rendered) {
+      renderedContent.push(rendered)
+      if (!finalResultIndexSet.has(i)) renderedProcessContent.push(rendered)
+    }
+
+    // Legacy transcripts can embed <think> tags inside the same text block as
+    // the final answer. Keep those thoughts available when the process row is
+    // expanded, while the result itself remains clean markdown.
+    if (finalResultIndexSet.has(i) && block.type === 'text') {
+      const segments = parseThinkTags(block.text || '')
+      segments?.forEach((segment, segmentIndex) => {
+        if (segment.type !== 'thinking') return
+        renderedProcessContent.push(
+          <ThinkingBlock
+            key={`result-thinking-${i}-${segmentIndex}`}
+            content={segment.content}
+            t={t}
+          />
+        )
+      })
+    }
   }
 
   const hasMessageHeader = (!isUser && isStreaming && message.timestamp) || (isStreaming && !isUser) || message.error
@@ -1541,7 +1604,44 @@ export default memo(function MessageBubble({
         {isErrorMessage && <ErrorBlock message={message} />}
 
         {/* Content blocks — render in order for continuity */}
-        {!isErrorMessage && renderedContent}
+        {!isErrorMessage && (canCollapseResponse ? (
+          <>
+            <button
+              type="button"
+              aria-expanded={processExpanded}
+              title={executionSummaryText}
+              onClick={() => setProcessExpanded((expanded) => !expanded)}
+              style={{
+                display: 'block',
+                width: '100%',
+                minWidth: 0,
+                padding: 0,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--text-dim)',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 300,
+                lineHeight: '18px',
+                outline: 'none',
+                overflow: 'hidden',
+                textAlign: 'left',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                transition: 'color 150ms ease',
+              }}
+              onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--text-secondary)' }}
+              onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--text-dim)' }}
+              onFocus={(event) => { event.currentTarget.style.color = 'var(--text-secondary)' }}
+              onBlur={(event) => { event.currentTarget.style.color = 'var(--text-dim)' }}
+            >
+              {executionSummaryText}
+            </button>
+            <div aria-hidden="true" style={{ width: '100%', borderTop: '1px solid var(--border-subtle)' }} />
+            {processExpanded && renderedProcessContent}
+            <MarkdownRenderer content={finalResultText} mermaidCollapsible />
+          </>
+        ) : renderedContent)}
         {/* Empty response fallback */}
         {!isUser && !isStreaming && !hasContent && !hasTools && hasMetadata && !isErrorMessage && (
           <span className="text-xs" style={{ color: 'var(--text-dim)', fontStyle: 'italic' }}>
@@ -1562,7 +1662,7 @@ export default memo(function MessageBubble({
         {/* Action bar — copy on every message, plus rewind/fork/stats for assistant */}
         {!isStreaming && (hasContent || hasMetadata) && (
           <MessageActions
-            textContent={textContent}
+            textContent={canCollapseResponse ? finalResultText : textContent}
             message={message}
             assistantIndex={assistantIndex}
             onRewind={onRewind}

@@ -154,6 +154,10 @@ export default function MessageList() {
     const latestAssistantChatIndex = lastAssistantIndex === -1
       ? -1
       : chatMessages.length - 1 - lastAssistantIndex
+    const lastUserIndex = [...chatMessages].reverse().findIndex((e) => e.msg.role === 'user')
+    const activeUserChatIndex = lastUserIndex === -1
+      ? -1
+      : chatMessages.length - 1 - lastUserIndex
 
     // Build render list: interleave compact boundaries at correct positions
     const items = []
@@ -177,6 +181,7 @@ export default function MessageList() {
           originalIndex: entry.originalIndex,
           isLastAssistant: isStreaming && entry.msg.role === 'assistant' && ci === chatMessages.length - 1,
           isLatestAssistantMessage: entry.msg.role === 'assistant' && ci === latestAssistantChatIndex,
+          responseStreaming: isStreaming && ci > activeUserChatIndex,
         })
       }
     }
@@ -397,6 +402,7 @@ export default function MessageList() {
                   <MessageBubble
                     message={item.msg}
                     isStreaming={item.isLastAssistant}
+                    responseStreaming={item.responseStreaming}
                     isLatestAssistantMessage={item.isLatestAssistantMessage}
                     latestAssistantRefreshKey={messages.length}
                     onSendAnswer={sendAnswer}

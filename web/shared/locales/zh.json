@@ -100,6 +100,7 @@
     "thinking": "思考中...",
     "thoughtComplete": "已思考",
     "thoughtFor": "已思考 {{duration}}",
+    "executionSummary": "已执行 {{duration}}，读取了{{readFiles}}个文件，编辑了{{editedFiles}}个文件，运行了{{commands}}条命令，提出了{{questions}}个问题",
     "session": "会话",
     "addDirs": "目录",
     "addDirsCount": "目录 ({{count}})",

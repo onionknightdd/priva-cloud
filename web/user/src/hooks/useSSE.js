@@ -93,6 +93,27 @@ function recomputeActiveStatus() {
   }
 }
 
+function markCurrentResponseInterrupted(chatSlice) {
+  chatSlice.setState((state) => {
+    let lastUserIndex = -1
+    for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+      if (state.messages[index]?.role === 'user') {
+        lastUserIndex = index
+        break
+      }
+    }
+    let changed = false
+    const messages = state.messages.map((message, index) => {
+      if (index <= lastUserIndex || message?.role !== 'assistant' || message.responseInterrupted) {
+        return message
+      }
+      changed = true
+      return { ...message, responseInterrupted: true }
+    })
+    return changed ? { messages } : {}
+  })
+}
+
 /**
  * Stop ONE session's stream (by runtime key or session id): abort the
  * transport, mark that runtime's in-flight tools/tasks/workflows aborted,
@@ -114,6 +135,7 @@ export function stopSessionStream(sessionIdOrKey, options = {}) {
   if (streamAbort) {
     streamAbort()
     abortRunningTools()
+    markCurrentResponseInterrupted(chatSlice)
     getSlice(key, 'tasks').getState().abortRunningTasks()
     getSlice(key, 'workflow').getState().abortRunning()
     setStreaming(false)
@@ -330,6 +352,34 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     }
   }
 
+  const recordSummaryQuestionRequest = (requestId, count = 1) => {
+    const currentMsgs = S.chat().messages
+    let assistantIndex = -1
+    for (let index = currentMsgs.length - 1; index >= 0; index -= 1) {
+      if (currentMsgs[index]?.role === 'assistant') {
+        assistantIndex = index
+        break
+      }
+      if (currentMsgs[index]?.role === 'user') break
+    }
+    if (assistantIndex < 0) return
+
+    const requestKey = String(requestId || `question-${Date.now()}`)
+    const message = currentMsgs[assistantIndex]
+    const seen = Array.isArray(message.summaryQuestionRequestIds)
+      ? message.summaryQuestionRequestIds
+      : []
+    if (seen.includes(requestKey)) return
+
+    const messages = [...currentMsgs]
+    messages[assistantIndex] = {
+      ...message,
+      summaryQuestionRequestIds: [...seen, requestKey],
+      summaryQuestionCount: (Number(message.summaryQuestionCount) || 0) + Math.max(1, Number(count) || 1),
+    }
+    S.chatSet({ messages })
+  }
+
   const openToolFileInBrowser = (block, options = {}) => {
     const tab = fileTabFromToolUse(block, FILE_SOURCE_CURRENT)
     if (!tab) return false
@@ -528,6 +578,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         // ExitPlanMode → show plan approval card
         if (data.tool_name === 'ExitPlanMode') {
           if (S.chat().pendingPlanApproval?.requestId === data.request_id) break
+          recordSummaryQuestionRequest(data.request_id, 1)
           const planContent = data.input?.plan || data.input?.content || ''
           const planFilePath = uiRead('planFilePath')
           S.chat().setPendingPlanApproval({
@@ -580,6 +631,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         const alreadyPending = pendingPermission?.request_id === data.request_id
           || permissionQueue.some((p) => p.request_id === data.request_id)
         if (alreadyPending) break
+        recordSummaryQuestionRequest(data.request_id, 1)
         if (pendingPermission) {
           queuePermission(data)
         } else {
@@ -1201,12 +1253,19 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         const finalMsgs = [...S.chat().messages]
         const finalIdx = finalMsgs.length - 1
         if (finalMsgs[finalIdx]?.role === 'assistant') {
+          const serverDuration = Number(data.duration_ms)
           finalMsgs[finalIdx] = {
             ...finalMsgs[finalIdx],
-            duration: Date.now() - streamStartTime,
+            duration: Number.isFinite(serverDuration) && serverDuration >= 0
+              ? serverDuration
+              : Date.now() - streamStartTime,
             inputTokens: data.usage?.input_tokens,
             outputTokens: data.usage?.output_tokens,
             agentLoops: data.num_turns,
+            resultReceived: true,
+            resultText: typeof data.result === 'string' ? data.result : null,
+            resultIsError: data.is_error === true,
+            resultSubtype: data.subtype || null,
           }
           S.chatSet({ messages: finalMsgs })
         }
@@ -1607,6 +1666,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
             ],
           })
         }
+        markCurrentResponseInterrupted(getSlice(rt.key, 'chat'))
         statusStore().setStatus(rt.key, terminalStatusFor(rt.key))
         pushToast({
           level: data.api_error_status === 429 ? 'warning' : 'error',
@@ -1641,6 +1701,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
             ],
           })
         }
+        markCurrentResponseInterrupted(getSlice(rt.key, 'chat'))
         statusStore().setStatus(rt.key, terminalStatusFor(rt.key))
         pushToast({
           level: data.api_error_status === 429 ? 'warning' : 'error',
@@ -1687,6 +1748,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
             ],
           })
         }
+        markCurrentResponseInterrupted(getSlice(rt.key, 'chat'))
         statusStore().setStatus(rt.key, terminalStatusFor(rt.key))
         pushToast({
           level: 'error',
