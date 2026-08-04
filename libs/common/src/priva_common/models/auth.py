@@ -175,8 +175,8 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=8)
     display_name: str | None = Field(default=None, max_length=128)
     runner_type: str = "auto_scale"
-    cpu_cores: float = Field(default=1.0, ge=0.1, le=16)
-    memory_mb: int = Field(default=2048, ge=256, le=131072)
+    cpu_cores: float = Field(default=1.0, ge=0.512, le=4)
+    memory_mb: int = Field(default=2048, ge=1024, le=4096)
     volume_gb: int = Field(default=1, ge=1, le=1024)
     note: str | None = Field(default=None, max_length=1000)
 

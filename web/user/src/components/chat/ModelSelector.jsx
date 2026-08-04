@@ -128,7 +128,7 @@ export default function ModelSelector() {
       <button
         className="flex items-center gap-1 px-2"
         style={{
-          height: 26,
+          height: 28,
           width: 'fit-content',
           maxWidth: '100%',
           minWidth: 0,

@@ -6,6 +6,34 @@ import useOverlayTransition from '../../motion/useOverlayTransition'
 import StepSlide from '../../motion/StepSlide'
 
 const RUNNER_TYPES = ['auto_scale', 'persistent']
+const MAX_CPU_CORES = 4
+const MAX_MEMORY_MB = 4096
+
+function NumberField({ label, value, onChange, unit, min, max, step: stp, inputStyle, focusProps }) {
+  return (
+    <div className="flex items-center gap-3">
+      <span
+        className="text-xs uppercase flex-shrink-0"
+        style={{ color: 'var(--text-secondary)', letterSpacing: '0.06em', fontWeight: 600, width: 64 }}
+      >
+        {label}
+      </span>
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        step={stp}
+        onChange={(e) => onChange(e.target.value)}
+        style={inputStyle}
+        {...focusProps}
+      />
+      <span className="text-xs font-light" style={{ color: 'var(--text-dim)' }}>
+        {unit}
+      </span>
+    </div>
+  )
+}
 
 function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
   const { t } = useTranslation()
@@ -32,7 +60,22 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
     password.length >= 8 &&
     confirmPassword === password
 
+  const cpuValue = Number(cpuCores)
+  const memoryValue = Number(memoryMb)
+  const volumeValue = Number(volumeGb)
+  const resourceValid =
+    Number.isFinite(cpuValue) &&
+    cpuValue >= 0.512 &&
+    cpuValue <= MAX_CPU_CORES &&
+    Number.isInteger(memoryValue) &&
+    memoryValue >= 1024 &&
+    memoryValue <= MAX_MEMORY_MB &&
+    Number.isInteger(volumeValue) &&
+    volumeValue >= 1
+
   const handleSubmit = async () => {
+    if (!resourceValid) return
+
     setSubmitting(true)
     setError('')
     try {
@@ -140,29 +183,6 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
         </span>
       </span>
     </button>
-  )
-
-  const NumberField = ({ label, value, onChange, unit, min, step: stp }) => (
-    <div className="flex items-center gap-3">
-      <span
-        className="text-xs uppercase flex-shrink-0"
-        style={{ color: 'var(--text-secondary)', letterSpacing: '0.06em', fontWeight: 600, width: 64 }}
-      >
-        {label}
-      </span>
-      <input
-        type="number"
-        value={value}
-        min={min}
-        step={stp}
-        onChange={(e) => onChange(e.target.value)}
-        style={numberInputStyle}
-        {...focusProps}
-      />
-      <span className="text-xs font-light" style={{ color: 'var(--text-dim)' }}>
-        {unit}
-      </span>
-    </div>
   )
 
   const ReviewRow = ({ label, value }) => (
@@ -426,14 +446,43 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
 
                   <div className="flex flex-col gap-3">
                     <span style={labelStyle}>{t('auth.regResourceRequest')}</span>
-                    <NumberField label={t('auth.regCpu')} value={cpuCores} onChange={setCpuCores} unit={t('auth.regCpuUnit')} min={0.1} step={0.1} />
-                    <NumberField label={t('auth.regMemory')} value={memoryMb} onChange={setMemoryMb} unit={t('auth.regMemoryUnit')} min={256} step={256} />
-                    <NumberField label={t('auth.regVolume')} value={volumeGb} onChange={setVolumeGb} unit={t('auth.regVolumeUnit')} min={1} step={1} />
+                    <NumberField
+                      label={t('auth.regCpu')}
+                      value={cpuCores}
+                      onChange={setCpuCores}
+                      unit={t('auth.regCpuUnit')}
+                      min={0.512}
+                      max={MAX_CPU_CORES}
+                      step={0.001}
+                      inputStyle={numberInputStyle}
+                      focusProps={focusProps}
+                    />
+                    <NumberField
+                      label={t('auth.regMemory')}
+                      value={memoryMb}
+                      onChange={setMemoryMb}
+                      unit={t('auth.regMemoryUnit')}
+                      min={1024}
+                      max={MAX_MEMORY_MB}
+                      step={256}
+                      inputStyle={numberInputStyle}
+                      focusProps={focusProps}
+                    />
+                    <NumberField
+                      label={t('auth.regVolume')}
+                      value={volumeGb}
+                      onChange={setVolumeGb}
+                      unit={t('auth.regVolumeUnit')}
+                      min={1}
+                      step={1}
+                      inputStyle={numberInputStyle}
+                      focusProps={focusProps}
+                    />
                   </div>
 
                   <div className="flex items-center justify-between pt-2">
                     {backBtn(() => setStep(1))}
-                    {nextBtn(() => setStep(3), false)}
+                    {nextBtn(() => setStep(3), !resourceValid)}
                   </div>
                 </div>
               )}
@@ -469,14 +518,14 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
                     <button
                       type="button"
                       className="px-4 py-2 text-xs font-semibold"
-                      disabled={submitting}
+                      disabled={submitting || !resourceValid}
                       style={{
                         background: 'var(--green)',
                         color: 'var(--text-inverse)',
                         border: 'none',
                         borderRadius: 4,
-                        cursor: submitting ? 'default' : 'pointer',
-                        opacity: submitting ? 0.6 : 1,
+                        cursor: submitting || !resourceValid ? 'default' : 'pointer',
+                        opacity: submitting || !resourceValid ? 0.6 : 1,
                         transition: 'opacity 150ms ease',
                       }}
                       onClick={handleSubmit}
