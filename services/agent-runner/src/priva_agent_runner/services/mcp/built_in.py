@@ -13,6 +13,7 @@ from claude_agent_sdk import create_sdk_mcp_server, tool
 
 
 FILE_CANVAS_TOOL_DESCRIPTION = (
+    "<system-reminder>\n"
     "注册由 Read、Write、Edit 之外的工具生成的文件。\n"
     "\n"
     "重要：如果某个非 Read / Write / Edit 工具创建、导出、渲染、下载、转换或保存了文件，"
@@ -43,7 +44,8 @@ FILE_CANVAS_TOOL_DESCRIPTION = (
     "\n"
     "请传入文件创建完成后的真实最终路径。\n"
     "同一批产物可以一次传多个路径。\n"
-    "如果工具返回路径无效，请修正路径后再次调用 FileCanvas。"
+    "如果工具返回路径无效，请修正路径后再次调用 FileCanvas。\n"
+    "</system-reminder>"
 )
 
 
