@@ -152,6 +152,41 @@ class ResourceUsageResponse(BaseModel):
     scraped_at: float = 0.0
 
 
+class ClusterCapacityMetric(BaseModel):
+    """One resource dimension in the agent-runtime capacity pool.
+
+    CPU values are millicores; memory values are MiB. ``assignable`` is the
+    eligible Node allocatable total after subtracting requests from non-tenant
+    workloads. ``allocated`` is the effective committed quota of active accounts,
+    including auto-scale accounts whose Pods are currently at zero replicas.
+    """
+    node_allocatable: float = 0.0
+    non_runner_requested: float = 0.0
+    assignable: float = 0.0
+    allocated: float = 0.0
+    remaining: float = 0.0
+    allocation_percent: float | None = None
+    overcommit_percent: float | None = None
+
+
+class ClusterCapacityResponse(BaseModel):
+    """Cluster-wide capacity that can be committed to tenant runtimes.
+
+    Eligible Nodes are Ready, schedulable and free of untolerated NoSchedule /
+    NoExecute taints. The current Runner template has no custom tolerations, node
+    selector or affinity. ``available=False`` means the Kubernetes inventory could
+    not be read; account allocation is still returned when data-spine is reachable.
+    """
+    available: bool = False
+    total_nodes: int = 0
+    eligible_nodes: int = 0
+    pending_non_runner_pods: int = 0
+    active_accounts: int = 0
+    cpu: ClusterCapacityMetric = Field(default_factory=ClusterCapacityMetric)
+    memory: ClusterCapacityMetric = Field(default_factory=ClusterCapacityMetric)
+    scraped_at: float = 0.0
+
+
 class PendingRegistrationResponse(BaseModel):
     """One pending self-registration request (admin Pending Approval tab).
     password_hash is NEVER included."""

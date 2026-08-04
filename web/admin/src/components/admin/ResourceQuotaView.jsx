@@ -5,15 +5,18 @@ import { useTranslation } from 'react-i18next'
 import Chip from '@shared/components/shared/Chip'
 import { useAnimatedNumber } from '@shared/motion/useAnimatedNumber'
 import useAdminStore from '../../stores/adminStore'
+import ClusterCapacityCard from './ClusterCapacityCard'
 import LiveToggleButton from './LiveToggleButton'
 
 // Resource Quota — Dashboard section. Live agent-runtime CPU/memory usage vs the
-// allocated per-account quota, from /api/admin/resource-usage. Two fleet-wide
-// usage bars (CPU, MEMORY) + a per-account breakdown table. Polls every POLL_MS;
+// allocated per-account quota, from /api/admin/resource-usage, plus scheduling
+// capacity from /api/admin/cluster-capacity. Two fleet-wide usage bars (CPU, MEMORY)
+// + a per-account breakdown table. Each source has its own polling interval;
 // the skeleton shows only on the first load — background polls update in place.
 // Status via a 2px left border, never dots. metrics-server unavailable → bars '—'.
 
-const POLL_MS = 5000
+const USAGE_POLL_MS = 5000
+const CAPACITY_POLL_MS = 15000
 
 // Runner type → chip color (same convention as UserManagement): persistent
 // (always-on) gets a distinct semantic color from auto_scale.
@@ -126,17 +129,30 @@ export default function ResourceQuotaView() {
   const refreshing = useAdminStore((s) => s.resourceUsageRefreshing)
   const error = useAdminStore((s) => s.resourceUsageError)
   const fetchResourceUsage = useAdminStore((s) => s.fetchResourceUsage)
+  const clusterCapacity = useAdminStore((s) => s.clusterCapacity)
+  const clusterCapacityLoading = useAdminStore((s) => s.clusterCapacityLoading)
+  const clusterCapacityRefreshing = useAdminStore((s) => s.clusterCapacityRefreshing)
+  const clusterCapacityError = useAdminStore((s) => s.clusterCapacityError)
+  const fetchClusterCapacity = useAdminStore((s) => s.fetchClusterCapacity)
   const [liveEnabled, setLiveEnabled] = useState(true)
 
-  const fetchRef = useRef(fetchResourceUsage)
-  fetchRef.current = fetchResourceUsage
+  const fetchUsageRef = useRef(fetchResourceUsage)
+  const fetchCapacityRef = useRef(fetchClusterCapacity)
+  fetchUsageRef.current = fetchResourceUsage
+  fetchCapacityRef.current = fetchClusterCapacity
 
   useEffect(() => {
     if (!liveEnabled) return undefined
-    const poll = () => fetchRef.current()
-    poll()
-    const pid = setInterval(poll, POLL_MS)
-    return () => clearInterval(pid)
+    const pollUsage = () => fetchUsageRef.current()
+    const pollCapacity = () => fetchCapacityRef.current()
+    pollUsage()
+    pollCapacity()
+    const usagePid = setInterval(pollUsage, USAGE_POLL_MS)
+    const capacityPid = setInterval(pollCapacity, CAPACITY_POLL_MS)
+    return () => {
+      clearInterval(usagePid)
+      clearInterval(capacityPid)
+    }
   }, [liveEnabled])
 
   const accounts = usage?.accounts || []
@@ -145,6 +161,9 @@ export default function ResourceQuotaView() {
   // available when any account reports a backend usage figure.
   const volAvailable = accounts.some((a) => a.volume_used_gb != null)
   const initialLoad = loading && !usage
+  const capacityInitialLoad = clusterCapacityLoading && !clusterCapacity
+  const liveError = error || clusterCapacityError
+  const liveRefreshing = refreshing || clusterCapacityRefreshing
 
   const rqScrollRef = useRef(null)
   const rqRowsRef = useRef(null)
@@ -159,7 +178,7 @@ export default function ResourceQuotaView() {
     setRqRowsMargin(
       rowsEl.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop
     )
-  }, [initialLoad, accounts.length])
+  }, [initialLoad, capacityInitialLoad, accounts.length])
 
   const rqVirtualizer = useVirtualizer({
     count: accounts.length,
@@ -170,14 +189,18 @@ export default function ResourceQuotaView() {
     getItemKey: (i) => accounts[i].account_id,
   })
   const handleLiveToggle = () => {
-    if (error) {
+    if (liveError) {
       setLiveEnabled(true)
       fetchResourceUsage()
+      fetchClusterCapacity()
       return
     }
     setLiveEnabled((enabled) => {
       const next = !enabled
-      if (next) fetchResourceUsage()
+      if (next) {
+        fetchResourceUsage()
+        fetchClusterCapacity()
+      }
       return next
     })
   }
@@ -193,9 +216,9 @@ export default function ResourceQuotaView() {
           </p>
         </div>
         <LiveToggleButton
-          active={liveEnabled && !error}
-          error={!!error}
-          refreshing={refreshing}
+          active={liveEnabled && !liveError}
+          error={!!liveError}
+          refreshing={liveRefreshing}
           onClick={handleLiveToggle}
           spinAnimation="rq-spin 1s linear infinite"
         />
@@ -203,6 +226,12 @@ export default function ResourceQuotaView() {
 
       {/* Body */}
       <div ref={rqScrollRef} className="flex-1 overflow-y-auto" style={{ padding: '16px var(--admin-section-x) 24px var(--admin-section-x)' }}>
+        <ClusterCapacityCard
+          capacity={clusterCapacity}
+          loading={clusterCapacityLoading}
+          error={clusterCapacityError}
+        />
+
         {/* Fleet-wide summary card */}
         {initialLoad ? (
           <SummarySkeleton />

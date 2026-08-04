@@ -520,6 +520,155 @@ def _mem_to_mib(q: str) -> float:
         return 0.0
 
 
+def _container_requests(container: Any) -> tuple[float, float]:
+    """Return one container's CPU millicores and memory MiB requests."""
+    resources = getattr(container, "resources", None)
+    requests = getattr(resources, "requests", None) or {}
+    return (
+        _cpu_to_millicores(str(requests.get("cpu", ""))),
+        _mem_to_mib(str(requests.get("memory", ""))),
+    )
+
+
+def _pod_effective_requests(pod: Any) -> tuple[float, float]:
+    """Return the scheduler-effective CPU/memory request for one Pod.
+
+    Regular containers run together and are summed. Ordinary init containers run
+    sequentially, so their maximum is compared with the app-container sum. Native
+    sidecar init containers (``restartPolicy: Always``) remain running and therefore
+    accumulate into both later init phases and the steady-state request. RuntimeClass
+    Pod overhead is added last. This mirrors the scheduler's resource accounting.
+    """
+    spec = getattr(pod, "spec", None)
+    if spec is None:
+        return 0.0, 0.0
+
+    app_cpu = app_memory = 0.0
+    for container in getattr(spec, "containers", None) or []:
+        cpu, memory = _container_requests(container)
+        app_cpu += cpu
+        app_memory += memory
+
+    sidecar_cpu = sidecar_memory = 0.0
+    init_peak_cpu = init_peak_memory = 0.0
+    for container in getattr(spec, "init_containers", None) or []:
+        cpu, memory = _container_requests(container)
+        if str(getattr(container, "restart_policy", "") or "") == "Always":
+            sidecar_cpu += cpu
+            sidecar_memory += memory
+            init_peak_cpu = max(init_peak_cpu, sidecar_cpu)
+            init_peak_memory = max(init_peak_memory, sidecar_memory)
+        else:
+            init_peak_cpu = max(init_peak_cpu, sidecar_cpu + cpu)
+            init_peak_memory = max(init_peak_memory, sidecar_memory + memory)
+
+    cpu = max(app_cpu + sidecar_cpu, init_peak_cpu)
+    memory = max(app_memory + sidecar_memory, init_peak_memory)
+    overhead = getattr(spec, "overhead", None) or {}
+    cpu += _cpu_to_millicores(str(overhead.get("cpu", "")))
+    memory += _mem_to_mib(str(overhead.get("memory", "")))
+    return cpu, memory
+
+
+def _node_is_runner_eligible(node: Any) -> bool:
+    """Whether today's Runner template can be scheduled onto ``node``.
+
+    Runner Pods currently define no node selector, affinity or custom tolerations,
+    so Ready + not cordoned + no NoSchedule/NoExecute taint is the exact template
+    compatibility check. PreferNoSchedule is advisory and does not remove capacity.
+    """
+    spec = getattr(node, "spec", None)
+    status = getattr(node, "status", None)
+    conditions = getattr(status, "conditions", None) or []
+    ready = any(
+        getattr(condition, "type", None) == "Ready"
+        and str(getattr(condition, "status", "")).lower() == "true"
+        for condition in conditions
+    )
+    if not ready or bool(getattr(spec, "unschedulable", False)):
+        return False
+    return not any(
+        getattr(taint, "effect", None) in ("NoSchedule", "NoExecute")
+        for taint in (getattr(spec, "taints", None) or [])
+    )
+
+
+def _is_committed_runtime_pod(
+    pod: Any, active_account_ids: set[str] | None,
+) -> bool:
+    """True when a Pod's resources are already represented by account quota."""
+    metadata = getattr(pod, "metadata", None)
+    labels = getattr(metadata, "labels", None) or {}
+    account_id = labels.get("priva.io/account-id")
+    if not account_id or labels.get("app") not in ("agent-runner", "terminal"):
+        return False
+    return active_account_ids is None or account_id in active_account_ids
+
+
+def scrape_cluster_capacity(active_account_ids: set[str] | None = None) -> dict | None:
+    """Read the physical resource pool that can be committed to tenant runtimes.
+
+    The pool is the sum of allocatable CPU/memory on Runner-eligible Nodes minus
+    effective requests of every non-committed Pod already scheduled there. Active
+    Runner/Terminal Pods are excluded because their full account quota is added by
+    the API layer, including scale-to-zero accounts. Inactive/orphan runtime Pods are
+    treated as fixed load when ``active_account_ids`` is supplied.
+
+    Unscheduled non-runner Pods cannot be assigned to a particular eligible Node and
+    are reported separately instead of silently subtracting them from the wrong pool.
+    Fail-open: Kubernetes/RBAC errors return ``None`` so the capacity card can degrade
+    independently from the existing per-account usage view.
+    """
+    try:
+        core = _core()
+        nodes = list(core.list_node().items or [])
+        pods = list(core.list_pod_for_all_namespaces().items or [])
+    except Exception as exc:
+        logger.warning("cluster capacity snapshot unavailable: {}", exc)
+        return None
+
+    eligible = [node for node in nodes if _node_is_runner_eligible(node)]
+    eligible_names = {
+        getattr(getattr(node, "metadata", None), "name", None)
+        for node in eligible
+    }
+    eligible_names.discard(None)
+
+    alloc_cpu = alloc_memory = 0.0
+    for node in eligible:
+        allocatable = getattr(getattr(node, "status", None), "allocatable", None) or {}
+        alloc_cpu += _cpu_to_millicores(str(allocatable.get("cpu", "")))
+        alloc_memory += _mem_to_mib(str(allocatable.get("memory", "")))
+
+    fixed_cpu = fixed_memory = 0.0
+    pending_non_runner_pods = 0
+    for pod in pods:
+        phase = str(getattr(getattr(pod, "status", None), "phase", "") or "")
+        if phase in ("Succeeded", "Failed"):
+            continue
+        if _is_committed_runtime_pod(pod, active_account_ids):
+            continue
+        node_name = getattr(getattr(pod, "spec", None), "node_name", None)
+        if not node_name:
+            pending_non_runner_pods += 1
+            continue
+        if node_name not in eligible_names:
+            continue
+        cpu, memory = _pod_effective_requests(pod)
+        fixed_cpu += cpu
+        fixed_memory += memory
+
+    return {
+        "total_nodes": len(nodes),
+        "eligible_nodes": len(eligible),
+        "node_allocatable_cpu_m": alloc_cpu,
+        "node_allocatable_memory_mb": alloc_memory,
+        "non_runner_requested_cpu_m": fixed_cpu,
+        "non_runner_requested_memory_mb": fixed_memory,
+        "pending_non_runner_pods": pending_non_runner_pods,
+    }
+
+
 def scrape_runner_usage() -> dict | None:
     """Live CPU/memory of the agent-runner pods, summed per account.
 

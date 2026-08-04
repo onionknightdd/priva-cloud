@@ -53,8 +53,9 @@ subjects:
     name: priva-control-panel
     namespace: {{ $ns }}
 ---
-# Cluster-scoped: list node images (Node.status.images) to discover available
-# agent-runner image tags for the admin Sandbox panel's image dropdown. Read-only.
+# Cluster-scoped, read-only inventory for the admin capacity view. Node allocatable
+# provides the physical ceiling; all-namespace Pod requests are subtracted so system
+# and non-tenant workloads are not offered again to agent runners.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -65,6 +66,9 @@ rules:
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

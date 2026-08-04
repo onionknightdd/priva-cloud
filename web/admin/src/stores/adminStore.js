@@ -113,6 +113,34 @@ const useAdminStore = create((set, get) => ({
     }
   },
 
+  // Cluster capacity is scheduling capacity, not metrics-server usage: eligible
+  // Node allocatable minus non-tenant Pod requests, compared with active quotas.
+  clusterCapacity: null,
+  clusterCapacityLoading: true,
+  clusterCapacityRefreshing: false,
+  clusterCapacityError: false,
+
+  fetchClusterCapacity: async () => {
+    set((s) => (s.clusterCapacity
+      ? { clusterCapacityRefreshing: true }
+      : { clusterCapacityLoading: true }))
+    try {
+      const clusterCapacity = await adminApi.getClusterCapacity()
+      set({
+        clusterCapacity,
+        clusterCapacityLoading: false,
+        clusterCapacityRefreshing: false,
+        clusterCapacityError: false,
+      })
+    } catch {
+      set({
+        clusterCapacityLoading: false,
+        clusterCapacityRefreshing: false,
+        clusterCapacityError: true,
+      })
+    }
+  },
+
   // System Map (topology + live per-module health, own 5s poll). Latest snapshot
   // only — the byte-path flow is constant (not req/s-scaled), so there's no rate
   // buffer. Skeleton only on the first load; background polls update in place.

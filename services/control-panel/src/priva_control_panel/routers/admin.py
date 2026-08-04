@@ -10,6 +10,8 @@ from priva_common.models.admin import (
     AuditLogResponse,
     CliPathResponse,
     CliPathUpdate,
+    ClusterCapacityMetric,
+    ClusterCapacityResponse,
     FleetAccountEntry,
     FleetResponse,
     GatewayMetricsResponse,
@@ -915,6 +917,88 @@ async def shutdown_account_runner(
 async def get_gateway_metrics():
     """Live agentgateway HTTP traffic snapshot. See ``_gateway_snapshot``."""
     return await _gateway_snapshot()
+
+
+def _capacity_metric(
+    node_allocatable: float,
+    non_runner_requested: float,
+    allocated: float,
+) -> ClusterCapacityMetric:
+    """Build one CPU/memory capacity line using the admin-confirmed formula."""
+    assignable = max(0.0, float(node_allocatable) - float(non_runner_requested))
+    allocated = float(allocated)
+    remaining = assignable - allocated
+    allocation_percent = (allocated / assignable * 100.0) if assignable > 0 else None
+    overcommit_percent = (
+        max(allocation_percent - 100.0, 0.0)
+        if allocation_percent is not None else None
+    )
+    return ClusterCapacityMetric(
+        node_allocatable=round(float(node_allocatable), 1),
+        non_runner_requested=round(float(non_runner_requested), 1),
+        assignable=round(assignable, 1),
+        allocated=round(allocated, 1),
+        remaining=round(remaining, 1),
+        allocation_percent=(round(allocation_percent, 1)
+                            if allocation_percent is not None else None),
+        overcommit_percent=(round(overcommit_percent, 1)
+                            if overcommit_percent is not None else None),
+    )
+
+
+@router.get("/cluster-capacity", response_model=ClusterCapacityResponse)
+async def get_cluster_capacity():
+    """Capacity that can be committed to active tenant runtimes.
+
+    CPU and memory use scheduling semantics, not metrics-server usage:
+    eligible Node allocatable minus effective requests of non-committed Pods.
+    The numerator is every active account's effective resource quota, including
+    auto-scale accounts at zero replicas. Runner + Terminal already split that
+    single committed quota and are therefore counted exactly once per account.
+    """
+    import time as _time
+
+    from priva_common.dataplane import get_client
+
+    from ..provisioner import scrape_cluster_capacity
+
+    active_account_ids = {
+        user.account_id
+        for user in get_user_store().list_users()
+        if user.status == "active" and user.account_id
+    }
+    client = get_client()
+    specs = {spec.account_id: spec for spec in client.resource_specs.list()}
+    defaults = client.runner_defaults.get()
+
+    allocated_cpu_m = 0.0
+    allocated_memory_mb = 0.0
+    for account_id in active_account_ids:
+        spec = specs.get(account_id)
+        allocated_cpu_m += float(spec.cpu_cores if spec else defaults.cpu_cores) * 1000.0
+        allocated_memory_mb += float(spec.memory_mb if spec else defaults.memory_mb)
+
+    snapshot = await asyncio.to_thread(scrape_cluster_capacity, active_account_ids)
+    available = snapshot is not None
+    snapshot = snapshot or {}
+    return ClusterCapacityResponse(
+        available=available,
+        total_nodes=int(snapshot.get("total_nodes", 0)),
+        eligible_nodes=int(snapshot.get("eligible_nodes", 0)),
+        pending_non_runner_pods=int(snapshot.get("pending_non_runner_pods", 0)),
+        active_accounts=len(active_account_ids),
+        cpu=_capacity_metric(
+            snapshot.get("node_allocatable_cpu_m", 0.0),
+            snapshot.get("non_runner_requested_cpu_m", 0.0),
+            allocated_cpu_m,
+        ),
+        memory=_capacity_metric(
+            snapshot.get("node_allocatable_memory_mb", 0.0),
+            snapshot.get("non_runner_requested_memory_mb", 0.0),
+            allocated_memory_mb,
+        ),
+        scraped_at=_time.time(),
+    )
 
 
 @router.get("/resource-usage", response_model=ResourceUsageResponse)
