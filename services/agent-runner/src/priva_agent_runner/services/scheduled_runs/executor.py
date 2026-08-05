@@ -410,6 +410,7 @@ async def _deliver_callback(
             "job_type": req.job_config.job_type,
             "status": outcome["status"],
             "duration_ms": duration_ms,
+            "session_id": outcome.get("session_id"),
             "result": result,
         },
     )

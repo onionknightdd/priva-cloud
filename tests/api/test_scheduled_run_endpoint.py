@@ -346,6 +346,7 @@ def test_agent_callback_success_uses_bounded_result_head(harness, monkeypatch):
 
     payload = callback_calls[0]
     assert payload["status"] == "success" and payload["job_type"] == "agent_run"
+    assert payload["session_id"] == "sess-callback"
     assert payload["result"]["message"] == full_result[:4001]
     assert len(harness.fake.finishes[0].result_summary) == 200
 
@@ -366,6 +367,7 @@ def test_agent_callback_failure_uses_outcome_error_message(harness, monkeypatch)
     assert harness.client.post("/api/sandbox/agent/scheduled-run", json=body).status_code == 202
     assert _wait(lambda: callback_calls)
     assert callback_calls[0]["status"] == "error"
+    assert callback_calls[0]["session_id"] == "sess-error"
     assert callback_calls[0]["result"] == {"message": "agent-visible failure"}
 
 
@@ -379,6 +381,7 @@ def test_http_callback_has_structured_response(harness, http_server, monkeypatch
 
     payload = callback_calls[0]
     assert payload["status"] == "success" and payload["job_type"] == "http_call"
+    assert payload["session_id"] is None
     assert payload["result"] == {
         "method": "GET", "url": http_server, "status_code": 200,
         "reason": "OK", "body": "pong", "error": None,
@@ -400,6 +403,7 @@ def test_script_stderr_with_zero_exit_fails_and_callback_keeps_both_streams(
     rec = harness.fake.finishes[0]
     assert rec.status == "error" and rec.is_error is True
     result = callback_calls[0]["result"]
+    assert callback_calls[0]["session_id"] is None
     assert result == {
         "exit_code": 0,
         "stdout": "stdout-value\n",

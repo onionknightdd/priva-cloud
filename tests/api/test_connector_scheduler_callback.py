@@ -40,6 +40,7 @@ def _agent_payload(**overrides) -> dict:
         "job_type": "agent_run",
         "status": "success",
         "duration_ms": 12_345,
+        "session_id": "sess-1",
         "result": {"message": "All done"},
     }
     payload.update(overrides)
@@ -157,7 +158,11 @@ def test_callback_endpoint_authenticates_scopes_and_delivers_card(verify_tokens)
     assert payload.run_id == "run-1"
     assert card["header"]["title"]["content"] == "✅ 定时任务执行成功"
     assert card["header"]["subtitle"]["content"] == "Daily briefing · Agent · 12.35s"
-    assert "All done" in _block(card, "Agent 结果")
+    assert "运行信息" not in card["body"]["elements"][0]["content"]
+    assert card["body"]["elements"][0]["content"].startswith("**任务**")
+    assert "**Session ID**：`sess-1`" in card["body"]["elements"][0]["content"]
+    assert "All done" in _block(card, "运行结果")
+    assert card["body"]["elements"][-1] == {"tag": "hr"}
 
 
 @pytest.mark.parametrize(
@@ -223,9 +228,10 @@ def test_agent_and_http_keep_head_and_mark_truncation():
     long = "HEAD-" + "x" * 3991 + "-TAIL"
     agent = SchedulerCallbackPayload.model_validate(_agent_payload(result={"message": long}))
     agent_card = render_scheduler_callback_card(agent)
-    agent_content = _block(agent_card, "Agent 结果")
+    agent_content = _block(agent_card, "运行结果")
     assert "HEAD-" in agent_content and "-TAIL" not in agent_content
     assert "内容已截断" in agent_content and len(agent_content) <= 4000
+    assert agent_card["body"]["elements"][-1] == {"tag": "hr"}
 
     http = SchedulerCallbackPayload.model_validate(_agent_payload(
         job_type="http_call", status="error",

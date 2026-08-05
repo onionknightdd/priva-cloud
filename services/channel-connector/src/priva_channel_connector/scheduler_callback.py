@@ -53,6 +53,7 @@ class SchedulerCallbackPayload(_StrictModel):
     job_type: Literal["agent_run", "http_call", "user_script"]
     status: Literal["success", "error", "cancelled"]
     duration_ms: int | None = Field(default=None, ge=0)
+    session_id: str | None = Field(default=None, max_length=128)
     result: CallbackResult
 
     @model_validator(mode="after")
@@ -76,7 +77,7 @@ def _md(content: str) -> dict:
 
 
 def _bounded_block(
-    label: str,
+    label: str | None,
     value: str | None,
     *,
     keep: Literal["head", "tail"],
@@ -92,7 +93,7 @@ def _bounded_block(
     if not text:
         text = "(空)"
 
-    prefix = f"**{label}**\n\n"
+    prefix = f"**{label}**\n\n" if label else ""
     fence_open = "```text\n" if code else ""
     fence_close = "\n```" if code else ""
     complete = f"{prefix}{fence_open}{text}{fence_close}"
@@ -145,13 +146,17 @@ def render_scheduler_callback_card(payload: SchedulerCallbackPayload) -> dict:
         f"**状态**：{status_label}\n"
         f"**耗时**：{_duration(payload.duration_ms)}\n"
         f"**Job ID**：`{payload.job_id}`\n"
-        f"**Run ID**：`{payload.run_id}`"
+        f"**Run ID**：`{payload.run_id}`\n"
+        f"**Session ID**：{f'`{payload.session_id}`' if payload.session_id else '—'}"
     )
-    elements = [_bounded_block("运行信息", meta, keep="head")]
+    # Keep metadata as the first body element, directly below the card header.
+    # There is intentionally no extra “运行信息” section label.
+    elements = [_bounded_block(None, meta, keep="head")]
 
     if isinstance(payload.result, AgentCallbackResult):
-        label = "异常信息" if payload.status == "error" else "Agent 结果"
+        label = "异常信息" if payload.status == "error" else "运行结果"
         elements.append(_bounded_block(label, payload.result.message, keep="head"))
+        elements.append({"tag": "hr"})
 
     elif isinstance(payload.result, HttpCallbackResult):
         result = payload.result
