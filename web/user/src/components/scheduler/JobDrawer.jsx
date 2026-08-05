@@ -1,14 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Trash2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Dropdown from '@shared/components/shared/Dropdown'
+import Toggle from '@shared/components/shared/Toggle'
 import { useOverlayTransition } from '@shared/motion/useOverlayTransition'
+import useUiStore from '@shared/stores/uiStore'
 import useSettingsStore from '../../stores/settingsStore'
 import useSchedulerStore from '../../stores/schedulerStore'
+import { getFeishuConfig } from '../../api/channels'
 import { validateTrigger } from '../../api/scheduler'
 import {
   PRESETS, WEEKDAYS, presetToTrigger, triggerToPreset, describeTrigger, parseTime,
 } from './triggerPresets'
+import {
+  buildFeishuCallback, canSetFeishuCallback, hasFeishuCallback, isFeishuCallbackReady,
+} from './callbackConfig'
 
 // Create/edit drawer (design §9.2): 480px right slide; trigger editor =
 // presets + custom-cron escape with an always-live preview line; type
@@ -110,6 +116,8 @@ export default function JobDrawer({ onDelete }) {
   const { closeDrawer, saveJob } = useSchedulerStore.getState()
   const models = useSettingsStore((s) => s.models)
   const fetchModels = useSettingsStore((s) => s.fetchModels)
+  const settingsOpen = useUiStore((s) => s.settingsOpen)
+  const openSettings = useUiStore((s) => s.openSettings)
 
   const isEdit = !!editingJob
   const [closing, setClosing] = useState(false)
@@ -152,6 +160,13 @@ export default function JobDrawer({ onDelete }) {
   const [source, setSource] = useState(initialCfg?.source || 'inline')
   const [script, setScript] = useState(initialCfg?.script || '')
   const [filePath, setFilePath] = useState(initialCfg?.file_path || '')
+  // completion callback
+  const [callbackEnabled, setCallbackEnabled] = useState(() => hasFeishuCallback(initialCfg))
+  const [feishuConfig, setFeishuConfig] = useState(null)
+  const [feishuLoading, setFeishuLoading] = useState(true)
+  const [feishuError, setFeishuError] = useState(null)
+  const feishuLoadedRef = useRef(false)
+  const settingsWasOpenRef = useRef(settingsOpen)
 
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState(null)
@@ -184,6 +199,33 @@ export default function JobDrawer({ onDelete }) {
 
   useEffect(() => { if (jobType === 'agent_run') fetchModels?.() }, [jobType, fetchModels])
 
+  const loadFeishuConfig = useCallback(async () => {
+    // Mark the request before awaiting so React StrictMode's effect replay does
+    // not issue a duplicate capability check.
+    feishuLoadedRef.current = true
+    setFeishuLoading(true)
+    try {
+      const data = await getFeishuConfig()
+      setFeishuConfig(data)
+      setFeishuError(null)
+    } catch (err) {
+      // Capability checks fail closed: an unknown binding state cannot enable
+      // proactive delivery, while an existing callback remains removable.
+      setFeishuConfig(null)
+      setFeishuError(err?.message || String(err))
+    } finally {
+      setFeishuLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const settingsJustClosed = settingsWasOpenRef.current && !settingsOpen
+    settingsWasOpenRef.current = settingsOpen
+    if (!settingsOpen && (!feishuLoadedRef.current || settingsJustClosed)) {
+      loadFeishuConfig()
+    }
+  }, [settingsOpen, loadFeishuConfig])
+
   const tzOptions = useMemo(() => {
     let zones = []
     try { zones = Intl.supportedValuesOf('timeZone') } catch { zones = ['UTC', 'Asia/Shanghai'] }
@@ -197,23 +239,24 @@ export default function JobDrawer({ onDelete }) {
   ]), [models, t])
 
   const buildJobConfig = () => {
+    const callback = buildFeishuCallback(callbackEnabled)
     if (jobType === 'agent_run') {
       return {
-        job_type: 'agent_run', prompt, model: model || null,
+        job_type: 'agent_run', prompt, model: model || null, callback,
         timeout_seconds: Math.max(60, Number(timeoutSec) || 1800),
         max_turns: Math.max(1, Number(maxTurns) || 50),
       }
     }
     if (jobType === 'http_call') {
       return {
-        job_type: 'http_call', method, url,
+        job_type: 'http_call', method, url, callback,
         headers: Object.fromEntries(Object.entries(headers).filter(([k]) => k)),
         body: body || null,
         timeout_seconds: Math.max(1, Number(timeoutSec) || 30),
       }
     }
     return {
-      job_type: 'user_script', language, source,
+      job_type: 'user_script', language, source, callback,
       script: source === 'inline' ? script : null,
       file_path: source === 'file' ? filePath : null,
       timeout_seconds: Math.max(1, Number(timeoutSec) || 300),
@@ -245,6 +288,32 @@ export default function JobDrawer({ onDelete }) {
   }
 
   if (!mounted) return null
+
+  const feishuReady = isFeishuCallbackReady(feishuConfig)
+  const callbackToggleDisabled = feishuLoading || (!callbackEnabled && !feishuReady)
+
+  const callbackStatus = feishuError
+    ? {
+        text: t('scheduler.callbackStatusError'),
+        color: 'var(--red)',
+        action: t('scheduler.retry'),
+        onAction: loadFeishuConfig,
+      }
+    : !feishuConfig?.owner_bound
+      ? {
+          text: t('scheduler.callbackFeishuNotBound'),
+          color: 'var(--border-strong)',
+          action: t('scheduler.configureFeishu'),
+          onAction: () => openSettings('channels'),
+        }
+      : !feishuConfig?.effective_enabled
+        ? {
+            text: t('scheduler.callbackFeishuUnavailable'),
+            color: 'var(--yellow)',
+            action: t('scheduler.configureFeishu'),
+            onAction: () => openSettings('channels'),
+          }
+        : null
 
   const presetOptions = PRESETS.map((p) => ({
     value: p,
@@ -485,6 +554,69 @@ export default function JobDrawer({ onDelete }) {
               </Field>
             </>
           )}
+
+          <Field label={t('scheduler.callback')}>
+            {feishuLoading ? (
+              <div className="skeleton" style={{ width: '100%', height: 62, borderRadius: 4 }} />
+            ) : (
+              <div
+                className="flex flex-col gap-2 min-w-0"
+                style={{
+                  padding: 10, background: 'var(--bg-surface)',
+                  border: '1px solid var(--border)', borderRadius: 4,
+                }}
+              >
+                <div className="flex items-start justify-between gap-3 min-w-0">
+                  <div className="flex-1 min-w-0">
+                    <div style={{ fontSize: 13, color: 'var(--text-primary)' }}>
+                      {t('scheduler.callbackFeishu')}
+                    </div>
+                    {feishuReady && (
+                      <div style={{ marginTop: 2, fontSize: 12, lineHeight: 1.5, color: 'var(--text-dim)' }}>
+                        {t('scheduler.callbackFeishuHint')}
+                      </div>
+                    )}
+                  </div>
+                  <Toggle
+                    size="sm"
+                    checked={callbackEnabled}
+                    disabled={callbackToggleDisabled}
+                    ariaLabel={t('scheduler.callbackFeishu')}
+                    onChange={(next) => {
+                      if (canSetFeishuCallback(next, feishuConfig)) setCallbackEnabled(next)
+                    }}
+                  />
+                </div>
+
+                {callbackStatus && (
+                  <div
+                    className="flex items-center justify-between gap-3 min-w-0"
+                    style={{
+                      padding: '5px 8px', borderLeft: `2px solid ${callbackStatus.color}`,
+                      background: 'var(--bg-elevated)', borderRadius: 4,
+                    }}
+                  >
+                    <span className="flex-1 min-w-0" style={{ fontSize: 12, lineHeight: 1.5, color: callbackStatus.color }}>
+                      {callbackStatus.text}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={callbackStatus.onAction}
+                      style={{
+                        flexShrink: 0, padding: 0, background: 'transparent', border: 'none',
+                        color: 'var(--blue)', fontSize: 12, cursor: 'pointer',
+                        transition: 'color 150ms ease',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--blue)' }}
+                    >
+                      {callbackStatus.action}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </Field>
 
           {isEdit && (
             <button

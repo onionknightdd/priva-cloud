@@ -8,9 +8,11 @@ from datetime import datetime, timedelta, timezone
 
 from priva_common.models.scheduler import (
     AgentRunConfig,
+    FeishuCallbackConfig,
     IntervalTriggerConfig,
     ScheduledJobDefinition,
 )
+from priva_common.scheduler_callback_token import verify as verify_callback_token
 
 from priva_scheduler.dispatch import DispatchError
 from priva_scheduler.engine import SchedulerEngine, fire_epoch_for
@@ -130,6 +132,21 @@ def test_fire_happy_path_dispatch_accepted(fake_client, fast_settings):
     ((acct, username, frame),) = [dispatcher.calls[0]]
     assert acct == "acct-1" and username == "carol"
     assert frame.run_id == run.run_id and frame.job_config.job_type == "agent_run"
+
+
+def test_fire_mints_exact_callback_capability(fake_client, fast_settings):
+    engine, dispatcher = make_engine(fake_client)
+    job = make_job("j1")
+    job.job_config.callback = FeishuCallbackConfig(type="feishu")
+    fake_client.scheduler.jobs["j1"] = ("acct-1", job)
+
+    assert asyncio.run(engine.fire("acct-1", "j1")) == "dispatched"
+
+    frame = dispatcher.calls[0][2]
+    claims = verify_callback_token(frame.callback_token)
+    assert claims["account_id"] == "acct-1"
+    assert claims["run_id"] == frame.run_id
+    assert claims["job_id"] == "j1"
 
 
 def test_fire_claim_lost_is_silent(fake_client, fast_settings):

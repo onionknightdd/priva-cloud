@@ -263,6 +263,11 @@ class LarkTransport:
             return None
         return await asyncio.to_thread(self._send_card_sync, chat_id, card)
 
+    async def send_card_to_user(self, open_id: str, card: dict) -> str | None:
+        if not open_id:
+            return None
+        return await asyncio.to_thread(self._send_card_to_user_sync, open_id, card)
+
     async def patch_card(self, message_id: str, card: dict) -> None:
         if not message_id:
             return
@@ -613,7 +618,6 @@ class LarkTransport:
             return _fail
 
     def _send_sync(self, chat_id: str, text: str) -> None:
-        import lark_oapi as lark
         from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
 
         rest = self._rest_client()
@@ -732,6 +736,32 @@ class LarkTransport:
         if not resp.success():
             logger.warning(
                 "lark card send failed account={} code={} msg={}",
+                self.account_id, getattr(resp, "code", "?"), getattr(resp, "msg", "?"),
+            )
+            return None
+        return getattr(getattr(resp, "data", None), "message_id", None)
+
+    def _send_card_to_user_sync(self, open_id: str, card: dict) -> str | None:
+        """Post an interactive card proactively using the bot-scoped owner open_id."""
+        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+
+        rest = self._rest_client()
+        req = (
+            CreateMessageRequest.builder()
+            .receive_id_type("open_id")
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(open_id)
+                .msg_type("interactive")
+                .content(json.dumps(card))
+                .build()
+            )
+            .build()
+        )
+        resp = rest.im.v1.message.create(req)
+        if not resp.success():
+            logger.warning(
+                "lark card send-to-user failed account={} code={} msg={}",
                 self.account_id, getattr(resp, "code", "?"), getattr(resp, "msg", "?"),
             )
             return None

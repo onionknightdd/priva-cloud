@@ -106,6 +106,29 @@ def _script_job(script: str, run_id: str, job_id: str, timeout: int = 30) -> dic
     }
 
 
+def _with_feishu_callback(body: dict) -> dict:
+    body["job_config"]["callback"] = {"type": "feishu"}
+    body["callback_token"] = "signed-run-capability"
+    return body
+
+
+def _capture_callbacks(harness, monkeypatch) -> list[dict]:
+    calls: list[dict] = []
+
+    async def capture(*, account_id, payload, record, callback_token):
+        # The terminal ledger and local run bookkeeping are closed before
+        # delivery so a slow connector cannot block the next fire.
+        assert harness.fake.finishes
+        assert not record.live
+        assert account_id == "acct-1"
+        assert callback_token == "signed-run-capability"
+        assert not any(kind == "__run_end__" for _, kind, _ in record.events)
+        calls.append(payload)
+
+    monkeypatch.setattr(harness.executor, "deliver_feishu", capture)
+    return calls
+
+
 @pytest.fixture
 def http_server():
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -299,6 +322,276 @@ def test_agent_run_crash_reports_error(harness, monkeypatch):
     assert _wait(lambda: harness.fake.finishes)
     rec = harness.fake.finishes[0]
     assert rec.status == "error" and "CLI could not start" in rec.error_message
+
+
+# --- typed Feishu callback outcomes -----------------------------------------
+
+
+def test_agent_callback_success_uses_bounded_result_head(harness, monkeypatch):
+    from priva_agent_runner.services.scheduled_runs import executor
+
+    callback_calls = _capture_callbacks(harness, monkeypatch)
+    full_result = "result:" + "x" * 5000
+
+    async def completed(*args, **kwargs):
+        await kwargs["emit"]("result", {
+            "session_id": "sess-callback", "is_error": False, "num_turns": 1,
+            "result": full_result, "subtype": "success",
+        })
+
+    monkeypatch.setattr(executor, "agent_run_events", completed)
+    body = _with_feishu_callback(_agent_job(run_id="r-agent-cb", job_id="job-agent-cb"))
+    assert harness.client.post("/api/sandbox/agent/scheduled-run", json=body).status_code == 202
+    assert _wait(lambda: callback_calls)
+
+    payload = callback_calls[0]
+    assert payload["status"] == "success" and payload["job_type"] == "agent_run"
+    assert payload["result"]["message"] == full_result[:4001]
+    assert len(harness.fake.finishes[0].result_summary) == 200
+
+
+def test_agent_callback_failure_uses_outcome_error_message(harness, monkeypatch):
+    from priva_agent_runner.services.scheduled_runs import executor
+
+    callback_calls = _capture_callbacks(harness, monkeypatch)
+
+    async def failed(*args, **kwargs):
+        await kwargs["emit"]("result", {
+            "session_id": "sess-error", "is_error": True, "num_turns": 1,
+            "result": "agent-visible failure", "subtype": "error_during_execution",
+        })
+
+    monkeypatch.setattr(executor, "agent_run_events", failed)
+    body = _with_feishu_callback(_agent_job(run_id="r-agent-err", job_id="job-agent-err"))
+    assert harness.client.post("/api/sandbox/agent/scheduled-run", json=body).status_code == 202
+    assert _wait(lambda: callback_calls)
+    assert callback_calls[0]["status"] == "error"
+    assert callback_calls[0]["result"] == {"message": "agent-visible failure"}
+
+
+def test_http_callback_has_structured_response(harness, http_server, monkeypatch):
+    callback_calls = _capture_callbacks(harness, monkeypatch)
+    body = _with_feishu_callback(
+        _http_job(http_server, run_id="r-http-cb", job_id="job-http-cb")
+    )
+    assert harness.client.post("/api/sandbox/agent/scheduled-run", json=body).status_code == 202
+    assert _wait(lambda: callback_calls)
+
+    payload = callback_calls[0]
+    assert payload["status"] == "success" and payload["job_type"] == "http_call"
+    assert payload["result"] == {
+        "method": "GET", "url": http_server, "status_code": 200,
+        "reason": "OK", "body": "pong", "error": None,
+    }
+
+
+def test_script_stderr_with_zero_exit_fails_and_callback_keeps_both_streams(
+    harness, monkeypatch,
+):
+    callback_calls = _capture_callbacks(harness, monkeypatch)
+    body = _with_feishu_callback(_script_job(
+        "import sys; print('stdout-value', flush=True); "
+        "sys.stderr.write('stderr-value\\n'); sys.stderr.flush()",
+        "r-script-stderr", "job-script-stderr",
+    ))
+    assert harness.client.post("/api/sandbox/agent/scheduled-run", json=body).status_code == 202
+    assert _wait(lambda: callback_calls)
+
+    rec = harness.fake.finishes[0]
+    assert rec.status == "error" and rec.is_error is True
+    result = callback_calls[0]["result"]
+    assert result == {
+        "exit_code": 0,
+        "stdout": "stdout-value\n",
+        "stderr": "stderr-value\n",
+        "timed_out": False,
+    }
+
+
+def test_script_large_unterminated_output_keeps_bounded_tails(harness, monkeypatch):
+    callback_calls = _capture_callbacks(harness, monkeypatch)
+    body = _with_feishu_callback(_script_job(
+        "import sys; sys.stdout.write('A' * 70000); "
+        "sys.stderr.write('B' * 70000)",
+        "r-script-large", "job-script-large",
+    ))
+    assert harness.client.post("/api/sandbox/agent/scheduled-run", json=body).status_code == 202
+    assert _wait(lambda: callback_calls)
+
+    result = callback_calls[0]["result"]
+    assert result["stdout"] == "A" * 4001
+    assert result["stderr"] == "B" * 4001
+    record = harness.executor._accepted["r-script-large"].record
+    output_events = [data for _, kind, data in record.events if kind == "script_output"]
+    assert output_events and max(len(event["line"]) for event in output_events) <= 4001
+
+
+def test_script_timeout_kills_descendants_and_finishes_callback(harness, monkeypatch):
+    callback_calls = _capture_callbacks(harness, monkeypatch)
+    body = _with_feishu_callback(_script_job(
+        "import subprocess, sys, time; "
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        "time.sleep(60)",
+        "r-script-tree-timeout", "job-script-tree-timeout", timeout=1,
+    ))
+    assert harness.client.post("/api/sandbox/agent/scheduled-run", json=body).status_code == 202
+    assert _wait(lambda: callback_calls, timeout=5)
+
+    rec = harness.fake.finishes[0]
+    assert rec.status == "error" and rec.error_message == "Script timed out after 1s"
+    assert callback_calls[0]["result"]["timed_out"] is True
+    assert callback_calls[0]["result"]["exit_code"] == -1
+
+
+def test_callback_http_failure_is_event_only_and_keeps_success_outcome(
+    harness, monkeypatch,
+):
+    import httpx
+
+    from priva_agent_runner.services.scheduled_runs import callbacks
+
+    real_client = httpx.AsyncClient
+
+    def reject(request):
+        assert request.headers["X-Priva-Service-Token"] == "svc"
+        assert request.headers["X-Priva-Scheduler-Callback-Token"] == (
+            "signed-run-capability"
+        )
+        return httpx.Response(503, json={"detail": "connector unavailable"})
+
+    transport = httpx.MockTransport(reject)
+    monkeypatch.setattr(
+        callbacks.httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    monkeypatch.setattr(callbacks, "auth_header", lambda: {"X-Priva-Service-Token": "svc"})
+
+    body = _with_feishu_callback(_script_job(
+        "print('still-success')", "r-callback-fail", "job-callback-fail",
+    ))
+    assert harness.client.post("/api/sandbox/agent/scheduled-run", json=body).status_code == 202
+    assert _wait(lambda: harness.fake.finishes)
+    assert _wait(lambda: any(
+        kind == "__run_end__"
+        for _, kind, _ in harness.executor._accepted["r-callback-fail"].record.events
+    ))
+
+    rec = harness.fake.finishes[0]
+    assert rec.status == "success" and rec.is_error is False
+    events = harness.executor._accepted["r-callback-fail"].record.events
+    kinds = [kind for _, kind, _ in events]
+    assert "callback_failed" in kinds
+    assert "__run_end__" in kinds
+    assert kinds.index("callback_failed") < kinds.index("__run_end__")
+    failure = next(data for _, kind, data in events if kind == "callback_failed")
+    assert failure["channel"] == "feishu" and "HTTP 503" in failure["message"]
+
+
+def test_missing_callback_capability_is_recorded_without_changing_task(harness):
+    body = _with_feishu_callback(_script_job(
+        "print('still-success')", "r-callback-no-cap", "job-callback-no-cap",
+    ))
+    body.pop("callback_token")
+
+    assert harness.client.post(
+        "/api/sandbox/agent/scheduled-run", json=body,
+    ).status_code == 202
+    assert _wait(lambda: any(
+        kind == "__run_end__"
+        for _, kind, _ in harness.executor._accepted["r-callback-no-cap"].record.events
+    ))
+
+    rec = harness.fake.finishes[0]
+    assert rec.status == "success" and rec.is_error is False
+    events = harness.executor._accepted["r-callback-no-cap"].record.events
+    failure = next(data for _, kind, data in events if kind == "callback_failed")
+    assert failure == {
+        "channel": "feishu",
+        "message": "missing scheduler callback capability",
+    }
+
+
+def test_finish_write_failure_records_callback_failed_without_attempting_delivery(
+    harness, monkeypatch,
+):
+    def fail_finish(_record):
+        raise RuntimeError("data-spine unavailable")
+
+    harness.fake.scheduler.finish_run = fail_finish
+    monkeypatch.setattr(harness.executor.time, "sleep", lambda _seconds: None)
+    body = _with_feishu_callback(_script_job(
+        "print('local-success')", "r-callback-no-ledger", "job-callback-no-ledger",
+    ))
+
+    assert harness.client.post(
+        "/api/sandbox/agent/scheduled-run", json=body,
+    ).status_code == 202
+    assert _wait(lambda: any(
+        kind == "__run_end__"
+        for _, kind, _ in harness.executor._accepted["r-callback-no-ledger"].record.events
+    ))
+
+    record = harness.executor._accepted["r-callback-no-ledger"].record
+    assert record.status == "completed"
+    events = record.events
+    failure = next(data for _, kind, data in events if kind == "callback_failed")
+    assert failure == {
+        "channel": "feishu",
+        "message": "terminal run could not be persisted",
+    }
+    assert [kind for _, kind, _ in events].index("callback_failed") < [
+        kind for _, kind, _ in events
+    ].index("__run_end__")
+
+
+def test_cancel_during_finish_write_still_releases_run_bookkeeping(monkeypatch, tmp_path):
+    from priva_agent_runner.services.claude_sdk.run_registry import run_registry
+    from priva_agent_runner.services.scheduled_runs import executor
+    from priva_common.models.scheduler import ScheduledRunRequest, UserScriptConfig
+
+    async def scenario():
+        record = run_registry.create(run_id="r-cancel-finish")
+        state = executor.ScheduledRunState(
+            "r-cancel-finish", "job-cancel-finish", "user_script", record,
+        )
+        executor._live_by_job[state.job_id] = state.run_id
+        request = ScheduledRunRequest(
+            run_id=state.run_id,
+            job_id=state.job_id,
+            job_name="cancel during finish",
+            job_config=UserScriptConfig(
+                source="inline", script="print('done')",
+            ),
+        )
+        entered_finish = asyncio.Event()
+
+        async def completed(*args):
+            outcome = args[-1]
+            outcome["status"] = "success"
+            outcome["result_summary"] = "done"
+
+        async def blocked_finish(*args, **kwargs):
+            entered_finish.set()
+            await asyncio.Future()
+
+        monkeypatch.setattr(executor, "_execute_builtin", completed)
+        monkeypatch.setattr(executor.asyncio, "to_thread", blocked_finish)
+
+        task = asyncio.create_task(executor._execute(
+            state, request, USER, str(tmp_path),
+        ))
+        await entered_finish.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert record.status == "completed"
+        assert state.job_id not in executor._live_by_job
+        assert state.ended_at is not None
+        assert record.events[-1][1] == "__run_end__"
+
+    asyncio.run(scenario())
 
 
 # --- D15 retention prune ------------------------------------------------------

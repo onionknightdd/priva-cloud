@@ -18,19 +18,50 @@ scheduler's list-diff.
 from __future__ import annotations
 
 import asyncio
+import time
+from collections import deque
 from datetime import datetime, timezone
 
 from priva_common.logging import get_app_logger
 
 from . import config
 from .router import SessionRouter
+from .scheduler_callback import SchedulerCallbackPayload
 from .worker import AppWorker
 
 logger = get_app_logger(__name__)
 
+_CALLBACK_RATE_WINDOW_SECONDS = 60.0
+_CALLBACK_RATE_LIMIT = 120
+_CALLBACK_DELIVERY_CACHE_MAX = 10_000
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class SchedulerCallbackUnavailable(RuntimeError):
+    """The account has no effective Feishu bot configuration."""
+
+
+class SchedulerCallbackOwnerUnbound(RuntimeError):
+    """The bot is configured, but no owner open_id is bound to it."""
+
+
+class SchedulerCallbackWorkerUnavailable(RuntimeError):
+    """The effective account currently has no armed connector worker."""
+
+
+class SchedulerCallbackDeliveryFailed(RuntimeError):
+    """Feishu rejected or failed the proactive card send."""
+
+
+class SchedulerCallbackRejected(RuntimeError):
+    """The claimed callback does not match an eligible terminal run."""
+
+
+class SchedulerCallbackRateLimited(RuntimeError):
+    """The account exceeded the bounded proactive-callback request rate."""
 
 
 class ReconcileEngine:
@@ -43,6 +74,12 @@ class ReconcileEngine:
         self._workers: dict[str, AppWorker] = {}
         self._digests: dict[str, str | None] = {}
         self._lock = asyncio.Lock()   # serialize reconcile_once vs reconcile_now
+        # Reconcile and callback delivery for one account share this lock.  It
+        # fences owner/config changes across the REST send without blocking
+        # callback delivery for unrelated accounts.
+        self._account_locks: dict[str, asyncio.Lock] = {}
+        self._callback_attempts: dict[str, deque[float]] = {}
+        self._callback_deliveries: dict[tuple[str, str], str] = {}
         self._task: asyncio.Task | None = None
 
     @property
@@ -64,7 +101,8 @@ class ReconcileEngine:
         # Graceful SIGTERM: close every WS (single-replica maxSurge=0 relies on this).
         async with self._lock:
             for aid in list(self._workers):
-                await self._teardown(aid)
+                async with self._account_lock(aid):
+                    await self._teardown(aid)
 
     async def _loop(self) -> None:
         while True:
@@ -99,14 +137,16 @@ class ReconcileEngine:
             # Vanished from the effective set → disabled/creds-cleared → hard-stop.
             for aid in list(self._workers):
                 if aid not in by_id:
-                    await self._teardown(aid)
+                    async with self._account_lock(aid):
+                        await self._teardown(aid)
             # New or digest-changed → arm / re-arm.
             for aid, cfg in by_id.items():
-                if aid not in self._workers:
-                    await self._arm(cfg)
-                elif cfg.desired_digest != self._digests.get(aid):
-                    await self._teardown(aid, mark_disabled=False)  # re-arm: don't flap the UI to disabled
-                    await self._arm(cfg)
+                async with self._account_lock(aid):
+                    if aid not in self._workers:
+                        await self._arm(cfg)
+                    elif cfg.desired_digest != self._digests.get(aid):
+                        await self._teardown(aid, mark_disabled=False)  # re-arm: don't flap the UI to disabled
+                        await self._arm(cfg)
 
     async def reconcile_now(self, account_id: str) -> None:
         """Targeted push (control-panel → connector). Fetch just this account and
@@ -114,17 +154,139 @@ class ReconcileEngine:
         cfg = await asyncio.to_thread(self._client.feishu_configs.get, account_id)
         active = await asyncio.to_thread(self._active_account_ids, [account_id])
         async with self._lock:
-            effective = (cfg is not None and getattr(cfg, "effective_enabled", False)
-                         and account_id in active)
-            if not effective:
-                if account_id in self._workers:
-                    await self._teardown(account_id)
-                return
-            if account_id not in self._workers:
-                await self._arm(cfg)
-            elif cfg.desired_digest != self._digests.get(account_id):
-                await self._teardown(account_id, mark_disabled=False)
-                await self._arm(cfg)
+            async with self._account_lock(account_id):
+                effective = (cfg is not None and getattr(cfg, "effective_enabled", False)
+                             and account_id in active)
+                if not effective:
+                    if account_id in self._workers:
+                        await self._teardown(account_id)
+                    return
+                if account_id not in self._workers:
+                    await self._arm(cfg)
+                elif cfg.desired_digest != self._digests.get(account_id):
+                    await self._teardown(account_id, mark_disabled=False)
+                    await self._arm(cfg)
+
+    async def push_scheduler_callback(
+        self,
+        account_id: str,
+        payload: SchedulerCallbackPayload,
+        card: dict,
+    ) -> str:
+        """Send one scheduled outcome to this account's bound Feishu owner.
+
+        Addressing is deliberately resolved here from the data-plane record.  The
+        caller supplies only ``account_id`` + content and therefore cannot target a
+        different Feishu identity.  Before any send, the claimed IDs/status are
+        matched against the terminal scheduler ledger and the current job must still
+        opt in to Feishu.  One account lock fences owner/config reconciliation across
+        the send and also makes the per-run delivery cache atomic.
+        """
+        async with self._account_lock(account_id):
+            cache_key = (account_id, payload.run_id)
+            delivered = self._callback_deliveries.get(cache_key)
+            if delivered:
+                return delivered
+            self._consume_callback_rate(account_id)
+
+            await self._verify_scheduler_callback(account_id, payload)
+
+            # Read the owner while holding the same account lock used by
+            # reconcile/teardown. A desired-digest fence rejects a config row
+            # that has changed but whose worker has not been re-armed yet.
+            try:
+                cfg = await asyncio.to_thread(self._client.feishu_configs.get, account_id)
+            except Exception as exc:
+                logger.exception("scheduler callback config read failed account={}", account_id)
+                raise SchedulerCallbackWorkerUnavailable("feishu config unavailable") from exc
+            if cfg is None or not getattr(cfg, "effective_enabled", False):
+                raise SchedulerCallbackUnavailable("feishu bot is not enabled")
+            owner_open_id = (getattr(cfg, "owner_open_id", "") or "").strip()
+            if not owner_open_id:
+                raise SchedulerCallbackOwnerUnbound("feishu owner is not bound")
+
+            worker = self._workers.get(account_id)
+            if worker is None:
+                raise SchedulerCallbackWorkerUnavailable("feishu connector is not ready")
+            desired_digest = getattr(cfg, "desired_digest", None)
+            if not desired_digest or desired_digest != self._digests.get(account_id):
+                raise SchedulerCallbackWorkerUnavailable("feishu configuration is changing")
+            try:
+                message_id = await worker.send_card_to_user(owner_open_id, card)
+            except Exception as exc:
+                logger.exception("scheduler callback send crashed account={}", account_id)
+                raise SchedulerCallbackDeliveryFailed("feishu card send failed") from exc
+            if not message_id:
+                raise SchedulerCallbackDeliveryFailed("feishu card send failed")
+
+            self._callback_deliveries[cache_key] = message_id
+            while len(self._callback_deliveries) > _CALLBACK_DELIVERY_CACHE_MAX:
+                self._callback_deliveries.pop(next(iter(self._callback_deliveries)))
+
+        logger.info(
+            "scheduler callback delivered account={} message_id={}",
+            account_id, message_id,
+        )
+        return message_id
+
+    def _account_lock(self, account_id: str) -> asyncio.Lock:
+        lock = self._account_locks.get(account_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._account_locks[account_id] = lock
+        return lock
+
+    def _consume_callback_rate(self, account_id: str) -> None:
+        now = time.monotonic()
+        attempts = self._callback_attempts.setdefault(account_id, deque())
+        cutoff = now - _CALLBACK_RATE_WINDOW_SECONDS
+        while attempts and attempts[0] <= cutoff:
+            attempts.popleft()
+        if len(attempts) >= _CALLBACK_RATE_LIMIT:
+            raise SchedulerCallbackRateLimited("scheduler callback rate limit exceeded")
+        attempts.append(now)
+
+    async def _verify_scheduler_callback(
+        self, account_id: str, payload: SchedulerCallbackPayload,
+    ) -> None:
+        try:
+            run, job = await asyncio.gather(
+                asyncio.to_thread(
+                    self._client.scheduler.get_run, account_id, payload.run_id,
+                ),
+                asyncio.to_thread(self._client.scheduler.get_job, payload.job_id),
+            )
+        except Exception as exc:
+            logger.exception("scheduler callback verification failed account={}", account_id)
+            raise SchedulerCallbackWorkerUnavailable(
+                "scheduler callback verification unavailable"
+            ) from exc
+
+        if run is None:
+            raise SchedulerCallbackRejected("scheduled run not found")
+        if run.run_id != payload.run_id:
+            raise SchedulerCallbackRejected("scheduled run id mismatch")
+        if run.job_id != payload.job_id:
+            raise SchedulerCallbackRejected("scheduled run job mismatch")
+        if run.job_name != payload.job_name:
+            raise SchedulerCallbackRejected("scheduled run name mismatch")
+        if run.status not in {"success", "error", "cancelled"}:
+            raise SchedulerCallbackRejected("scheduled run is not terminal")
+        if run.status != payload.status:
+            raise SchedulerCallbackRejected("scheduled run status mismatch")
+
+        job_config = getattr(job, "job_config", None) if job is not None else None
+        callback = getattr(job_config, "callback", None)
+        callback_type = (
+            callback.get("type") if isinstance(callback, dict)
+            else getattr(callback, "type", None)
+        )
+        if job is None or getattr(job, "id", None) != payload.job_id:
+            raise SchedulerCallbackRejected("scheduled job not found")
+        if getattr(job_config, "job_type", None) != payload.job_type:
+            raise SchedulerCallbackRejected("scheduled job type mismatch")
+        if callback_type != "feishu":
+            raise SchedulerCallbackRejected("feishu callback is not enabled")
 
     # --- arm / teardown (call under self._lock) ---------------------------
     async def _arm(self, cfg) -> None:

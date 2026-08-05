@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # --- Trigger configs ---
@@ -27,10 +27,20 @@ TriggerConfig = IntervalTriggerConfig | CronTriggerConfig
 
 # --- Job config types (discriminated union on job_type) ---
 
+class FeishuCallbackConfig(BaseModel):
+    """Deliver a completed scheduled-job result through the user's Feishu bot."""
+    model_config = ConfigDict(extra="forbid")
+
+    # Keep this explicit: ``callback: {}`` must not silently opt a job into
+    # proactive external delivery.
+    type: Literal["feishu"]
+
+
 class AgentRunConfig(BaseModel):
     job_type: Literal["agent_run"] = "agent_run"
     prompt: str
     model: str | None = None
+    callback: FeishuCallbackConfig | None = None
     # D14 runaway guards for unattended runs — the runner kills the run at
     # whichever cap trips first (error_message: 'timeout' | 'max_turns').
     timeout_seconds: int = 1800
@@ -41,6 +51,7 @@ class HttpCallConfig(BaseModel):
     job_type: Literal["http_call"] = "http_call"
     method: Literal["GET", "POST", "PUT", "DELETE"] = "GET"
     url: str
+    callback: FeishuCallbackConfig | None = None
     headers: dict[str, str] = {}
     body: str | None = None
     timeout_seconds: int = 30
@@ -50,6 +61,7 @@ class UserScriptConfig(BaseModel):
     job_type: Literal["user_script"] = "user_script"
     language: Literal["python", "shell"] = "python"
     source: Literal["file", "inline"] = "file"
+    callback: FeishuCallbackConfig | None = None
     file_path: str | None = None
     script: str | None = None
     timeout_seconds: int = 300
@@ -220,6 +232,9 @@ class ScheduledRunRequest(BaseModel):
     ]
     model: str | None = None  # job-level override; falls back to job_config.model
     permission_mode: Literal["bypassPermissions"] = "bypassPermissions"  # D2 (per-job override parked)
+    # Signed by the scheduler for one exact callback-enabled run. It is kept
+    # in runner memory and never exported to the job subprocess environment.
+    callback_token: str | None = None
 
 
 class ScheduledRunAccepted(BaseModel):

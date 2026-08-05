@@ -56,6 +56,10 @@ class IMTransport(Protocol):
     # (None on failure); ``patch_card`` replaces that card in place (Feishu patch is a
     # wholesale replace). Both best-effort — a card failure falls back to send_text.
     async def send_card(self, chat_id: str, card: dict) -> "str | None": ...
+    # Proactive card addressed by the owner's open_id. Scheduled callbacks have no
+    # inbound chat frame (and therefore no durable chat_id), so they must use this
+    # receive-id form directly rather than relying on the process-local p2p cache.
+    async def send_card_to_user(self, open_id: str, card: dict) -> "str | None": ...
     async def patch_card(self, message_id: str, card: dict) -> None: ...
     # Download one inbound image (message-scoped resource fetch) → (bytes, media_type),
     # or None on any failure (missing im:resource scope, unknown format, network).
@@ -116,6 +120,14 @@ class FakeTransport:
         self._mid_seq += 1
         mid = f"m{self._mid_seq}"
         self.cards.append((chat_id, card))
+        return mid
+
+    async def send_card_to_user(self, open_id: str, card: dict) -> "str | None":
+        if not open_id:
+            return None
+        self._mid_seq += 1
+        mid = f"m{self._mid_seq}"
+        self.cards.append((open_id, card))
         return mid
 
     async def patch_card(self, message_id: str, card: dict) -> None:

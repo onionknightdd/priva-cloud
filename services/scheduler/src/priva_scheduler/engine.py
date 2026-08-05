@@ -47,6 +47,7 @@ from priva_common.models.scheduler import (
     ScheduledJobDefinition,
     ScheduledRunRequest,
 )
+from priva_common.scheduler_callback_token import mint as mint_callback_token
 
 from .dispatch import DispatchError, Dispatcher
 from .reconcile import sweep_once
@@ -88,6 +89,17 @@ def interval_seconds(config: IntervalTriggerConfig) -> int:
         config.weeks * 604800 + config.days * 86400 + config.hours * 3600
         + config.minutes * 60 + config.seconds
     )
+
+
+def _uses_feishu_callback(config) -> bool:
+    callback = getattr(config, "callback", None)
+    return getattr(callback, "type", None) == "feishu"
+
+
+def _callback_token_ttl(config) -> int:
+    """Cover the job wall clock plus delivery slack; unbounded jobs get 24h."""
+    timeout = int(getattr(config, "timeout_seconds", 0) or 0)
+    return max(3600, timeout + 900) if timeout > 0 else 24 * 3600
 
 
 def fire_epoch_for(job: ScheduledJobDefinition, now: float) -> int:
@@ -253,6 +265,13 @@ class SchedulerEngine:
             SCHEDULER_FIRES.labels(outcome="error").inc()
             return "error"
         frame.run_id = run_id
+        if _uses_feishu_callback(frame.job_config):
+            frame.callback_token = mint_callback_token(
+                account_id,
+                run_id,
+                job.id,
+                ttl_seconds=_callback_token_ttl(frame.job_config),
+            )
 
         await asyncio.to_thread(c.scheduler.start_run, account_id, JobRunRecord(
             run_id=run_id, job_id=job_id, job_name=job.name,

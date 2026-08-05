@@ -8,7 +8,11 @@ import asyncio
 import httpx
 import pytest
 
-from priva_common.models.scheduler import AgentRunConfig, ScheduledRunRequest
+from priva_common.models.scheduler import (
+    AgentRunConfig,
+    FeishuCallbackConfig,
+    ScheduledRunRequest,
+)
 
 from priva_scheduler import dispatch as dispatch_mod
 from priva_scheduler.dispatch import DispatchError, WakeDialDispatcher
@@ -17,7 +21,10 @@ from priva_scheduler.dispatch import DispatchError, WakeDialDispatcher
 def frame() -> ScheduledRunRequest:
     return ScheduledRunRequest(
         run_id="r-1", job_id="j-1", job_name="daily",
-        job_config=AgentRunConfig(prompt="brief me"),
+        callback_token="signed-callback-capability",
+        job_config=AgentRunConfig(
+            prompt="brief me", callback=FeishuCallbackConfig(type="feishu"),
+        ),
     )
 
 
@@ -49,6 +56,8 @@ def test_202_accepted_carries_token_and_frame(fast_settings):
     import json
     body = json.loads(req.content)
     assert body["run_id"] == "r-1" and body["job_config"]["job_type"] == "agent_run"
+    assert body["job_config"]["callback"] == {"type": "feishu"}
+    assert body["callback_token"] == "signed-callback-capability"
     assert body["permission_mode"] == "bypassPermissions"
 
 

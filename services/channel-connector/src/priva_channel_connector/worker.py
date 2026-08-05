@@ -113,6 +113,10 @@ class AppWorker:
         except Exception:
             logger.exception("transport stop failed account={}", self.account_id)
 
+    async def send_card_to_user(self, open_id: str, card: dict) -> str | None:
+        """Proactive outbound seam used by account-scoped scheduled callbacks."""
+        return await self._transport.send_card_to_user(open_id, card)
+
     # --- inbound ----------------------------------------------------------
     async def _on_message(self, msg) -> None:
         # The transport fires this per DM; never let one bad message kill the socket.

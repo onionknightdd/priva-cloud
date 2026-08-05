@@ -31,10 +31,12 @@ from priva_common.models.scheduler import (
     ScheduledRunRequest,
 )
 
+from ... import activity
 from ..claude_sdk import session_meta
 from ..claude_sdk.run_registry import RUN_END_EVENT, RunRecord, run_registry
 from ..claude_sdk.service import agent_run_events
 from .builtin_tasks import execute_http_call, execute_user_script
+from .callbacks import deliver_feishu, is_feishu_enabled
 
 logger = get_app_logger(__name__)
 
@@ -48,6 +50,7 @@ _ACCEPTED_TTL_SECONDS = 3600
 # detail keeps enough to be useful in the UI's inline expand.
 _SUMMARY_CHARS = 200
 _ERROR_CHARS = 2000
+_CALLBACK_CAPTURE_CHARS = 4001
 
 _STATUS_TO_RECORD = {"success": "completed", "error": "error", "cancelled": "aborted"}
 
@@ -154,8 +157,58 @@ async def _execute(
             outcome["error_message"] = (str(exc) or type(exc).__name__)[:_ERROR_CHARS]
         outcome["status"] = "error"
 
-    _close_record(state, req, outcome)
-    await asyncio.to_thread(_write_finish, req, user, outcome, _elapsed_ms(started))
+    duration_ms = _elapsed_ms(started)
+    callback_activity = False
+    callback_enabled = False
+    record_closed = False
+    try:
+        finish_written = await asyncio.to_thread(
+            _write_finish, req, user, outcome, duration_ms,
+        )
+        callback_requested = is_feishu_enabled(req.job_config)
+        callback_enabled = finish_written and callback_requested
+        if callback_requested and not finish_written:
+            record.record_event(
+                "callback_failed",
+                {
+                    "channel": "feishu",
+                    "message": "terminal run could not be persisted",
+                },
+            )
+        if callback_enabled:
+            # Keep the pod awake for the outbound notification without leaving
+            # this completed run in the admission/concurrency live set.
+            activity.enter()
+            callback_activity = True
+
+        _close_record(
+            state,
+            req,
+            outcome,
+            signal_followers=not callback_enabled,
+        )
+        record_closed = True
+
+        if callback_enabled:
+            try:
+                await _deliver_callback(req, user, record, outcome, duration_ms)
+            except Exception as exc:  # callback bugs must not strand the run
+                message = (str(exc) or type(exc).__name__)[:_ERROR_CHARS]
+                logger.exception("[SCHED] callback handling crashed run_id={}", req.run_id)
+                record.record_event(
+                    "callback_failed", {"channel": "feishu", "message": message},
+                )
+    finally:
+        # Cancellation during FinishRun still has to free overlap/activity.
+        if not record_closed:
+            _close_record(state, req, outcome)
+        elif callback_enabled:
+            # The registry/admission state was already closed before delivery,
+            # but hold the follower sentinel until callback_failed (if any) is
+            # observable on the live stream.
+            _signal_run_end(record)
+        if callback_activity:
+            activity.leave()
     logger.info(
         "[SCHED] run end run_id={} status={} reason={}",
         req.run_id, outcome["status"], outcome.get("error_message"),
@@ -243,6 +296,9 @@ async def _execute_agent(
             wd.cancel()
 
     text = str(result_out.get("result") or "").strip()
+    # Kept out of JobRunRecord (whose summary is intentionally 200 chars) and
+    # used only by an enabled callback after the terminal write succeeds.
+    outcome["agent_result_message"] = text[:_CALLBACK_CAPTURE_CHARS]
     outcome["num_turns"] = result_out.get("num_turns")
     if cap_reason[0]:
         outcome["status"] = "error"
@@ -282,8 +338,22 @@ async def _execute_builtin(
     cfg = req.job_config
     if isinstance(cfg, HttpCallConfig):
         res = await execute_http_call(cfg, user.username, cwd, emit, record.cancelled)
+        outcome["callback_result"] = {
+            "method": res.get("method"),
+            "url": res.get("url"),
+            "status_code": res.get("status_code"),
+            "reason": res.get("reason") or "",
+            "body": res.get("body") or "",
+            "error": res.get("error"),
+        }
     else:
         res = await execute_user_script(cfg, user.username, cwd, emit, record.cancelled)
+        outcome["callback_result"] = {
+            "exit_code": res.get("exit_code"),
+            "stdout": res.get("stdout", ""),
+            "stderr": res.get("stderr", ""),
+            "timed_out": bool(res.get("timed_out")),
+        }
 
     text = str(res.get("result") or "").strip()
     outcome["result_summary"] = text[:_SUMMARY_CHARS] or None
@@ -296,18 +366,80 @@ async def _execute_builtin(
         outcome["status"] = "success"
 
 
-def _close_record(state: ScheduledRunState, req: ScheduledRunRequest, outcome: dict) -> None:
+async def _deliver_callback(
+    req: ScheduledRunRequest,
+    user: UserRecord,
+    record: RunRecord,
+    outcome: dict,
+    duration_ms: int,
+) -> None:
+    if not is_feishu_enabled(req.job_config):
+        return
+
+    if isinstance(req.job_config, AgentRunConfig):
+        if outcome["status"] == "success":
+            message = outcome.get("agent_result_message") or ""
+        else:
+            message = outcome.get("error_message") or outcome["status"]
+        result: dict = {"message": message}
+    elif isinstance(req.job_config, HttpCallConfig):
+        result = outcome.get("callback_result") or {
+            "method": req.job_config.method,
+            "url": req.job_config.url,
+            "status_code": None,
+            "reason": "",
+            "body": "",
+            "error": outcome.get("error_message"),
+        }
+    else:
+        result = outcome.get("callback_result") or {
+            "exit_code": None,
+            "stdout": "",
+            "stderr": outcome.get("error_message") or "",
+            "timed_out": False,
+        }
+
+    await deliver_feishu(
+        account_id=user.account_id,
+        record=record,
+        callback_token=req.callback_token,
+        payload={
+            "run_id": req.run_id,
+            "job_id": req.job_id,
+            "job_name": req.job_name,
+            "job_type": req.job_config.job_type,
+            "status": outcome["status"],
+            "duration_ms": duration_ms,
+            "result": result,
+        },
+    )
+
+
+def _close_record(
+    state: ScheduledRunState,
+    req: ScheduledRunRequest,
+    outcome: dict,
+    *,
+    signal_followers: bool = True,
+) -> None:
     """Terminal bookkeeping — registry finish (releases the activity slot),
     RUN_END for followers, overlap-map cleanup, metrics. Sync on purpose so
     the cancellation path can run it."""
     record = state.record
     if record.status == "running":
         run_registry.finish(record, _STATUS_TO_RECORD.get(outcome["status"], "error"))
-        record.record_event(RUN_END_EVENT, {"status": record.status})
+    if signal_followers:
+        _signal_run_end(record)
     if _live_by_job.get(req.job_id) == req.run_id:
         _live_by_job.pop(req.job_id, None)
     state.ended_at = time.time()
     SCHEDULED_RUNS.labels(job_type=state.job_type, status=outcome["status"]).inc()
+
+
+def _signal_run_end(record: RunRecord) -> None:
+    if any(kind == RUN_END_EVENT for _, kind, _ in record.events):
+        return
+    record.record_event(RUN_END_EVENT, {"status": record.status})
 
 
 def _elapsed_ms(started_monotonic: float) -> int:
@@ -320,7 +452,7 @@ def _write_finish(
     outcome: dict,
     duration_ms: int,
     attempts: int = 3,
-) -> None:
+) -> bool:
     """The pod-owned outcome write (D13). Sync — call via to_thread from the
     normal path; the cancellation path calls it directly with attempts=1."""
     rec = JobRunRecord(
@@ -340,7 +472,7 @@ def _write_finish(
     for attempt in range(1, attempts + 1):
         try:
             get_client().scheduler.finish_run(rec)
-            return
+            return True
         except Exception:
             logger.warning(
                 "[SCHED] FinishRun {} attempt {}/{} failed",
@@ -351,3 +483,4 @@ def _write_finish(
     logger.error(
         "[SCHED] FinishRun {} lost — the scheduler sweep will age it out", req.run_id,
     )
+    return False

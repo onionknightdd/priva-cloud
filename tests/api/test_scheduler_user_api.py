@@ -104,6 +104,35 @@ def test_job_crud_lifecycle(harness):
     assert http.delete(f"/api/sandbox/scheduler/jobs/{job_id}").status_code == 404
 
 
+@pytest.mark.parametrize("job_config", [
+    {"job_type": "agent_run", "prompt": "brief me"},
+    {"job_type": "http_call", "url": "https://example.com/health"},
+    {"job_type": "user_script", "source": "inline", "script": "echo ok"},
+])
+def test_feishu_callback_round_trips_through_job_api(harness, job_config):
+    payload = {
+        "name": "notify me", "timezone": "UTC",
+        "trigger": {"type": "interval", "hours": 1},
+        "job_config": {**job_config, "callback": {"type": "feishu"}},
+    }
+
+    created = harness.http.post("/api/sandbox/scheduler/jobs", json=payload)
+    assert created.status_code == 200, created.text
+    job = created.json()
+    assert job["job_config"]["callback"] == {"type": "feishu"}
+
+    listed = harness.http.get("/api/sandbox/scheduler/jobs").json()["jobs"]
+    assert listed[0]["job_config"]["callback"] == {"type": "feishu"}
+
+    disabled_config = {**job_config, "callback": None}
+    updated = harness.http.put(
+        f"/api/sandbox/scheduler/jobs/{job['id']}",
+        json={"job_config": disabled_config},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["job_config"]["callback"] is None
+
+
 def test_create_rejects_invalid_cron(harness):
     bad = _cron_job(expr="not a cron")
     resp = harness.http.post("/api/sandbox/scheduler/jobs", json=bad)
