@@ -296,6 +296,11 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
 
   // Capture the generation this stream belongs to; loadSession/stop bump it.
   const streamGen = S.chat().streamGeneration
+  // Every assistant emission and tool_use envelope is a process group. The
+  // message renderer uses this marker to keep only the newest group expanded
+  // while older groups move into the collapsed process history.
+  let processGroupSeq = 0
+  const nextProcessGroupId = () => `${streamGen}-process-${++processGroupSeq}`
 
   // Track tool_use_ids that are canvas-only (hidden from message flow)
   const hiddenToolIds = new Set()
@@ -350,34 +355,6 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
       if (isActive()) useSidebarStore.getState().setActiveSessionId(sid)
       announceSessionRow(sid)
     }
-  }
-
-  const recordSummaryQuestionRequest = (requestId, count = 1) => {
-    const currentMsgs = S.chat().messages
-    let assistantIndex = -1
-    for (let index = currentMsgs.length - 1; index >= 0; index -= 1) {
-      if (currentMsgs[index]?.role === 'assistant') {
-        assistantIndex = index
-        break
-      }
-      if (currentMsgs[index]?.role === 'user') break
-    }
-    if (assistantIndex < 0) return
-
-    const requestKey = String(requestId || `question-${Date.now()}`)
-    const message = currentMsgs[assistantIndex]
-    const seen = Array.isArray(message.summaryQuestionRequestIds)
-      ? message.summaryQuestionRequestIds
-      : []
-    if (seen.includes(requestKey)) return
-
-    const messages = [...currentMsgs]
-    messages[assistantIndex] = {
-      ...message,
-      summaryQuestionRequestIds: [...seen, requestKey],
-      summaryQuestionCount: (Number(message.summaryQuestionCount) || 0) + Math.max(1, Number(count) || 1),
-    }
-    S.chatSet({ messages })
   }
 
   const openToolFileInBrowser = (block, options = {}) => {
@@ -578,7 +555,6 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         // ExitPlanMode → show plan approval card
         if (data.tool_name === 'ExitPlanMode') {
           if (S.chat().pendingPlanApproval?.requestId === data.request_id) break
-          recordSummaryQuestionRequest(data.request_id, 1)
           const planContent = data.input?.plan || data.input?.content || ''
           const planFilePath = uiRead('planFilePath')
           S.chat().setPendingPlanApproval({
@@ -605,6 +581,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         // AskUserQuestion via can_use_tool → route to existing ask_user flow
         if (data.tool_name === 'AskUserQuestion' && data.input?.questions) {
           if (S.chat().pendingAskUser?._permissionRequestId === data.request_id) break
+          const askProcessGroupId = nextProcessGroupId()
           const askBlock = {
             toolUseId: data.request_id,
             questions: data.input.questions,
@@ -619,6 +596,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
               toolUseId: data.request_id,
               questions: data.input.questions,
               status: 'pending',
+              processGroupId: askProcessGroupId,
             }]
             S.chatSet({
               messages: [...msgs.slice(0, lastIdx), { ...lastMsg, content: newContent }],
@@ -631,7 +609,6 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         const alreadyPending = pendingPermission?.request_id === data.request_id
           || permissionQueue.some((p) => p.request_id === data.request_id)
         if (alreadyPending) break
-        recordSummaryQuestionRequest(data.request_id, 1)
         if (pendingPermission) {
           queuePermission(data)
         } else {
@@ -688,9 +665,10 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         // Stamp arrival time so a thinking block can render "Thought for Xs"
         // once it's finished (duration = gap before the block appeared).
         const blockArrivalTs = Date.now()
+        const assistantProcessGroupId = nextProcessGroupId()
         const assistantBlocks = data.content
           .filter((b) => b.type === 'thinking' || b.type === 'text')
-          .map((b) => ({ ...b, startTime: blockArrivalTs }))
+          .map((b) => ({ ...b, startTime: blockArrivalTs, processGroupId: assistantProcessGroupId }))
 
         // Subagent assistant frame: route content to the subagent's bucket
         // keyed by parent_tool_use_id instead of the main thread.
@@ -715,11 +693,12 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
 
       case 'tool_use': {
         if (!data.content) break
+        const toolProcessGroupId = nextProcessGroupId()
         const toolBlocks = data.content
           .filter((b) => b.type === 'tool_use')
           .map((b) => {
             const buffered = pendingHookEvents.get(b.id)
-            const base = { ...b, status: 'running', startTime: Date.now() }
+            const base = { ...b, status: 'running', startTime: Date.now(), processGroupId: toolProcessGroupId }
             if (buffered && buffered.length) {
               base.metadata = { ...(base.metadata || {}), hookEvents: buffered }
               pendingHookEvents.delete(b.id)
@@ -889,6 +868,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
                 fileOpId: block.id,
                 name: block.name,
                 filePath: block.input?.file_path || '',
+                processGroupId: block.processGroupId,
               })
               continue
             }
@@ -906,6 +886,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
                   id: `file-ref-${generatedOpId}`,
                   name: GENERATED_TOOL_LABEL,
                   filePath,
+                  processGroupId: block.processGroupId,
                 })
                 // Auto-open in File Browser at tool_use time. The matching
                 // tool_result event later re-opens with mime/size/extension

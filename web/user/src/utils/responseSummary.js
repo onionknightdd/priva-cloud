@@ -22,6 +22,14 @@ function isFailed(block) {
     || block?.result?.isError === true
 }
 
+// Live tool_use blocks are inserted before their tool_result arrives. Keep
+// those blocks visible in the process stream, but defer execution metrics until
+// the matching result has settled. Historical blocks often omit status, so an
+// absent status remains compatible with replayed transcripts and fixtures.
+function isCompleted(block) {
+  return block?.status !== 'running' && block?.status !== 'pending'
+}
+
 function questionCount(questions) {
   return Array.isArray(questions) && questions.length > 0 ? questions.length : 1
 }
@@ -157,7 +165,7 @@ export function summarizeResponseExecution({
       if (block.type === 'file_ref') {
         if (!EDIT_TOOL_NAMES.has(block.name)) return
         const op = block.fileOpId ? fileOpsById.get(block.fileOpId) : null
-        if (op?.status === 'error') return
+        if (op && (op.status === 'running' || op.status === 'pending' || op.status === 'error')) return
         addPath(editedFiles, block.filePath || op?.filePath)
         return
       }
@@ -167,13 +175,13 @@ export function summarizeResponseExecution({
       if (visitedToolIds.has(toolKey)) return
       visitedToolIds.add(toolKey)
 
-      if (READ_TOOL_NAMES.has(block.name) && !isFailed(block)) {
+      if (READ_TOOL_NAMES.has(block.name) && isCompleted(block) && !isFailed(block)) {
         addPath(readFiles, toolFilePath(block))
       }
-      if (EDIT_TOOL_NAMES.has(block.name) && !isFailed(block)) {
+      if (EDIT_TOOL_NAMES.has(block.name) && isCompleted(block) && !isFailed(block)) {
         addPath(editedFiles, toolFilePath(block))
       }
-      if (COMMAND_TOOL_NAMES.has(block.name)) commands += 1
+      if (COMMAND_TOOL_NAMES.has(block.name) && isCompleted(block)) commands += 1
       if (block.name === 'AskUserQuestion') {
         if (block.id && visitedQuestionIds.has(block.id)) return
         if (block.id) visitedQuestionIds.add(block.id)

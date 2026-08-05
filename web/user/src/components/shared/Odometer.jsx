@@ -170,6 +170,7 @@ export function RollingText({
   fontSize = height,
   fontWeight = 600,
   verticalAlign = 'middle',
+  whiteSpace = 'pre-wrap',
 }) {
   const parts = String(text ?? '').split(/(\d+)/g)
   return (
@@ -190,7 +191,7 @@ export function RollingText({
             />
           )
         }
-        return <span key={`text-${index}`} style={{ whiteSpace: 'pre-wrap' }}>{part}</span>
+        return <span key={`text-${index}`} style={{ whiteSpace }}>{part}</span>
       })}
     </>
   )

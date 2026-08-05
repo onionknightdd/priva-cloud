@@ -18,7 +18,7 @@ import Chip from '@shared/components/shared/Chip'
 import FileReferenceCard from '../shared/FileReferenceCard'
 import SelectedXlsxCard from '../shared/SelectedXlsxCard'
 import SelectedFileCard from '../shared/SelectedFileCard'
-import { RollingInteger } from '../shared/Odometer'
+import { RollingInteger, RollingText } from '../shared/Odometer'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 import AnimatedShimmerText from '@shared/components/shared/AnimatedShimmerText'
 import useUiStore from '@shared/stores/uiStore'
@@ -1111,7 +1111,19 @@ export default memo(function MessageBubble({
   const hasCollapsibleToolSection = !isUser && contentBlocks.some(isCollapsibleToolBlock)
   const [collapsedToolSections, setCollapsedToolSections] = useState({})
   const [processExpanded, setProcessExpanded] = useState(false)
+  const [liveNow, setLiveNow] = useState(() => Date.now())
   const [lightboxImage, setLightboxImage] = useState(null)
+
+  // Keep the elapsed-time token in the process summary moving while the
+  // server is still emitting events. The interval is local to the active
+  // assistant bubble and stops as soon as the stream settles.
+  useEffect(() => {
+    if (!isStreaming) return undefined
+    const tick = () => setLiveNow(Date.now())
+    tick()
+    const timer = window.setInterval(tick, 1000)
+    return () => window.clearInterval(timer)
+  }, [isStreaming])
 
   const personalSkills = useSkillsStore((s) => s.personal)
   const skillGroups = useSkillsStore((s) => s.groups)
@@ -1144,7 +1156,13 @@ export default memo(function MessageBubble({
     ? resultTextFromBlocks([{ type: 'text', text: message.resultText }], [0])
     : ''
   const finalResultText = streamedResultText || resultTextFromBlocks(contentBlocks, finalResultIndexes)
-  const hasCompletedResult = message.resultReceived === true || message.duration != null
+  const hasCompletedResult = message.resultReceived === true
+    || message.duration != null
+    || message.replayComplete === true
+  // Before ResultMessage arrives, the newest assistant text is still part of
+  // the live process stream. Once it arrives, only that authoritative result
+  // remains outside the collapsible process history.
+  const processResultIndexSet = hasCompletedResult ? finalResultIndexSet : new Set()
   const canCollapseResponse = !isUser
     && !isStreaming
     && !responseStreaming
@@ -1153,11 +1171,14 @@ export default memo(function MessageBubble({
     && !isErrorMessage
     && hasCompletedResult
     && Boolean(finalResultText)
+  const executionDurationMs = message.duration != null
+    ? message.duration
+    : (isStreaming && message.timestamp ? Math.max(0, liveNow - message.timestamp) : 0)
   const executionSummary = summarizeResponseExecution({
     contentBlocks,
     subagentContent,
     fileOps,
-    durationMs: message.duration,
+    durationMs: executionDurationMs,
     additionalQuestionCount: message.summaryQuestionCount,
   })
   const executionSummaryParts = visibleExecutionSummaryItems(executionSummary).map(({ key, value }) => (
@@ -1463,15 +1484,31 @@ export default memo(function MessageBubble({
   }
 
   const renderedContent = []
-  const renderedProcessContent = []
+  const renderedProcessGroups = []
+  const pushProcessNode = (groupId, node) => {
+    if (!node) return
+    const previous = renderedProcessGroups[renderedProcessGroups.length - 1]
+    if (previous?.groupId === groupId) {
+      previous.nodes.push(node)
+      return
+    }
+    renderedProcessGroups.push({ groupId, nodes: [node] })
+  }
+  const processGroupFor = (block, index) => (
+    block?.processGroupId || 'legacy-' + (message._cid || message.timestamp || 'message') + '-' + index
+  )
   for (let i = 0; i < contentBlocks.length; i++) {
     const block = contentBlocks[i]
     if (isCollapsibleToolBlock(block)) {
       const runStartIndex = i
       const run = [block]
+      const runGroupId = processGroupFor(block, runStartIndex)
       while (i + 1 < contentBlocks.length) {
         const nextBlock = contentBlocks[i + 1]
         if (isCollapsibleToolBlock(nextBlock)) {
+          // A tool_use envelope is one process group. Do not let contiguous
+          // tool cards from the next envelope merge into the previous group.
+          if (nextBlock.processGroupId !== block.processGroupId) break
           i += 1
           run.push(contentBlocks[i])
           continue
@@ -1501,24 +1538,25 @@ export default memo(function MessageBubble({
         />
       )
       renderedContent.push(renderedToolRun)
-      renderedProcessContent.push(renderedToolRun)
+      pushProcessNode(runGroupId, renderedToolRun)
       continue
     }
 
     const rendered = renderBlock(block, i)
     if (rendered) {
       renderedContent.push(rendered)
-      if (!finalResultIndexSet.has(i)) renderedProcessContent.push(rendered)
+      if (!processResultIndexSet.has(i)) pushProcessNode(processGroupFor(block, i), rendered)
     }
 
     // Legacy transcripts can embed <think> tags inside the same text block as
     // the final answer. Keep those thoughts available when the process row is
     // expanded, while the result itself remains clean markdown.
-    if (finalResultIndexSet.has(i) && block.type === 'text') {
+    if (processResultIndexSet.has(i) && block.type === 'text') {
       const segments = parseThinkTags(block.text || '')
       segments?.forEach((segment, segmentIndex) => {
         if (segment.type !== 'thinking') return
-        renderedProcessContent.push(
+        pushProcessNode(
+          processGroupFor(block, i),
           <ThinkingBlock
             key={`result-thinking-${i}-${segmentIndex}`}
             content={segment.content}
@@ -1528,6 +1566,28 @@ export default memo(function MessageBubble({
       })
     }
   }
+
+  // Resolve the newest event from the original block order, not only from
+  // rendered nodes. Pending AskUser/permission blocks intentionally render in
+  // the composer, so their group can be the newest event even when it has no
+  // inline node; in that case all prior inline nodes stay inside the collapsed
+  // history until another visible event arrives.
+  let latestProcessGroupId = null
+  for (let i = contentBlocks.length - 1; i >= 0; i -= 1) {
+    if (isEmptyTextBlock(contentBlocks[i])) continue
+    latestProcessGroupId = processGroupFor(contentBlocks[i], i)
+    break
+  }
+  const latestProcessGroup = latestProcessGroupId
+    ? renderedProcessGroups.find((group) => group.groupId === latestProcessGroupId) || null
+    : null
+  const hasProcessEvents = contentBlocks.some((block) => !isEmptyTextBlock(block))
+  const shouldFoldProcess = !isUser
+    && !isErrorMessage
+    && !message.responseInterrupted
+    && message.resultIsError !== true
+    && (canCollapseResponse || (isStreaming && hasProcessEvents))
+  const allRenderedProcessNodes = renderedProcessGroups.flatMap((group) => group.nodes)
 
   const hasMessageHeader = (!isUser && isStreaming && message.timestamp) || (isStreaming && !isUser) || message.error
   const messageHeader = hasMessageHeader ? (
@@ -1606,7 +1666,7 @@ export default memo(function MessageBubble({
         {isErrorMessage && <ErrorBlock message={message} />}
 
         {/* Content blocks — render in order for continuity */}
-        {!isErrorMessage && (canCollapseResponse ? (
+        {!isErrorMessage && (shouldFoldProcess ? (
           <>
             <button
               type="button"
@@ -1637,11 +1697,45 @@ export default memo(function MessageBubble({
               onFocus={(event) => { event.currentTarget.style.color = 'var(--text-secondary)' }}
               onBlur={(event) => { event.currentTarget.style.color = 'var(--text-dim)' }}
             >
-              {executionSummaryText}
+              <span
+                style={{
+                  display: 'inline-flex',
+                  minWidth: 0,
+                  maxWidth: '100%',
+                  alignItems: 'center',
+                  overflow: 'hidden',
+                  verticalAlign: 'middle',
+                }}
+              >
+                <RollingText
+                  text={executionSummaryText}
+                  height={12}
+                  color="currentColor"
+                  fontFamily="'Noto Sans', sans-serif"
+                  fontSize={12}
+                  fontWeight={300}
+                  whiteSpace="nowrap"
+                />
+              </span>
             </button>
             <div aria-hidden="true" style={{ width: '100%', borderTop: '1px solid var(--border-subtle)' }} />
-            {processExpanded && renderedProcessContent}
-            <MarkdownRenderer content={finalResultText} mermaidCollapsible />
+            <AnimatedCollapse open={processExpanded}>
+              <div className="flex flex-col gap-1 min-w-0">
+                {allRenderedProcessNodes}
+              </div>
+            </AnimatedCollapse>
+            {!processExpanded && isStreaming && latestProcessGroup && (
+              <div
+                key={'active-process-' + latestProcessGroup.groupId}
+                className="chat-process-active flex flex-col gap-1 min-w-0"
+                style={{ minWidth: 0 }}
+              >
+                {latestProcessGroup.nodes}
+              </div>
+            )}
+            {hasCompletedResult && finalResultText && (
+              <MarkdownRenderer content={finalResultText} mermaidCollapsible />
+            )}
           </>
         ) : renderedContent)}
         {/* Empty response fallback */}

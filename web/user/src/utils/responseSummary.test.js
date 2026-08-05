@@ -70,6 +70,44 @@ test('does not count failed file operations', () => {
   assert.equal(summary.editedFiles, 0)
 })
 
+test('defers live tool metrics until tool results settle', () => {
+  const running = summarizeResponseExecution({
+    contentBlocks: [
+      { type: 'tool_use', id: 'read-1', name: 'Read', status: 'running', input: { file_path: 'src/live.js' } },
+      { type: 'tool_use', id: 'bash-1', name: 'Bash', status: 'running', input: { command: 'npm test' } },
+      { type: 'file_ref', id: 'file-ref-edit-1', fileOpId: 'edit-1', name: 'Edit', filePath: 'src/live.js' },
+    ],
+    fileOps: [{ id: 'edit-1', status: 'running', filePath: 'src/live.js' }],
+  })
+  assert.equal(running.readFiles, 0)
+  assert.equal(running.editedFiles, 0)
+  assert.equal(running.commands, 0)
+
+  const settled = summarizeResponseExecution({
+    contentBlocks: [
+      { type: 'tool_use', id: 'read-1', name: 'Read', status: 'success', input: { file_path: 'src/live.js' } },
+      { type: 'tool_use', id: 'bash-1', name: 'Bash', status: 'success', input: { command: 'npm test' } },
+      { type: 'file_ref', id: 'file-ref-edit-1', fileOpId: 'edit-1', name: 'Edit', filePath: 'src/live.js' },
+    ],
+    fileOps: [{ id: 'edit-1', status: 'success', filePath: 'src/live.js' }],
+  })
+  assert.equal(settled.readFiles, 1)
+  assert.equal(settled.editedFiles, 1)
+  assert.equal(settled.commands, 1)
+})
+
+test('counts AskUserQuestion prompts without treating approval tools as questions', () => {
+  const summary = summarizeResponseExecution({
+    contentBlocks: [
+      { type: 'tool_use', id: 'plan-1', name: 'ExitPlanMode', input: {} },
+      { type: 'tool_use', id: 'permission-1', name: 'Write', input: { file_path: 'notes.md' } },
+      { type: 'ask_user', id: 'ask-1', questions: [{ question: 'Continue?' }] },
+    ],
+  })
+
+  assert.equal(summary.questions, 1)
+})
+
 test('only exposes non-zero summary metrics for display', () => {
   assert.deepEqual(visibleExecutionSummaryItems({
     duration: '12s',

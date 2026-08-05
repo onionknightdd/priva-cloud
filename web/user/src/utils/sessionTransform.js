@@ -431,9 +431,10 @@ export function transformSessionMessages(sdkMessages) {
         }
 
         // ExitPlanMode is represented by an interactive plan-approval prompt
-        // live, but the tool itself is hidden from the transcript UI.
+        // live, but the tool itself is hidden from the transcript UI. It is an
+        // approval request, not an AskUserQuestion, so it is not included in
+        // the question total.
         if (block.name === 'ExitPlanMode') {
-          hiddenQuestionCount += 1
           continue
         }
 
@@ -475,6 +476,10 @@ export function transformSessionMessages(sdkMessages) {
   // Stable client ids so list keys survive rewind/fork truncation (index keys
   // would swap bubble contents when earlier messages are removed).
   for (const m of messages) {
+    // The history endpoint returns completed turns without the live SSE
+    // ResultMessage envelope. Mark replayed assistant turns as complete so
+    // the UI can apply the same process folding used for live responses.
+    if (m.role === 'assistant') m.replayComplete = true
     if (!m._cid) m._cid = `s-${++cidCounter}`
   }
 
