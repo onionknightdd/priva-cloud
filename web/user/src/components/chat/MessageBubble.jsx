@@ -37,6 +37,7 @@ import {
   findFinalResultBlockIndexes,
   resultTextFromBlocks,
   summarizeResponseExecution,
+  visibleExecutionSummaryItems,
 } from '../../utils/responseSummary'
 
 const ASSISTANT_MESSAGE_GAP = 6
@@ -1159,13 +1160,14 @@ export default memo(function MessageBubble({
     durationMs: message.duration,
     additionalQuestionCount: message.summaryQuestionCount,
   })
-  const executionSummaryText = t('chat.executionSummary', {
-    duration: executionSummary.duration,
-    readFiles: executionSummary.readFiles,
-    editedFiles: executionSummary.editedFiles,
-    commands: executionSummary.commands,
-    questions: executionSummary.questions,
-  })
+  const executionSummaryParts = visibleExecutionSummaryItems(executionSummary).map(({ key, value }) => (
+    key === 'duration'
+      ? t('chat.executionSummaryDuration', { duration: value })
+      : t(`chat.executionSummary${key[0].toUpperCase()}${key.slice(1)}`, { count: value })
+  ))
+  const executionSummaryText = executionSummaryParts.length > 0
+    ? executionSummaryParts.join(t('chat.executionSummarySeparator'))
+    : t('chat.executionSummaryCompleted')
   const shouldHideBubble = !isUser && !hasContent && !hasTools && !hasThinkingContent
     && !isStreaming && (!hasMetadata || hadSdkTaskActivity)
 

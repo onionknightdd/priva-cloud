@@ -6,6 +6,7 @@ import {
   formatExecutionDuration,
   resultTextFromBlocks,
   summarizeResponseExecution,
+  visibleExecutionSummaryItems,
 } from './responseSummary.js'
 
 test('formats elapsed time without zero-value units', () => {
@@ -67,4 +68,26 @@ test('does not count failed file operations', () => {
   })
   assert.equal(summary.readFiles, 0)
   assert.equal(summary.editedFiles, 0)
+})
+
+test('only exposes non-zero summary metrics for display', () => {
+  assert.deepEqual(visibleExecutionSummaryItems({
+    duration: '12s',
+    readFiles: 3,
+    editedFiles: 0,
+    commands: 2,
+    questions: 0,
+  }), [
+    { key: 'duration', value: '12s' },
+    { key: 'readFiles', value: 3 },
+    { key: 'commands', value: 2 },
+  ])
+
+  assert.deepEqual(visibleExecutionSummaryItems({
+    duration: '0s',
+    readFiles: 0,
+    editedFiles: 0,
+    commands: 0,
+    questions: 0,
+  }), [])
 })

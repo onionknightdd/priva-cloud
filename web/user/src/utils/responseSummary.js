@@ -98,6 +98,25 @@ export function formatExecutionDuration(durationMs) {
 }
 
 /**
+ * Return only the summary metrics that have a meaningful, non-zero value.
+ * Keeping this filtering outside the component makes live and replayed
+ * responses follow the same display rule.
+ */
+export function visibleExecutionSummaryItems(summary = {}) {
+  const items = []
+  if (summary.duration && summary.duration !== '0s') {
+    items.push({ key: 'duration', value: summary.duration })
+  }
+
+  for (const key of ['readFiles', 'editedFiles', 'commands', 'questions']) {
+    const value = Number(summary[key])
+    if (Number.isFinite(value) && value > 0) items.push({ key, value })
+  }
+
+  return items
+}
+
+/**
  * Count successful file reads/edits by unique path and executions/questions by
  * occurrence. Subagent buckets are followed recursively from Agent/Task blocks.
  */
