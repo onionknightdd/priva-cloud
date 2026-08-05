@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FileDiff, FolderTree, PanelRight, SquareTerminal, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
@@ -326,6 +326,8 @@ export default function ChatPanel() {
   const sessionTitle = activeSidebarSession?.name || (sessionId ? sessionId : '')
   const [renamingSessionTitle, setRenamingSessionTitle] = useState(false)
   const [sessionTitleDraft, setSessionTitleDraft] = useState('')
+  const sessionTitleInputMeasureRef = useRef(null)
+  const [sessionTitleInputWidth, setSessionTitleInputWidth] = useState(0)
   const sessionTitleHandledRef = useRef(false)
   const isEmpty = messages.length === 0
   // First-page bootstrap: wake the sandbox and learn the workspace via the
@@ -334,8 +336,13 @@ export default function ChatPanel() {
   useEffect(() => {
     setRenamingSessionTitle(false)
     setSessionTitleDraft('')
+    setSessionTitleInputWidth(0)
     sessionTitleHandledRef.current = false
   }, [sessionId])
+  useLayoutEffect(() => {
+    if (!renamingSessionTitle || !sessionTitleInputMeasureRef.current) return
+    setSessionTitleInputWidth(Math.ceil(sessionTitleInputMeasureRef.current.getBoundingClientRect().width))
+  }, [renamingSessionTitle, sessionTitleDraft])
   // cwd comes entirely from the agent-runner: the active session's cwd, else the
   // /api/health workspace. Empty until one resolves — CwdIndicator then shows '~'.
   const activeCwd = activeSidebarSession?.cwd || agentWorkspace || ''
@@ -399,6 +406,7 @@ export default function ChatPanel() {
     if (!sessionId) return
     sessionTitleHandledRef.current = false
     setSessionTitleDraft(sessionTitle)
+    setSessionTitleInputWidth(0)
     setRenamingSessionTitle(true)
   }
   const cancelSessionTitleRename = () => {
@@ -444,33 +452,62 @@ export default function ChatPanel() {
     >
       <div className="flex flex-1 items-center gap-1 min-w-0" style={{ marginRight: 12 }}>
         {renamingSessionTitle ? (
-          <input
-            type="text"
-            autoFocus
-            aria-label={t('sidebar.rename')}
-            value={sessionTitleDraft}
-            onChange={(event) => setSessionTitleDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                commitSessionTitleRename()
-              } else if (event.key === 'Escape') {
-                event.preventDefault()
-                cancelSessionTitleRename()
-              }
-            }}
-            onBlur={commitSessionTitleRename}
-            className="flex-1 min-w-0"
-            style={{
-              background: 'var(--bg-elevated)',
-              border: '1px solid var(--border)',
-              borderRadius: 2,
-              color: 'var(--text-primary)',
-              outline: 'none',
-              fontSize: 13,
-              padding: '2px 4px',
-            }}
-          />
+          <>
+            <span
+              ref={sessionTitleInputMeasureRef}
+              aria-hidden="true"
+              style={{
+                position: 'fixed',
+                left: -9999,
+                top: -9999,
+                visibility: 'hidden',
+                whiteSpace: 'pre',
+                pointerEvents: 'none',
+                boxSizing: 'border-box',
+                border: '1px solid var(--border)',
+                padding: '2px 4px',
+                fontFamily: 'inherit',
+                fontSize: 13,
+                fontWeight: 400,
+              }}
+            >
+              {sessionTitleDraft || ' '}
+            </span>
+            <input
+              type="text"
+              autoFocus
+              aria-label={t('sidebar.rename')}
+              value={sessionTitleDraft}
+              onChange={(event) => setSessionTitleDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  commitSessionTitleRename()
+                } else if (event.key === 'Escape') {
+                  event.preventDefault()
+                  cancelSessionTitleRename()
+                }
+              }}
+              onBlur={commitSessionTitleRename}
+              size={Math.max(sessionTitleDraft.length, 1)}
+              className="min-w-0"
+              style={{
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border)',
+                borderRadius: 2,
+                color: 'var(--text-primary)',
+                outline: 'none',
+                fontFamily: 'inherit',
+                fontSize: 13,
+                fontWeight: 400,
+                padding: '2px 4px',
+                width: sessionTitleInputWidth ? `${sessionTitleInputWidth}px` : undefined,
+                maxWidth: '100%',
+                flex: '0 1 auto',
+                boxSizing: 'border-box',
+              }}
+            />
+          </>
         ) : (
           <button
             type="button"
