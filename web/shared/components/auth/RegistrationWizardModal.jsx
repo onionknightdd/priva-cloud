@@ -6,31 +6,82 @@ import useOverlayTransition from '../../motion/useOverlayTransition'
 import StepSlide from '../../motion/StepSlide'
 
 const RUNNER_TYPES = ['auto_scale', 'persistent']
+const MIN_CPU_CORES = 0.512
 const MAX_CPU_CORES = 4
+const MIN_MEMORY_MB = 1024
 const MAX_MEMORY_MB = 4096
+const MIN_VOLUME_GB = 1
+const MAX_VOLUME_GB = 1024
 
-function NumberField({ label, value, onChange, unit, min, max, step: stp, inputStyle, focusProps }) {
+function validateNumberField(value, { min, max, integer = false }) {
+  if (value == null || String(value).trim() === '') return 'number'
+
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) return 'number'
+  if (integer && !Number.isInteger(numericValue)) return 'integer'
+  if (numericValue < min || (max != null && numericValue > max)) return 'range'
+  return null
+}
+
+function NumberField({ id, label, value, onChange, unit, min, max, step: stp, error, inputStyle, focusProps }) {
   return (
-    <div className="flex items-center gap-3">
-      <span
+    <div className="flex items-center gap-3 min-w-0">
+      <label
+        htmlFor={id}
         className="text-xs uppercase flex-shrink-0"
         style={{ color: 'var(--text-secondary)', letterSpacing: '0.06em', fontWeight: 600, width: 64 }}
       >
         {label}
-      </span>
+      </label>
       <input
+        id={id}
         type="number"
         value={value}
         min={min}
         max={max}
         step={stp}
+        aria-label={label}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${id}-error` : undefined}
         onChange={(e) => onChange(e.target.value)}
-        style={inputStyle}
-        {...focusProps}
+        onFocus={(e) => {
+          if (error) {
+            e.target.style.borderColor = 'var(--red)'
+            return
+          }
+          focusProps?.onFocus?.(e)
+        }}
+        onBlur={(e) => {
+          if (error) {
+            e.target.style.borderColor = 'var(--red)'
+            return
+          }
+          focusProps?.onBlur?.(e)
+        }}
+        style={{ ...inputStyle, borderColor: error ? 'var(--red)' : undefined }}
       />
-      <span className="text-xs font-light" style={{ color: 'var(--text-dim)' }}>
+      <span className="text-xs font-light flex-shrink-0" style={{ color: 'var(--text-dim)' }}>
         {unit}
       </span>
+      {error && (
+        <span
+          id={`${id}-error`}
+          className="text-xs min-w-0"
+          role="alert"
+          style={{
+            flex: '1 1 0',
+            borderLeft: '2px solid var(--red)',
+            color: 'var(--red)',
+            fontWeight: 400,
+            lineHeight: '16px',
+            paddingLeft: 6,
+            wordBreak: 'break-word',
+            overflowWrap: 'break-word',
+          }}
+        >
+          {error}
+        </span>
+      )}
     </div>
   )
 }
@@ -60,18 +111,25 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
     password.length >= 8 &&
     confirmPassword === password
 
-  const cpuValue = Number(cpuCores)
-  const memoryValue = Number(memoryMb)
-  const volumeValue = Number(volumeGb)
-  const resourceValid =
-    Number.isFinite(cpuValue) &&
-    cpuValue >= 0.512 &&
-    cpuValue <= MAX_CPU_CORES &&
-    Number.isInteger(memoryValue) &&
-    memoryValue >= 1024 &&
-    memoryValue <= MAX_MEMORY_MB &&
-    Number.isInteger(volumeValue) &&
-    volumeValue >= 1
+  const formatResourceError = (type, rangeKey) => {
+    if (!type) return ''
+    if (type === 'number') return t('auth.regNumberInvalid')
+    if (type === 'integer') return t('auth.regIntegerRequired')
+    return t(rangeKey)
+  }
+  const cpuError = formatResourceError(
+    validateNumberField(cpuCores, { min: MIN_CPU_CORES, max: MAX_CPU_CORES }),
+    'auth.regCpuRange'
+  )
+  const memoryError = formatResourceError(
+    validateNumberField(memoryMb, { min: MIN_MEMORY_MB, max: MAX_MEMORY_MB, integer: true }),
+    'auth.regMemoryRange'
+  )
+  const volumeError = formatResourceError(
+    validateNumberField(volumeGb, { min: MIN_VOLUME_GB, max: MAX_VOLUME_GB, integer: true }),
+    'auth.regVolumeRange'
+  )
+  const resourceValid = !cpuError && !memoryError && !volumeError
 
   const handleSubmit = async () => {
     if (!resourceValid) return
@@ -447,34 +505,41 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
                   <div className="flex flex-col gap-3">
                     <span style={labelStyle}>{t('auth.regResourceRequest')}</span>
                     <NumberField
+                      id="registration-cpu"
                       label={t('auth.regCpu')}
                       value={cpuCores}
                       onChange={setCpuCores}
                       unit={t('auth.regCpuUnit')}
-                      min={0.512}
+                      min={MIN_CPU_CORES}
                       max={MAX_CPU_CORES}
                       step={0.001}
+                      error={cpuError}
                       inputStyle={numberInputStyle}
                       focusProps={focusProps}
                     />
                     <NumberField
+                      id="registration-memory"
                       label={t('auth.regMemory')}
                       value={memoryMb}
                       onChange={setMemoryMb}
                       unit={t('auth.regMemoryUnit')}
-                      min={1024}
+                      min={MIN_MEMORY_MB}
                       max={MAX_MEMORY_MB}
                       step={256}
+                      error={memoryError}
                       inputStyle={numberInputStyle}
                       focusProps={focusProps}
                     />
                     <NumberField
+                      id="registration-volume"
                       label={t('auth.regVolume')}
                       value={volumeGb}
                       onChange={setVolumeGb}
                       unit={t('auth.regVolumeUnit')}
-                      min={1}
+                      min={MIN_VOLUME_GB}
+                      max={MAX_VOLUME_GB}
                       step={1}
+                      error={volumeError}
                       inputStyle={numberInputStyle}
                       focusProps={focusProps}
                     />
