@@ -435,6 +435,24 @@ export default function FileManagerTab() {
         {/* Upload */}
         <input type="file" ref={fileInputRef} onChange={handleUpload} style={{ display: 'none' }} />
         <button
+          className="flex items-center justify-center px-2 py-1 flex-shrink-0"
+          style={{
+            background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+            borderRadius: 4, cursor: resolvedPath ? 'pointer' : 'not-allowed',
+            color: resolvedPath ? 'var(--text-secondary)' : 'var(--text-dim)', fontSize: 12,
+            transition: 'border-color 150ms ease',
+          }}
+          type="button"
+          onClick={() => { setTooltip(null); setCreateDirectoryOpen(true) }}
+          disabled={!resolvedPath}
+          title={t('picker.newFolder')}
+          aria-label={t('picker.newFolder')}
+          onMouseEnter={(e) => { if (resolvedPath) e.currentTarget.style.borderColor = 'var(--blue)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)' }}
+        >
+          <FolderPlus size={14} strokeWidth={1.5} />
+        </button>
+        <button
           className="flex items-center gap-1 px-2 py-1 flex-shrink-0"
           style={{
             background: 'var(--bg-elevated)', border: '1px solid var(--border)',
@@ -450,25 +468,6 @@ export default function FileManagerTab() {
           <Upload size={12} strokeWidth={1.5} />
           <span>{t('settings.fileManagerUpload')}</span>
         </button>
-        <button
-          className="flex items-center justify-center px-2 py-1 flex-shrink-0"
-          style={{
-            background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-            borderRadius: 4, cursor: resolvedPath ? 'pointer' : 'not-allowed',
-            color: resolvedPath ? 'var(--text-secondary)' : 'var(--text-dim)',
-            transition: 'border-color 150ms ease',
-          }}
-          type="button"
-          onClick={() => { setTooltip(null); setCreateDirectoryOpen(true) }}
-          disabled={!resolvedPath}
-          title={t('picker.newFolder')}
-          aria-label={t('picker.newFolder')}
-          onMouseEnter={(e) => { if (resolvedPath) e.currentTarget.style.borderColor = 'var(--blue)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)' }}
-        >
-          <FolderPlus size={14} strokeWidth={1.5} />
-        </button>
-
         <div className="flex-1" />
 
         {/* Path input + Go */}

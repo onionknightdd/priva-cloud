@@ -182,6 +182,22 @@ export default function DirectoryPicker({
               {name}
             </span>
           </button>
+          {allowCreate && !multiple && isSel && (
+            <button
+              type="button"
+              onClick={(event) => { event.stopPropagation(); setCreateParentPath(path) }}
+              title={t('picker.newFolder')}
+              aria-label={t('picker.newFolder')}
+              style={{
+                background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer',
+                display: 'flex', flexShrink: 0, padding: 2, transition: 'color 150ms ease',
+              }}
+              onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--text-secondary)' }}
+              onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--text-dim)' }}
+            >
+              <FolderPlus size={14} strokeWidth={1.5} />
+            </button>
+          )}
         </div>
         <AnimatedCollapse
           open={isOpen}
@@ -229,19 +245,6 @@ export default function DirectoryPicker({
             {title || t('picker.title')}
           </span>
           <div className="flex items-center gap-1">
-            {allowCreate && (
-              <button
-                type="button"
-                onClick={() => setCreateParentPath(single || initialPath || '/')}
-                title={t('picker.newFolder')}
-                aria-label={t('picker.newFolder')}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', transition: 'color 150ms ease' }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
-              >
-                <FolderPlus size={14} strokeWidth={1.5} />
-              </button>
-            )}
             <button
               type="button"
               onClick={onCancel}

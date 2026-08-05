@@ -507,19 +507,31 @@ export default function ChatPanel() {
                 boxSizing: 'border-box',
               }}
             />
+            {sessionId && (
+              <span
+                className="flex-shrink-0"
+                title={t('sidebar.copySessionId')}
+                onMouseDown={(event) => event.preventDefault()}
+              >
+                <CopyButton content={sessionId} inline />
+              </span>
+            )}
           </>
         ) : (
           <button
             type="button"
             disabled={!sessionId}
-            className="flex-1 min-w-0 truncate"
+            className="min-w-0 truncate"
             style={{
               background: 'transparent',
               border: 'none',
               color: 'var(--text-secondary)',
               cursor: sessionId ? 'pointer' : 'default',
+              flex: '0 1 auto',
               fontSize: 13,
               minWidth: 0,
+              width: 'fit-content',
+              maxWidth: '100%',
               padding: 0,
               textAlign: 'left',
               transition: 'color 150ms ease',
@@ -536,7 +548,7 @@ export default function ChatPanel() {
             {sessionTitle}
           </button>
         )}
-        {sessionId && (
+        {!renamingSessionTitle && sessionId && (
           <span className="flex-shrink-0" title={t('sidebar.copySessionId')}>
             <CopyButton content={sessionId} inline />
           </span>
