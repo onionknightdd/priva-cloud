@@ -1,5 +1,6 @@
-import { memo, useState, useEffect, useId, useRef, useCallback, useMemo } from 'react'
+import { memo, useState, useEffect, useLayoutEffect, useId, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
+import { animate } from 'animejs'
 import { Clock, Loader, Copy, Check, AlertTriangle, Repeat, ArrowDownToLine, ArrowUpFromLine, PanelRight, ChevronRight, ChevronDown, FileText, FilePen, CornerDownLeft, RotateCcw, GitBranch, ExternalLink, ScrollText, Timer } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import MarkdownRenderer from '../markdown/MarkdownRenderer'
@@ -21,6 +22,9 @@ import SelectedFileCard from '../shared/SelectedFileCard'
 import { RollingInteger, RollingText } from '../shared/Odometer'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 import AnimatedShimmerText from '@shared/components/shared/AnimatedShimmerText'
+import { usePresence } from '@shared/motion/usePresence'
+import { useReducedMotion } from '@shared/motion/useReducedMotion'
+import { DURATION, EASE_SPRING } from '@shared/motion/tokens'
 import useUiStore from '@shared/stores/uiStore'
 import useChatStore from '../../stores/chatStore'
 import useSkillsStore, { flattenSkillsForPicker } from '../../stores/skillsStore'
@@ -134,6 +138,92 @@ function formatDuration(ms) {
   const m = Math.floor(s / 60)
   const rs = Math.round(s % 60)
   return `${m}m ${rs}s`
+}
+
+// The newest process group stays mounted across a stream-end transition so it
+// can leave through the same Anime.js presence path as every other fold. A
+// conditional render used to remove it immediately when isStreaming flipped
+// false, which made the last frame jump while the virtualized row remeasured.
+function AnimatedProcessGroup({ group, visible }) {
+  const groupId = group?.groupId || null
+  const displayGroupRef = useRef(group || null)
+  if (group) displayGroupRef.current = group
+
+  const elementRef = useRef(null)
+  const animationRef = useRef(null)
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
+  const reducedMotion = useReducedMotion()
+  const { mounted, onExited } = usePresence(visible)
+
+  useLayoutEffect(() => {
+    const element = elementRef.current
+    if (!mounted || !element || !displayGroupRef.current) return undefined
+
+    animationRef.current?.cancel()
+
+    const clearMotionStyles = () => {
+      element.style.willChange = ''
+      element.style.transform = ''
+    }
+
+    if (reducedMotion) {
+      if (visible) {
+        element.style.height = 'auto'
+        element.style.opacity = '1'
+        clearMotionStyles()
+      } else {
+        onExited()
+      }
+      return undefined
+    }
+
+    element.style.willChange = 'height, opacity, transform'
+    if (visible) {
+      const targetHeight = element.scrollHeight
+      element.style.height = '0px'
+      element.style.opacity = '0'
+      element.style.transform = 'translateY(4px)'
+      void element.offsetHeight
+      animationRef.current = animate(element, {
+        height: { to: `${targetHeight}px`, duration: DURATION.panel, ease: EASE_SPRING },
+        opacity: { to: 1, duration: DURATION.panel, ease: EASE_SPRING },
+        translateY: { to: 0, duration: DURATION.panel, ease: EASE_SPRING },
+        onComplete: () => {
+          if (!visibleRef.current) return
+          element.style.height = 'auto'
+          clearMotionStyles()
+        },
+      })
+    } else {
+      const currentHeight = element.offsetHeight || element.scrollHeight
+      element.style.height = `${currentHeight}px`
+      void element.offsetHeight
+      animationRef.current = animate(element, {
+        height: { to: '0px', duration: DURATION.panel, ease: EASE_SPRING },
+        opacity: { to: 0, duration: DURATION.panel, ease: EASE_SPRING },
+        translateY: { to: -2, duration: DURATION.panel, ease: EASE_SPRING },
+        onComplete: () => {
+          clearMotionStyles()
+          onExited()
+        },
+      })
+    }
+
+    return () => animationRef.current?.cancel()
+  }, [groupId, mounted, onExited, reducedMotion, visible])
+
+  if (!mounted || !displayGroupRef.current) return null
+
+  return (
+    <div
+      ref={elementRef}
+      className="flex flex-col gap-1 min-w-0"
+      style={{ minWidth: 0, overflow: 'hidden' }}
+    >
+      {displayGroupRef.current.nodes}
+    </div>
+  )
 }
 
 function getCompactDiffPalette(kind) {
@@ -1724,14 +1814,11 @@ export default memo(function MessageBubble({
                 {allRenderedProcessNodes}
               </div>
             </AnimatedCollapse>
-            {!processExpanded && isStreaming && latestProcessGroup && (
-              <div
-                key={'active-process-' + latestProcessGroup.groupId}
-                className="chat-process-active flex flex-col gap-1 min-w-0"
-                style={{ minWidth: 0 }}
-              >
-                {latestProcessGroup.nodes}
-              </div>
+            {hasProcessEvents && (
+              <AnimatedProcessGroup
+                group={latestProcessGroup}
+                visible={Boolean(isStreaming && !processExpanded && latestProcessGroup)}
+              />
             )}
             {hasCompletedResult && finalResultText && (
               <MarkdownRenderer content={finalResultText} mermaidCollapsible />
