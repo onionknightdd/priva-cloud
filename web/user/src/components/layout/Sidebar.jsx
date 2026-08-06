@@ -88,10 +88,9 @@ const PLUGINS_SECTIONS = [
 ]
 
 const SUBMENU_ACTIVE_RAIL_OFFSET = 18
-// SessionItem's status marker plus its 8px gap occupy 15px. At indent 11px,
-// the session title starts at the same 26px column as the project name and
-// the primary menu icons.
-const PROJECT_SESSION_INDENT = 11
+// SessionItem's status marker plus its 8px gap occupy 15px. At indent 37px,
+// the session title starts at the same 52px column as the project name.
+const PROJECT_SESSION_INDENT = 37
 
 function SessionItem({
   session, isActive, openMenuId, menuRef, onSelect, onMenuToggle,
@@ -1268,10 +1267,10 @@ export default function Sidebar() {
                         onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
                         onMouseLeave={(e) => { e.currentTarget.style.color = 'inherit' }}
                       >
-                        <span className="truncate" style={{ flex: '0 1 auto', fontSize: 14, minWidth: 0, textAlign: 'left' }}>
+                        <ProjectGroupIcon expanded={isExpanded} />
+                        <span className="flex-1 truncate" style={{ fontSize: 14, minWidth: 0, textAlign: 'left' }}>
                           {shortCwd(group.cwd)}
                         </span>
-                        <ProjectGroupIcon expanded={isExpanded} />
                       </button>
                       {group.pinned && (
                         <Pin size={10} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--cyan)' }} />
