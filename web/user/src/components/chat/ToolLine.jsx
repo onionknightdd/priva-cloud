@@ -176,9 +176,8 @@ function ToolDetails({ sections, error }) {
     <div className="tool-detail-block">
       {sections.map((section, index) => (
         <section
-          className={`tool-detail-section${section.type === 'diff' ? ' is-diff' : ''}`}
+          className={`tool-detail-section${section.type === 'diff' ? ' is-diff' : ''}${index > 0 ? ' has-divider' : ''}`}
           key={`${section.label}-${index}`}
-          style={index > 0 ? { borderTop: '1px solid var(--border)' } : undefined}
         >
           {section.label && (
             <div className="tool-detail-label" style={{ color: error && section.label === 'OUTPUT' ? 'var(--red)' : undefined }}>

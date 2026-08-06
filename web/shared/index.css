@@ -1435,6 +1435,15 @@ html, body {
   overflow: hidden;
 }
 
+.tool-detail-section.has-divider::before {
+  position: absolute;
+  top: 0;
+  right: 10px;
+  left: 10px;
+  border-top: 1px solid var(--border);
+  content: '';
+}
+
 .tool-detail-section.is-diff {
   padding: 6px 28px 6px 6px;
 }
