@@ -1962,7 +1962,7 @@ export default memo(function MessageBubble({
                 maxWidth: '100%',
                 boxSizing: 'border-box',
                 border: '1px solid var(--border)',
-                borderRadius: 4,
+                borderRadius: 8,
                 padding: '6px 10px',
                 background: 'var(--bg-elevated)',
               }}
