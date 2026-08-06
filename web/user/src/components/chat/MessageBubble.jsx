@@ -97,7 +97,7 @@ function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
         aria-controls={bodyId}
         className="flex items-center gap-1 px-2 rounded-sm"
         style={{
-          fontSize: 'var(--text-sm)',
+          fontSize: 'var(--text-xs)',
           color: 'var(--text-secondary)',
           cursor: 'pointer',
           userSelect: 'none',
@@ -114,7 +114,7 @@ function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
         onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)'; e.currentTarget.style.borderColor = 'var(--border-subtle)' }}
       >
         {streaming ? (
-          <AnimatedShimmerText>{t('chat.thinking')}</AnimatedShimmerText>
+          <AnimatedShimmerText style={{ fontSize: 'var(--text-xs)' }}>{t('chat.thinking')}</AnimatedShimmerText>
         ) : (
           <>
             <Check size={10} strokeWidth={1.5} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
