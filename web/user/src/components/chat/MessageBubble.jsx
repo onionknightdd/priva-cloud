@@ -1890,10 +1890,14 @@ export default memo(function MessageBubble({
               >
                 <span
                   style={{
-                    display: 'inline-flex',
+                    // Keep the text segments in a normal inline formatting
+                    // context. RollingText splits around numbers; making the
+                    // wrapper a flex container turns the spaces at those
+                    // boundaries into flex-item whitespace and they can be
+                    // visually trimmed ("Ran for1m", ",read").
+                    display: 'inline-block',
                     minWidth: 0,
                     maxWidth: '100%',
-                    alignItems: 'center',
                     overflow: 'hidden',
                     verticalAlign: 'middle',
                   }}
