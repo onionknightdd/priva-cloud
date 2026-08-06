@@ -959,12 +959,20 @@ export default function Sidebar() {
       >
         {collapsed ? (
           <button style={iconBtn} onClick={toggleCollapsed} title={t('sidebar.expand')} onMouseEnter={iconBtnIn} onMouseLeave={iconBtnOut}>
-            <Bot size={21} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color)' }} />
+            <Bot size={25} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color)' }} />
           </button>
         ) : (
           <>
-            <div className="flex items-center gap-2 min-w-0">
-              <Bot size={21} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color)', flexShrink: 0 }} />
+            <div className="flex items-center min-w-0">
+              {/* Keep the brand text anchored to the menu label column while
+                  centering the larger logo inside the remaining logo slot. */}
+              <span
+                aria-hidden="true"
+                className="flex items-center justify-center flex-shrink-0"
+                style={{ width: 29, height: 28 }}
+              >
+                <Bot size={25} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color)' }} />
+              </span>
               <span className="font-bold truncate" style={{ color: 'var(--text-primary)', fontSize: 17, letterSpacing: '-0.01em', minWidth: 0 }}>
                 {t('brand.title')}
               </span>
