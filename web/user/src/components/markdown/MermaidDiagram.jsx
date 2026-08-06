@@ -108,7 +108,7 @@ function initializeMermaid(mermaid) {
     startOnLoad: false,
     securityLevel: 'strict',
     theme: 'base',
-    fontFamily: "'Noto Sans', 'Source Han Sans SC', sans-serif",
+    fontFamily: 'var(--font-ui)',
     // The scoped `.mermaid-svg` CSS block owns the final appearance so
     // diagrams re-theme live. These values keep Mermaid's generated CSS
     // aligned with the app tokens before the overrides land.

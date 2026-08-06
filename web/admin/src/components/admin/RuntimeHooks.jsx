@@ -36,7 +36,7 @@ const badgeStyle = {
 const inputStyle = {
   width: '100%', padding: '7px 10px', background: 'var(--bg-elevated)',
   border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)',
-  fontSize: 13, fontFamily: "'Noto Sans', sans-serif", outline: 'none', boxSizing: 'border-box',
+  fontSize: 13, fontFamily: 'var(--font-ui)', outline: 'none', boxSizing: 'border-box',
 }
 
 const monoInputStyle = { ...inputStyle, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }

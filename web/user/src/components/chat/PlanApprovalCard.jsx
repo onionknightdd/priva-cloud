@@ -165,7 +165,7 @@ export default function PlanApprovalCard({ approval, onApprove }) {
               borderRadius: 2,
               color: 'var(--text-primary)',
               fontSize: 12,
-              fontFamily: "'Noto Sans', sans-serif",
+              fontFamily: 'var(--font-ui)',
               padding: '8px 10px',
               resize: 'vertical',
               outline: 'none',

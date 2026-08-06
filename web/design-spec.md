@@ -38,7 +38,7 @@ app.mount("/", StaticFiles(directory="dist", html=True), name="static")
 
 ### Font — Local Setup (No CDN)
 
-**Primary font: Noto Sans** (variable weight woff2), **Code font: JetBrains Mono**. Both loaded locally from `public/fonts/`.
+Product UI uses the operating system UI font stack so the web console follows the host platform in the same way as TRAE Work. Code and terminal surfaces use local fonts from `public/fonts/`; SF Pro and CJK system fonts are never bundled.
 
 ```css
 /* src/index.css */
@@ -53,6 +53,17 @@ app.mount("/", StaticFiles(directory="dist", html=True), name="static")
 @font-face { font-family: 'JetBrains Mono';
   src: url('/fonts/JetBrainsMono-Bold.woff2') format('woff2');
   font-weight: 700; font-display: swap; }
+
+:root {
+  --font-ui: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    system-ui, "PingFang SC", "Microsoft YaHei", "Noto Sans", sans-serif;
+  --font-code: "JetBrains Mono", "Source Han Mono SC", "SFMono-Regular",
+    Consolas, monospace;
+  --font-terminal: "JetBrainsMono Nerd Font Mono", "Source Han Mono SC",
+    monospace;
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
+}
 ```
 
 ### Tailwind Locked Config
@@ -81,8 +92,8 @@ export default {
       // Only none — all shadow-* classes are dead
     },
     fontFamily: {
-      sans: ['Noto Sans', 'sans-serif'],
-      mono: ['JetBrains Mono', 'monospace'],
+      sans: ['var(--font-ui)'],
+      mono: ['var(--font-code)'],
     },
     fontSize: {
       xs:    ['11px', { lineHeight: '16px' }],
@@ -148,7 +159,7 @@ export default {
 
 **Core metaphor: A living, hardcover technical manual.**
 
-Users are heavy terminal users. The aesthetic anchors are GitHub Dark Default + Noto Sans (UI) / JetBrains Mono (code) + Powerlevel10k.
+Users are heavy terminal users. The aesthetic anchors are GitHub Dark Default + a platform-native UI font stack / JetBrains Mono (code) + Powerlevel10k.
 The goal is not "a pretty AI interface" — it's **the spirit of the terminal, the craft of Stripe**.
 
 The interface should feel: serious, precise, in control. Every pixel has a reason to exist.
@@ -204,21 +215,21 @@ The interface should feel: serious, precise, in control. Every pixel has a reaso
 
 ## §3 Typography
 
-**Primary font: Noto Sans** for UI text. **Code font: JetBrains Mono** for code blocks, inline code, and monospace content. Both loaded locally, no CDN.
+UI text uses `var(--font-ui)` — `SF Pro Text`, `-apple-system`, `Segoe UI`, `system-ui`, `PingFang SC`, `Microsoft YaHei`, and local `Noto Sans` as the final fallback. Code blocks, inline code, IDs, paths, logs, and technical metadata use `var(--font-code)`. The Web Terminal uses `var(--font-terminal)`. Only the code and terminal fonts are bundled locally; system UI fonts are never bundled.
 
 ```css
-body { font-family: 'Noto Sans', 'JetBrains Mono', sans-serif; }
-code, pre { font-family: 'JetBrains Mono', monospace; }
+body { font-family: var(--font-ui); }
+code, pre { font-family: var(--font-code); }
 ```
 
 ### Font Weight Scale
 
 | Weight | Usage | Examples |
 |--------|-------|---------|
-| 700 | Page titles | H1, task names |
+| 700 | Strong emphasis | Explicitly required emphasis and code weight |
 | 600 | Section headers | Panel titles, group labels |
 | 400 | Body text | Message body, descriptions, inputs |
-| 300 | Secondary info | Timestamps, hints, dim text |
+| 300 | Legacy light metadata | Prefer 400 with dim color for new UI |
 
 ### Font Size Scale
 
@@ -241,7 +252,7 @@ code, pre { font-family: 'JetBrains Mono', monospace; }
 **Rules:**
 - Numbers are always monospace-aligned, right-aligned (time, duration, counts)
 - Status chips / labels: ALL CAPS + `letter-spacing: var(--tracking-wide)`
-- Use JetBrains Mono for code/monospace content only, Noto Sans for everything else
+- Use `var(--font-code)` for code/monospace content only, `var(--font-ui)` for everything else
 
 ---
 
@@ -1061,7 +1072,7 @@ Prepend this context to every new component request:
 
 ```
 Follow the design spec strictly:
-- Font: Noto Sans for UI, JetBrains Mono for code only
+- Font: `var(--font-ui)` for UI, `var(--font-code)` for code, and `var(--font-terminal)` for terminal surfaces
 - Colors: CSS variables only, no Tailwind color palette, no hardcoded hex
 - No box-shadow — use background color difference for depth
 - Border radius max 4px
@@ -1081,7 +1092,7 @@ Follow the design spec strictly:
 - [ ] Shrink browser window — no horizontal scrollbar appears
 - [ ] All colors from CSS variables — no hardcoded hex
 - [ ] No `box-shadow` used anywhere
-- [ ] Font is Noto Sans for UI, JetBrains Mono for code blocks only
+- [ ] Font is `var(--font-ui)` for UI, `var(--font-code)` for code blocks, and `var(--font-terminal)` for terminal surfaces
 - [ ] Long text tested: wrap and marquee both work
 - [ ] Hover states have 150ms transition
 - [ ] Copy icon appears on hover, shows Check on click, reverts after 800ms

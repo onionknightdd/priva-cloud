@@ -1850,7 +1850,7 @@ export default memo(function MessageBubble({
                     text={executionSummaryText}
                     height={12}
                     color="currentColor"
-                    fontFamily="'Noto Sans', sans-serif"
+                    fontFamily="var(--font-ui)"
                     fontSize={12}
                     fontWeight={300}
                     whiteSpace="nowrap"

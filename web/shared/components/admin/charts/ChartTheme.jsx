@@ -70,7 +70,7 @@ export function ChartTooltip({ active, payload, label, formatter }) {
         style={{
           color: resolveVar('--text-secondary'),
           marginBottom: 4,
-          fontFamily: "'Noto Sans', sans-serif",
+          fontFamily: 'var(--font-ui)',
           fontSize: 11,
         }}
       >
@@ -90,7 +90,7 @@ export function ChartTooltip({ active, payload, label, formatter }) {
           <span
             style={{
               color: resolveVar('--text-secondary'),
-              fontFamily: "'Noto Sans', sans-serif",
+              fontFamily: 'var(--font-ui)',
               fontSize: 11,
             }}
           >
@@ -99,7 +99,7 @@ export function ChartTooltip({ active, payload, label, formatter }) {
           <span
             style={{
               color: resolveVar('--text-primary'),
-              fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+              fontFamily: 'var(--font-code)',
               fontSize: 11,
             }}
           >

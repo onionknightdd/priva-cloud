@@ -314,7 +314,7 @@ export default function LifecycleGraph() {
             fontSize: 11,
             fontWeight: 600,
             letterSpacing: '0.08em',
-            fontFamily: "'Noto Sans', sans-serif",
+            fontFamily: 'var(--font-ui)',
           }}
         >
           TOOL PIPELINE
@@ -327,7 +327,7 @@ export default function LifecycleGraph() {
             fontSize: 11,
             fontWeight: 600,
             letterSpacing: '0.08em',
-            fontFamily: "'Noto Sans', sans-serif",
+            fontFamily: 'var(--font-ui)',
           }}
         >
           AGENT PIPELINE
@@ -464,7 +464,7 @@ export default function LifecycleGraph() {
                   style={{
                     fill: 'var(--text-dim)',
                     fontSize: 10,
-                    fontFamily: "'Noto Sans', sans-serif",
+                    fontFamily: 'var(--font-ui)',
                   }}
                 >
                   configured: {handlerCount}
@@ -499,7 +499,7 @@ export default function LifecycleGraph() {
                 style={{
                   fill: 'var(--text-dim)',
                   fontSize: 10,
-                  fontFamily: "'Noto Sans', sans-serif",
+                  fontFamily: 'var(--font-ui)',
                 }}
               >
                 {t(item.labelKey)}
@@ -514,7 +514,7 @@ export default function LifecycleGraph() {
               style={{
                 fill: 'var(--text-dim)',
                 fontSize: 10,
-                fontFamily: "'Noto Sans', sans-serif",
+                fontFamily: 'var(--font-ui)',
               }}
             >
               {t('hooks.legendCanBlock')}

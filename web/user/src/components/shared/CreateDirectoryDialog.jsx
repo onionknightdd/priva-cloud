@@ -101,7 +101,7 @@ export default function CreateDirectoryDialog({ open, parentPath, onCreated, onC
               width: '100%', boxSizing: 'border-box', padding: '7px 8px',
               background: 'var(--bg-elevated)', border: `1px solid ${error ? 'var(--red)' : 'var(--border)'}`,
               borderRadius: 4, color: 'var(--text-primary)', fontSize: 13,
-              fontFamily: "'Noto Sans', 'Source Han Sans SC', sans-serif", outline: 'none',
+              fontFamily: 'var(--font-ui)', outline: 'none',
             }}
           />
           {error && (

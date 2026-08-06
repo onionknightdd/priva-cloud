@@ -150,7 +150,7 @@ function PlusDropdown({ open, onClose, onUpload, extra }) {
         style={{
           background: 'transparent', border: 'none',
           color: 'var(--text-secondary)', cursor: 'pointer', textAlign: 'left',
-          fontFamily: "'Noto Sans', sans-serif", fontSize: 13, transition: 'background 150ms ease',
+          fontFamily: 'var(--font-ui)', fontSize: 13, transition: 'background 150ms ease',
         }}
         onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
         onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
@@ -1341,7 +1341,7 @@ export default function PromptComposer({
             color: 'var(--text-primary)',
             resize: 'none',
             outline: 'none',
-            fontFamily: "'Noto Sans', sans-serif",
+            fontFamily: 'var(--font-ui)',
             fontSize: 14,
             lineHeight: 1.5,
             minHeight,
@@ -1486,7 +1486,7 @@ export default function PromptComposer({
                 color: 'var(--text-primary)',
                 resize: 'none',
                 outline: 'none',
-                fontFamily: "'Noto Sans', sans-serif",
+                fontFamily: 'var(--font-ui)',
                 fontSize: 14,
                 lineHeight: 1.6,
                 padding: '44px 20px 12px 20px',
@@ -1543,7 +1543,7 @@ export default function PromptComposer({
                 padding: '6px 12px',
                 color: 'var(--text-dim)',
                 borderTop: '1px solid var(--border-subtle)',
-                fontFamily: "'Noto Sans', sans-serif",
+                fontFamily: 'var(--font-ui)',
                 letterSpacing: '0.02em',
               }}
             >

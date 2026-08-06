@@ -142,7 +142,7 @@ function TerminalSessionInner({
     }
 
     const term = new Terminal({
-      fontFamily: "'JetBrainsMono Nerd Font Mono', 'Source Han Mono SC', monospace",
+      fontFamily: 'var(--font-terminal)',
       fontSize: 13,
       cursorBlink: true,
       cursorStyle: 'block',

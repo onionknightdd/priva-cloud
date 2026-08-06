@@ -52,7 +52,7 @@ export default function SetupPage() {
     borderRadius: '4px',
     color: 'var(--text-primary)',
     fontSize: '13px',
-    fontFamily: "'Noto Sans', sans-serif",
+    fontFamily: 'var(--font-ui)',
     outline: 'none',
     boxSizing: 'border-box',
     transition: 'border-color 150ms ease',

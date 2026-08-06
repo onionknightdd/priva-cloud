@@ -375,7 +375,7 @@ function getExcelTextDecoration(font = {}) {
 function getExcelFontFamily(name) {
   if (!name) return undefined
   const escaped = String(name).replace(/["\\]/g, '')
-  return `"${escaped}", "Noto Sans", sans-serif`
+  return `"${escaped}", var(--font-ui)`
 }
 
 function getExcelCellStyle(cell) {

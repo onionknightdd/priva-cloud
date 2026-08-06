@@ -959,7 +959,7 @@ function McpSubMenu({ mcpServers, setMcpServers, serverList, loading, t }) {
           background: showSub ? 'var(--bg-surface)' : 'transparent',
           border: 'none', cursor: 'pointer',
           color: 'var(--text-secondary)', textAlign: 'left',
-          fontFamily: "'Noto Sans', sans-serif", fontSize: 13,
+          fontFamily: 'var(--font-ui)', fontSize: 13,
           transition: 'background 150ms ease',
         }}
         onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}

@@ -4496,7 +4496,7 @@ export function FeedbackScene() {
                     borderRadius: 2,
                     color: 'var(--text-primary)',
                     fontSize: 11,
-                    fontFamily: "'Noto Sans', sans-serif",
+                    fontFamily: 'var(--font-ui)',
                     padding: '8px 10px',
                     lineHeight: 1.5,
                   }}

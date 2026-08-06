@@ -379,7 +379,7 @@ export default function OptimizePopup({ data, onClose }) {
               padding: '8px 10px',
               resize: 'none',
               outline: 'none',
-              fontFamily: "'Noto Sans', sans-serif",
+              fontFamily: 'var(--font-ui)',
               fontSize: 13,
               lineHeight: 1.5,
               minHeight: 40,

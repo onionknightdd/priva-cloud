@@ -55,7 +55,7 @@ export default function AuditCharts({ entries, loading }) {
     const { payload } = props
     if (!payload) return null
     return (
-      <div className="flex items-center gap-3 justify-center flex-wrap" style={{ fontSize: 11, fontFamily: "'Noto Sans', sans-serif" }}>
+      <div className="flex items-center gap-3 justify-center flex-wrap" style={{ fontSize: 11, fontFamily: 'var(--font-ui)' }}>
         {payload.map((entry) => {
           const isHidden = hiddenCategories.has(entry.dataKey)
           return (

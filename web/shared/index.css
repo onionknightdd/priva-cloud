@@ -16,7 +16,7 @@
   font-display: swap;
 }
 
-/* JetBrains Mono — UI monospace (code blocks, mono labels). Small, no Nerd icons. */
+/* JetBrains Mono — code blocks, mono labels, and technical metadata. */
 @font-face {
   font-family: 'JetBrains Mono';
   src: url('/fonts/JetBrainsMono-Light.woff2') format('woff2');
@@ -62,8 +62,9 @@
   font-display: swap;
 }
 
-/* Source Han Mono SC — CJK fallback. unicode-range gates the download:
-   the browser only fetches these files when a glyph in this range is rendered. */
+/* Source Han Mono SC — CJK fallback for code and terminal surfaces.
+   unicode-range gates the download: the browser only fetches these files when
+   a glyph in this range is rendered. */
 @font-face {
   font-family: 'Source Han Mono SC';
   src: url('/fonts/SourceHanMonoSC-Regular.woff2') format('woff2');
@@ -91,6 +92,32 @@
 
 /* ── CSS Variables ── */
 :root {
+  /* Typography — system UI for product surfaces, local mono for technical data. */
+  --font-ui:
+    "SF Pro Text",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    system-ui,
+    "PingFang SC",
+    "Microsoft YaHei",
+    "Noto Sans",
+    sans-serif;
+  --font-code:
+    "JetBrains Mono",
+    "Source Han Mono SC",
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+  --font-terminal:
+    "JetBrainsMono Nerd Font Mono",
+    "Source Han Mono SC",
+    monospace;
+
+  /* Compatibility aliases for existing component-level references. */
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
+
   --bg-base: #0d1117;
   --bg-surface: #161b22;
   --bg-elevated: #21262d;
@@ -159,8 +186,8 @@
   --text-xl: 20px;
   --text-2xl: 24px;
 
-  --font-weight-base: 450;
-  --font-weight-light: 300;
+  --font-weight-base: 400;
+  --font-weight-light: 400;
 }
 
 /* ── Light Theme ── */
@@ -202,7 +229,7 @@
   --scrollbar-thumb: #c9cfd6;
   --scrollbar-thumb-hover: #8b95a2;
 
-  --font-weight-base: 500;
+  --font-weight-base: 400;
   --font-weight-light: 400;
 }
 
@@ -311,10 +338,10 @@ html, body {
   max-width: 100vw;
   background: var(--bg-base);
   color: var(--text-primary);
-  font-family: 'Noto Sans', 'JetBrains Mono', 'Source Han Mono SC', sans-serif;
+  font-family: var(--font-ui);
   font-size: 14px;
   font-weight: var(--font-weight-base);
-  line-height: 1.5;
+  line-height: 20px;
   -webkit-font-smoothing: auto;
   scroll-behavior: smooth;
 }
@@ -663,7 +690,7 @@ html, body {
 .mermaid-svg .label {
   fill: var(--text-primary) !important;
   color: var(--text-primary) !important;
-  font-family: 'Noto Sans', 'Source Han Sans SC', sans-serif !important;
+  font-family: var(--font-ui) !important;
 }
 
 /* Flowchart */
@@ -1037,7 +1064,7 @@ html, body {
 }
 .recharts-text {
   fill: var(--text-dim);
-  font-family: 'JetBrains Mono', 'Source Han Mono SC', monospace;
+  font-family: var(--font-code);
   font-size: var(--text-xs);
 }
 

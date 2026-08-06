@@ -22,7 +22,7 @@
 
 ### Design Language
 
-**Style:** GitHub Dark Default palette · Noto Sans (UI) / JetBrains Mono (code) · Vercel×Linear industrial minimalism
+**Style:** GitHub Dark Default palette · system UI stack (SF Pro Text / system-ui / CJK system fonts) / JetBrains Mono (code) · Vercel×Linear industrial minimalism
 **Metaphor:** A living, hardcover technical manual. Serious, precise, in control.  
 **Never:** AI-slop aesthetics — no purple gradients, no glassmorphism, no rounded-full buttons.
 
@@ -71,14 +71,14 @@ Only use these CSS variables. Never hardcode hex values. Never use Tailwind colo
 
 ### Typography
 
-**Primary font: Noto Sans** for UI text. **Code font: JetBrains Mono** for code blocks and monospace content. Both loaded locally from `public/fonts/`.
+**UI font:** `var(--font-ui)` uses the operating system UI stack (`SF Pro Text`, `-apple-system`, `Segoe UI`, `system-ui`, `PingFang SC`, `Microsoft YaHei`, then local `Noto Sans`). **Code font:** `var(--font-code)` uses local JetBrains Mono with Source Han Mono SC for CJK. **Terminal font:** `var(--font-terminal)` uses the local Nerd Font build. Do not bundle SF Pro, PingFang, Segoe UI, or Microsoft YaHei.
 
 | Weight | Usage |
 |--------|-------|
-| 700 | Page titles, task names |
+| 700 | Strong emphasis and code weight where explicitly required |
 | 600 | Panel headers, group labels |
 | 400 | Body text, descriptions, inputs |
-| 300 | Timestamps, dim text, hints |
+| 300 | Legacy light metadata only; prefer 400 with dim color for new UI |
 
 Font sizes: `xs=11px` `sm=12px` `base=13px` `md=14px` `lg=16px` `xl=20px`
 
@@ -296,7 +296,7 @@ Full component map in `design-spec.md §七`.
 - [ ] Shrink browser window — zero horizontal scrollbar
 - [ ] All colors from CSS variables — no hardcoded hex
 - [ ] No `box-shadow` used anywhere
-- [ ] Font is Noto Sans for UI, JetBrains Mono for code only
+- [ ] Font is `var(--font-ui)` for UI, `var(--font-code)` for code, and `var(--font-terminal)` for terminal surfaces
 - [ ] All Lucide icons have `strokeWidth={1.5}`
 - [ ] Hover states have 150ms transition
 - [ ] Loading uses skeleton shimmer, not spinner

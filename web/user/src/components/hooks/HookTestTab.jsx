@@ -130,7 +130,7 @@ export default function HookTestTab({ hookId }) {
               className="flex items-center gap-2 w-full px-2 py-1"
               style={{
                 ...inputStyle,
-                fontFamily: "'Noto Sans', sans-serif",
+                fontFamily: 'var(--font-ui)',
                 cursor: 'pointer',
                 display: 'flex',
                 justifyContent: 'space-between',

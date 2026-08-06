@@ -25,8 +25,8 @@ export default {
       none: 'none',
     },
     fontFamily: {
-      sans: ['Noto Sans', 'sans-serif'],
-      mono: ['JetBrains Mono', 'monospace'],
+      sans: ['var(--font-ui)'],
+      mono: ['var(--font-code)'],
     },
     fontSize: {
       xs: ['11px', { lineHeight: '16px' }],

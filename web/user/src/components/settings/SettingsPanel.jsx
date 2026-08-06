@@ -187,7 +187,7 @@ const inputStyle = {
   borderRadius: 4,
   color: 'var(--text-primary)',
   fontSize: 13,
-  fontFamily: "'Noto Sans', sans-serif",
+  fontFamily: 'var(--font-ui)',
   outline: 'none',
   boxSizing: 'border-box',
 }

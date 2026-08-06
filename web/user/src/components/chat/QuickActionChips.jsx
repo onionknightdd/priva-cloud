@@ -51,7 +51,7 @@ export default function QuickActionChips() {
               border: '1px solid var(--border-subtle)',
               borderRadius: 4,
               cursor: 'pointer',
-              fontFamily: "'Noto Sans', sans-serif",
+              fontFamily: 'var(--font-ui)',
               fontSize: 12,
               fontWeight: 400,
               transition: 'border-color 150ms ease, background 150ms ease',
