@@ -77,7 +77,7 @@ function LaunchedRow({ block }) {
             <div className="overflow-y-auto overflow-x-hidden" style={{ padding: 12 }}>
               <div className="copyable-block relative overflow-hidden" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, padding: '10px 12px' }}>
                 <CopyButton content={script || ''} />
-                <pre className="overflow-hidden" style={{ margin: 0, color: 'var(--text-secondary)', fontFamily: "'JetBrains Mono', monospace", fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                <pre className="overflow-hidden" style={{ margin: 0, color: 'var(--text-secondary)', fontFamily: "'JetBrains Mono', monospace", fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                   {script || ''}
                 </pre>
               </div>

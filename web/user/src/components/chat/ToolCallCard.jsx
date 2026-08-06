@@ -247,7 +247,7 @@ function HookEventPills({ events, compact }) {
       byKey.set(key, evt)
     }
   }
-  const fontSize = compact ? 9 : 10
+  const fontSize = compact ? 'calc(var(--text-xs) - 1px)' : 'var(--text-xs)'
   const padding = compact ? '0px 4px' : '1px 6px'
   return (
     <div className="flex items-center" style={{ gap: 4, flexShrink: 0 }}>
@@ -354,14 +354,14 @@ export default function ToolCallCard({ block, reverted = false, compact = false 
   const chevronSize = compact ? 10 : 12
   const iconSize = compact ? 11 : 12
   const statusIconSize = compact ? 9 : 10
-  const nameFontSize = compact ? 11 : 12
-  const metaFontSize = compact ? 10 : 11
+  const nameFontSize = compact ? 'var(--text-sm)' : 'var(--text-base)'
+  const metaFontSize = compact ? 'var(--text-xs)' : 'var(--text-sm)'
   const commandMarginLeft = compact ? 18 : 22
   const commandIconSize = compact ? 10 : 11
   const contentPadding = compact ? '5px 8px' : '8px 12px'
   const codeLineHeight = compact ? 1.45 : 1.6
   const chipCompactStyle = compact
-    ? { padding: '1px 4px', fontSize: 10, lineHeight: '12px' }
+    ? { padding: '1px 4px', fontSize: 'var(--text-xs)', lineHeight: 'calc(var(--text-xs) + 2px)' }
     : {}
 
   // Status-based background tint
@@ -602,7 +602,7 @@ export default function ToolCallCard({ block, reverted = false, compact = false 
               ...chipCompactStyle,
             }}>
               <Loader size={statusIconSize} strokeWidth={1.5} className="icon-running" style={{ marginRight: 2 }} />
-              <AnimatedShimmerText style={{ fontSize: compact ? 10 : 11 }}>{statusOverride || t('toolCall.running')}</AnimatedShimmerText>
+              <AnimatedShimmerText style={{ fontSize: compact ? 'var(--text-xs)' : 'var(--text-sm)' }}>{statusOverride || t('toolCall.running')}</AnimatedShimmerText>
             </span>
           )}
 

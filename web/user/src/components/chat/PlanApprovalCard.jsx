@@ -137,7 +137,7 @@ export default function PlanApprovalCard({ approval, onApprove }) {
                 )}
               </div>
               <div className="min-w-0">
-                <div className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 13 }}>
+                <div className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 'var(--text-md)' }}>
                   {opt.label}
                 </div>
                 <div className="text-xs" style={{ color: 'var(--text-secondary)', marginTop: 2 }}>
@@ -164,7 +164,7 @@ export default function PlanApprovalCard({ approval, onApprove }) {
               border: '1px solid var(--border)',
               borderRadius: 2,
               color: 'var(--text-primary)',
-              fontSize: 12,
+              fontSize: 'var(--text-base)',
               fontFamily: 'var(--font-ui)',
               padding: '8px 10px',
               resize: 'vertical',

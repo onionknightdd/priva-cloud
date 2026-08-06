@@ -140,7 +140,7 @@ function ConfirmDangerDialog({ toolName, command, onConfirm, onCancel, t }) {
       >
         <div className="flex items-center gap-2">
           <AlertTriangle size={16} strokeWidth={1.5} style={{ color: 'var(--red)' }} />
-          <span className="font-semibold" style={{ color: 'var(--red)', fontSize: 13 }}>
+          <span className="font-semibold" style={{ color: 'var(--red)', fontSize: 'var(--text-md)' }}>
             {t('permissionRequest.dangerousCommand')}
           </span>
         </div>
@@ -350,7 +350,7 @@ export default function PermissionRequestCard({ block, onRespond }) {
               background: 'var(--bg-elevated)',
               color: 'var(--cyan)',
               borderRadius: 2,
-              fontSize: 11,
+              fontSize: 'var(--text-sm)',
             }}
           >
             {(() => { const Icon = toolIcon; return <Icon size={12} strokeWidth={1.5} /> })()}
@@ -368,7 +368,7 @@ export default function PermissionRequestCard({ block, onRespond }) {
         {isRisky && matchedRule && (
           <div
             style={{
-              fontSize: 10,
+              fontSize: 'var(--text-xs)',
               color: 'var(--text-dim)',
               fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
               marginBottom: 10,

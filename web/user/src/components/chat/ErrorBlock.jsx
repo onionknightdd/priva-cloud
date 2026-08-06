@@ -62,7 +62,7 @@ export default function ErrorBlock({ message }) {
         <AlertTriangle size={14} strokeWidth={1.5} style={{ color: 'var(--red)', flexShrink: 0 }} />
         <span
           className="uppercase font-semibold"
-          style={{ color: 'var(--red)', fontSize: 11, letterSpacing: '0.06em' }}
+          style={{ color: 'var(--red)', fontSize: 'var(--text-sm)', letterSpacing: '0.06em' }}
         >
           {title}
         </span>
@@ -116,7 +116,7 @@ export default function ErrorBlock({ message }) {
             borderRadius: 4,
             background: 'transparent',
             color: isStreaming || !lastUserPrompt ? 'var(--text-dim)' : 'var(--text-primary)',
-            fontSize: 12,
+            fontSize: 'var(--text-base)',
             cursor: isStreaming || !lastUserPrompt ? 'default' : 'pointer',
             transition: 'border-color 150ms ease, color 150ms ease',
           }}
@@ -142,7 +142,7 @@ export default function ErrorBlock({ message }) {
             borderRadius: 4,
             background: 'transparent',
             color: copied ? 'var(--green)' : 'var(--text-secondary)',
-            fontSize: 12,
+            fontSize: 'var(--text-base)',
             cursor: 'pointer',
             transition: 'color 150ms ease, border-color 150ms ease',
           }}

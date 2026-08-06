@@ -59,7 +59,7 @@ function SummaryToken({ text, height, fontWeight, shimmer, color }) {
   )
 }
 
-function SummaryTokens({ summary, fallback, height = 12, fontWeight = 500, shimmer = false }) {
+function SummaryTokens({ summary, fallback, height = 14, fontWeight = 500, shimmer = false }) {
   if (!summary?.tokens?.length) {
     return (
       <SummaryToken
@@ -90,7 +90,7 @@ export function ToolSectionToggle({ collapsed, onToggle, run, fileOps, t, contro
   const hasRunningTools = hasUnfinishedTool(run, fileOps)
   const labelColor = hovered ? 'var(--text-primary)' : 'var(--text-secondary)'
   const fallback = t('toolCall.toolStepsFallback', { count: run.length })
-  const tokenHeight = compact ? 11 : 12
+  const tokenHeight = compact ? 13 : 14
 
   return (
     <button
@@ -106,7 +106,7 @@ export function ToolSectionToggle({ collapsed, onToggle, run, fileOps, t, contro
         padding: compact ? '1px 0' : 0,
         cursor: 'pointer',
         color: labelColor,
-        fontSize: compact ? 12 : 13,
+        fontSize: compact ? 'var(--text-base)' : 'var(--text-md)',
         textAlign: 'left',
         transition: 'color 150ms ease',
       }}
@@ -126,7 +126,7 @@ export function ToolSectionToggle({ collapsed, onToggle, run, fileOps, t, contro
           wordBreak: 'break-word',
           flex: '1 1 auto',
           display: 'block',
-          lineHeight: compact ? '18px' : '20px',
+          lineHeight: compact ? '20px' : '22px',
         }}
       >
         {collapsed ? (

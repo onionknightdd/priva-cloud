@@ -635,6 +635,19 @@ export default function Sidebar() {
   const activeSession = useMemo(() => (
     sessions.find((session) => session.id === activeSessionId && !session.archived) || null
   ), [sessions, activeSessionId])
+  // The PROJECT section can be collapsed independently of each cwd group. Keep
+  // the selected session's parent project row with it so the hierarchy remains
+  // legible while the rest of the project list is hidden.
+  const activeProject = useMemo(() => {
+    if (!activeSession) return null
+    const group = groups.find((item) => item.cwd === activeSession.cwd)
+    if (group) return group
+    return {
+      cwd: activeSession.cwd,
+      total: sessions.filter((session) => !session.archived && session.cwd === activeSession.cwd).length,
+      pinned: false,
+    }
+  }, [activeSession, groups, sessions])
   const allGroupsExpanded = renderedGroups.length > 0 && renderedGroups.every((g) => (
     !!expandedCwds[g.cwd]
     && (!g.sessions.some((s) => s.origin === 'scheduler') || !!expandedScheduledCwds[g.cwd])
@@ -1399,8 +1412,45 @@ export default function Sidebar() {
           {/* Keep the selected conversation visible while the whole PROJECT
               section is collapsed (including when a sidebar menu pushes it
               down). */}
-          {!projectOpen && activeSession && (
+          {!projectOpen && activeSession && activeProject && (
             <div className="py-1" style={{ flexShrink: 0 }}>
+              <div
+                className="project-group-row flex items-center gap-2 py-1 min-w-0"
+                style={{
+                  marginLeft: 16,
+                  marginRight: 16,
+                  paddingLeft: 10,
+                  paddingRight: 8,
+                  color: 'var(--text-secondary)',
+                }}
+                title={activeProject.cwd}
+              >
+                <button
+                  type="button"
+                  className="flex items-center gap-2 flex-1 min-w-0"
+                  title={t('sidebar.expand')}
+                  onClick={() => setProjectOpen(true)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'inherit',
+                    minWidth: 0,
+                    transition: 'color 150ms ease',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = 'inherit' }}
+                >
+                  <ProjectGroupIcon expanded={false} />
+                  <span className="flex-1 truncate" style={{ fontSize: 15, minWidth: 0, textAlign: 'left' }}>
+                    {shortCwd(activeProject.cwd)}
+                  </span>
+                </button>
+                {activeProject.pinned && (
+                  <Pin size={11} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--sidebar-icon-color)' }} />
+                )}
+                <span style={{ fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{activeProject.total}</span>
+              </div>
               {renderSessionItem(
                 activeSession,
                 activeSession.origin === 'scheduler' ? 44 : PROJECT_SESSION_INDENT

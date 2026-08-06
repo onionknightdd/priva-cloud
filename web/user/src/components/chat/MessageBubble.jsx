@@ -89,7 +89,7 @@ function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
       <summary
         className="flex items-center gap-1 px-2 rounded-sm"
         style={{
-          fontSize: 11,
+          fontSize: 'var(--text-sm)',
           color: 'var(--purple)',
           cursor: 'pointer',
           userSelect: 'none',
@@ -516,7 +516,7 @@ function CompactFilePreview({ preview }) {
               style={{
                 textAlign: 'right',
                 color: palette.number,
-                fontSize: 11,
+                fontSize: 'var(--text-sm)',
                 userSelect: 'none',
               }}
             >
@@ -583,7 +583,7 @@ function buildPreviewOutputStr(preview) {
   return preview.truncated ? `${body}\n...` : body
 }
 
-function DeltaStat({ sign, value, color, fontSize = 12 }) {
+function DeltaStat({ sign, value, color, fontSize = 14 }) {
   const height = fontSize <= 11 ? 18 : 20
   return (
     <span
@@ -601,7 +601,7 @@ function DeltaStat({ sign, value, color, fontSize = 12 }) {
       }}
     >
       <span>{sign}</span>
-      <RollingInteger value={value} height={12} color="currentColor" />
+      <RollingInteger value={value} height={14} color="currentColor" />
     </span>
   )
 }
@@ -748,7 +748,7 @@ function FileToolCard({ kind, block = null, op = null, reverted = false }) {
             className="font-semibold"
             style={{
               color: 'var(--text-primary)',
-              fontSize: 12,
+              fontSize: 'var(--text-base)',
               flexShrink: 0,
             }}
           >
@@ -766,7 +766,7 @@ function FileToolCard({ kind, block = null, op = null, reverted = false }) {
               background: 'transparent',
               cursor: 'pointer',
               color: hovered ? 'var(--blue)' : 'var(--text-primary)',
-              fontSize: 12,
+              fontSize: 'var(--text-base)',
               fontFamily: 'JetBrains Mono, monospace',
               flex: '0 1 auto',
               maxWidth: 180,
@@ -785,7 +785,7 @@ function FileToolCard({ kind, block = null, op = null, reverted = false }) {
               title={errorText}
               style={{
                 color: 'var(--red)',
-                fontSize: 12,
+                fontSize: 'var(--text-base)',
                 fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
                 minWidth: 0,
                 flex: '1 1 auto',
@@ -815,7 +815,7 @@ function FileToolCard({ kind, block = null, op = null, reverted = false }) {
           {meta && (
             <span
               className="text-xs"
-              style={{ color: 'var(--text-dim)', flexShrink: 0, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace", fontSize: 11, whiteSpace: 'nowrap' }}
+              style={{ color: 'var(--text-dim)', flexShrink: 0, fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace", fontSize: 'var(--text-sm)', whiteSpace: 'nowrap' }}
             >
               · {meta}
             </span>
@@ -890,7 +890,7 @@ function FileToolCard({ kind, block = null, op = null, reverted = false }) {
               }}
             >
               <Loader size={10} strokeWidth={1.5} className="icon-running" style={{ marginRight: 2 }} />
-              <AnimatedShimmerText style={{ fontSize: 11 }}>{t('toolCall.running')}</AnimatedShimmerText>
+              <AnimatedShimmerText style={{ fontSize: 'var(--text-sm)' }}>{t('toolCall.running')}</AnimatedShimmerText>
             </span>
           ) : (
             <span
@@ -1011,7 +1011,7 @@ function FileToolCard({ kind, block = null, op = null, reverted = false }) {
                       textAlign: 'right',
                       paddingRight: 10,
                       userSelect: 'none',
-                      fontSize: 11,
+                      fontSize: 'var(--text-sm)',
                     }}
                   >
                     {lineNumber ?? ''}
@@ -1735,9 +1735,9 @@ export default memo(function MessageBubble({
             border: '1px solid var(--border)',
             borderRadius: 3,
             color: 'var(--text-secondary)',
-            fontSize: 11,
+            fontSize: 'var(--text-sm)',
             fontWeight: 600,
-            lineHeight: '16px',
+            lineHeight: '18px',
             padding: '2px 6px',
           }}
         >
@@ -1821,9 +1821,9 @@ export default memo(function MessageBubble({
                   background: 'transparent',
                   color: 'var(--text-dim)',
                   cursor: 'pointer',
-                  fontSize: 12,
-                  fontWeight: 300,
-                  lineHeight: '18px',
+                  fontSize: 'var(--text-base)',
+                  fontWeight: 400,
+                  lineHeight: '20px',
                   outline: 'none',
                   overflow: 'hidden',
                   textAlign: 'left',
@@ -1848,11 +1848,11 @@ export default memo(function MessageBubble({
                 >
                   <RollingText
                     text={executionSummaryText}
-                    height={12}
+                    height={14}
                     color="currentColor"
                     fontFamily="var(--font-ui)"
-                    fontSize={12}
-                    fontWeight={300}
+                    fontSize={14}
+                    fontWeight={400}
                     whiteSpace="nowrap"
                   />
                 </span>
@@ -1919,10 +1919,20 @@ export default memo(function MessageBubble({
 
   return (
     <div
-      className="flex px-4 py-2 overflow-hidden"
+      className="message-bubble flex px-4 py-2 overflow-hidden"
       style={{
         background: 'transparent',
         justifyContent: isUser ? 'flex-end' : 'flex-start',
+        // Message content uses the main-scope type scale plus one readable
+        // step. Keeping the tokens local prevents sidebar and composer text
+        // from changing with the message typography.
+        '--text-xs': '12px',
+        '--text-sm': '13px',
+        '--text-base': '14px',
+        '--text-md': '15px',
+        '--text-lg': '16px',
+        '--text-xl': '18px',
+        '--text-2xl': '22px',
       }}
     >
       {/* Content */}
@@ -1983,7 +1993,7 @@ export default memo(function MessageBubble({
             borderRadius: 4,
             padding: '4px 10px',
             cursor: 'pointer',
-            fontSize: 12,
+            fontSize: 14,
             color: 'var(--text-secondary)',
             whiteSpace: 'nowrap',
             transition: 'color 150ms ease, border-color 150ms ease',
@@ -2213,7 +2223,7 @@ function AttachmentChips({ files }) {
             title={file.name}
             style={{
               color: 'var(--text-secondary)',
-              fontSize: 12,
+              fontSize: 'var(--text-base)',
               fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
               maxWidth: 130,
             }}
@@ -2221,7 +2231,7 @@ function AttachmentChips({ files }) {
             {file.name}
           </span>
           {file.size != null && (
-            <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+            <span style={{ color: 'var(--text-dim)', fontSize: 'var(--text-sm)' }}>
               {file.size < 1024 ? `${file.size}B` : file.size < 1024 * 1024 ? `${(file.size / 1024).toFixed(1)}KB` : `${(file.size / (1024 * 1024)).toFixed(1)}MB`}
             </span>
           )}
@@ -2241,7 +2251,7 @@ function QuoteBlock({ text }) {
       padding: '6px 10px',
     }}>
       <div className="uppercase" style={{
-        fontSize: 11,
+        fontSize: 'var(--text-sm)',
         letterSpacing: '0.06em',
         color: 'var(--text-dim)',
         fontWeight: 600,
@@ -2250,7 +2260,7 @@ function QuoteBlock({ text }) {
         {t('quote.quoted')}
       </div>
       <div style={{
-        fontSize: 12,
+        fontSize: 'var(--text-base)',
         color: 'var(--text-secondary)',
         fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
         wordBreak: 'break-word',
@@ -2277,7 +2287,7 @@ function SkillCommandChip({ skillName }) {
           style={{
             color: 'var(--text-dim)',
             fontWeight: 400,
-            fontSize: 13,
+            fontSize: 'var(--text-md)',
             fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
           }}
         >
@@ -2287,7 +2297,7 @@ function SkillCommandChip({ skillName }) {
           style={{
             color: 'var(--text-primary)',
             fontWeight: 600,
-            fontSize: 13,
+            fontSize: 'var(--text-md)',
             fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
           }}
         >

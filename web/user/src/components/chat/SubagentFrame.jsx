@@ -21,7 +21,7 @@ function formatDuration(ms) {
 function ToolUseCountLabel({ count }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-      <RollingInteger value={count} height={12} color="currentColor" />
+      <RollingInteger value={count} height={14} color="currentColor" />
       <span>{count === 1 ? 'tool use' : 'tool uses'}</span>
     </span>
   )
@@ -94,9 +94,9 @@ function SubagentFrame({ block, reverted = false }) {
         <Loader size={10} strokeWidth={1.5} className="icon-running" style={{ marginRight: 2 }} />
         <ToolUseCountLabel count={toolUseCount} />
         {latestToolUse ? (
-          <AnimatedShimmerText style={{ fontSize: 11 }}>· {latestToolUse.name}...</AnimatedShimmerText>
+          <AnimatedShimmerText style={{ fontSize: 'var(--text-sm)' }}>· {latestToolUse.name}...</AnimatedShimmerText>
         ) : (
-          <AnimatedShimmerText style={{ fontSize: 11 }}>· running</AnimatedShimmerText>
+          <AnimatedShimmerText style={{ fontSize: 'var(--text-sm)' }}>· running</AnimatedShimmerText>
         )}
       </span>
     )

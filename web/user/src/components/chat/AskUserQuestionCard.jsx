@@ -30,13 +30,13 @@ function QuestionSection({
               borderRadius: 2,
               letterSpacing: '0.06em',
               fontWeight: 600,
-              fontSize: 11,
+              fontSize: 'var(--text-sm)',
             }}
           >
             {question.header}
           </span>
         )}
-        <span style={{ color: 'var(--text-primary)', fontSize: 13 }}>
+        <span style={{ color: 'var(--text-primary)', fontSize: 'var(--text-md)' }}>
           {question.question}
         </span>
       </div>
@@ -82,7 +82,7 @@ function QuestionSection({
                 {isSelected && <Check size={12} strokeWidth={1.5} style={{ color: 'var(--text-inverse)' }} />}
               </div>
               <div className="min-w-0">
-                <div className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 13 }}>
+                <div className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 'var(--text-md)' }}>
                   {option.label}
                 </div>
                 {option.description && (
@@ -146,7 +146,7 @@ function QuestionSection({
                 border: '1px solid var(--border)',
                 borderRadius: 2,
                 color: 'var(--text-primary)',
-                fontSize: 12,
+                fontSize: 'var(--text-base)',
                 fontFamily: 'var(--font-sans)',
                 padding: '8px 10px',
                 resize: 'vertical',
@@ -289,7 +289,7 @@ export default function AskUserQuestionCard({ block, onAnswer, onSkip }) {
           style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
         >
           <Check size={16} strokeWidth={1.5} style={{ color: 'var(--green)', flexShrink: 0 }} />
-          <span className="flex-1 font-semibold" style={{ color: 'var(--green)', fontSize: 13 }}>
+          <span className="flex-1 font-semibold" style={{ color: 'var(--green)', fontSize: 'var(--text-md)' }}>
             {t('askUser.answered')}
           </span>
           <ChevronDown
@@ -321,7 +321,7 @@ export default function AskUserQuestionCard({ block, onAnswer, onSkip }) {
                             borderRadius: 2,
                             letterSpacing: '0.06em',
                             fontWeight: 600,
-                            fontSize: 10,
+                            fontSize: 'var(--text-xs)',
                           }}
                         >
                           {q.header}
@@ -411,7 +411,7 @@ export default function AskUserQuestionCard({ block, onAnswer, onSkip }) {
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                   fontFamily: 'var(--font-code)',
-                  fontSize: 11,
+                  fontSize: 'var(--text-sm)',
                 }}
               >
                 {answeredText}
@@ -437,7 +437,7 @@ export default function AskUserQuestionCard({ block, onAnswer, onSkip }) {
       >
         <div className="flex items-center gap-2">
           <MessageSquare size={16} strokeWidth={1.5} style={{ color: 'var(--yellow)', flexShrink: 0 }} />
-          <span className="font-semibold" style={{ color: 'var(--yellow)', fontSize: 13 }}>
+          <span className="font-semibold" style={{ color: 'var(--yellow)', fontSize: 'var(--text-md)' }}>
             {t('askUser.skipped')}
           </span>
         </div>
@@ -461,7 +461,7 @@ export default function AskUserQuestionCard({ block, onAnswer, onSkip }) {
       {/* Header */}
       <div className="flex items-center gap-2" style={{ marginBottom: 12 }}>
         <HelpCircle size={16} strokeWidth={1.5} style={{ color: 'var(--blue)', flexShrink: 0 }} />
-        <span className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 13 }}>
+        <span className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 'var(--text-md)' }}>
           {t('askUser.needsFeedback')}
         </span>
       </div>
