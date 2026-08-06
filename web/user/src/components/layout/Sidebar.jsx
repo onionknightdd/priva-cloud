@@ -45,12 +45,12 @@ function shortCwd(p) {
 function ProjectGroupIcon({ expanded }) {
   return (
     <span className="project-group-icon" aria-hidden="true">
-      <FolderBookmark className="project-group-folder-icon" size={18} strokeWidth={1.5} />
+      <FolderBookmark className="project-group-folder-icon" size={19} strokeWidth={1.5} />
       <span
         className="project-group-chevron-icon"
         style={{ '--project-group-chevron-rotation': `${expanded ? 0 : -90}deg` }}
       >
-        <ChevronDown size={18} strokeWidth={1.5} />
+        <ChevronDown size={19} strokeWidth={1.5} />
       </span>
     </span>
   )
@@ -61,7 +61,7 @@ const WD_MENU_ITEM_STYLE = {
   background: 'transparent',
   border: 'none',
   cursor: 'pointer',
-  fontSize: 12,
+  fontSize: 13,
   paddingTop: 6,
   paddingBottom: 6,
   transition: 'background 150ms ease',
@@ -88,9 +88,10 @@ const PLUGINS_SECTIONS = [
 ]
 
 const SUBMENU_ACTIVE_RAIL_OFFSET = 18
-// SessionItem's status marker plus its 8px gap occupy 15px. At indent 37px,
-// the session title starts at the same 52px column as the project name.
-const PROJECT_SESSION_INDENT = 37
+// SessionItem's status marker plus its 8px gap occupy 15px. With the shared
+// 16px row gutter, indent 38px places the session title at the same 53px
+// column as the project name (19px project icon + 8px gap).
+const PROJECT_SESSION_INDENT = 38
 
 function SessionItem({
   session, isActive, openMenuId, menuRef, onSelect, onMenuToggle,
@@ -110,7 +111,7 @@ function SessionItem({
     background: 'transparent',
     border: 'none',
     cursor: 'pointer',
-    fontSize: 12,
+    fontSize: 13,
     paddingTop: 6,
     paddingBottom: 6,
     transition: 'background 150ms ease',
@@ -118,21 +119,23 @@ function SessionItem({
 
   return (
     <div
-      className="flex flex-col gap-1 px-3 group"
+      className="sidebar-session-item flex flex-col gap-1 px-3 group"
       draggable={!editing}
       style={{
         position: 'relative',
         paddingTop: 4,
         paddingBottom: 4,
-        // Shift the box right so it starts at the active indicator bar (its left
-        // edge) and runs to the sidebar's right edge; icon stays put (margin + pad).
-        marginLeft: (indent || 12) - 8,
-        paddingLeft: 8,
+        // Keep the hover box on the same 16px-to-16px gutter as the main menu;
+        // the text indent remains independent so project/session names align.
+        marginLeft: 16,
+        marginRight: 16,
+        paddingLeft: Math.max(0, (indent || 12) - 16),
+        paddingRight: 0,
         background: isActive ? 'var(--bg-elevated)' : 'transparent',
-        borderRadius: isActive ? 3 : 0,
+        borderRadius: 8,
         color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
         cursor: editing ? 'default' : 'pointer',
-        fontSize: 13,
+        fontSize: 14,
         transition: 'background 150ms ease',
       }}
       onDragStart={(e) => {
@@ -194,7 +197,7 @@ function SessionItem({
               borderRadius: 2,
               color: 'var(--text-primary)',
               outline: 'none',
-              fontSize: 13,
+              fontSize: 14,
               padding: '2px 4px',
             }}
           />
@@ -202,13 +205,13 @@ function SessionItem({
           <>
             {session.origin === 'scheduler' && (
               <CalendarClock
-                size={12}
+                size={13}
                 strokeWidth={1.5}
-                style={{ color: 'var(--text-dim)', flexShrink: 0 }}
+                style={{ color: 'var(--sidebar-icon-color)', flexShrink: 0 }}
                 title={session.schedulerJobName ? `${t('sidebar.scheduled', { defaultValue: 'scheduled' })} · ${session.schedulerJobName}` : t('sidebar.scheduled', { defaultValue: 'scheduled' })}
               />
             )}
-            <span className="flex-1 truncate" style={{ minWidth: 0, fontSize: 12, lineHeight: 1.2 }}>{session.name}</span>
+            <span className="flex-1 truncate" style={{ minWidth: 0, fontSize: 13, lineHeight: 1.2 }}>{session.name}</span>
           </>
         )}
         {session.forkCount > 0 && !editing && (
@@ -216,13 +219,13 @@ function SessionItem({
             className="inline-flex items-center gap-1"
             style={{
               color: 'var(--cyan)',
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: 600,
               flexShrink: 0,
             }}
             title={`${session.forkCount} fork${session.forkCount === 1 ? '' : 's'}`}
           >
-            <GitBranch size={11} strokeWidth={1.5} />
+            <GitBranch size={12} strokeWidth={1.5} />
             {session.forkCount}
           </span>
         )}
@@ -245,7 +248,7 @@ function SessionItem({
             onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
             onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--cyan)' }}
           >
-            <Pin size={11} strokeWidth={1.5} />
+            <Pin size={12} strokeWidth={1.5} />
           </button>
         )}
         {isProject && !editing && (
@@ -272,7 +275,7 @@ function SessionItem({
                 }
               }}
             >
-              <MoreHorizontal size={11} strokeWidth={1.5} />
+              <MoreHorizontal size={12} strokeWidth={1.5} />
             </button>
             {openMenuId === session.id && (
               <div
@@ -300,7 +303,7 @@ function SessionItem({
                   onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                 >
-                  <Pin size={12} strokeWidth={1.5} />
+                  <Pin size={13} strokeWidth={1.5} />
                   {session.pinned ? t('sidebar.unpin') : t('sidebar.pin')}
                 </button>
                 <button
@@ -314,7 +317,7 @@ function SessionItem({
                   onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                 >
-                  <Pencil size={12} strokeWidth={1.5} />
+                  <Pencil size={13} strokeWidth={1.5} />
                   {t('sidebar.rename')}
                 </button>
                 <button
@@ -328,7 +331,7 @@ function SessionItem({
                   onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                 >
-                  <Flag size={12} strokeWidth={1.5} />
+                  <Flag size={13} strokeWidth={1.5} />
                   {session.tag ? t('sidebar.changeTag') : t('sidebar.setTag')}
                 </button>
                 <div style={{ height: 1, background: 'var(--border-subtle)' }} />
@@ -343,7 +346,7 @@ function SessionItem({
                   onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                 >
-                  <Archive size={12} strokeWidth={1.5} />
+                  <Archive size={13} strokeWidth={1.5} />
                   {t('sidebar.archive')}
                 </button>
                 <button
@@ -356,7 +359,7 @@ function SessionItem({
                   onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                 >
-                  <Trash2 size={12} strokeWidth={1.5} />
+                  <Trash2 size={13} strokeWidth={1.5} />
                   {t('sidebar.delete')}
                 </button>
               </div>
@@ -374,7 +377,7 @@ function SessionItem({
               borderLeft: '2px solid var(--orange)',
               borderRadius: 2,
               color: 'var(--text-dim)',
-              fontSize: 10,
+              fontSize: 11,
               letterSpacing: '0.06em',
               fontWeight: 600,
               padding: '1px 6px',
@@ -382,7 +385,7 @@ function SessionItem({
             }}
             title={session.tag}
           >
-            <Flag size={10} strokeWidth={1.5} style={{ color: 'var(--orange)', flexShrink: 0 }} />
+            <Flag size={11} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color)', flexShrink: 0 }} />
             <span className="truncate">{session.tag}</span>
           </span>
         </div>
@@ -441,7 +444,7 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
           borderRadius: 2,
           color: 'var(--text-primary)',
           padding: '4px 6px',
-          fontSize: 12,
+          fontSize: 13,
           outline: 'none',
           marginBottom: 6,
         }}
@@ -459,7 +462,7 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
                 borderRadius: 2,
                 color: 'var(--text-secondary)',
                 cursor: 'pointer',
-                fontSize: 11,
+                fontSize: 12,
                 padding: '1px 6px',
               }}
             >
@@ -469,7 +472,7 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
         </div>
       )}
       {error && (
-        <div style={{ color: 'var(--red)', fontSize: 11, marginBottom: 6 }}>{error}</div>
+        <div style={{ color: 'var(--red)', fontSize: 12, marginBottom: 6 }}>{error}</div>
       )}
       <div className="flex justify-end gap-1">
         <button
@@ -482,7 +485,7 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
             borderRadius: 2,
             color: 'var(--text-secondary)',
             cursor: saving ? 'default' : 'pointer',
-            fontSize: 11,
+            fontSize: 12,
             padding: '2px 8px',
           }}
         >
@@ -498,7 +501,7 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
             borderRadius: 2,
             color: 'var(--text-inverse)',
             cursor: saving ? 'default' : 'pointer',
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: 600,
             padding: '2px 10px',
           }}
@@ -906,7 +909,7 @@ export default function Sidebar() {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 4,
+    borderRadius: 8,
     flexShrink: 0,
     transition: 'color 150ms ease, background 150ms ease',
   }
@@ -938,18 +941,18 @@ export default function Sidebar() {
       >
         {collapsed ? (
           <button style={iconBtn} onClick={toggleCollapsed} title={t('sidebar.expand')} onMouseEnter={iconBtnIn} onMouseLeave={iconBtnOut}>
-            <Bot size={20} strokeWidth={1.5} style={{ color: 'var(--blue)' }} />
+            <Bot size={21} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color)' }} />
           </button>
         ) : (
           <>
             <div className="flex items-center gap-2 min-w-0">
-              <Bot size={20} strokeWidth={1.5} style={{ color: 'var(--blue)', flexShrink: 0 }} />
-              <span className="font-bold truncate" style={{ color: 'var(--text-primary)', fontSize: 16, letterSpacing: '-0.01em', minWidth: 0 }}>
+              <Bot size={21} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color)', flexShrink: 0 }} />
+              <span className="font-bold truncate" style={{ color: 'var(--text-primary)', fontSize: 17, letterSpacing: '-0.01em', minWidth: 0 }}>
                 {t('brand.title')}
               </span>
             </div>
             <button style={iconBtn} onClick={toggleCollapsed} title={t('sidebar.collapse')} onMouseEnter={iconBtnIn} onMouseLeave={iconBtnOut}>
-              <PanelLeftClose size={16} strokeWidth={1.5} />
+              <PanelLeftClose size={17} strokeWidth={1.5} />
             </button>
           </>
         )}
@@ -1081,14 +1084,15 @@ export default function Sidebar() {
                 style={{
                   background: 'var(--bg-elevated)',
                   border: '1px solid var(--border)',
-                  borderRadius: 4,
+                  borderRadius: 8,
                   padding: '4px 8px',
                   minWidth: 0,
                   width: '100%',
-                  margin: '4px 0',
+                  height: 32,
+                  margin: 0,
                 }}
               >
-                <Search size={12} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
+                <Search size={13} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color)', flexShrink: 0 }} />
                 <input
                   ref={searchInputRef}
                   type="text"
@@ -1102,7 +1106,7 @@ export default function Sidebar() {
                     border: 'none',
                     outline: 'none',
                     color: 'var(--text-primary)',
-                    fontSize: 12,
+                    fontSize: 13,
                     fontFamily: "'Noto Sans', sans-serif",
                     minWidth: 0,
                   }}
@@ -1122,7 +1126,7 @@ export default function Sidebar() {
                     onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
                     onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
                   >
-                    <X size={12} strokeWidth={1.5} />
+                    <X size={13} strokeWidth={1.5} />
                   </button>
                 )}
               </div>
@@ -1212,13 +1216,13 @@ export default function Sidebar() {
           >
             <div style={{ position: 'relative', minHeight: '100%' }}>
               {sessions.length === 0 && !sessionsLoading && (
-                <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 13 }}>
+                <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 14 }}>
                   {t('sidebar.noSessions')}
                 </div>
               )}
 
               {filtersActive && sessions.length > 0 && renderedGroups.length === 0 && (
-                <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 13 }}>
+                <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 14 }}>
                   {t('sidebar.noResults')}
                 </div>
               )}
@@ -1250,11 +1254,13 @@ export default function Sidebar() {
                   <div key={group.cwd} style={{ marginBottom: 2 }}>
                     {/* Group header — toggle + (hover) workdir menu & new-chat */}
                     <div
-                      className="project-group-row flex items-center gap-2 w-full py-1 min-w-0 group"
+                      className="project-group-row flex items-center gap-2 py-1 min-w-0 group"
                       style={{
                         borderLeft: isActiveGroup ? '2px solid var(--blue)' : '2px solid transparent',
-                        paddingLeft: 24,
-                        paddingRight: 16,
+                        marginLeft: 16,
+                        marginRight: 16,
+                        paddingLeft: 8,
+                        paddingRight: 0,
                         color: isActiveGroup ? 'var(--text-secondary)' : 'var(--text-dim)',
                       }}
                       title={group.cwd}
@@ -1268,14 +1274,14 @@ export default function Sidebar() {
                         onMouseLeave={(e) => { e.currentTarget.style.color = 'inherit' }}
                       >
                         <ProjectGroupIcon expanded={isExpanded} />
-                        <span className="flex-1 truncate" style={{ fontSize: 14, minWidth: 0, textAlign: 'left' }}>
+                        <span className="flex-1 truncate" style={{ fontSize: 15, minWidth: 0, textAlign: 'left' }}>
                           {shortCwd(group.cwd)}
                         </span>
                       </button>
                       {group.pinned && (
-                        <Pin size={10} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--cyan)' }} />
+                      <Pin size={11} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--sidebar-icon-color)' }} />
                       )}
-                      <span style={{ fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{group.total}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{group.total}</span>
                       {/* Workdir menu (sliders) */}
                       <div className="relative" ref={openWorkdirMenu === group.cwd ? workdirMenuRef : undefined} style={{ flexShrink: 0 }}>
                         <button
@@ -1287,7 +1293,7 @@ export default function Sidebar() {
                           onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
                           onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
                         >
-                          <SlidersVertical size={12} strokeWidth={1.5} />
+                          <SlidersVertical size={13} strokeWidth={1.5} />
                         </button>
                         {openWorkdirMenu === group.cwd && (
                           <div className="absolute" style={{ top: '100%', right: 0, marginTop: 4, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, zIndex: 50, minWidth: 150, overflow: 'hidden' }}>
@@ -1298,7 +1304,7 @@ export default function Sidebar() {
                               onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
                               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                             >
-                              <Pin size={12} strokeWidth={1.5} />
+                              <Pin size={13} strokeWidth={1.5} />
                               {group.pinned ? t('sidebar.unpinWorkdir') : t('sidebar.pinWorkdir')}
                             </button>
                             <button
@@ -1308,7 +1314,7 @@ export default function Sidebar() {
                               onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
                               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                             >
-                              <Archive size={12} strokeWidth={1.5} />
+                              <Archive size={13} strokeWidth={1.5} />
                               {t('sidebar.archiveWorkdir')}
                             </button>
                           </div>
@@ -1324,7 +1330,7 @@ export default function Sidebar() {
                         onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
                         onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
                       >
-                        <SquarePen size={12} strokeWidth={1.5} />
+                        <SquarePen size={13} strokeWidth={1.5} />
                       </button>
                     </div>
 
@@ -1353,12 +1359,12 @@ export default function Sidebar() {
                               onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
                             >
                               {scheduledExpanded
-                                ? <ChevronDown size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-                                : <ChevronRight size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />}
-                              <CalendarClock size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                                ? <ChevronDown size={13} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                                : <ChevronRight size={13} strokeWidth={1.5} style={{ flexShrink: 0 }} />}
+                              <CalendarClock size={13} strokeWidth={1.5} style={{ flexShrink: 0 }} />
                               <span
                                 className="flex-1 truncate uppercase"
-                                style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', minWidth: 0, textAlign: 'left' }}
+                                style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', minWidth: 0, textAlign: 'left' }}
                               >
                                 {t('sidebar.scheduledSessions', { defaultValue: 'Scheduled sessions' })}
                               </span>
@@ -1375,7 +1381,7 @@ export default function Sidebar() {
                               border: 'none',
                               color: 'var(--text-dim)',
                               cursor: groupLoadingCwd === group.cwd ? 'default' : 'pointer',
-                              fontSize: 12,
+                              fontSize: 13,
                               paddingLeft: 28,
                               transition: 'color 150ms ease',
                             }}
@@ -1388,7 +1394,7 @@ export default function Sidebar() {
                               t('sidebar.loading')
                             ) : (
                               <>
-                                <ChevronDown size={12} strokeWidth={1.5} />
+                                <ChevronDown size={13} strokeWidth={1.5} />
                                 {t('sidebar.moreInDir', { count: group.total - loadedCount })}
                               </>
                             )}
@@ -1424,12 +1430,12 @@ export default function Sidebar() {
               onMouseEnter={iconBtnIn}
               onMouseLeave={iconBtnOut}
             >
-              <Settings size={16} strokeWidth={1.5} />
+              <Settings size={17} strokeWidth={1.5} />
             </button>
           </div>
           <div className="flex items-center gap-2 min-w-0">
             {authUser && (
-              <span className="truncate" style={{ color: 'var(--text-secondary)', fontSize: 12, minWidth: 0 }}>
+              <span className="truncate" style={{ color: 'var(--text-secondary)', fontSize: 13, minWidth: 0 }}>
                 {authUser.username}
               </span>
             )}
@@ -1440,7 +1446,7 @@ export default function Sidebar() {
               onMouseEnter={iconBtnIn}
               onMouseLeave={iconBtnOut}
             >
-              <LogOut size={14} strokeWidth={1.5} />
+              <LogOut size={15} strokeWidth={1.5} />
             </button>
           </div>
         </div>

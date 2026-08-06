@@ -19,9 +19,9 @@ export default function TagFilterChip({ active, label, onClick, showIcon = true 
         background: active ? 'var(--bg-elevated)' : 'transparent',
         border: '1px solid var(--border-subtle)',
         borderLeft: active ? '2px solid var(--blue)' : '2px solid transparent',
-        borderRadius: 2,
+        borderRadius: 8,
         padding: '1px 6px',
-        fontSize: 10,
+        fontSize: 11,
         letterSpacing: '0.05em',
         fontWeight: 600,
         lineHeight: 1.4,
@@ -30,7 +30,7 @@ export default function TagFilterChip({ active, label, onClick, showIcon = true 
         transition: 'color 150ms ease, background 150ms ease',
       }}
     >
-      {showIcon && <Flag size={10} strokeWidth={1.5} />}
+      {showIcon && <Flag size={11} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color, currentColor)' }} />}
       <span className="truncate" style={{ maxWidth: 110 }}>{label}</span>
     </button>
   )

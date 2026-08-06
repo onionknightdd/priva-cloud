@@ -84,7 +84,7 @@ export default function NavItem({
         // scaleY-tick (a border can't be transformed).
         borderLeft: '2px solid transparent',
         // Active and hover fills share the same restrained row treatment.
-        borderRadius: 3,
+        borderRadius: 8,
         background: active ? 'var(--bg-elevated)' : 'transparent',
         color: disabled ? 'var(--text-dim)' : baseColor,
         cursor: disabled ? 'not-allowed' : 'pointer',
@@ -127,22 +127,22 @@ export default function NavItem({
       ) : null}
       {Icon && (
         <Icon
-          size={large ? 18 : 16}
+          size={large ? 19 : 17}
           strokeWidth={1.5}
-          style={{ flexShrink: 0, color: iconColor || 'currentColor' }}
+          style={{ flexShrink: 0, color: iconColor || 'var(--sidebar-icon-color, currentColor)' }}
         />
       )}
       {!collapsed && (
-        <span className="sidebar-menu-label flex-1 truncate" style={{ minWidth: 0, fontSize: large ? 14 : 13 }}>{label}</span>
+        <span className="sidebar-menu-label flex-1 truncate" style={{ minWidth: 0, fontSize: large ? 15 : 14 }}>{label}</span>
       )}
       {!collapsed && badge != null && (
-        <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, color: 'var(--text-dim)' }}>
+        <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 600, color: 'var(--text-dim)' }}>
           {badge}
         </span>
       )}
       {!collapsed && expandable && (
-        <AnimatedChevron open={expanded} style={{ color: 'var(--text-dim)' }}>
-          <ChevronDown size={large ? 16 : 14} strokeWidth={1.5} />
+        <AnimatedChevron open={expanded} style={{ color: 'var(--sidebar-icon-color, var(--text-dim))' }}>
+          <ChevronDown size={large ? 17 : 15} strokeWidth={1.5} />
         </AnimatedChevron>
       )}
     </button>

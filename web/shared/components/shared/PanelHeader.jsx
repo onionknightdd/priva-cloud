@@ -17,7 +17,7 @@ import { AnimatedChevron } from './Accordion'
 export default function PanelHeader({ label, onClick, title, open, actions = [], labelClassName = '' }) {
   const collapsible = typeof open === 'boolean'
   return (
-    <div className="flex items-center justify-between" style={{ padding: '4px 16px', gap: 8 }}>
+    <div className="sidebar-panel-header flex items-center justify-between" style={{ margin: '0 16px', padding: '4px 0', gap: 8 }}>
       <button
         type="button"
         onClick={onClick}
@@ -28,7 +28,7 @@ export default function PanelHeader({ label, onClick, title, open, actions = [],
           border: 'none',
           cursor: onClick ? 'pointer' : 'default',
           color: 'var(--text-dim)',
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: 600,
           letterSpacing: '0.06em',
           gap: 4,
@@ -44,9 +44,9 @@ export default function PanelHeader({ label, onClick, title, open, actions = [],
         {collapsible && (
           <AnimatedChevron
             open={open}
-            style={{ color: 'var(--text-dim)', transform: `rotate(${open ? 0 : -90}deg)` }}
+            style={{ color: 'var(--sidebar-icon-color, var(--text-dim))', transform: `rotate(${open ? 0 : -90}deg)` }}
           >
-            <ChevronDown size={18} strokeWidth={1.5} />
+            <ChevronDown size={19} strokeWidth={1.5} />
           </AnimatedChevron>
         )}
       </button>
@@ -66,9 +66,9 @@ export default function PanelHeader({ label, onClick, title, open, actions = [],
                 height: 24,
                 background: 'transparent',
                 border: 'none',
-                borderRadius: 4,
+                borderRadius: 8,
                 cursor: action.disabled ? 'default' : 'pointer',
-                color: action.active ? 'var(--text-secondary)' : 'var(--text-dim)',
+                color: action.active ? 'var(--text-secondary)' : 'var(--sidebar-icon-color, var(--text-dim))',
                 transition: 'color 150ms ease, background 150ms ease',
               }}
               onMouseEnter={(e) => {
@@ -77,14 +77,14 @@ export default function PanelHeader({ label, onClick, title, open, actions = [],
                 e.currentTarget.style.background = 'var(--bg-elevated)'
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.color = action.active ? 'var(--text-secondary)' : 'var(--text-dim)'
+                e.currentTarget.style.color = action.active ? 'var(--text-secondary)' : 'var(--sidebar-icon-color, var(--text-dim))'
                 e.currentTarget.style.background = 'transparent'
               }}
             >
               <Icon
-                size={14}
+                size={15}
                 strokeWidth={1.5}
-                style={{ animation: action.spinning ? 'spin 1s linear infinite' : 'none' }}
+                style={{ color: 'var(--sidebar-icon-color, currentColor)', animation: action.spinning ? 'spin 1s linear infinite' : 'none' }}
               />
             </button>
           )

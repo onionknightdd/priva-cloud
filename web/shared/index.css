@@ -222,7 +222,36 @@
 }
 
 .sidebar-menu .sidebar-menu-project-label {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
+}
+
+/* Sidebar icons share one readable color instead of inheriting dim metadata
+   colors. Light mode uses the requested pure black; dark mode uses the
+   primary text token so icons remain visible against the dark surface. */
+.sidebar-menu {
+  --sidebar-icon-color: var(--text-primary);
+}
+[data-theme="light"] .sidebar-menu {
+  --sidebar-icon-color: var(--sidebar-menu-text);
+}
+.sidebar-menu .lucide {
+  color: var(--sidebar-icon-color);
+}
+
+/* All expanded-sidebar rows share the same hover footprint as the primary
+   menu: 16px gutters on both sides and an 8px radius. */
+.sidebar-menu button:hover {
+  border-radius: 8px !important;
+}
+.sidebar-menu .project-group-row,
+.sidebar-menu .sidebar-session-item,
+.sidebar-menu .sidebar-panel-header {
+  border-radius: 8px;
+  transition: background 150ms ease, color 150ms ease;
+}
+.sidebar-menu .project-group-row:hover,
+.sidebar-menu .sidebar-panel-header:hover {
+  background: var(--bg-elevated);
 }
 
 .project-group-icon {
@@ -230,8 +259,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 19px;
+  height: 19px;
   flex-shrink: 0;
 }
 .project-group-icon > svg,
