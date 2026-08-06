@@ -980,8 +980,8 @@ export default function PromptComposer({
         className="flex flex-col rounded relative"
         style={{
           background: 'var(--bg-elevated)',
-          border: isDragging ? '1px solid var(--blue)' : '1px solid var(--border)',
-          borderRadius: 10,
+          border: isDragging ? '0.5px solid var(--blue)' : '0.5px solid var(--border)',
+          borderRadius: 12,
           transition: 'border-color 150ms ease',
         }}
         onDragEnter={handleDragEnter}
@@ -1027,7 +1027,7 @@ export default function PromptComposer({
             className="absolute inset-0 flex items-center justify-center"
             style={{
               background: 'var(--bg-overlay)',
-              borderRadius: 10,
+              borderRadius: 12,
               zIndex: 10,
               pointerEvents: 'none',
             }}

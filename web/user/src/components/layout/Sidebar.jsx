@@ -940,7 +940,9 @@ export default function Sidebar() {
         className="flex items-center flex-shrink-0"
         style={{
           height: 48,
-          padding: collapsed ? 0 : '0 8px 0 12px',
+          // Match the primary menu's 53px text baseline (16px outer gutter
+          // + 10px row inset + 19px icon + 8px icon gap).
+          padding: collapsed ? 0 : '0 8px 0 24px',
           justifyContent: collapsed ? 'center' : 'space-between',
           borderBottom: '1px solid var(--border-subtle)',
         }}
