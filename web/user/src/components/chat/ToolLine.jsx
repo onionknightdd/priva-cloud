@@ -180,7 +180,7 @@ function ToolDetails({ sections, error }) {
           key={`${section.label}-${index}`}
         >
           {section.label && (
-            <div className="tool-detail-label" style={{ color: error && section.label === 'OUTPUT' ? 'var(--red)' : undefined }}>
+            <div className="tool-detail-label" style={{ color: error && section.kind === 'output' ? 'var(--red)' : undefined }}>
               {section.label}
             </div>
           )}
@@ -190,7 +190,7 @@ function ToolDetails({ sections, error }) {
           ) : (
             <pre
               className="tool-detail-code"
-              style={{ color: error && section.label === 'OUTPUT' ? 'var(--red)' : undefined }}
+              style={{ color: error && section.kind === 'output' ? 'var(--red)' : undefined }}
             >
               {section.content}
             </pre>
@@ -243,18 +243,18 @@ export default function ToolLine({
         copyText: presentation.diffRows.map((row) => row.text).join('\n'),
       })
       if (presentation.isError && presentation.outputText) {
-        next.push({ label: 'OUTPUT', type: 'code', content: presentation.outputText, copyText: presentation.outputText })
+        next.push({ kind: 'output', label: t('toolCall.output'), type: 'code', content: presentation.outputText, copyText: presentation.outputText })
       }
       return next
     }
     if (presentation.inputText) {
-      next.push({ label: 'INPUT', type: 'code', content: presentation.inputText, copyText: presentation.inputText })
+      next.push({ kind: 'input', label: t('toolCall.input'), type: 'code', content: presentation.inputText, copyText: presentation.inputText })
     }
     if (presentation.outputText) {
-      next.push({ label: 'OUTPUT', type: 'code', content: presentation.outputText, copyText: presentation.outputText })
+      next.push({ kind: 'output', label: t('toolCall.output'), type: 'code', content: presentation.outputText, copyText: presentation.outputText })
     }
     return next
-  }, [presentation])
+  }, [presentation, t])
   const hasDetails = !livePreview && sections.length > 0
   const [isOpen, setIsOpen] = useState(() => Boolean(presentation.isError && hasDetails))
   const previousErrorRef = useRef(presentation.isError)
