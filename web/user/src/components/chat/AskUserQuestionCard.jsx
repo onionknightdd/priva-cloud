@@ -279,7 +279,7 @@ export default function AskUserQuestionCard({ block, onAnswer, onSkip }) {
           border: '1px solid var(--green)',
           borderRadius: 0,
           background: 'var(--bg-surface)',
-          padding: '10px 12px',
+          padding: '8px 12px',
           opacity: 0.9,
         }}
       >

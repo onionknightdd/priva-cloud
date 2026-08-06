@@ -88,9 +88,9 @@ export function ToolSectionToggle({ collapsed, onToggle, run, fileOps, t, contro
   const summary = summarizeRun(run, fileOps, t)
   const hasSummary = summary && summary.tokens.length > 0
   const hasRunningTools = hasUnfinishedTool(run, fileOps)
-  const labelColor = hovered ? 'var(--text-primary)' : 'var(--text-secondary)'
+  const labelColor = hovered ? 'var(--text-secondary)' : 'var(--text-dim)'
   const fallback = t('toolCall.toolStepsFallback', { count: run.length })
-  const tokenHeight = compact ? 13 : 14
+  const tokenHeight = compact ? 12 : 13
 
   return (
     <button
@@ -106,7 +106,7 @@ export function ToolSectionToggle({ collapsed, onToggle, run, fileOps, t, contro
         padding: compact ? '1px 0' : 0,
         cursor: 'pointer',
         color: labelColor,
-        fontSize: compact ? 'var(--text-base)' : 'var(--text-md)',
+        fontSize: compact ? 'calc(var(--text-base) - 1px)' : 'calc(var(--text-md) - 1px)',
         textAlign: 'left',
         transition: 'color 150ms ease',
       }}
@@ -126,7 +126,7 @@ export function ToolSectionToggle({ collapsed, onToggle, run, fileOps, t, contro
           wordBreak: 'break-word',
           flex: '1 1 auto',
           display: 'block',
-          lineHeight: compact ? '20px' : '22px',
+          lineHeight: compact ? '19px' : '21px',
         }}
       >
         {collapsed ? (

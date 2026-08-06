@@ -44,8 +44,8 @@ import {
   visibleExecutionSummaryItems,
 } from '../../utils/responseSummary'
 
-const ASSISTANT_MESSAGE_GAP = 6
-const ASSISTANT_META_MARGIN_TOP = -5
+const ASSISTANT_MESSAGE_GAP = 7
+const ASSISTANT_META_MARGIN_TOP = -2
 
 /**
  * Parse text containing <think>...</think> tags into segments.
@@ -1629,7 +1629,7 @@ export default memo(function MessageBubble({
       const thinkSegments = parseThinkTags(block.text)
       if (thinkSegments) {
         return (
-          <div key={i} className="flex flex-col gap-2 min-w-0">
+          <div key={i} className="flex flex-col min-w-0" style={{ gap: 9 }}>
             {thinkSegments.map((seg, si) =>
               seg.type === 'thinking'
                 ? <ThinkingBlock key={si} content={seg.content} t={t} />
@@ -1967,7 +1967,7 @@ export default memo(function MessageBubble({
         background: 'transparent',
         justifyContent: isUser ? 'flex-end' : 'flex-start',
         overflow: isUser ? 'visible' : 'hidden',
-        paddingBottom: 11,
+        paddingBottom: !isUser && messageActions ? 15 : 11,
         // Message content uses the main-scope type scale plus one readable
         // step. Keeping the tokens local prevents sidebar and composer text
         // from changing with the message typography.
