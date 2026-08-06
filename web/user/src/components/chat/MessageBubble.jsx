@@ -1243,9 +1243,14 @@ export default memo(function MessageBubble({
       (block) => block?.type === 'tool_use' && isSdkTaskToolName(block.name),
     ),
   )
-  const contentBlocks = rawContentBlocks.filter(
-    (block) => !(block?.type === 'tool_use' && isSdkTaskToolName(block.name)),
-  )
+  const contentBlocks = rawContentBlocks.filter((block) => {
+    if (block?.type === 'tool_use' && isSdkTaskToolName(block.name)) return false
+    if (
+      (block?.type === 'tool_use' || block?.type === 'file_ref')
+      && isGeneratedToolName(block.name)
+    ) return false
+    return true
+  })
   const textBlocks = contentBlocks.filter((b) => b.type === 'text')
   const imageBlocks = contentBlocks.filter((b) => b.type === 'image')
   const toolBlocks = contentBlocks.filter((b) => b.type === 'tool_use')
@@ -1922,11 +1927,13 @@ export default memo(function MessageBubble({
                 >
                   <RollingText
                     text={executionSummaryText}
-                    height={14}
+                    height={20}
+                    digitWidth={8.68}
                     color="currentColor"
                     fontFamily="var(--font-ui)"
                     fontSize={14}
                     fontWeight={400}
+                    verticalAlign="top"
                     whiteSpace="nowrap"
                   />
                 </span>

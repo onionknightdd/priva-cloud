@@ -176,6 +176,7 @@ export function RollingInteger({
 export function RollingText({
   text,
   height = 12,
+  digitWidth,
   color = 'currentColor',
   fontFamily = DEFAULT_FONT_FAMILY,
   fontSize = height,
@@ -194,6 +195,7 @@ export function RollingText({
               key={`number-${index}`}
               value={Number(part)}
               height={height}
+              width={digitWidth}
               color={color}
               fontFamily={fontFamily}
               fontSize={fontSize}

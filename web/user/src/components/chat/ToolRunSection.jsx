@@ -18,7 +18,7 @@ function AnimatedLineSwap({ itemKey, children, animateOnMount = false, block = f
   const generationRef = useRef(0)
   const elementRefs = useRef(new Map())
   const animationsRef = useRef([])
-  const initialEnteredRef = useRef(false)
+  const hasTransitionedRef = useRef(false)
   const [entries, setEntries] = useState(() => ([{
     instanceKey: String(itemKey),
     itemKey,
@@ -34,6 +34,7 @@ function AnimatedLineSwap({ itemKey, children, animateOnMount = false, block = f
     if (previousKey === itemKey) return
 
     previousKeyRef.current = itemKey
+    hasTransitionedRef.current = true
     const generation = generationRef.current + 1
     generationRef.current = generation
     setEntries([
@@ -61,11 +62,7 @@ function AnimatedLineSwap({ itemKey, children, animateOnMount = false, block = f
     if (entries.length === 1) {
       const entry = entries[0]
       const element = elementRefs.current.get(entry.instanceKey)
-      if (!element || initialEnteredRef.current || !animateOnMount) {
-        initialEnteredRef.current = true
-        return undefined
-      }
-      initialEnteredRef.current = true
+      if (!element || !animateOnMount || hasTransitionedRef.current) return undefined
       if (reduceMotion) return undefined
       element.style.opacity = '0'
       element.style.transform = 'translateY(8px)'

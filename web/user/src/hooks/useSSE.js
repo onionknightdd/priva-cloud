@@ -21,7 +21,6 @@ import { DEFAULT_UI_SNAPSHOT } from '../session/openSession'
 import i18n from '@shared/i18n'
 import {
   GENERATED_TOOL_LABEL,
-  buildGeneratedFileOpId,
   getGeneratedInputPaths,
   isGeneratedToolName,
 } from '../utils/generatedTool'
@@ -879,15 +878,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
               generatedToolIds.add(block.id)
               const generatedPaths = getGeneratedInputPaths(block.input)
 
-              generatedPaths.forEach((filePath, index) => {
-                const generatedOpId = buildGeneratedFileOpId(block.id, index)
-                messageBlocks.push({
-                  type: 'file_ref',
-                  id: `file-ref-${generatedOpId}`,
-                  name: GENERATED_TOOL_LABEL,
-                  filePath,
-                  processGroupId: block.processGroupId,
-                })
+              generatedPaths.forEach((filePath) => {
                 // Auto-open in File Browser at tool_use time. The matching
                 // tool_result event later re-opens with mime/size/extension
                 // — fileBrowserStore.openFile merges into the same tab.
@@ -1170,29 +1161,6 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
             const files = Array.isArray(tur.files) ? tur.files : []
             fileTabsFromGeneratedFiles(files, FILE_SOURCE_CURRENT, rb.tool_use_id)
               .forEach((file) => openFileBrowserTab(file))
-            if (files.length > 0) {
-              const currentMsgs = S.chat().messages
-              const updatedMsgs = currentMsgs.map((msg) => {
-                if (!Array.isArray(msg.content)) return msg
-                let changed = false
-                const content = msg.content.map((contentBlock) => {
-                  const index = files.findIndex((_, fileIndex) =>
-                    contentBlock?.id === `file-ref-${buildGeneratedFileOpId(rb.tool_use_id, fileIndex)}`
-                  )
-                  if (index < 0 || !files[index]?.path) return contentBlock
-                  changed = true
-                  return {
-                    ...contentBlock,
-                    filePath: files[index].path,
-                    mimeType: files[index].mime_type,
-                    size: files[index].size,
-                    extension: files[index].extension,
-                  }
-                })
-                return changed ? { ...msg, content } : msg
-              })
-              S.chatSet({ messages: updatedMsgs })
-            }
             if (files.length > 0) {
               fxShowCanvas('file-browser')
             }
