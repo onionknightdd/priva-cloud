@@ -18,7 +18,7 @@ export default function TagFilterChip({ active, label, onClick, showIcon = true 
         gap: 3,
         background: active ? 'var(--bg-elevated)' : 'transparent',
         border: '1px solid var(--border-subtle)',
-        borderLeft: active ? '2px solid var(--blue)' : '2px solid transparent',
+        borderLeft: '1px solid transparent',
         borderRadius: 8,
         padding: '1px 6px',
         fontSize: 11,

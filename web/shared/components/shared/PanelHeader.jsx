@@ -17,7 +17,7 @@ import { AnimatedChevron } from './Accordion'
 export default function PanelHeader({ label, onClick, title, open, actions = [], labelClassName = '' }) {
   const collapsible = typeof open === 'boolean'
   return (
-    <div className="sidebar-panel-header flex items-center justify-between" style={{ margin: '0 16px', padding: '4px 0', gap: 8 }}>
+    <div className="sidebar-panel-header flex items-center justify-between" style={{ margin: '0 16px', padding: '4px 8px 4px 0', gap: 8 }}>
       <button
         type="button"
         onClick={onClick}

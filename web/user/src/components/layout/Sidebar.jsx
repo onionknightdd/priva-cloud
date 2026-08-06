@@ -30,7 +30,6 @@ import NavItem from '@shared/components/shared/NavItem'
 import PanelHeader from '@shared/components/shared/PanelHeader'
 import Chip from '@shared/components/shared/Chip'
 import { AnimatedCollapse } from '@shared/components/shared/Accordion'
-import { useSlidingVerticalIndicator } from '@shared/motion/useSlidingUnderline'
 import DirectoryPicker from '../shared/DirectoryPicker'
 import TagFilterChip from '../shared/TagFilterChip'
 import safeStorage from '@shared/utils/safeStorage'
@@ -87,7 +86,6 @@ const PLUGINS_SECTIONS = [
   { id: 'memory', icon: NotebookPen, labelKey: 'tabs.memory' },
 ]
 
-const SUBMENU_ACTIVE_RAIL_OFFSET = 18
 // SessionItem's status marker plus its 8px gap occupy 15px. With the shared
 // 16px row gutter, indent 38px places the session title at the same 53px
 // column as the project name (19px project icon + 8px gap).
@@ -130,7 +128,7 @@ function SessionItem({
         marginLeft: 16,
         marginRight: 16,
         paddingLeft: Math.max(0, (indent || 12) - 16),
-        paddingRight: 0,
+        paddingRight: 8,
         background: isActive ? 'var(--bg-elevated)' : 'transparent',
         borderRadius: 8,
         color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
@@ -374,7 +372,7 @@ function SessionItem({
             style={{
               background: 'transparent',
               border: '1px solid var(--border-subtle)',
-              borderLeft: '2px solid var(--orange)',
+              borderLeft: '1px solid var(--orange)',
               borderRadius: 2,
               color: 'var(--text-dim)',
               fontSize: 11,
@@ -564,8 +562,6 @@ export default function Sidebar() {
   const menuRef = useRef(null)
   const workdirMenuRef = useRef(null)
   const searchInputRef = useRef(null)
-  const pluginsSubmenuRef = useRef(null)
-  const dataSubmenuRef = useRef(null)
   const [renameEditingId, setRenameEditingId] = useState(null)
   const [tagPopoverSession, setTagPopoverSession] = useState(null)
   const [tagPopoverTop, setTagPopoverTop] = useState(120)
@@ -641,15 +637,6 @@ export default function Sidebar() {
   // block to the sidebar bottom and collapses it; collapsing the menu restores it.
   const menuExpanded = dataMenuOpen || pluginsMenuOpen
   const projectAtBottom = menuExpanded
-  const pluginsSubmenuIndicator = useSlidingVerticalIndicator(
-    activeNavTab === 'plugins' && pluginsMenuOpen ? activePluginSection : null,
-    pluginsSubmenuRef
-  )
-  const dataSubmenuIndicator = useSlidingVerticalIndicator(
-    activeNavTab === 'userdata' && dataMenuOpen ? activeSection : null,
-    dataSubmenuRef
-  )
-
   useEffect(() => {
     fetchSessions()
   }, [fetchSessions])
@@ -976,13 +963,12 @@ export default function Sidebar() {
         </div>
       ) : (
         <>
-          {/* Primary navigation — full-width rows so the active 2px bar sits flush at the left edge (like sessions) */}
+          {/* Primary navigation — full-width rows aligned to the shared sidebar gutter. */}
           <div style={{ padding: '6px 16px 4px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <NavItem scale="lg" icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
             <NavItem scale="lg" icon={CalendarClock} label={t('sidebar.scheduler')} active={activeNavTab === 'scheduler'} onClick={() => setActiveNavTab('scheduler')} />
             <NavItem
               scale="lg"
-              activeRailLayoutId="sidebar-nav-parent-active-rail"
               icon={PackageSearch}
               label={t('sidebar.plugins')}
               active={activeNavTab === 'plugins'}
@@ -991,28 +977,11 @@ export default function Sidebar() {
               onClick={togglePluginsMenu}
             />
             <AnimatedCollapse open={pluginsMenuOpen}>
-              <div ref={pluginsSubmenuRef} style={{ position: 'relative' }}>
-                <span
-                  ref={pluginsSubmenuIndicator.indicatorRef}
-                  aria-hidden="true"
-                  style={{
-                    position: 'absolute',
-                    left: SUBMENU_ACTIVE_RAIL_OFFSET,
-                    top: 0,
-                    width: 2,
-                    height: 0,
-                    opacity: 0,
-                    background: 'var(--blue)',
-                    pointerEvents: 'none',
-                    zIndex: 2,
-                  }}
-                />
+              <div>
                 {PLUGINS_SECTIONS.map((sec) => (
                   <NavItem
                     scale="md"
                     key={sec.id}
-                    itemRef={pluginsSubmenuIndicator.setItemRef(sec.id)}
-                    showActiveRail={false}
                     icon={sec.icon}
                     label={t(sec.labelKey)}
                     indent={16}
@@ -1024,7 +993,6 @@ export default function Sidebar() {
             </AnimatedCollapse>
             <NavItem
               scale="lg"
-              activeRailLayoutId="sidebar-nav-parent-active-rail"
               icon={ChartColumnBig}
               label={t('sidebar.dataUsage')}
               active={activeNavTab === 'userdata'}
@@ -1033,28 +1001,11 @@ export default function Sidebar() {
               onClick={toggleDataMenu}
             />
             <AnimatedCollapse open={dataMenuOpen}>
-              <div ref={dataSubmenuRef} style={{ position: 'relative' }}>
-                <span
-                  ref={dataSubmenuIndicator.indicatorRef}
-                  aria-hidden="true"
-                  style={{
-                    position: 'absolute',
-                    left: SUBMENU_ACTIVE_RAIL_OFFSET,
-                    top: 0,
-                    width: 2,
-                    height: 0,
-                    opacity: 0,
-                    background: 'var(--blue)',
-                    pointerEvents: 'none',
-                    zIndex: 2,
-                  }}
-                />
+              <div>
                 {DATA_SECTIONS.map((sec) => (
                   <NavItem
                     scale="md"
                     key={sec.id}
-                    itemRef={dataSubmenuIndicator.setItemRef(sec.id)}
-                    showActiveRail={false}
                     icon={sec.icon}
                     label={t(sec.labelKey)}
                     indent={16}
@@ -1256,11 +1207,11 @@ export default function Sidebar() {
                     <div
                       className="project-group-row flex items-center gap-2 py-1 min-w-0 group"
                       style={{
-                        borderLeft: isActiveGroup ? '2px solid var(--blue)' : '2px solid transparent',
+                        borderLeft: 'none',
                         marginLeft: 16,
                         marginRight: 16,
-                        paddingLeft: 8,
-                        paddingRight: 0,
+                        paddingLeft: 10,
+                        paddingRight: 8,
                         color: isActiveGroup ? 'var(--text-secondary)' : 'var(--text-dim)',
                       }}
                       title={group.cwd}

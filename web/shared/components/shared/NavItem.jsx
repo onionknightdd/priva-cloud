@@ -1,18 +1,11 @@
-import { useLayoutEffect, useRef } from 'react'
 import { ChevronDown } from 'lucide-react'
-import { animate } from 'animejs'
 import { AnimatedChevron } from './Accordion'
-import { SlidingTabIndicator } from './Tabs'
-import { useReducedMotion } from '../../motion/useReducedMotion'
-import { EASE_OUT } from '../../motion/tokens'
 
 /**
  * Shared sidebar navigation row (style guide: `.nav-item`).
  *
- * Borderless by default; active/hover paint `--bg-elevated` + `--text-primary`,
- * active adds a 2px `--blue` left rail. The rail gives a one-shot scaleY
- * 0.6→1 tick when a row is activated LIVE (I5 spec) — rows that mount
- * already-active render it static. Collapsed → icon-only with a tooltip.
+ * Borderless by default; active/hover paint `--bg-elevated` + `--text-primary`.
+ * Collapsed → icon-only with a tooltip.
  *
  * Props:
  *   icon        lucide component
@@ -40,32 +33,14 @@ export default function NavItem({
   expanded = false,
   iconColor,
   scale = 'md',
-  itemRef,
-  showActiveRail = true,
-  activeRailLayoutId,
-  activeRailOffset = -2,
   onClick,
   title,
 }) {
   const baseColor = active ? 'var(--text-primary)' : 'var(--text-secondary)'
   const large = scale === 'lg'
-  const railRef = useRef(null)
-  const wasActiveRef = useRef(active)
-  const reducedMotion = useReducedMotion()
-
-  // One-shot activation tick on the rail — live transitions only.
-  useLayoutEffect(() => {
-    if (active === wasActiveRef.current) return
-    wasActiveRef.current = active
-    const el = railRef.current
-    if (!showActiveRail || !active || !el || reducedMotion) return
-    el.style.transform = 'scaleY(0.6)'
-    animate(el, { scaleY: 1, duration: 150, ease: EASE_OUT })
-  }, [active, reducedMotion, showActiveRail])
 
   return (
     <button
-      ref={itemRef}
       type="button"
       disabled={disabled}
       onClick={disabled ? undefined : onClick}
@@ -77,12 +52,10 @@ export default function NavItem({
         paddingTop: 6,
         paddingBottom: 6,
         paddingRight: collapsed ? 0 : 8,
-        paddingLeft: collapsed ? 0 : 8 + indent,
+        paddingLeft: collapsed ? 0 : 10 + indent,
         justifyContent: collapsed ? 'center' : 'flex-start',
         border: 0,
-        // Reserved 2px lane; the paintable rail below overlays it so it can
-        // scaleY-tick (a border can't be transformed).
-        borderLeft: '2px solid transparent',
+        borderLeft: 'none',
         // Active and hover fills share the same restrained row treatment.
         borderRadius: 8,
         background: active ? 'var(--bg-elevated)' : 'transparent',
@@ -104,27 +77,6 @@ export default function NavItem({
         e.currentTarget.style.color = baseColor
       }}
     >
-      {showActiveRail && active && activeRailLayoutId ? (
-        <SlidingTabIndicator
-          variant="left-border"
-          layoutId={activeRailLayoutId}
-          style={{ left: activeRailOffset, zIndex: 2 }}
-        />
-      ) : showActiveRail && active ? (
-        <span
-          ref={railRef}
-          aria-hidden="true"
-          style={{
-            position: 'absolute',
-            left: activeRailOffset,
-            top: 0,
-            bottom: 0,
-            width: 2,
-            background: 'var(--blue)',
-            pointerEvents: 'none',
-          }}
-        />
-      ) : null}
       {Icon && (
         <Icon
           size={large ? 19 : 17}
@@ -133,7 +85,7 @@ export default function NavItem({
         />
       )}
       {!collapsed && (
-        <span className="sidebar-menu-label flex-1 truncate" style={{ minWidth: 0, fontSize: large ? 15 : 14 }}>{label}</span>
+        <span className="sidebar-menu-label truncate" style={{ flex: '0 1 auto', minWidth: 0, fontSize: large ? 15 : 14 }}>{label}</span>
       )}
       {!collapsed && badge != null && (
         <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 600, color: 'var(--text-dim)' }}>
