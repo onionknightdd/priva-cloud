@@ -151,6 +151,7 @@ function AnimatedProcessGroup({ group, visible }) {
 
   const elementRef = useRef(null)
   const animationRef = useRef(null)
+  const exitFrameRef = useRef(null)
   const visibleRef = useRef(visible)
   visibleRef.current = visible
   const reducedMotion = useReducedMotion()
@@ -161,15 +162,23 @@ function AnimatedProcessGroup({ group, visible }) {
     if (!mounted || !element || !displayGroupRef.current) return undefined
 
     animationRef.current?.cancel()
+    if (exitFrameRef.current != null && typeof window !== 'undefined') {
+      window.cancelAnimationFrame(exitFrameRef.current)
+      exitFrameRef.current = null
+    }
 
-    const clearMotionStyles = () => {
+    const clearMotionStyles = ({ preserveOverlay = false } = {}) => {
       element.style.willChange = ''
       element.style.transform = ''
+      if (!preserveOverlay) {
+        element.style.position = ''
+        element.style.inset = ''
+        element.style.width = ''
+      }
     }
 
     if (reducedMotion) {
       if (visible) {
-        element.style.height = 'auto'
         element.style.opacity = '1'
         clearMotionStyles()
       } else {
@@ -178,50 +187,79 @@ function AnimatedProcessGroup({ group, visible }) {
       return undefined
     }
 
-    element.style.willChange = 'height, opacity, transform'
+    // Keep the enter at natural height and animate only compositor-friendly
+    // properties. Animating height here makes the chat virtualizer remeasure
+    // on every frame; height animation remains reserved for the explicitly
+    // opened AnimatedCollapse below.
+    element.style.willChange = 'opacity, transform'
     if (visible) {
-      const targetHeight = element.scrollHeight
-      element.style.height = '0px'
+      // A previous exit may have taken the node out of flow inside the
+      // presence wrapper. Restore normal flow before measuring the enter.
+      element.style.position = 'relative'
+      element.style.inset = ''
+      element.style.width = ''
       element.style.opacity = '0'
       element.style.transform = 'translateY(4px)'
       void element.offsetHeight
       animationRef.current = animate(element, {
-        height: { to: `${targetHeight}px`, duration: DURATION.panel, ease: EASE_SPRING },
         opacity: { to: 1, duration: DURATION.panel, ease: EASE_SPRING },
         translateY: { to: 0, duration: DURATION.panel, ease: EASE_SPRING },
         onComplete: () => {
           if (!visibleRef.current) return
-          element.style.height = 'auto'
           clearMotionStyles()
         },
       })
     } else {
-      const currentHeight = element.offsetHeight || element.scrollHeight
-      element.style.height = `${currentHeight}px`
-      void element.offsetHeight
+      // Remove the active node from layout at the start of its exit. The
+      // presence wrapper keeps the node painted for the fade, so the row gets
+      // one stable layout update instead of a second jump on the last frame.
+      element.style.position = 'absolute'
+      element.style.inset = '0 0 auto 0'
+      element.style.width = '100%'
       animationRef.current = animate(element, {
-        height: { to: '0px', duration: DURATION.panel, ease: EASE_SPRING },
         opacity: { to: 0, duration: DURATION.panel, ease: EASE_SPRING },
         translateY: { to: -2, duration: DURATION.panel, ease: EASE_SPRING },
         onComplete: () => {
-          clearMotionStyles()
-          onExited()
+          // Keep the node overlaid until presence unmounts it. Restoring
+          // normal flow here would recreate the end-of-fold height jump.
+          clearMotionStyles({ preserveOverlay: true })
+          // Let Anime commit its final opacity frame before React removes the
+          // presence node and asks the virtualizer for one final measurement.
+          if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+            onExited()
+            return
+          }
+          exitFrameRef.current = window.requestAnimationFrame(() => {
+            exitFrameRef.current = null
+            onExited()
+          })
         },
       })
     }
 
-    return () => animationRef.current?.cancel()
+    return () => {
+      animationRef.current?.cancel()
+      if (exitFrameRef.current != null && typeof window !== 'undefined') {
+        window.cancelAnimationFrame(exitFrameRef.current)
+        exitFrameRef.current = null
+      }
+    }
   }, [groupId, mounted, onExited, reducedMotion, visible])
 
   if (!mounted || !displayGroupRef.current) return null
 
   return (
     <div
-      ref={elementRef}
-      className="flex flex-col gap-1 min-w-0"
-      style={{ minWidth: 0, overflow: 'hidden' }}
+      className="min-w-0"
+      style={{ position: 'relative', width: '100%', minWidth: 0 }}
     >
-      {displayGroupRef.current.nodes}
+      <div
+        ref={elementRef}
+        className="flex flex-col gap-1 min-w-0"
+        style={{ minWidth: 0, overflow: 'hidden' }}
+      >
+        {displayGroupRef.current.nodes}
+      </div>
     </div>
   )
 }
@@ -1140,6 +1178,18 @@ function isEmptyTextBlock(block) {
   return block?.type === 'text' && !block?.text?.trim()
 }
 
+function isThinkingOnlyBlock(block) {
+  if (block?.type === 'thinking') return true
+  if (block?.type !== 'text') return false
+
+  const text = String(block.text || '').trim()
+  if (!text) return true
+  if (!text.replace(/<think>[\s\S]*?<\/think>/g, '').trim()) return true
+
+  const segments = parseThinkTags(text)
+  return Boolean(segments?.length) && segments.every((segment) => segment.type === 'thinking')
+}
+
 function getToolSectionKey(run, startIndex) {
   const first = run[0]
   return `${first?.type || 'tool'}-${first?.id || first?.refType || startIndex}-${startIndex}`
@@ -1672,11 +1722,26 @@ export default memo(function MessageBubble({
     ? renderedProcessGroups.find((group) => group.groupId === latestProcessGroupId) || null
     : null
   const hasProcessEvents = contentBlocks.some((block) => !isEmptyTextBlock(block))
+  // A plain final assistant turn (thinking + answer, with no tools/files/
+  // questions/task activity) should read as a normal response. If a completed
+  // transcript also contains an earlier non-thinking assistant segment, that
+  // segment is process content and still belongs in the fold.
+  const hasNonThinkingProcessEvents = !isStreaming && contentBlocks.some((block, index) => {
+    if (isEmptyTextBlock(block) || finalResultIndexSet.has(index)) return false
+    return !isThinkingOnlyBlock(block)
+  })
+  const hasFoldableProcessEvents = hadSdkTaskActivity || hasTools || hasNonThinkingProcessEvents
   const shouldFoldProcess = !isUser
     && !isErrorMessage
     && !message.responseInterrupted
     && message.resultIsError !== true
+    && hasFoldableProcessEvents
     && (canCollapseResponse || (isStreaming && hasProcessEvents))
+  const hasStandaloneResult = !shouldFoldProcess
+    && !isUser
+    && hasCompletedResult
+    && Boolean(finalResultText)
+    && finalResultIndexes.length === 0
   const allRenderedProcessNodes = renderedProcessGroups.flatMap((group) => group.nodes)
 
   const hasMessageHeader = (!isUser && isStreaming && message.timestamp) || (isStreaming && !isUser) || message.error
@@ -1824,7 +1889,12 @@ export default memo(function MessageBubble({
               <MarkdownRenderer content={finalResultText} mermaidCollapsible />
             )}
           </>
-        ) : renderedContent)}
+        ) : (
+          <>
+            {renderedContent}
+            {hasStandaloneResult && <MarkdownRenderer content={finalResultText} mermaidCollapsible />}
+          </>
+        ))}
         {/* Empty response fallback */}
         {!isUser && !isStreaming && !hasContent && !hasTools && hasMetadata && !isErrorMessage && (
           <span className="text-xs" style={{ color: 'var(--text-dim)', fontStyle: 'italic' }}>

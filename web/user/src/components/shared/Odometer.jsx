@@ -99,6 +99,17 @@ function Digit({ value, place, height, width }) {
         }
         applyGlyphs()
       },
+      onComplete: () => {
+        // Anime's spring can finish one frame after the last update callback.
+        // Snap the internal value and glyph positions together so the Summary
+        // does not visibly pause on a stale final digit.
+        st.v = target
+        st.vel = 0
+        st.lastV = target
+        st.lastT = performance.now()
+        applyGlyphs()
+        st.anim = null
+      },
     })
   }, [target, height, reducedMotion])
 
