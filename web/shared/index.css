@@ -1090,44 +1090,27 @@ html, body {
 }
 
 /* ── Tree indent for expanded tool sections ── */
+.chat-branch-connector {
+  color: var(--text-dim);
+  font-family: var(--font-code);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  flex-shrink: 0;
+  user-select: none;
+}
 .tool-tree {
-  position: relative;
-  margin-left: 2px;
-  padding-left: 10px;
+  margin-left: 8px;
 }
 .tool-tree-child {
-  position: relative;
-  padding-left: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
   margin-top: 4px;
 }
-.tool-tree-child::before {
-  content: '';
-  position: absolute;
-  left: -8px;
-  top: 14px;
-  width: 8px;
-  height: 1px;
-  background: var(--border);
-}
-.tool-tree-child::after {
-  content: '';
-  position: absolute;
-  left: -8px;
-  top: -4px;
-  bottom: 0;
-  width: 1px;
-  background: var(--border);
-}
-.tool-tree-child:first-child::after {
-  top: 0;
-}
-.tool-tree-child:last-child::after {
-  bottom: auto;
-  height: 18px;
-}
-.tool-tree-child:first-child:last-child::after {
-  top: 0;
-  height: 14px;
+.tool-tree-child-content {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────

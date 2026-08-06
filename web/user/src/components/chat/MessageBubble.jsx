@@ -43,6 +43,7 @@ import {
   summarizeResponseExecution,
   visibleExecutionSummaryItems,
 } from '../../utils/responseSummary'
+import { collectToolRun } from '../../utils/toolRunGrouping'
 
 const ASSISTANT_MESSAGE_GAP = 7
 const ASSISTANT_META_MARGIN_TOP = -2
@@ -141,14 +142,7 @@ function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
           >
             <span
               aria-hidden="true"
-              style={{
-                color: 'var(--text-dim)',
-                fontFamily: 'var(--font-code)',
-                fontSize: 'var(--text-sm)',
-                lineHeight: '20px',
-                flexShrink: 0,
-                userSelect: 'none',
-              }}
+              className="chat-branch-connector"
             >└─</span>
             <div
               className="min-w-0 flex-1 text-xs"
@@ -1660,24 +1654,16 @@ export default memo(function MessageBubble({
     const block = contentBlocks[i]
     if (isCollapsibleToolBlock(block)) {
       const runStartIndex = i
-      const run = [block]
-      const runGroupId = processGroupFor(block, runStartIndex)
-      while (i + 1 < contentBlocks.length) {
-        const nextBlock = contentBlocks[i + 1]
-        if (isCollapsibleToolBlock(nextBlock)) {
-          // A tool_use envelope is one process group. Do not let contiguous
-          // tool cards from the next envelope merge into the previous group.
-          if (nextBlock.processGroupId !== block.processGroupId) break
-          i += 1
-          run.push(contentBlocks[i])
-          continue
-        }
-        if (isEmptyTextBlock(nextBlock)) {
-          i += 1
-          continue
-        }
-        break
-      }
+      const { run, toolIndexes, endIndex, lastToolIndex } = collectToolRun(
+        contentBlocks,
+        runStartIndex,
+        isCollapsibleToolBlock,
+        isEmptyTextBlock,
+      )
+      i = endIndex
+      // The merged run belongs to its newest visible tool envelope. This keeps
+      // latestProcessGroupId resolvable while the run is streaming.
+      const runGroupId = processGroupFor(run[run.length - 1], lastToolIndex)
       const sectionKey = getToolSectionKey(run, runStartIndex)
       const isCollapsed = collapsedToolSections[sectionKey] ?? !isStreaming
 
@@ -1692,8 +1678,8 @@ export default memo(function MessageBubble({
           run={run}
           fileOps={fileOps}
           t={t}
-          renderBlock={(toolBlock, runIndex) => renderBlock(toolBlock, runStartIndex + runIndex)}
-          getChildKey={(toolBlock, runIndex) => `tree-child-${toolBlock.id || runStartIndex + runIndex}`}
+          renderBlock={(toolBlock, runIndex) => renderBlock(toolBlock, toolIndexes[runIndex])}
+          getChildKey={(toolBlock, runIndex) => `tree-child-${toolBlock.id || toolIndexes[runIndex]}`}
         />
       )
       renderedContent.push(renderedToolRun)

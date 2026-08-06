@@ -213,7 +213,12 @@ export default function ToolRunSection({
           key={getChildKey ? getChildKey(toolBlock, runIndex) : (toolBlock.id || runIndex)}
           className="tool-tree-child"
         >
-          {renderBlock(toolBlock, runIndex)}
+          <span aria-hidden="true" className="chat-branch-connector">
+            {runIndex === run.length - 1 ? '└─' : '├─'}
+          </span>
+          <div className="tool-tree-child-content">
+            {renderBlock(toolBlock, runIndex)}
+          </div>
         </div>
       ))}
     </div>
