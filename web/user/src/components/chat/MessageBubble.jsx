@@ -2018,7 +2018,7 @@ export default memo(function MessageBubble({
                     maxWidth: '100%',
                     boxSizing: 'border-box',
                     borderRadius: 10,
-                    padding: '9px 13px 9px 12px',
+                    padding: '9px 14px 9px 13px',
                     background: 'var(--bg-elevated)',
                   }}
                 >
