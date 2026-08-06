@@ -1967,8 +1967,11 @@ export default memo(function MessageBubble({
         background: 'transparent',
         justifyContent: isUser ? 'flex-end' : 'flex-start',
         overflow: isUser ? 'visible' : 'hidden',
+        // User actions are absolutely positioned below the bubble. Reserve
+        // the extra 5px after moving that overlay down, otherwise both edges
+        // move together and the visible gap to the next assistant is unchanged.
         paddingBottom: isUser && messageActions
-          ? 16
+          ? 21
           : (!isUser && messageActions ? 15 : 11),
         // Message content uses the main-scope type scale plus one readable
         // step. Keeping the tokens local prevents sidebar and composer text
