@@ -9,7 +9,7 @@ import { EASE_SPRING } from '@shared/motion/tokens'
 import { formatDuration, getRunMetrics } from '../../utils/toolPresentation'
 import { summarizeRun } from '../../utils/toolRunSummary'
 
-const TOOL_SWAP_DURATION = 180
+const TOOL_SWAP_DURATION = 800
 
 function AnimatedLineSwap({ itemKey, children, animateOnMount = false, block = false, className = '', style }) {
   const reduceMotion = useReducedMotion()
