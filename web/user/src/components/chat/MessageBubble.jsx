@@ -1967,7 +1967,9 @@ export default memo(function MessageBubble({
         background: 'transparent',
         justifyContent: isUser ? 'flex-end' : 'flex-start',
         overflow: isUser ? 'visible' : 'hidden',
-        paddingBottom: !isUser && messageActions ? 15 : 11,
+        paddingBottom: isUser && messageActions
+          ? 16
+          : (!isUser && messageActions ? 15 : 11),
         // Message content uses the main-scope type scale plus one readable
         // step. Keeping the tokens local prevents sidebar and composer text
         // from changing with the message typography.
@@ -2024,7 +2026,7 @@ export default memo(function MessageBubble({
                     maxWidth: '100%',
                     boxSizing: 'border-box',
                     borderRadius: 10,
-                    padding: '7px 11px 7px 10px',
+                    padding: '9px 13px 9px 12px',
                     background: 'var(--bg-elevated)',
                   }}
                 >
