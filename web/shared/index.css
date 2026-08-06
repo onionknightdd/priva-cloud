@@ -294,9 +294,12 @@
   background: linear-gradient(
     90deg,
     var(--text-dim) 0%,
-    var(--text-secondary) 35%,
-    var(--text-primary) 50%,
-    var(--text-secondary) 65%,
+    var(--text-dim) 38%,
+    var(--text-secondary) 44%,
+    var(--text-primary) 49%,
+    var(--text-primary) 53%,
+    var(--text-secondary) 59%,
+    var(--text-dim) 66%,
     var(--text-dim) 100%
   );
   background-position-x: 200%;
