@@ -88,6 +88,10 @@ const PLUGINS_SECTIONS = [
 ]
 
 const SUBMENU_ACTIVE_RAIL_OFFSET = 18
+// SessionItem's status marker plus its 8px gap occupy 15px. At indent 11px,
+// the session title starts at the same 26px column as the project name and
+// the primary menu icons.
+const PROJECT_SESSION_INDENT = 11
 
 function SessionItem({
   session, isActive, openMenuId, menuRef, onSelect, onMenuToggle,
@@ -971,7 +975,7 @@ export default function Sidebar() {
       ) : (
         <>
           {/* Primary navigation — full-width rows so the active 2px bar sits flush at the left edge (like sessions) */}
-          <div style={{ padding: '6px 16px 4px', flexShrink: 0 }}>
+          <div style={{ padding: '6px 16px 4px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <NavItem scale="lg" icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
             <NavItem scale="lg" icon={CalendarClock} label={t('sidebar.scheduler')} active={activeNavTab === 'scheduler'} onClick={() => setActiveNavTab('scheduler')} />
             <NavItem
@@ -1068,7 +1072,7 @@ export default function Sidebar() {
 
           {/* Search — the nav row and the input box cross-animate (height) for a smooth morph.
               Both stay mounted so AnimatedCollapse can run enter/exit transitions. */}
-          <div style={{ flexShrink: 0 }}>
+          <div style={{ flexShrink: 0, padding: '0 16px' }}>
             <AnimatedCollapse open={!searchOpen}>
               <NavItem icon={Search} label={t('sidebar.search')} onClick={() => setSearchOpen(true)} />
             </AnimatedCollapse>
@@ -1081,7 +1085,8 @@ export default function Sidebar() {
                   borderRadius: 4,
                   padding: '4px 8px',
                   minWidth: 0,
-                  margin: '4px 8px',
+                  width: '100%',
+                  margin: '4px 0',
                 }}
               >
                 <Search size={12} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
@@ -1263,10 +1268,10 @@ export default function Sidebar() {
                         onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
                         onMouseLeave={(e) => { e.currentTarget.style.color = 'inherit' }}
                       >
-                        <ProjectGroupIcon expanded={isExpanded} />
-                        <span className="flex-1 truncate" style={{ fontSize: 14, minWidth: 0, textAlign: 'left' }}>
+                        <span className="truncate" style={{ flex: '0 1 auto', fontSize: 14, minWidth: 0, textAlign: 'left' }}>
                           {shortCwd(group.cwd)}
                         </span>
+                        <ProjectGroupIcon expanded={isExpanded} />
                       </button>
                       {group.pinned && (
                         <Pin size={10} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--cyan)' }} />
@@ -1329,7 +1334,7 @@ export default function Sidebar() {
                       <>
                         {/* Regular sessions remain directly visible — only scheduler
                             sessions gain their own collapsible subgroup. */}
-                        {regularSessions.map((session) => renderSessionItem(session, 28))}
+                        {regularSessions.map((session) => renderSessionItem(session, PROJECT_SESSION_INDENT))}
                         {scheduledSessions.length > 0 && (
                           <div style={{ marginTop: regularSessions.length > 0 ? 2 : 0 }}>
                             <button

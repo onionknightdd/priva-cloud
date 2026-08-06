@@ -10,14 +10,14 @@ import { AnimatedChevron } from './Accordion'
  *   label    header text (rendered uppercase, letter-spaced)
  *   onClick  optional — makes the label a button (e.g. collapse-all)
  *   title    optional tooltip for the label button
- *   open     optional boolean — when set, renders a leading collapse chevron
+ *   open     optional boolean — when set, renders a trailing collapse chevron
  *   labelClassName optional class for the label span
  *   actions  [{ icon, title, onClick, active?, spinning?, disabled? }]
  */
 export default function PanelHeader({ label, onClick, title, open, actions = [], labelClassName = '' }) {
   const collapsible = typeof open === 'boolean'
   return (
-    <div className="flex items-center justify-between" style={{ padding: '4px 12px', gap: 8 }}>
+    <div className="flex items-center justify-between" style={{ padding: '4px 16px', gap: 8 }}>
       <button
         type="button"
         onClick={onClick}
@@ -33,18 +33,22 @@ export default function PanelHeader({ label, onClick, title, open, actions = [],
           letterSpacing: '0.06em',
           gap: 4,
           padding: 0,
+          paddingLeft: 10,
           minWidth: 0,
           transition: 'color 150ms ease',
         }}
         onMouseEnter={(e) => { if (onClick) e.currentTarget.style.color = 'var(--text-secondary)' }}
         onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
       >
+        <span className={`sidebar-menu-label truncate ${labelClassName}`}>{label}</span>
         {collapsible && (
-          <AnimatedChevron open={open} style={{ color: 'var(--text-dim)' }}>
-            <ChevronDown size={12} strokeWidth={1.5} />
+          <AnimatedChevron
+            open={open}
+            style={{ color: 'var(--text-dim)', transform: `rotate(${open ? 0 : -90}deg)` }}
+          >
+            <ChevronDown size={18} strokeWidth={1.5} />
           </AnimatedChevron>
         )}
-        <span className={`sidebar-menu-label truncate ${labelClassName}`}>{label}</span>
       </button>
       <div className="flex items-center" style={{ gap: 2, flexShrink: 0 }}>
         {actions.map((action, i) => {
