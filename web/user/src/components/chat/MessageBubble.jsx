@@ -157,7 +157,6 @@ function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
                 borderRadius: '2px',
                 color: 'var(--text-dim)',
                 padding: '8px 12px',
-                whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
               }}
             >
