@@ -24,8 +24,6 @@ import useChatStore from '../../stores/chatStore'
 import useFileBrowserStore from '../../stores/fileBrowserStore'
 import useFileOpsStore from '../../stores/fileOpsStore'
 import useSidebarStore from '../../stores/sidebarStore'
-import useTaskStore from '../../stores/taskStore'
-import { tweenScrollIntoView } from '@shared/motion/tweenScroll'
 import {
   formatDuration,
   getToolPresentation,
@@ -50,6 +48,8 @@ const TOOL_ICONS = {
   Skill: ScrollText,
 }
 
+const TOOL_ICON_SWEEP_WIDTH = 8
+
 function ToolIcon({ icon: Icon, running, size }) {
   const sweepRef = useRef(null)
   const innerRef = useRef(null)
@@ -61,10 +61,10 @@ function ToolIcon({ icon: Icon, running, size }) {
     if (!running || reduceMotion || !sweep || !inner) return undefined
 
     const iconWidth = sweep.parentElement?.getBoundingClientRect().width || 12
-    const progress = { x: -5 }
+    const progress = { x: -TOOL_ICON_SWEEP_WIDTH }
     const motion = animate(progress, {
-      x: iconWidth + 5,
-      duration: 1600,
+      x: iconWidth + TOOL_ICON_SWEEP_WIDTH,
+      duration: 2400,
       loop: true,
       ease: eases.linear,
       onUpdate: () => {
@@ -82,7 +82,7 @@ function ToolIcon({ icon: Icon, running, size }) {
   return (
     <span className="tool-line-icon tool-line-icon-shimmer" style={{ width: size, height: size }} aria-hidden="true">
       <Icon size={size} strokeWidth={1.5} className="tool-line-icon-base" />
-      <span ref={sweepRef} className="tool-line-icon-sweep" style={{ width: 5, height: size }}>
+      <span ref={sweepRef} className="tool-line-icon-sweep" style={{ width: TOOL_ICON_SWEEP_WIDTH, height: size }}>
         <span ref={innerRef} className="tool-line-icon-sweep-inner" style={{ width: size, height: size }}>
           <Icon size={size} strokeWidth={1.5} />
         </span>
@@ -259,23 +259,14 @@ export default function ToolLine({
   const hasDetails = !livePreview && sections.length > 0
   const [isOpen, setIsOpen] = useState(() => Boolean(presentation.isError && hasDetails))
   const previousErrorRef = useRef(presentation.isError)
-  const rowRef = useRef(null)
-  const activeTaskId = useTaskStore((state) => state.activeTaskId)
-  const setActiveTaskId = useTaskStore((state) => state.setActiveTaskId)
   const showCanvas = useUiStore((state) => state.showCanvas)
   const setActiveCanvasTab = useUiStore((state) => state.setActiveCanvasTab)
   const setSelectedFileOpId = useFileOpsStore((state) => state.setSelectedFileOpId)
   const openFile = useFileBrowserStore((state) => state.openFile)
-  const isActive = Boolean(block?.id && activeTaskId === block.id)
-
   useEffect(() => {
     if (presentation.isError && !previousErrorRef.current && hasDetails) setIsOpen(true)
     previousErrorRef.current = presentation.isError
   }, [hasDetails, presentation.isError])
-
-  useEffect(() => {
-    if (isActive && rowRef.current) tweenScrollIntoView(rowRef.current, { block: 'center', flash: false })
-  }, [isActive])
 
   const openExternal = (event) => {
     event.stopPropagation()
@@ -302,7 +293,6 @@ export default function ToolLine({
   const toggleDetails = () => {
     if (!hasDetails) return
     setIsOpen((open) => !open)
-    if (block?.id && activeTaskId !== block.id) setActiveTaskId(block.id)
   }
 
   const Icon = TOOL_ICONS[presentation.displayName]
@@ -321,8 +311,7 @@ export default function ToolLine({
 
   return (
     <div
-      ref={rowRef}
-      className={`tool-line${compact ? ' tool-line-compact' : ''}${presentation.isRunning ? ' is-running' : ''}${presentation.isError ? ' is-error' : ''}${reverted ? ' is-reverted' : ''}${isActive ? ' is-active' : ''}`}
+      className={`tool-line${compact ? ' tool-line-compact' : ''}${presentation.isRunning ? ' is-running' : ''}${presentation.isError ? ' is-error' : ''}${reverted ? ' is-reverted' : ''}`}
       data-tool-card
       data-tool-use-id={block?.id}
     >

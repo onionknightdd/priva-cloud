@@ -188,6 +188,7 @@ function GroupSummary({ live, run, fileOps, t, compact }) {
       <span className="tool-run-summary-content" style={{ fontSize }}>
         {live ? (
           <AnimatedShimmerText
+            duration={3600}
             style={{
               fontSize,
               fontWeight: 400,

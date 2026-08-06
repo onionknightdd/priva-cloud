@@ -1258,8 +1258,7 @@ html, body {
 }
 
 .tool-line-row:hover,
-.tool-line-row:focus-visible,
-.tool-line.is-active .tool-line-row {
+.tool-line-row:focus-visible {
   color: var(--text-secondary);
 }
 
@@ -1323,10 +1322,12 @@ html, body {
   background: linear-gradient(
     90deg,
     var(--text-dim) 0%,
-    var(--text-dim) 30%,
-    var(--text-primary) 45%,
-    var(--text-primary) 55%,
-    var(--text-dim) 70%,
+    var(--text-dim) 20%,
+    var(--text-secondary) 34%,
+    var(--text-primary) 44%,
+    var(--text-primary) 60%,
+    var(--text-secondary) 72%,
+    var(--text-dim) 84%,
     var(--text-dim) 100%
   );
   background-position-x: 200%;
@@ -1334,7 +1335,7 @@ html, body {
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: tool-line-text-shimmer 3s linear infinite;
+  animation: tool-line-text-shimmer 3.6s linear infinite;
 }
 
 .tool-line-icon-shimmer {
