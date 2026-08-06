@@ -435,20 +435,32 @@ export default function FileManagerTab() {
         {/* Upload */}
         <input type="file" ref={fileInputRef} onChange={handleUpload} style={{ display: 'none' }} />
         <button
-          className="flex items-center justify-center px-2 py-1 flex-shrink-0"
+          className="flex items-center justify-center flex-shrink-0"
           style={{
-            background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-            borderRadius: 4, cursor: resolvedPath ? 'pointer' : 'not-allowed',
-            color: resolvedPath ? 'var(--text-secondary)' : 'var(--text-dim)', fontSize: 12,
-            transition: 'border-color 150ms ease',
+            width: 24,
+            height: 24,
+            padding: 0,
+            background: 'transparent',
+            border: 'none',
+            borderRadius: 4,
+            cursor: resolvedPath ? 'pointer' : 'not-allowed',
+            color: resolvedPath ? 'var(--text-secondary)' : 'var(--text-dim)',
+            transition: 'color 150ms ease, background 150ms ease',
           }}
           type="button"
           onClick={() => { setTooltip(null); setCreateDirectoryOpen(true) }}
           disabled={!resolvedPath}
           title={t('picker.newFolder')}
           aria-label={t('picker.newFolder')}
-          onMouseEnter={(e) => { if (resolvedPath) e.currentTarget.style.borderColor = 'var(--blue)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)' }}
+          onMouseEnter={(e) => {
+            if (!resolvedPath) return
+            e.currentTarget.style.background = 'var(--bg-elevated)'
+            e.currentTarget.style.color = 'var(--text-primary)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = resolvedPath ? 'var(--text-secondary)' : 'var(--text-dim)'
+          }}
         >
           <FolderPlus size={14} strokeWidth={1.5} />
         </button>
@@ -462,20 +474,32 @@ export default function FileManagerTab() {
           }}
         />
         <button
-          className="flex items-center justify-center px-2 py-1 flex-shrink-0"
+          className="flex items-center justify-center flex-shrink-0"
           style={{
-            background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-            borderRadius: 4, cursor: uploading ? 'wait' : 'pointer',
+            width: 24,
+            height: 24,
+            padding: 0,
+            background: 'transparent',
+            border: 'none',
+            borderRadius: 4,
+            cursor: uploading ? 'wait' : 'pointer',
             color: 'var(--text-secondary)',
-            transition: 'border-color 150ms ease',
+            transition: 'color 150ms ease, background 150ms ease',
           }}
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
           title={t('settings.fileManagerUpload')}
           aria-label={t('settings.fileManagerUpload')}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--blue)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)' }}
+          onMouseEnter={(e) => {
+            if (uploading) return
+            e.currentTarget.style.background = 'var(--bg-elevated)'
+            e.currentTarget.style.color = 'var(--text-primary)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'var(--text-secondary)'
+          }}
         >
           <Upload size={14} strokeWidth={1.5} />
         </button>
