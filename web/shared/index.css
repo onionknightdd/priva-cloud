@@ -552,26 +552,26 @@ html, body {
   opacity: 1;
 }
 
-/* User message actions live outside the bubble and stay out of the layout
-   until the message surface is hovered. */
+/* User message actions live outside the bubble in an overlay slot so hover
+   only changes visibility and never pushes the following message downward. */
 .user-message-hover-scope .user-message-actions-slot {
-  max-height: 0;
-  margin-top: 0;
-  overflow: hidden;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 2;
+  height: 24px;
+  margin-top: 4px;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: max-height 150ms ease, margin-top 150ms ease, opacity 150ms ease,
-    visibility 0s linear 150ms;
+  transition: opacity 150ms ease, visibility 0s linear 150ms;
 }
 .user-message-hover-scope:hover .user-message-actions-slot,
 .user-message-hover-scope:focus-within .user-message-actions-slot {
-  max-height: 32px;
-  margin-top: 4px;
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transition: max-height 150ms ease, margin-top 150ms ease, opacity 150ms ease;
+  transition: opacity 150ms ease;
 }
 
 /* ── Chip ── */
@@ -595,11 +595,6 @@ html, body {
 .icon-running {
   animation: spin 1s linear infinite;
 }
-
-.thinking-block[open] .thinking-chevron {
-  transform: rotate(90deg);
-}
-.thinking-block summary::-webkit-details-marker { display: none; }
 
 /* Quiet focus treatment for dense accordion toggles. */
 .quiet-toggle:focus {

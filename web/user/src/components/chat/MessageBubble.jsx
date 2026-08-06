@@ -84,22 +84,30 @@ function contentHasThinking(contentBlocks) {
 
 function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
   const durationStr = durationMs ? formatDuration(durationMs) : null
+  const bodyId = useId()
+  const [expanded, setExpanded] = useState(false)
+
   return (
-    <details className="thinking-block">
-      <summary
+    <div className="thinking-block">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={bodyId}
         className="flex items-center gap-1 px-2 rounded-sm"
         style={{
           fontSize: 'var(--text-sm)',
           color: 'var(--text-secondary)',
           cursor: 'pointer',
           userSelect: 'none',
-          listStyle: 'none',
           background: 'var(--bg-elevated)',
           border: '1px solid var(--border-subtle)',
           width: 'fit-content',
           height: 22,
+          fontFamily: 'var(--font-ui)',
+          textAlign: 'left',
           transition: 'background 150ms ease, border-color 150ms ease',
         }}
+        onClick={() => setExpanded((open) => !open)}
         onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.borderColor = 'var(--border)' }}
         onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)'; e.currentTarget.style.borderColor = 'var(--border-subtle)' }}
       >
@@ -109,42 +117,56 @@ function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
           <>
             <Check size={10} strokeWidth={1.5} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
             {durationStr ? t('chat.thoughtFor', { duration: durationStr }) : t('chat.thoughtComplete')}
-            <ChevronRight size={10} strokeWidth={1.5} className="thinking-chevron" style={{ color: 'var(--text-dim)', flexShrink: 0, transition: 'transform 150ms ease' }} />
+            <ChevronRight
+              size={10}
+              strokeWidth={1.5}
+              className="thinking-chevron"
+              style={{
+                color: 'var(--text-dim)',
+                flexShrink: 0,
+                transform: expanded ? 'rotate(90deg)' : 'none',
+                transition: 'transform 150ms ease',
+              }}
+            />
           </>
         )}
-      </summary>
-      <div
-        className="flex items-start gap-1 min-w-0 mt-1"
-        style={{
-          marginLeft: 8,
-        }}
-      >
-        <span
-          aria-hidden="true"
-          style={{
-            color: 'var(--text-dim)',
-            fontFamily: 'var(--font-code)',
-            fontSize: 'var(--text-sm)',
-            lineHeight: '20px',
-            flexShrink: 0,
-            userSelect: 'none',
-          }}
-        >└─</span>
-        <div
-          className="min-w-0 flex-1 text-xs"
-          style={{
-            background: 'var(--bg-elevated)',
-            borderRadius: '2px',
-            color: 'var(--text-dim)',
-            padding: '8px 12px',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
-          {content}
+      </button>
+      <AnimatedCollapse open={expanded} id={bodyId}>
+        <div style={{ paddingTop: 4 }}>
+          <div
+            className="flex items-start gap-1 min-w-0"
+            style={{
+              marginLeft: 8,
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                color: 'var(--text-dim)',
+                fontFamily: 'var(--font-code)',
+                fontSize: 'var(--text-sm)',
+                lineHeight: '20px',
+                flexShrink: 0,
+                userSelect: 'none',
+              }}
+            >└─</span>
+            <div
+              className="min-w-0 flex-1 text-xs"
+              style={{
+                background: 'var(--bg-elevated)',
+                borderRadius: '2px',
+                color: 'var(--text-dim)',
+                padding: '8px 12px',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {content}
+            </div>
+          </div>
         </div>
-      </div>
-    </details>
+      </AnimatedCollapse>
+    </div>
   )
 }
 
@@ -1940,10 +1962,12 @@ export default memo(function MessageBubble({
 
   return (
     <div
-      className="message-bubble flex px-4 py-2 overflow-hidden"
+      className="message-bubble flex px-4 py-2"
       style={{
         background: 'transparent',
         justifyContent: isUser ? 'flex-end' : 'flex-start',
+        overflow: isUser ? 'visible' : 'hidden',
+        paddingBottom: 11,
         // Message content uses the main-scope type scale plus one readable
         // step. Keeping the tokens local prevents sidebar and composer text
         // from changing with the message typography.
@@ -1959,12 +1983,13 @@ export default memo(function MessageBubble({
       {/* Content */}
       <div
         ref={contentAreaRef}
-        className={isUser ? 'min-w-0 overflow-hidden' : 'flex-1 min-w-0 overflow-hidden'}
+        className={isUser ? 'min-w-0' : 'flex-1 min-w-0'}
         style={{
           display: 'flex',
           flexDirection: 'column',
           gap: isUser ? 2 : ASSISTANT_MESSAGE_GAP,
           alignItems: isUser ? 'flex-end' : 'stretch',
+          overflow: isUser ? 'visible' : 'hidden',
           width: hasUserReferenceContent ? 'min(720px, 80%)' : undefined,
           maxWidth: isUser ? 'min(720px, 80%)' : undefined,
         }}
@@ -1974,6 +1999,7 @@ export default memo(function MessageBubble({
             <div
               className="user-message-hover-scope flex flex-col items-end min-w-0"
               style={{
+                position: 'relative',
                 width: hasUserReferenceContent ? '100%' : undefined,
                 maxWidth: '100%',
               }}

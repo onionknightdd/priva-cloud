@@ -398,7 +398,13 @@ export default function MessageList() {
               // transform is the virtualizer's positioner and must stay untouched.
               const animClass = item.originalIndex >= mountedCountRef.current ? ' chat-message-in' : ''
               row = (
-                <div className={`overflow-hidden${animClass}`} style={ROW_COLUMN_STYLE}>
+                <div
+                  className={animClass.trim()}
+                  style={{
+                    ...ROW_COLUMN_STYLE,
+                    overflow: item.msg.role === 'user' ? 'visible' : 'hidden',
+                  }}
+                >
                   <MessageBubble
                     message={item.msg}
                     isStreaming={item.isLastAssistant}
