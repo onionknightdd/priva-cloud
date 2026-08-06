@@ -42,6 +42,20 @@ function shortCwd(p) {
   return parts.length ? parts[parts.length - 1] : p
 }
 
+function ProjectGroupIcon({ expanded }) {
+  return (
+    <span className="project-group-icon" aria-hidden="true">
+      <FolderBookmark className="project-group-folder-icon" size={18} strokeWidth={1.5} />
+      <span
+        className="project-group-chevron-icon"
+        style={{ '--project-group-chevron-rotation': `${expanded ? 0 : -90}deg` }}
+      >
+        <ChevronDown size={18} strokeWidth={1.5} />
+      </span>
+    </span>
+  )
+}
+
 // Dropdown item style shared by the workdir (sliders) menu.
 const WD_MENU_ITEM_STYLE = {
   background: 'transparent',
@@ -898,7 +912,7 @@ export default function Sidebar() {
 
   return (
     <aside
-      className="fixed flex flex-col overflow-hidden"
+      className="sidebar-menu fixed flex flex-col overflow-hidden"
       style={{
         width: effectiveWidth,
         top: 'var(--navbar-height)',
@@ -1115,6 +1129,7 @@ export default function Sidebar() {
           <div style={{ flexShrink: 0 }}>
           <PanelHeader
             label={t('sidebar.project')}
+            labelClassName="sidebar-menu-project-label"
             open={projectOpen}
             title={projectOpen ? t('sidebar.collapse') : t('sidebar.expand')}
             onClick={() => setProjectOpen((v) => !v)}
@@ -1231,9 +1246,11 @@ export default function Sidebar() {
                   <div key={group.cwd} style={{ marginBottom: 2 }}>
                     {/* Group header — toggle + (hover) workdir menu & new-chat */}
                     <div
-                      className="flex items-center gap-1 w-full px-3 py-1 min-w-0 group"
+                      className="project-group-row flex items-center gap-2 w-full py-1 min-w-0 group"
                       style={{
                         borderLeft: isActiveGroup ? '2px solid var(--blue)' : '2px solid transparent',
+                        paddingLeft: 24,
+                        paddingRight: 16,
                         color: isActiveGroup ? 'var(--text-secondary)' : 'var(--text-dim)',
                       }}
                       title={group.cwd}
@@ -1241,16 +1258,13 @@ export default function Sidebar() {
                       <button
                         type="button"
                         onClick={() => toggleGroup(group.cwd)}
-                        className="flex items-center gap-1 flex-1 min-w-0"
+                        className="flex items-center gap-2 flex-1 min-w-0"
                         style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'inherit', minWidth: 0, transition: 'color 150ms ease' }}
                         onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
                         onMouseLeave={(e) => { e.currentTarget.style.color = 'inherit' }}
                       >
-                        {isExpanded
-                          ? <ChevronDown size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-                          : <ChevronRight size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />}
-                        <FolderBookmark size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-                        <span className="flex-1 truncate" style={{ fontSize: 12, minWidth: 0, textAlign: 'left' }}>
+                        <ProjectGroupIcon expanded={isExpanded} />
+                        <span className="flex-1 truncate" style={{ fontSize: 14, minWidth: 0, textAlign: 'left' }}>
                           {shortCwd(group.cwd)}
                         </span>
                       </button>

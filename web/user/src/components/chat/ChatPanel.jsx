@@ -450,9 +450,18 @@ export default function ChatPanel() {
         background: 'var(--bg-surface)',
       }}
     >
-      <div className="flex flex-1 items-center gap-1 min-w-0" style={{ marginRight: 12 }}>
-        {renamingSessionTitle ? (
-          <>
+      <div className="flex flex-1 items-center min-w-0" style={{ marginRight: 12 }}>
+        <div
+          className="flex items-center gap-1 min-w-0"
+          style={{
+            flex: '0 1 auto',
+            width: 'fit-content',
+            maxWidth: '100%',
+            justifyContent: 'flex-start',
+          }}
+        >
+          {renamingSessionTitle ? (
+            <>
             <span
               ref={sessionTitleInputMeasureRef}
               aria-hidden="true"
@@ -517,42 +526,43 @@ export default function ChatPanel() {
               </span>
             )}
           </>
-        ) : (
-          <button
-            type="button"
-            disabled={!sessionId}
-            className="min-w-0 truncate"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-secondary)',
-              cursor: sessionId ? 'pointer' : 'default',
-              flex: '0 1 auto',
-              fontSize: 13,
-              minWidth: 0,
-              width: 'fit-content',
-              maxWidth: '100%',
-              padding: 0,
-              textAlign: 'left',
-              transition: 'color 150ms ease',
-            }}
-            title={sessionId ? `${sessionTitle}\n${t('sidebar.rename')}` : sessionTitle}
-            onClick={startSessionTitleRename}
-            onMouseEnter={(event) => {
-              if (sessionId) event.currentTarget.style.color = 'var(--text-primary)'
-            }}
-            onMouseLeave={(event) => {
-              event.currentTarget.style.color = 'var(--text-secondary)'
-            }}
-          >
-            {sessionTitle}
-          </button>
-        )}
-        {!renamingSessionTitle && sessionId && (
-          <span className="flex-shrink-0" title={t('sidebar.copySessionId')}>
-            <CopyButton content={sessionId} inline />
-          </span>
-        )}
+          ) : (
+            <button
+              type="button"
+              disabled={!sessionId}
+              className="min-w-0 truncate"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                cursor: sessionId ? 'pointer' : 'default',
+                flex: '0 1 auto',
+                fontSize: 13,
+                minWidth: 0,
+                width: 'fit-content',
+                maxWidth: '100%',
+                padding: 0,
+                textAlign: 'left',
+                transition: 'color 150ms ease',
+              }}
+              title={sessionId ? `${sessionTitle}\n${t('sidebar.rename')}` : sessionTitle}
+              onClick={startSessionTitleRename}
+              onMouseEnter={(event) => {
+                if (sessionId) event.currentTarget.style.color = 'var(--text-primary)'
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.color = 'var(--text-secondary)'
+              }}
+            >
+              {sessionTitle}
+            </button>
+          )}
+          {!renamingSessionTitle && sessionId && (
+            <span className="flex-shrink-0" title={t('sidebar.copySessionId')}>
+              <CopyButton content={sessionId} inline />
+            </span>
+          )}
+        </div>
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
         {showTasksShortcut && (

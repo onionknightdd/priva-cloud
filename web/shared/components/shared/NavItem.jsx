@@ -133,7 +133,7 @@ export default function NavItem({
         />
       )}
       {!collapsed && (
-        <span className="flex-1 truncate" style={{ minWidth: 0, fontSize: large ? 14 : 13 }}>{label}</span>
+        <span className="sidebar-menu-label flex-1 truncate" style={{ minWidth: 0, fontSize: large ? 14 : 13 }}>{label}</span>
       )}
       {!collapsed && badge != null && (
         <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, color: 'var(--text-dim)' }}>

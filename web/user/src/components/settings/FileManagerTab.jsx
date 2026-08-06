@@ -452,21 +452,32 @@ export default function FileManagerTab() {
         >
           <FolderPlus size={14} strokeWidth={1.5} />
         </button>
+        <span
+          aria-hidden="true"
+          style={{
+            width: 1,
+            height: 14,
+            flexShrink: 0,
+            background: 'var(--border-strong)',
+          }}
+        />
         <button
-          className="flex items-center gap-1 px-2 py-1 flex-shrink-0"
+          className="flex items-center justify-center px-2 py-1 flex-shrink-0"
           style={{
             background: 'var(--bg-elevated)', border: '1px solid var(--border)',
             borderRadius: 4, cursor: uploading ? 'wait' : 'pointer',
-            color: 'var(--text-secondary)', fontSize: 12,
+            color: 'var(--text-secondary)',
             transition: 'border-color 150ms ease',
           }}
+          type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
+          title={t('settings.fileManagerUpload')}
+          aria-label={t('settings.fileManagerUpload')}
           onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--blue)' }}
           onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)' }}
         >
-          <Upload size={12} strokeWidth={1.5} />
-          <span>{t('settings.fileManagerUpload')}</span>
+          <Upload size={14} strokeWidth={1.5} />
         </button>
         <div className="flex-1" />
 

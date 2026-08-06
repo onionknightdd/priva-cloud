@@ -11,9 +11,10 @@ import { AnimatedChevron } from './Accordion'
  *   onClick  optional — makes the label a button (e.g. collapse-all)
  *   title    optional tooltip for the label button
  *   open     optional boolean — when set, renders a leading collapse chevron
+ *   labelClassName optional class for the label span
  *   actions  [{ icon, title, onClick, active?, spinning?, disabled? }]
  */
-export default function PanelHeader({ label, onClick, title, open, actions = [] }) {
+export default function PanelHeader({ label, onClick, title, open, actions = [], labelClassName = '' }) {
   const collapsible = typeof open === 'boolean'
   return (
     <div className="flex items-center justify-between" style={{ padding: '4px 12px', gap: 8 }}>
@@ -43,7 +44,7 @@ export default function PanelHeader({ label, onClick, title, open, actions = [] 
             <ChevronDown size={12} strokeWidth={1.5} />
           </AnimatedChevron>
         )}
-        <span className="truncate">{label}</span>
+        <span className={`sidebar-menu-label truncate ${labelClassName}`}>{label}</span>
       </button>
       <div className="flex items-center" style={{ gap: 2, flexShrink: 0 }}>
         {actions.map((action, i) => {

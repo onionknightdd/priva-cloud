@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  X, Folder, FolderOpen, FolderPlus, ChevronRight, Check, CornerDownLeft,
+  X, Folder, FolderOpen, FolderPlus, ChevronDown, Check, CornerDownLeft,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { listDirectory } from '../../api/userFiles'
@@ -150,8 +150,11 @@ export default function DirectoryPicker({
             onClick={() => toggleExpand(path)}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 0, display: 'flex', flexShrink: 0 }}
           >
-            <AnimatedChevron open={isOpen}>
-              <ChevronRight size={12} strokeWidth={1.5} />
+            <AnimatedChevron
+              open={isOpen}
+              style={{ transform: `rotate(${isOpen ? 0 : -90}deg)` }}
+            >
+              <ChevronDown size={12} strokeWidth={1.5} />
             </AnimatedChevron>
           </button>
           {multiple && (
