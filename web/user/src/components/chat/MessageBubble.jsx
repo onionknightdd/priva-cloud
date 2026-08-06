@@ -90,7 +90,7 @@ function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
         className="flex items-center gap-1 px-2 rounded-sm"
         style={{
           fontSize: 'var(--text-sm)',
-          color: 'var(--purple)',
+          color: 'var(--text-secondary)',
           cursor: 'pointer',
           userSelect: 'none',
           listStyle: 'none',
@@ -107,24 +107,55 @@ function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
           <AnimatedShimmerText>{t('chat.thinking')}</AnimatedShimmerText>
         ) : (
           <>
-            <Check size={10} strokeWidth={1.5} style={{ color: 'var(--purple)', flexShrink: 0 }} />
+            <Check size={10} strokeWidth={1.5} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
             {durationStr ? t('chat.thoughtFor', { duration: durationStr }) : t('chat.thoughtComplete')}
             <ChevronRight size={10} strokeWidth={1.5} className="thinking-chevron" style={{ color: 'var(--text-dim)', flexShrink: 0, transition: 'transform 150ms ease' }} />
           </>
         )}
       </summary>
       <div
-        className="px-3 py-2 mt-1 text-xs"
+        className="flex min-w-0 mt-1 text-xs"
         style={{
           background: 'var(--bg-elevated)',
           borderRadius: '2px',
           color: 'var(--text-dim)',
-          borderLeft: '2px solid var(--purple)',
+          marginLeft: 8,
+          padding: '8px 12px 8px 0',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
         }}
       >
-        {content}
+        <span
+          aria-hidden="true"
+          style={{
+            position: 'relative',
+            width: 16,
+            flexShrink: 0,
+            alignSelf: 'stretch',
+          }}
+        >
+          <span
+            style={{
+              position: 'absolute',
+              left: 4,
+              top: 0,
+              bottom: 0,
+              borderLeft: '1px solid var(--border-strong)',
+            }}
+          />
+          <span
+            style={{
+              position: 'absolute',
+              left: 4,
+              top: 10,
+              width: 8,
+              borderTop: '1px solid var(--border-strong)',
+            }}
+          />
+        </span>
+        <span className="min-w-0" style={{ flex: 1 }}>
+          {content}
+        </span>
       </div>
     </details>
   )
@@ -1961,7 +1992,6 @@ export default memo(function MessageBubble({
                 width: hasUserReferenceContent ? '100%' : undefined,
                 maxWidth: '100%',
                 boxSizing: 'border-box',
-                border: '1px solid var(--border)',
                 borderRadius: 10,
                 padding: '6px 10px',
                 background: 'var(--bg-elevated)',
