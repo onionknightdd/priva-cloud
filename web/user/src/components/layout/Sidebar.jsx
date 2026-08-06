@@ -629,6 +629,12 @@ export default function Sidebar() {
   }, [sessions, groups, searchQuery, activeTag, activeCwd])
 
   const filtersActive = !!searchQuery.trim() || !!activeTag
+  // Keep the currently selected session reachable when its project tree is
+  // collapsed. The row is rendered from the unfiltered store list so folding
+  // PROJECT does not make the active conversation disappear.
+  const activeSession = useMemo(() => (
+    sessions.find((session) => session.id === activeSessionId && !session.archived) || null
+  ), [sessions, activeSessionId])
   const allGroupsExpanded = renderedGroups.length > 0 && renderedGroups.every((g) => (
     !!expandedCwds[g.cwd]
     && (!g.sessions.some((s) => s.origin === 'scheduler') || !!expandedScheduledCwds[g.cwd])
@@ -1205,6 +1211,9 @@ export default function Sidebar() {
                 const showMore = !filtersActive && loadedCount < group.total
                 const regularSessions = group.sessions.filter((session) => session.origin !== 'scheduler')
                 const scheduledSessions = group.sessions.filter((session) => session.origin === 'scheduler')
+                const activeSessionInCollapsedGroup = !isExpanded
+                  ? group.sessions.find((session) => session.id === activeSessionId)
+                  : null
                 // Search/tag filtering must reveal matching scheduled sessions;
                 // otherwise this nested group intentionally starts collapsed.
                 const scheduledExpanded = filtersActive || !!expandedScheduledCwds[group.cwd]
@@ -1292,6 +1301,12 @@ export default function Sidebar() {
                       </button>
                     </div>
 
+                    {/* A collapsed project keeps its selected session in view. */}
+                    {activeSessionInCollapsedGroup && renderSessionItem(
+                      activeSessionInCollapsedGroup,
+                      activeSessionInCollapsedGroup.origin === 'scheduler' ? 44 : PROJECT_SESSION_INDENT
+                    )}
+
                     {/* Group sessions */}
                     {isExpanded && (
                       <>
@@ -1340,20 +1355,33 @@ export default function Sidebar() {
                               color: 'var(--text-dim)',
                               cursor: groupLoadingCwd === group.cwd ? 'default' : 'pointer',
                               fontSize: 13,
-                              paddingLeft: 28,
-                              transition: 'color 150ms ease',
+                              // 36px + chevron (13px) + gap (4px) = 53px,
+                              // matching the regular session title column.
+                              paddingLeft: 36,
+                              opacity: groupLoadingCwd === group.cwd ? 0.45 : 0.65,
+                              transition: 'color 150ms ease, opacity 150ms ease',
                             }}
                             onClick={() => fetchMoreInGroup(group.cwd)}
                             disabled={groupLoadingCwd === group.cwd}
-                            onMouseEnter={(e) => { if (groupLoadingCwd !== group.cwd) e.currentTarget.style.color = 'var(--text-secondary)' }}
-                            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+                            onMouseEnter={(e) => {
+                              if (groupLoadingCwd !== group.cwd) {
+                                e.currentTarget.style.color = 'var(--text-secondary)'
+                                e.currentTarget.style.opacity = '0.85'
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.color = 'var(--text-dim)'
+                              e.currentTarget.style.opacity = groupLoadingCwd === group.cwd ? '0.45' : '0.65'
+                            }}
                           >
                             {groupLoadingCwd === group.cwd ? (
                               t('sidebar.loading')
                             ) : (
                               <>
                                 <ChevronDown size={13} strokeWidth={1.5} />
-                                {t('sidebar.moreInDir', { count: group.total - loadedCount })}
+                                <span className="truncate" style={{ minWidth: 0 }}>
+                                  {t('sidebar.moreInDir')}
+                                </span>
                               </>
                             )}
                           </button>
@@ -1366,6 +1394,18 @@ export default function Sidebar() {
             </div>
           </div>
             </>
+          )}
+
+          {/* Keep the selected conversation visible while the whole PROJECT
+              section is collapsed (including when a sidebar menu pushes it
+              down). */}
+          {!projectOpen && activeSession && (
+            <div className="py-1" style={{ flexShrink: 0 }}>
+              {renderSessionItem(
+                activeSession,
+                activeSession.origin === 'scheduler' ? 44 : PROJECT_SESSION_INDENT
+              )}
+            </div>
           )}
 
           {/* Chat mode with PROJECT manually collapsed: filler keeps the footer pinned to the bottom */}
