@@ -279,7 +279,7 @@ export default function AskUserQuestionCard({ block, onAnswer, onSkip }) {
           border: '1px solid var(--green)',
           borderRadius: 0,
           background: 'var(--bg-surface)',
-          padding: '8px 12px',
+          padding: '4px 12px',
           opacity: 0.9,
         }}
       >
@@ -289,7 +289,7 @@ export default function AskUserQuestionCard({ block, onAnswer, onSkip }) {
           style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
         >
           <Check size={16} strokeWidth={1.5} style={{ color: 'var(--green)', flexShrink: 0 }} />
-          <span className="flex-1 font-semibold" style={{ color: 'var(--green)', fontSize: 'var(--text-md)' }}>
+          <span className="flex-1 font-semibold" style={{ color: 'var(--green)', fontSize: 'calc(var(--text-md) - 2px)' }}>
             {t('askUser.answered')}
           </span>
           <ChevronDown
