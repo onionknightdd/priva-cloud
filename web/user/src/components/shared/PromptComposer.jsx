@@ -981,7 +981,7 @@ export default function PromptComposer({
         style={{
           background: 'var(--bg-elevated)',
           border: isDragging ? '1px solid var(--blue)' : '1px solid var(--border)',
-          borderRadius: 8,
+          borderRadius: 10,
           transition: 'border-color 150ms ease',
         }}
         onDragEnter={handleDragEnter}
@@ -1027,7 +1027,7 @@ export default function PromptComposer({
             className="absolute inset-0 flex items-center justify-center"
             style={{
               background: 'var(--bg-overlay)',
-              borderRadius: 8,
+              borderRadius: 10,
               zIndex: 10,
               pointerEvents: 'none',
             }}

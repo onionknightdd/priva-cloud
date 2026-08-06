@@ -45,7 +45,7 @@ import {
 } from '../../utils/responseSummary'
 
 const ASSISTANT_MESSAGE_GAP = 6
-const ASSISTANT_META_MARGIN_TOP = -6
+const ASSISTANT_META_MARGIN_TOP = -5
 
 /**
  * Parse text containing <think>...</think> tags into segments.
@@ -1962,7 +1962,7 @@ export default memo(function MessageBubble({
                 maxWidth: '100%',
                 boxSizing: 'border-box',
                 border: '1px solid var(--border)',
-                borderRadius: 8,
+                borderRadius: 10,
                 padding: '6px 10px',
                 background: 'var(--bg-elevated)',
               }}
@@ -2114,7 +2114,7 @@ function MessageActions({ textContent, message, assistantIndex, onRewind, onFork
       data-message-actions
       className="flex items-center gap-3 text-xs"
       style={{
-        marginTop: isUser ? -3 : ASSISTANT_META_MARGIN_TOP,
+        marginTop: isUser ? -2 : ASSISTANT_META_MARGIN_TOP,
         color: 'var(--text-dim)',
         alignSelf: isUser ? 'flex-end' : undefined,
         lineHeight: '16px',
