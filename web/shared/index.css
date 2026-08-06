@@ -281,6 +281,49 @@
   background: var(--bg-elevated);
 }
 
+@keyframes sidebar-session-title-shimmer {
+  from { background-position-x: 200%; }
+  to { background-position-x: -200%; }
+}
+
+.sidebar-session-title {
+  transition: color 150ms ease;
+}
+
+.sidebar-session-title.is-running {
+  background: linear-gradient(
+    90deg,
+    var(--text-dim) 0%,
+    var(--text-secondary) 35%,
+    var(--text-primary) 50%,
+    var(--text-secondary) 65%,
+    var(--text-dim) 100%
+  );
+  background-position-x: 200%;
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: sidebar-session-title-shimmer 3.6s linear infinite;
+}
+
+.sidebar-session-title.is-attention {
+  color: var(--orange);
+}
+
+.sidebar-session-title.is-unseen {
+  color: var(--green);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-session-title.is-running {
+    background: none;
+    color: var(--purple);
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+  }
+}
+
 .project-group-icon {
   position: relative;
   display: inline-flex;

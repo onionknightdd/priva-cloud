@@ -23,7 +23,6 @@ import {
 import { openSession, newDraftSession } from '../../session/openSession'
 import { stopSessionStream } from '../../hooks/useSSE'
 import { getActiveKey, removeRuntime, resolveKey } from '../../stores/runtime/registry'
-import SessionStatusDot from '../shared/SessionStatusDot'
 import SidebarResizer from './SidebarResizer'
 import SettingsPopover from '../settings/SettingsPopover'
 import NavItem from '@shared/components/shared/NavItem'
@@ -86,19 +85,26 @@ const PLUGINS_SECTIONS = [
   { id: 'memory', icon: NotebookPen, labelKey: 'tabs.memory' },
 ]
 
-// SessionItem's status marker plus its 8px gap occupy 15px. With the shared
-// 16px row gutter, indent 38px places the session title at the same 53px
-// column as the project name (19px project icon + 8px gap).
-const PROJECT_SESSION_INDENT = 38
+// Session titles align with the project name column. Scheduled sessions keep
+// their deeper nesting while their CalendarClock icon remains visible.
+const PROJECT_SESSION_INDENT = 53
+const SCHEDULED_SESSION_INDENT = 59
 
 function SessionItem({
   session, isActive, openMenuId, menuRef, onSelect, onMenuToggle,
   onDelete, onRenameStart, onTagStart, onPinToggle, onArchive, renameEditingId,
   onRenameCommit, onRenameCancel, onDragStartSession, onDragEndSession, t, indent = 0,
 }) {
-  // Resolve rotated session ids (resume mints a new id per turn) so the dot
+  // Resolve rotated session ids (resume mints a new id per turn) so the title
   // follows the live runtime even while the row still holds a former id.
-  const dotStatus = useSessionStatusStore((s) => s.statuses[resolveKey(session.sessionId || session.id)])
+  const sessionStatus = useSessionStatusStore((s) => s.statuses[resolveKey(session.sessionId || session.id)])
+  const titleStatusClass = sessionStatus === 'running'
+    ? ' is-running'
+    : sessionStatus === 'attention'
+      ? ' is-attention'
+      : sessionStatus === 'unseen'
+        ? ' is-unseen'
+        : ''
   const [renameValue, setRenameValue] = useState(session.name || '')
   useEffect(() => {
     if (renameEditingId === session.id) setRenameValue(session.name || '')
@@ -169,7 +175,6 @@ function SessionItem({
       onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
     >
       <div className="flex items-center gap-2 min-w-0">
-        <SessionStatusDot status={dotStatus} />
         {editing ? (
           <input
             type="text"
@@ -209,7 +214,12 @@ function SessionItem({
                 title={session.schedulerJobName ? `${t('sidebar.scheduled', { defaultValue: 'scheduled' })} · ${session.schedulerJobName}` : t('sidebar.scheduled', { defaultValue: 'scheduled' })}
               />
             )}
-            <span className="flex-1 truncate" style={{ minWidth: 0, fontSize: 13, lineHeight: 1.2 }}>{session.name}</span>
+            <span
+              className={`sidebar-session-title flex-1 truncate${titleStatusClass}`}
+              style={{ minWidth: 0, fontSize: 13, lineHeight: 1.2 }}
+            >
+              {session.name}
+            </span>
           </>
         )}
         {session.forkCount > 0 && !editing && (
@@ -1319,7 +1329,7 @@ export default function Sidebar() {
                     {/* A collapsed project keeps its selected session in view. */}
                     {activeSessionInCollapsedGroup && renderSessionItem(
                       activeSessionInCollapsedGroup,
-                      activeSessionInCollapsedGroup.origin === 'scheduler' ? 44 : PROJECT_SESSION_INDENT
+                      activeSessionInCollapsedGroup.origin === 'scheduler' ? SCHEDULED_SESSION_INDENT : PROJECT_SESSION_INDENT
                     )}
 
                     {/* Group sessions */}
@@ -1357,7 +1367,7 @@ export default function Sidebar() {
                                 {t('sidebar.scheduledSessions', { defaultValue: 'Scheduled sessions' })}
                               </span>
                             </button>
-                            {scheduledExpanded && scheduledSessions.map((session) => renderSessionItem(session, 44))}
+                            {scheduledExpanded && scheduledSessions.map((session) => renderSessionItem(session, SCHEDULED_SESSION_INDENT))}
                           </div>
                         )}
                         {showMore && (
@@ -1455,7 +1465,7 @@ export default function Sidebar() {
               </div>
               {renderSessionItem(
                 activeSession,
-                activeSession.origin === 'scheduler' ? 44 : PROJECT_SESSION_INDENT
+                activeSession.origin === 'scheduler' ? SCHEDULED_SESSION_INDENT : PROJECT_SESSION_INDENT
               )}
             </div>
           )}
