@@ -324,6 +324,14 @@ export default function ToolRunSection({
   const latestIndex = Math.max(run.length - 1, 0)
   const latest = run[latestIndex] || null
 
+  if (run.length === 1 && latest) {
+    return (
+      <div className={`tool-run${compact ? ' tool-run-compact' : ''}`}>
+        {renderBlock(latest, 0, { livePreview: live })}
+      </div>
+    )
+  }
+
   const renderToolTree = () => (
     <div className="tool-tree">
       {run.map((toolBlock, runIndex) => {
