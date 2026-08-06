@@ -151,7 +151,6 @@ function AnimatedProcessGroup({ group, visible }) {
 
   const elementRef = useRef(null)
   const animationRef = useRef(null)
-  const exitFrameRef = useRef(null)
   const visibleRef = useRef(visible)
   visibleRef.current = visible
   const reducedMotion = useReducedMotion()
@@ -162,10 +161,6 @@ function AnimatedProcessGroup({ group, visible }) {
     if (!mounted || !element || !displayGroupRef.current) return undefined
 
     animationRef.current?.cancel()
-    if (exitFrameRef.current != null && typeof window !== 'undefined') {
-      window.cancelAnimationFrame(exitFrameRef.current)
-      exitFrameRef.current = null
-    }
 
     const clearMotionStyles = ({ preserveOverlay = false } = {}) => {
       element.style.willChange = ''
@@ -223,27 +218,12 @@ function AnimatedProcessGroup({ group, visible }) {
           // Keep the node overlaid until presence unmounts it. Restoring
           // normal flow here would recreate the end-of-fold height jump.
           clearMotionStyles({ preserveOverlay: true })
-          // Let Anime commit its final opacity frame before React removes the
-          // presence node and asks the virtualizer for one final measurement.
-          if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
-            onExited()
-            return
-          }
-          exitFrameRef.current = window.requestAnimationFrame(() => {
-            exitFrameRef.current = null
-            onExited()
-          })
+          onExited()
         },
       })
     }
 
-    return () => {
-      animationRef.current?.cancel()
-      if (exitFrameRef.current != null && typeof window !== 'undefined') {
-        window.cancelAnimationFrame(exitFrameRef.current)
-        exitFrameRef.current = null
-      }
-    }
+    return () => animationRef.current?.cancel()
   }, [groupId, mounted, onExited, reducedMotion, visible])
 
   if (!mounted || !displayGroupRef.current) return null
@@ -256,7 +236,7 @@ function AnimatedProcessGroup({ group, visible }) {
       <div
         ref={elementRef}
         className="flex flex-col gap-1 min-w-0"
-        style={{ minWidth: 0, overflow: 'hidden' }}
+        style={{ minWidth: 0, overflow: 'hidden', paddingTop: ASSISTANT_MESSAGE_GAP }}
       >
         {displayGroupRef.current.nodes}
       </div>
@@ -1823,68 +1803,78 @@ export default memo(function MessageBubble({
         {/* Content blocks — render in order for continuity */}
         {!isErrorMessage && (shouldFoldProcess ? (
           <>
-            <button
-              type="button"
-              aria-expanded={processExpanded}
-              title={executionSummaryText}
-              onClick={() => setProcessExpanded((expanded) => !expanded)}
-              style={{
-                display: 'block',
-                width: '100%',
-                minWidth: 0,
-                padding: 0,
-                border: 'none',
-                background: 'transparent',
-                color: 'var(--text-dim)',
-                cursor: 'pointer',
-                fontSize: 12,
-                fontWeight: 300,
-                lineHeight: '18px',
-                outline: 'none',
-                overflow: 'hidden',
-                textAlign: 'left',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                transition: 'color 150ms ease',
-              }}
-              onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--text-secondary)' }}
-              onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--text-dim)' }}
-              onFocus={(event) => { event.currentTarget.style.color = 'var(--text-secondary)' }}
-              onBlur={(event) => { event.currentTarget.style.color = 'var(--text-dim)' }}
-            >
-              <span
+            {/* The summary/process region is one stable flex item. Spacing is
+                owned inside it so presence unmounts cannot remove a parent
+                flex gap on the terminal animation frame. */}
+            <div className="min-w-0" style={{ minWidth: 0, width: '100%' }}>
+              <button
+                type="button"
+                aria-expanded={processExpanded}
+                title={executionSummaryText}
+                onClick={() => setProcessExpanded((expanded) => !expanded)}
                 style={{
-                  display: 'inline-flex',
+                  display: 'block',
+                  width: '100%',
                   minWidth: 0,
-                  maxWidth: '100%',
-                  alignItems: 'center',
+                  padding: 0,
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--text-dim)',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontWeight: 300,
+                  lineHeight: '18px',
+                  outline: 'none',
                   overflow: 'hidden',
-                  verticalAlign: 'middle',
+                  textAlign: 'left',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  transition: 'color 150ms ease',
                 }}
+                onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--text-secondary)' }}
+                onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--text-dim)' }}
+                onFocus={(event) => { event.currentTarget.style.color = 'var(--text-secondary)' }}
+                onBlur={(event) => { event.currentTarget.style.color = 'var(--text-dim)' }}
               >
-                <RollingText
-                  text={executionSummaryText}
-                  height={12}
-                  color="currentColor"
-                  fontFamily="'Noto Sans', sans-serif"
-                  fontSize={12}
-                  fontWeight={300}
-                  whiteSpace="nowrap"
-                />
-              </span>
-            </button>
-            <div aria-hidden="true" style={{ width: '100%', borderTop: '1px solid var(--border-subtle)' }} />
-            <AnimatedCollapse open={processExpanded}>
-              <div className="flex flex-col gap-1 min-w-0">
-                {allRenderedProcessNodes}
-              </div>
-            </AnimatedCollapse>
-            {hasProcessEvents && (
-              <AnimatedProcessGroup
-                group={latestProcessGroup}
-                visible={Boolean(isStreaming && !processExpanded && latestProcessGroup)}
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    minWidth: 0,
+                    maxWidth: '100%',
+                    alignItems: 'center',
+                    overflow: 'hidden',
+                    verticalAlign: 'middle',
+                  }}
+                >
+                  <RollingText
+                    text={executionSummaryText}
+                    height={12}
+                    color="currentColor"
+                    fontFamily="'Noto Sans', sans-serif"
+                    fontSize={12}
+                    fontWeight={300}
+                    whiteSpace="nowrap"
+                  />
+                </span>
+              </button>
+              <div
+                aria-hidden="true"
+                style={{ width: '100%', marginTop: ASSISTANT_MESSAGE_GAP, borderTop: '1px solid var(--border-subtle)' }}
               />
-            )}
+              <AnimatedCollapse open={processExpanded}>
+                <div style={{ paddingTop: ASSISTANT_MESSAGE_GAP }}>
+                  <div className="flex flex-col gap-1 min-w-0">
+                    {allRenderedProcessNodes}
+                  </div>
+                </div>
+              </AnimatedCollapse>
+              {hasProcessEvents && (
+                <AnimatedProcessGroup
+                  group={latestProcessGroup}
+                  visible={Boolean(isStreaming && !processExpanded && latestProcessGroup)}
+                />
+              )}
+            </div>
             {hasCompletedResult && finalResultText && (
               <MarkdownRenderer content={finalResultText} mermaidCollapsible />
             )}

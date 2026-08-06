@@ -967,54 +967,61 @@ export default function Sidebar() {
           <div style={{ padding: '6px 16px 4px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <NavItem scale="lg" icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
             <NavItem scale="lg" icon={CalendarClock} label={t('sidebar.scheduler')} active={activeNavTab === 'scheduler'} onClick={() => setActiveNavTab('scheduler')} />
-            <NavItem
-              scale="lg"
-              icon={PackageSearch}
-              label={t('sidebar.plugins')}
-              active={activeNavTab === 'plugins'}
-              expandable
-              expanded={pluginsMenuOpen}
-              onClick={togglePluginsMenu}
-            />
-            <AnimatedCollapse open={pluginsMenuOpen}>
-              <div>
-                {PLUGINS_SECTIONS.map((sec) => (
-                  <NavItem
-                    scale="md"
-                    key={sec.id}
-                    icon={sec.icon}
-                    label={t(sec.labelKey)}
-                    indent={16}
-                    active={activeNavTab === 'plugins' && activePluginSection === sec.id}
-                    onClick={() => openPluginSection(sec.id)}
-                  />
-                ))}
-              </div>
-            </AnimatedCollapse>
-            <NavItem
-              scale="lg"
-              icon={ChartColumnBig}
-              label={t('sidebar.dataUsage')}
-              active={activeNavTab === 'userdata'}
-              expandable
-              expanded={dataMenuOpen}
-              onClick={toggleDataMenu}
-            />
-            <AnimatedCollapse open={dataMenuOpen}>
-              <div>
-                {DATA_SECTIONS.map((sec) => (
-                  <NavItem
-                    scale="md"
-                    key={sec.id}
-                    icon={sec.icon}
-                    label={t(sec.labelKey)}
-                    indent={16}
-                    active={activeNavTab === 'userdata' && activeSection === sec.id}
-                    onClick={() => openDataSection(sec.id)}
-                  />
-                ))}
-              </div>
-            </AnimatedCollapse>
+            {/* Keep each trigger and its animated submenu inside one stable
+                flex item. Otherwise removing the zero-height collapse shell
+                also removes one parent gap on the terminal frame. */}
+            <div className="min-w-0">
+              <NavItem
+                scale="lg"
+                icon={PackageSearch}
+                label={t('sidebar.plugins')}
+                active={activeNavTab === 'plugins'}
+                expandable
+                expanded={pluginsMenuOpen}
+                onClick={togglePluginsMenu}
+              />
+              <AnimatedCollapse open={pluginsMenuOpen}>
+                <div style={{ paddingTop: 4 }}>
+                  {PLUGINS_SECTIONS.map((sec) => (
+                    <NavItem
+                      scale="md"
+                      key={sec.id}
+                      icon={sec.icon}
+                      label={t(sec.labelKey)}
+                      indent={16}
+                      active={activeNavTab === 'plugins' && activePluginSection === sec.id}
+                      onClick={() => openPluginSection(sec.id)}
+                    />
+                  ))}
+                </div>
+              </AnimatedCollapse>
+            </div>
+            <div className="min-w-0">
+              <NavItem
+                scale="lg"
+                icon={ChartColumnBig}
+                label={t('sidebar.dataUsage')}
+                active={activeNavTab === 'userdata'}
+                expandable
+                expanded={dataMenuOpen}
+                onClick={toggleDataMenu}
+              />
+              <AnimatedCollapse open={dataMenuOpen}>
+                <div style={{ paddingTop: 4 }}>
+                  {DATA_SECTIONS.map((sec) => (
+                    <NavItem
+                      scale="md"
+                      key={sec.id}
+                      icon={sec.icon}
+                      label={t(sec.labelKey)}
+                      indent={16}
+                      active={activeNavTab === 'userdata' && activeSection === sec.id}
+                      onClick={() => openDataSection(sec.id)}
+                    />
+                  ))}
+                </div>
+              </AnimatedCollapse>
+            </div>
           </div>
 
           {/* When a nav menu is expanded, push Search + PROJECT to the sidebar bottom */}

@@ -50,7 +50,6 @@ export function AnimatedCollapse({
   const outerRef = useRef(null)
   const animRef = useRef(null)
   const resizeAnimRef = useRef(null)
-  const exitFrameRef = useRef(null)
   const openRef = useRef(open)
   openRef.current = open
 
@@ -147,16 +146,8 @@ export function AnimatedCollapse({
         height: { to: `${h}px`, duration: heightDuration, ease: heightEase },
         opacity: { to: 1, duration: opacityDuration, ease: opacityEase },
         onComplete: () => {
-          // Back to natural height after the terminal frame has painted. This
-          // avoids a same-frame auto-height reflow at the end of the reveal.
-          if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
-            if (openRef.current) el.style.height = 'auto'
-            return
-          }
-          exitFrameRef.current = window.requestAnimationFrame(() => {
-            exitFrameRef.current = null
-            if (openRef.current) el.style.height = 'auto'
-          })
+          // Back to natural height so later content growth flows freely.
+          if (openRef.current) el.style.height = 'auto'
         },
       })
     } else {
@@ -170,29 +161,11 @@ export function AnimatedCollapse({
       animRef.current = animate(el, {
         height: { to: '0px', duration: heightDuration, ease: heightEase },
         opacity: { to: 0, duration: opacityDuration, ease: opacityEase },
-        onComplete: () => {
-          // Anime writes the terminal frame before invoking onComplete. Defer
-          // the presence unmount by one paint so the virtualized chat row does
-          // not reconcile and measure in the same frame as that final write.
-          if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
-            onExited()
-            return
-          }
-          exitFrameRef.current = window.requestAnimationFrame(() => {
-            exitFrameRef.current = null
-            onExited()
-          })
-        },
+        onComplete: onExited,
       })
     }
 
-    return () => {
-      animRef.current?.cancel()
-      if (exitFrameRef.current != null && typeof window !== 'undefined') {
-        window.cancelAnimationFrame(exitFrameRef.current)
-        exitFrameRef.current = null
-      }
-    }
+    return () => animRef.current?.cancel()
   }, [animateHeight, heightDuration, heightEase, open, mounted, opacityDuration, opacityEase, shouldReduce, onExited])
 
   useLayoutEffect(() => {
