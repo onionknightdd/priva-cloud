@@ -46,7 +46,8 @@ import {
 } from '../../utils/responseSummary'
 import { collectToolRun } from '../../utils/toolRunGrouping'
 
-const ASSISTANT_MESSAGE_GAP = 7
+const ASSISTANT_MESSAGE_GAP = 8
+const ASSISTANT_PROCESS_BLOCK_GAP = 5
 const ASSISTANT_META_MARGIN_TOP = -2
 
 /**
@@ -270,8 +271,8 @@ function AnimatedProcessGroup({ group, visible }) {
     >
       <div
         ref={elementRef}
-        className="flex flex-col gap-1 min-w-0"
-        style={{ minWidth: 0, overflow: 'hidden', paddingTop: ASSISTANT_MESSAGE_GAP }}
+        className="flex flex-col min-w-0"
+        style={{ minWidth: 0, overflow: 'hidden', paddingTop: ASSISTANT_MESSAGE_GAP, gap: ASSISTANT_PROCESS_BLOCK_GAP }}
       >
         {displayGroupRef.current.nodes}
       </div>
@@ -1647,7 +1648,7 @@ export default memo(function MessageBubble({
       const thinkSegments = parseThinkTags(block.text)
       if (thinkSegments) {
         return (
-          <div key={i} className="flex flex-col min-w-0" style={{ gap: 9 }}>
+          <div key={i} className="flex flex-col min-w-0" style={{ gap: 10 }}>
             {thinkSegments.map((seg, si) =>
               seg.type === 'thinking'
                 ? <ThinkingBlock key={si} content={seg.content} t={t} />
@@ -1944,7 +1945,7 @@ export default memo(function MessageBubble({
               />
               <AnimatedCollapse open={processExpanded}>
                 <div style={{ paddingTop: ASSISTANT_MESSAGE_GAP }}>
-                  <div className="flex flex-col gap-1 min-w-0">
+                  <div className="flex flex-col min-w-0" style={{ gap: ASSISTANT_PROCESS_BLOCK_GAP }}>
                     {allRenderedProcessNodes}
                   </div>
                 </div>
