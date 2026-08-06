@@ -1,19 +1,19 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { animate, eases } from 'animejs'
 import {
+  Bot,
   Check,
   Copy,
   ExternalLink,
   FilePen,
-  FilePlus,
   FileText,
   Globe,
+  ListTodo,
   Radio,
   ScrollText,
   Search,
   Send,
   Terminal,
-  Wrench,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { AnimatedCollapse } from '@shared/components/shared/Accordion'
@@ -34,13 +34,18 @@ import {
 const TOOL_ICONS = {
   Bash: Terminal,
   Read: FileText,
-  Write: FilePlus,
+  Write: FileText,
   Edit: FilePen,
   Grep: Search,
   Glob: Search,
   WebFetch: Globe,
   WebSearch: Globe,
   delegate_to_openclaw: Send,
+  mcp__priva_openclaw__delegate_to_openclaw: Send,
+  FileCanvas: FileText,
+  Agent: Bot,
+  Task: Bot,
+  TODO: ListTodo,
   Monitor: Radio,
   Skill: ScrollText,
 }
@@ -55,9 +60,10 @@ function ToolIcon({ icon: Icon, running, size }) {
     const inner = innerRef.current
     if (!running || reduceMotion || !sweep || !inner) return undefined
 
+    const iconWidth = sweep.parentElement?.getBoundingClientRect().width || 12
     const progress = { x: -5 }
     const motion = animate(progress, {
-      x: size + 5,
+      x: iconWidth + 5,
       duration: 1600,
       loop: true,
       ease: eases.linear,
@@ -70,11 +76,11 @@ function ToolIcon({ icon: Icon, running, size }) {
   }, [reduceMotion, running, size])
 
   if (!running || reduceMotion) {
-    return <Icon size={size} strokeWidth={1.5} style={{ color: 'currentColor', flexShrink: 0 }} />
+    return <Icon className="tool-line-icon" size={size} strokeWidth={1.5} style={{ color: 'currentColor', flexShrink: 0 }} />
   }
 
   return (
-    <span className="tool-line-icon-shimmer" style={{ width: size, height: size }} aria-hidden="true">
+    <span className="tool-line-icon tool-line-icon-shimmer" style={{ width: size, height: size }} aria-hidden="true">
       <Icon size={size} strokeWidth={1.5} className="tool-line-icon-base" />
       <span ref={sweepRef} className="tool-line-icon-sweep" style={{ width: 5, height: size }}>
         <span ref={innerRef} className="tool-line-icon-sweep-inner" style={{ width: size, height: size }}>
@@ -170,14 +176,16 @@ function ToolDetails({ sections, error }) {
     <div className="tool-detail-block">
       {sections.map((section, index) => (
         <section
-          className="tool-detail-section"
+          className={`tool-detail-section${section.type === 'diff' ? ' is-diff' : ''}`}
           key={`${section.label}-${index}`}
           style={index > 0 ? { borderTop: '1px solid var(--border)' } : undefined}
         >
-          <div className="tool-detail-label" style={{ color: error && section.label === 'OUTPUT' ? 'var(--red)' : undefined }}>
-            {section.label}
-          </div>
-          <DetailCopyButton content={section.copyText} label={section.label} />
+          {section.label && (
+            <div className="tool-detail-label" style={{ color: error && section.label === 'OUTPUT' ? 'var(--red)' : undefined }}>
+              {section.label}
+            </div>
+          )}
+          <DetailCopyButton content={section.copyText} label={section.copyLabel || section.label || 'content'} />
           {section.type === 'diff' ? (
             <DiffContent rows={section.rows} />
           ) : (
@@ -229,7 +237,8 @@ export default function ToolLine({
     const next = []
     if (presentation.diffRows.length) {
       next.push({
-        label: 'DIFF',
+        label: '',
+        copyLabel: 'changes',
         type: 'diff',
         rows: presentation.diffRows,
         copyText: presentation.diffRows.map((row) => row.text).join('\n'),
@@ -298,7 +307,7 @@ export default function ToolLine({
 
   const Icon = TOOL_ICONS[presentation.displayName]
     || TOOL_ICONS[block?.name]
-    || Wrench
+    || Terminal
   const suffix = statusText(t, presentation, reverted)
   const duration = presentation.isRunning && presentation.startTime
     ? null
@@ -308,7 +317,7 @@ export default function ToolLine({
     presentation.fullPath || presentation.summary,
     suffix,
   ].filter(Boolean).join(' · ')
-  const iconSize = compact ? 11 : 12
+  const iconSize = '1em'
 
   return (
     <div

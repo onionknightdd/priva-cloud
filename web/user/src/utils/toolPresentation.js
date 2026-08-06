@@ -68,12 +68,19 @@ export function getStoppedStatus(block, op = null) {
 export function formatDuration(ms) {
   const value = numberOrNull(ms)
   if (value == null || value < 0) return null
-  if (value < 1000) return `${Math.round(value)}ms`
-  const seconds = value / 1000
-  if (seconds < 60) return `${seconds.toFixed(1)}s`
-  const minutes = Math.floor(seconds / 60)
-  const remaining = Math.round(seconds % 60)
-  return `${minutes}m ${remaining}s`
+  const seconds = Math.round(value / 100) / 10
+  if (seconds < 60) return `${seconds} s`
+
+  const wholeSeconds = Math.round(value / 1000)
+  const hours = Math.floor(wholeSeconds / 3600)
+  const minutes = Math.floor((wholeSeconds % 3600) / 60)
+  const remainingSeconds = wholeSeconds % 60
+  const parts = []
+
+  if (hours > 0) parts.push(`${hours} h`)
+  if (minutes > 0) parts.push(`${minutes} m`)
+  if (remainingSeconds > 0 || parts.length === 0) parts.push(`${remainingSeconds} s`)
+  return parts.join(' ')
 }
 
 export function formatToolValue(value) {

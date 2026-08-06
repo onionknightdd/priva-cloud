@@ -2,11 +2,19 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildDiffRows,
+  formatDuration,
   getMcpIdentity,
   getRunMetrics,
   getToolPresentation,
   toProjectRelativePath,
 } from './toolPresentation.js'
+
+test('formats durations with spaced second, minute, and hour units', () => {
+  assert.equal(formatDuration(250), '0.3 s')
+  assert.equal(formatDuration(1_000), '1 s')
+  assert.equal(formatDuration(65_000), '1 m 5 s')
+  assert.equal(formatDuration(3_725_000), '1 h 2 m 5 s')
+})
 
 test('formats MCP tools as server and final method segments', () => {
   assert.deepEqual(getMcpIdentity('mcp__github__get_issue'), {

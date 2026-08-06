@@ -7,6 +7,7 @@ import { usePresence } from '@shared/motion/usePresence'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
 import { EASE_SPRING } from '@shared/motion/tokens'
 import { formatDuration, getRunMetrics } from '../../utils/toolPresentation'
+import { summarizeRun } from '../../utils/toolRunSummary'
 
 const TOOL_SWAP_DURATION = 180
 
@@ -105,12 +106,12 @@ function AnimatedLineSwap({ itemKey, children, animateOnMount = false, block = f
     }
 
     incomingElement.style.opacity = '0'
-    incomingElement.style.transform = 'translateY(8px)'
+    incomingElement.style.transform = 'translateY(4px)'
     const motions = []
     if (outgoingElement) {
       motions.push(animate(outgoingElement, {
         opacity: 0,
-        translateY: '-8px',
+        translateY: '-20px',
         duration: TOOL_SWAP_DURATION,
         ease: EASE_SPRING,
       }))
@@ -162,15 +163,15 @@ function GroupSummary({ live, run, fileOps, t, compact }) {
   }, [live])
 
   const metrics = getRunMetrics(run, fileOps, now, live)
-  const label = live
-    ? t('toolCall.group.running', {
-        count: metrics.count,
-        defaultValue: `Running ${metrics.count} ${metrics.count === 1 ? 'tool' : 'tools'}`,
-      })
-    : t('toolCall.group.used', {
-        count: metrics.count,
-        defaultValue: `Used ${metrics.count} ${metrics.count === 1 ? 'tool' : 'tools'}`,
-      })
+  const summary = summarizeRun(run, fileOps, t)
+  const summaryTokens = summary?.tokens?.length
+    ? summary.tokens
+    : [{
+        text: t('toolCall.toolStepsFallback', {
+          count: metrics.count,
+          defaultValue: `${metrics.count} ${metrics.count === 1 ? 'tool step' : 'tool steps'}`,
+        }),
+      }]
   const failed = metrics.failed > 0
     ? t('toolCall.group.failed', {
         count: metrics.failed,
@@ -179,6 +180,11 @@ function GroupSummary({ live, run, fileOps, t, compact }) {
     : ''
   const duration = formatDuration(metrics.duration)
   const fontSize = compact ? 'var(--text-sm)' : 'var(--text-base)'
+  const summaryContent = summaryTokens.map((token, index) => (
+    <span key={`${token.text}-${index}`} style={token.color ? { color: token.color } : undefined}>
+      {token.text}
+    </span>
+  ))
 
   return (
     <AnimatedLineSwap itemKey={live ? 'running' : 'complete'}>
@@ -192,10 +198,10 @@ function GroupSummary({ live, run, fileOps, t, compact }) {
               verticalAlign: 'top',
             }}
           >
-            {label}
+            {summaryContent}
           </AnimatedShimmerText>
         ) : (
-          <span>{label}</span>
+          <span>{summaryContent}</span>
         )}
         {duration && <span className="tool-run-summary-meta"> · {duration}</span>}
         {failed && <span style={{ color: 'var(--red)' }}> · {failed}</span>}
@@ -287,6 +293,7 @@ function LiveToolPreview({
   const key = getChildKey
     ? getChildKey(snapshot.latest, snapshot.latestIndex)
     : (snapshot.latest.id || snapshot.latestIndex)
+  const sequenceKey = `${snapshot.latestIndex}:${key}`
 
   return (
     <div ref={wrapperRef} className="tool-live-preview">
@@ -294,7 +301,7 @@ function LiveToolPreview({
         <div className="tool-tree-child is-last">
           <span aria-hidden="true" className="chat-branch-connector">└─</span>
           <div className="tool-tree-child-content">
-            <AnimatedLineSwap itemKey={key} animateOnMount block>
+            <AnimatedLineSwap itemKey={sequenceKey} animateOnMount block>
               {renderBlock(snapshot.latest, snapshot.latestIndex, { livePreview: true })}
             </AnimatedLineSwap>
           </div>

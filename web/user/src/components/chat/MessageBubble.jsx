@@ -180,6 +180,7 @@ function formatDuration(ms) {
 // false, which made the last frame jump while the virtualized row remeasured.
 function AnimatedProcessGroup({ group, visible }) {
   const groupId = group?.groupId || null
+  const transitionId = group?.stableId || groupId
   const displayGroupRef = useRef(group || null)
   if (group) displayGroupRef.current = group
 
@@ -258,7 +259,7 @@ function AnimatedProcessGroup({ group, visible }) {
     }
 
     return () => animationRef.current?.cancel()
-  }, [groupId, mounted, onExited, reducedMotion, visible])
+  }, [mounted, onExited, reducedMotion, transitionId, visible])
 
   if (!mounted || !displayGroupRef.current) return null
 
@@ -1657,14 +1658,14 @@ export default memo(function MessageBubble({
 
   const renderedContent = []
   const renderedProcessGroups = []
-  const pushProcessNode = (groupId, node) => {
+  const pushProcessNode = (groupId, node, stableId = groupId) => {
     if (!node) return
     const previous = renderedProcessGroups[renderedProcessGroups.length - 1]
     if (previous?.groupId === groupId) {
       previous.nodes.push(node)
       return
     }
-    renderedProcessGroups.push({ groupId, nodes: [node] })
+    renderedProcessGroups.push({ groupId, stableId, nodes: [node] })
   }
   const processGroupFor = (block, index) => (
     block?.processGroupId || 'legacy-' + (message._cid || message.timestamp || 'message') + '-' + index
@@ -1715,7 +1716,7 @@ export default memo(function MessageBubble({
         />
       )
       renderedContent.push(renderedToolRun)
-      pushProcessNode(runGroupId, renderedToolRun)
+      pushProcessNode(runGroupId, renderedToolRun, `tool-run-${sectionKey}`)
       continue
     }
 

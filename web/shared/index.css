@@ -1098,11 +1098,23 @@ html, body {
   min-height: 20px;
   color: var(--text-dim);
   font-family: var(--font-code);
-  font-size: var(--text-sm);
-  line-height: 20px;
+  font-size: 0;
+  line-height: 0;
   flex-shrink: 0;
   user-select: none;
   white-space: nowrap;
+}
+
+.chat-branch-connector::before {
+  position: absolute;
+  top: 0;
+  left: 3px;
+  box-sizing: border-box;
+  width: 11px;
+  height: 11px;
+  border-bottom: 1px solid currentColor;
+  border-left: 1px solid currentColor;
+  content: '';
 }
 
 .tool-run {
@@ -1204,8 +1216,8 @@ html, body {
   top: 10px;
   bottom: -2px;
   left: 3px;
-  width: 1px;
-  background: var(--text-dim);
+  width: 0;
+  border-left: 1px solid currentColor;
   content: '';
 }
 
@@ -1235,6 +1247,10 @@ html, body {
   text-align: left;
   white-space: nowrap;
   transition: color 150ms ease;
+}
+
+.tool-line-icon {
+  margin-right: 1px;
 }
 
 .tool-line-compact .tool-line-row {
@@ -1418,6 +1434,10 @@ html, body {
   overflow: hidden;
 }
 
+.tool-detail-section.is-diff {
+  padding: 6px 28px 6px 6px;
+}
+
 .tool-detail-label {
   margin-bottom: 4px;
   color: var(--text-dim);
@@ -1459,12 +1479,13 @@ html, body {
 
 .tool-diff-row {
   display: grid;
-  grid-template-columns: 28px 28px minmax(0, 1fr);
+  grid-template-columns: minmax(14px, max-content) minmax(14px, max-content) minmax(0, 1fr);
+  column-gap: 2px;
   min-width: 0;
 }
 
 .tool-diff-line-number {
-  padding-right: 6px;
+  padding-right: 2px;
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
   text-align: right;
