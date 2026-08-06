@@ -1347,11 +1347,16 @@ export default memo(function MessageBubble({
     durationMs: executionDurationMs,
     additionalQuestionCount: message.summaryQuestionCount,
   })
-  const executionSummaryParts = visibleExecutionSummaryItems(executionSummary).map(({ key, value }) => (
-    key === 'duration'
-      ? t('chat.executionSummaryDuration', { duration: value })
-      : t(`chat.executionSummary${key[0].toUpperCase()}${key.slice(1)}`, { count: value })
-  ))
+  // The live header already owns the running timer. Keep it out of the
+  // process Summary while the turn is streaming; the final duration is still
+  // shown once the result settles.
+  const executionSummaryParts = visibleExecutionSummaryItems(executionSummary)
+    .filter(({ key }) => !isStreaming || key !== 'duration')
+    .map(({ key, value }) => (
+      key === 'duration'
+        ? t('chat.executionSummaryDuration', { duration: value })
+        : t(`chat.executionSummary${key[0].toUpperCase()}${key.slice(1)}`, { count: value })
+    ))
   const executionSummaryText = executionSummaryParts.length > 0
     ? executionSummaryParts.join(t('chat.executionSummarySeparator'))
     : t('chat.executionSummaryCompleted')
