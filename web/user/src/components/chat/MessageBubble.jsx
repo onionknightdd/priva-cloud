@@ -114,48 +114,35 @@ function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
         )}
       </summary>
       <div
-        className="flex min-w-0 mt-1 text-xs"
+        className="flex items-start gap-1 min-w-0 mt-1"
         style={{
-          background: 'var(--bg-elevated)',
-          borderRadius: '2px',
-          color: 'var(--text-dim)',
           marginLeft: 8,
-          padding: '8px 12px 8px 0',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
         }}
       >
         <span
           aria-hidden="true"
           style={{
-            position: 'relative',
-            width: 16,
+            color: 'var(--text-dim)',
+            fontFamily: 'var(--font-code)',
+            fontSize: 'var(--text-sm)',
+            lineHeight: '20px',
             flexShrink: 0,
-            alignSelf: 'stretch',
+            userSelect: 'none',
+          }}
+        >└─</span>
+        <div
+          className="min-w-0 flex-1 text-xs"
+          style={{
+            background: 'var(--bg-elevated)',
+            borderRadius: '2px',
+            color: 'var(--text-dim)',
+            padding: '8px 12px',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
           }}
         >
-          <span
-            style={{
-              position: 'absolute',
-              left: 4,
-              top: 0,
-              bottom: 0,
-              borderLeft: '1px solid var(--border-strong)',
-            }}
-          />
-          <span
-            style={{
-              position: 'absolute',
-              left: 4,
-              top: 10,
-              width: 8,
-              borderTop: '1px solid var(--border-strong)',
-            }}
-          />
-        </span>
-        <span className="min-w-0" style={{ flex: 1 }}>
           {content}
-        </span>
+        </div>
       </div>
     </details>
   )
@@ -1788,6 +1775,18 @@ export default memo(function MessageBubble({
     </div>
   ) : null
 
+  const messageActions = !isStreaming && (hasContent || hasMetadata) ? (
+    <MessageActions
+      textContent={canCollapseResponse ? finalResultText : textContent}
+      message={message}
+      assistantIndex={assistantIndex}
+      onRewind={onRewind}
+      onFork={onFork}
+      showCheckpointActions={showCheckpointActions}
+      streamingDisabled={streamingProp}
+    />
+  ) : null
+
   const messageBody = (
     <>
         {/* Image thumbnails in user messages */}
@@ -1933,18 +1932,9 @@ export default memo(function MessageBubble({
           <StreamingSkeleton />
         )}
 
-        {/* Action bar — copy on every message, plus rewind/fork/stats for assistant */}
-        {!isStreaming && (hasContent || hasMetadata) && (
-          <MessageActions
-            textContent={canCollapseResponse ? finalResultText : textContent}
-            message={message}
-            assistantIndex={assistantIndex}
-            onRewind={onRewind}
-            onFork={onFork}
-            showCheckpointActions={showCheckpointActions}
-            streamingDisabled={streamingProp}
-          />
-        )}
+        {/* Action bar stays in the assistant message body. User actions are
+            rendered outside the bubble below and revealed on hover. */}
+        {!isUser && messageActions}
     </>
   )
 
@@ -1981,23 +1971,45 @@ export default memo(function MessageBubble({
       >
         {isUser ? (
           <>
-            {messageHeader}
             <div
-              className="min-w-0 overflow-hidden"
+              className="user-message-hover-scope flex flex-col items-end min-w-0"
               style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 1,
-                alignItems: hasUserReferenceContent ? 'stretch' : 'flex-end',
                 width: hasUserReferenceContent ? '100%' : undefined,
                 maxWidth: '100%',
-                boxSizing: 'border-box',
-                borderRadius: 10,
-                padding: '6px 10px',
-                background: 'var(--bg-elevated)',
               }}
             >
-              {messageBody}
+              <div
+                className="flex flex-col items-end min-w-0"
+                style={{
+                  gap: 2,
+                  width: hasUserReferenceContent ? '100%' : undefined,
+                  maxWidth: '100%',
+                }}
+              >
+                {messageHeader}
+                <div
+                  className="min-w-0 overflow-hidden"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 1,
+                    alignItems: hasUserReferenceContent ? 'stretch' : 'flex-end',
+                    width: hasUserReferenceContent ? '100%' : undefined,
+                    maxWidth: '100%',
+                    boxSizing: 'border-box',
+                    borderRadius: 10,
+                    padding: '7px 11px 7px 10px',
+                    background: 'var(--bg-elevated)',
+                  }}
+                >
+                  {messageBody}
+                </div>
+              </div>
+              {messageActions && (
+                <div className="user-message-actions-slot">
+                  {messageActions}
+                </div>
+              )}
             </div>
           </>
         ) : (
@@ -2144,7 +2156,7 @@ function MessageActions({ textContent, message, assistantIndex, onRewind, onFork
       data-message-actions
       className="flex items-center gap-3 text-xs"
       style={{
-        marginTop: isUser ? -2 : ASSISTANT_META_MARGIN_TOP,
+        marginTop: isUser ? 0 : ASSISTANT_META_MARGIN_TOP,
         color: 'var(--text-dim)',
         alignSelf: isUser ? 'flex-end' : undefined,
         lineHeight: '16px',
