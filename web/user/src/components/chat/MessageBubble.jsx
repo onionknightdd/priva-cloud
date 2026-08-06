@@ -5,6 +5,7 @@ import { Clock, Loader, Copy, Check, AlertTriangle, Repeat, ArrowDownToLine, Arr
 import { useTranslation } from 'react-i18next'
 import MarkdownRenderer from '../markdown/MarkdownRenderer'
 import ToolCallCard from './ToolCallCard'
+import TextFileTool from './FileToolCard'
 import SubagentFrame from './SubagentFrame'
 import WorkflowCard from './WorkflowCard'
 import ToolRunSection from './ToolRunSection'
@@ -32,7 +33,7 @@ import useTaskStore from '../../stores/taskStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import useFileOpsStore from '../../stores/fileOpsStore'
 import useFileBrowserStore from '../../stores/fileBrowserStore'
-import { getToolDisplayName } from '../../utils/generatedTool'
+import { getToolDisplayName, isGeneratedToolName } from '../../utils/generatedTool'
 import { parseSelectedXlsx } from '../../utils/selectedXlsx'
 import { parseSelectedFile } from '../../utils/selectedFile'
 import DrawIcon from '@shared/components/shared/DrawIcon'
@@ -1176,7 +1177,11 @@ function hasUserReferenceMarkup(text) {
 }
 
 function isCollapsibleToolBlock(block) {
-  if (block?.type === 'canvas_ref' || block?.type === 'file_ref') return true
+  if (block?.type === 'canvas_ref') return false
+  if (block?.type === 'file_ref') {
+    if (isGeneratedToolName(block.name)) return false
+    return ['Read', 'Write', 'Edit'].includes(getToolDisplayName(block.name))
+  }
   if (block?.type !== 'tool_use') return false
   // SubagentFrame and TodoWriteCard manage their own collapse UX — keep them
   // out of the outer tool-steps section so they render as top-level nodes.
@@ -1184,6 +1189,7 @@ function isCollapsibleToolBlock(block) {
   if (block.name === 'TodoWrite') return false
   // WorkflowCard manages its own collapse UX — render as a top-level node.
   if (block.name === 'Workflow') return false
+  if (block.name === 'AskUserQuestion' || block.name === 'AskUser') return false
   return true
 }
 
@@ -1401,30 +1407,21 @@ export default memo(function MessageBubble({
     for (let i = 0; i < contentBlocks.length; i++) {
       const block = contentBlocks[i]
       if (!isCollapsibleToolBlock(block)) continue
-
-      const run = [block]
-      while (i + 1 < contentBlocks.length) {
-        const nextBlock = contentBlocks[i + 1]
-        if (isCollapsibleToolBlock(nextBlock)) {
-          i += 1
-          run.push(contentBlocks[i])
-          continue
-        }
-        if (isEmptyTextBlock(nextBlock)) {
-          i += 1
-          continue
-        }
-        break
-      }
-      nextSectionKeys.push(getToolSectionKey(run, i - run.length + 1))
+      const runStartIndex = i
+      const { run, endIndex } = collectToolRun(
+        contentBlocks,
+        runStartIndex,
+        isCollapsibleToolBlock,
+        isEmptyTextBlock,
+      )
+      i = endIndex
+      nextSectionKeys.push(getToolSectionKey(run, runStartIndex))
     }
 
     setCollapsedToolSections((prev) => {
       const next = {}
       nextSectionKeys.forEach((key) => {
-        next[key] = Object.prototype.hasOwnProperty.call(prev, key)
-          ? prev[key]
-          : true
+        if (Object.prototype.hasOwnProperty.call(prev, key)) next[key] = prev[key]
       })
       const prevKeys = Object.keys(prev)
       const nextKeys = Object.keys(next)
@@ -1457,7 +1454,7 @@ export default memo(function MessageBubble({
   // Keep hook order stable even when a stopped stream leaves an empty assistant placeholder behind.
   if (shouldHideBubble) return null
 
-  const renderBlock = (block, i) => {
+  const renderBlock = (block, i, { livePreview = false } = {}) => {
     if (block.type === 'ask_user') {
       // Active questions are shown in ChatInput instead; only render inline for answered/declined
       if (block.status === 'answered' || block.status === 'declined') {
@@ -1473,8 +1470,16 @@ export default memo(function MessageBubble({
     }
     if (block.type === 'tool_use') {
       const reverted = revertedToolUseIds?.has(block.id) || false
-      if (block.name === 'Read') {
-        return <FileToolCard key={block.id || i} kind="Read" block={block} reverted={reverted} />
+      if (block.name === 'Read' || block.name === 'Write' || block.name === 'Edit') {
+        return (
+          <TextFileTool
+            key={block.id || i}
+            kind={block.name}
+            block={block}
+            reverted={reverted}
+            livePreview={livePreview}
+          />
+        )
       }
       // Subagents render as a collapsible framed node with nested children.
       if (block.name === 'Agent' || block.name === 'Task') {
@@ -1495,14 +1500,28 @@ export default memo(function MessageBubble({
           />
         )
       }
-      return <ToolCallCard key={block.id || i} block={block} reverted={reverted} />
+      return (
+        <ToolCallCard
+          key={block.id || i}
+          block={block}
+          reverted={reverted}
+          livePreview={livePreview}
+        />
+      )
     }
     if (block.type === 'canvas_ref') {
       return <CanvasRefIndicator key={block.id || i} count={block.count} refType={block.refType} />
     }
     if (block.type === 'file_ref') {
       const reverted = revertedToolUseIds?.has(block.fileOpId) || false
-      return <FileOpRefIndicator key={block.id || i} block={block} reverted={reverted} />
+      return (
+        <FileOpRefIndicator
+          key={block.id || i}
+          block={block}
+          reverted={reverted}
+          livePreview={livePreview}
+        />
+      )
     }
     if (block.type === 'thinking' && block.thinking?.trim()) {
       // A thinking block is "done" the moment any later non-empty block appears
@@ -1665,7 +1684,13 @@ export default memo(function MessageBubble({
       // latestProcessGroupId resolvable while the run is streaming.
       const runGroupId = processGroupFor(run[run.length - 1], lastToolIndex)
       const sectionKey = getToolSectionKey(run, runStartIndex)
-      const isCollapsed = collapsedToolSections[sectionKey] ?? !isStreaming
+      const hasVisibleBlockAfterRun = contentBlocks
+        .slice(endIndex + 1)
+        .some((candidate) => !isEmptyTextBlock(candidate))
+      const isLiveRun = isStreaming && !hasVisibleBlockAfterRun
+      const isCollapsed = Object.prototype.hasOwnProperty.call(collapsedToolSections, sectionKey)
+        ? collapsedToolSections[sectionKey]
+        : !isLiveRun
 
       const renderedToolRun = (
         <ToolRunSection
@@ -1673,12 +1698,19 @@ export default memo(function MessageBubble({
           collapsed={isCollapsed}
           onToggle={() => setCollapsedToolSections((prev) => ({
             ...prev,
-            [sectionKey]: !(prev[sectionKey] ?? !isStreaming),
+            [sectionKey]: !(
+              Object.prototype.hasOwnProperty.call(prev, sectionKey)
+                ? prev[sectionKey]
+                : !isLiveRun
+            ),
           }))}
           run={run}
           fileOps={fileOps}
           t={t}
-          renderBlock={(toolBlock, runIndex) => renderBlock(toolBlock, toolIndexes[runIndex])}
+          live={isLiveRun}
+          renderBlock={(toolBlock, runIndex, options) => (
+            renderBlock(toolBlock, toolIndexes[runIndex], options)
+          )}
           getChildKey={(toolBlock, runIndex) => `tree-child-${toolBlock.id || toolIndexes[runIndex]}`}
         />
       )
@@ -2141,9 +2173,20 @@ function CanvasRefIndicator({ count }) {
   )
 }
 
-function FileOpRefIndicator({ block, reverted = false }) {
+function FileOpRefIndicator({ block, reverted = false, livePreview = false }) {
   const op = useFileOpsStore((s) => s.fileOps.find((item) => item.id === block.fileOpId) || null)
   const displayName = getToolDisplayName(block.name)
+  if (displayName !== 'FileCanvas') {
+    return (
+      <TextFileTool
+        kind={displayName}
+        op={op}
+        block={block}
+        reverted={reverted}
+        livePreview={livePreview}
+      />
+    )
+  }
   return (
     <FileToolCard
       kind={displayName === 'FileCanvas' ? 'FILECANVAS' : displayName}

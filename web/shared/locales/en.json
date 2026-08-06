@@ -337,6 +337,23 @@
     "hideToolSteps": "Hide tool steps",
     "toolStepsFallback_one": "{{count}} tool step",
     "toolStepsFallback_other": "{{count}} tool steps",
+    "group": {
+      "running_one": "Running {{count}} tool",
+      "running_other": "Running {{count}} tools",
+      "used_one": "Used {{count}} tool",
+      "used_other": "Used {{count}} tools",
+      "failed_one": "{{count}} failed",
+      "failed_other": "{{count}} failed"
+    },
+    "status": {
+      "failed": "failed",
+      "cancelled": "cancelled",
+      "stopped": "stopped",
+      "skipped": "skipped",
+      "aborted": "aborted",
+      "killed": "killed",
+      "reverted": "reverted"
+    },
     "summary": {
       "edited_one": "Edited {{count}} file",
       "edited_other": "Edited {{count}} files",

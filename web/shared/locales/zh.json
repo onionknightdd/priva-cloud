@@ -330,6 +330,20 @@
     "running": "运行中",
     "hideToolSteps": "收起工具步骤",
     "toolStepsFallback_other": "{{count}} 个工具步骤",
+    "group": {
+      "running_other": "正在运行 {{count}} 个工具",
+      "used_other": "使用了 {{count}} 个工具",
+      "failed_other": "{{count}} 个失败"
+    },
+    "status": {
+      "failed": "失败",
+      "cancelled": "已取消",
+      "stopped": "已停止",
+      "skipped": "已跳过",
+      "aborted": "已中止",
+      "killed": "已终止",
+      "reverted": "已回滚"
+    },
     "summary": {
       "edited_other": "编辑了 {{count}} 个文件",
       "wrote_other": "写入了 {{count}} 个文件",

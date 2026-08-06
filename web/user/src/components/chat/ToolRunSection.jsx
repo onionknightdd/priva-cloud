@@ -1,149 +1,306 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { animate } from 'animejs'
 import { ChevronDown } from 'lucide-react'
-import { summarizeRun } from '../../utils/toolRunSummary'
-import { RollingText } from '../shared/Odometer'
 import AnimatedShimmerText from '@shared/components/shared/AnimatedShimmerText'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 import { usePresence } from '@shared/motion/usePresence'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
-import { DUR_MIGRATION, EASE_TAB } from '@shared/motion/tokens'
+import { EASE_SPRING } from '@shared/motion/tokens'
+import { formatDuration, getRunMetrics } from '../../utils/toolPresentation'
 
-function findFileOp(fileOps, block) {
-  if (!Array.isArray(fileOps) || !block) return null
-  return fileOps.find((op) => (
-    op.id === block.fileOpId ||
-    op.id === block.id ||
-    (block.fileOpId && op.toolUseId === block.fileOpId) ||
-    (block.id && op.toolUseId === block.id)
-  )) || null
-}
+const TOOL_SWAP_DURATION = 180
 
-function hasUnfinishedTool(run, fileOps) {
-  if (!Array.isArray(run)) return false
-  return run.some((block) => {
-    if (!block || (block.type !== 'tool_use' && block.type !== 'file_ref')) return false
-    const op = findFileOp(fileOps, block)
-    const status = op?.status || block.status
-    return status === 'running' || status === 'pending'
-  })
-}
+function AnimatedLineSwap({ itemKey, children, animateOnMount = false, block = false, className = '', style }) {
+  const reduceMotion = useReducedMotion()
+  const previousKeyRef = useRef(itemKey)
+  const previousNodeRef = useRef(children)
+  const generationRef = useRef(0)
+  const elementRefs = useRef(new Map())
+  const animationsRef = useRef([])
+  const initialEnteredRef = useRef(false)
+  const [entries, setEntries] = useState(() => ([{
+    instanceKey: String(itemKey),
+    itemKey,
+    node: children,
+    phase: 'current',
+    generation: 0,
+  }]))
 
-function SummaryToken({ text, height, fontWeight, shimmer, color }) {
-  const style = color ? { color } : undefined
-  if (shimmer) {
-    return (
-      <AnimatedShimmerText
-        style={{
-          ...style,
-          fontSize: height,
-          fontWeight,
-          lineHeight: `${height}px`,
-          verticalAlign: 'middle',
-        }}
-      >
-        {text}
-      </AnimatedShimmerText>
-    )
-  }
+  useLayoutEffect(() => {
+    const previousKey = previousKeyRef.current
+    const previousNode = previousNodeRef.current
+    previousNodeRef.current = children
+    if (previousKey === itemKey) return
+
+    previousKeyRef.current = itemKey
+    const generation = generationRef.current + 1
+    generationRef.current = generation
+    setEntries([
+      {
+        instanceKey: String(previousKey),
+        itemKey: previousKey,
+        node: previousNode,
+        phase: 'out',
+        generation,
+      },
+      {
+        instanceKey: String(itemKey),
+        itemKey,
+        node: children,
+        phase: 'in',
+        generation,
+      },
+    ])
+  }, [children, itemKey])
+
+  useLayoutEffect(() => {
+    animationsRef.current.forEach((motion) => motion.cancel())
+    animationsRef.current = []
+
+    if (entries.length === 1) {
+      const entry = entries[0]
+      const element = elementRefs.current.get(entry.instanceKey)
+      if (!element || initialEnteredRef.current || !animateOnMount) {
+        initialEnteredRef.current = true
+        return undefined
+      }
+      initialEnteredRef.current = true
+      if (reduceMotion) return undefined
+      element.style.opacity = '0'
+      element.style.transform = 'translateY(8px)'
+      const motion = animate(element, {
+        opacity: 1,
+        translateY: '0px',
+        duration: TOOL_SWAP_DURATION,
+        ease: EASE_SPRING,
+        onComplete: () => {
+          element.style.opacity = ''
+          element.style.transform = ''
+        },
+      })
+      animationsRef.current = [motion]
+      return () => motion.cancel()
+    }
+
+    const outgoing = entries.find((entry) => entry.phase === 'out')
+    const incoming = entries.find((entry) => entry.phase === 'in')
+    const outgoingElement = outgoing ? elementRefs.current.get(outgoing.instanceKey) : null
+    const incomingElement = incoming ? elementRefs.current.get(incoming.instanceKey) : null
+    if (!incoming || !incomingElement) return undefined
+
+    const finish = () => {
+      if (generationRef.current !== incoming.generation) return
+      incomingElement.style.opacity = ''
+      incomingElement.style.transform = ''
+      setEntries([{
+        ...incoming,
+        instanceKey: String(incoming.itemKey),
+        phase: 'current',
+      }])
+    }
+
+    if (reduceMotion) {
+      finish()
+      return undefined
+    }
+
+    incomingElement.style.opacity = '0'
+    incomingElement.style.transform = 'translateY(8px)'
+    const motions = []
+    if (outgoingElement) {
+      motions.push(animate(outgoingElement, {
+        opacity: 0,
+        translateY: '-8px',
+        duration: TOOL_SWAP_DURATION,
+        ease: EASE_SPRING,
+      }))
+    }
+    motions.push(animate(incomingElement, {
+      opacity: 1,
+      translateY: '0px',
+      duration: TOOL_SWAP_DURATION,
+      ease: EASE_SPRING,
+      onComplete: finish,
+    }))
+    animationsRef.current = motions
+    return () => motions.forEach((motion) => motion.cancel())
+  }, [animateOnMount, entries, reduceMotion])
+
+  useEffect(() => () => {
+    animationsRef.current.forEach((motion) => motion.cancel())
+  }, [])
+
+  const Root = block ? 'div' : 'span'
+  const Item = block ? 'div' : 'span'
 
   return (
-    <span style={style}>
-      <RollingText
-        text={text}
-        height={height}
-        color="currentColor"
-        fontWeight={fontWeight}
-      />
-    </span>
+    <Root className={`tool-line-swap ${className}`.trim()} style={style}>
+      {entries.map((entry) => (
+        <Item
+          key={entry.instanceKey}
+          ref={(element) => {
+            if (element) elementRefs.current.set(entry.instanceKey, element)
+            else elementRefs.current.delete(entry.instanceKey)
+          }}
+          className="tool-line-swap-item"
+        >
+          {entry.itemKey === itemKey ? children : entry.node}
+        </Item>
+      ))}
+    </Root>
   )
 }
 
-function SummaryTokens({ summary, fallback, height = 14, fontWeight = 500, shimmer = false }) {
-  if (!summary?.tokens?.length) {
-    return (
-      <SummaryToken
-        text={fallback}
-        height={height}
-        fontWeight={fontWeight}
-        shimmer={shimmer}
-      />
-    )
-  }
+function GroupSummary({ live, run, fileOps, t, compact }) {
+  const [now, setNow] = useState(() => Date.now())
 
-  return summary.tokens.map((tok, i) => (
-    <SummaryToken
-      key={i}
-      text={tok.text}
-      height={height}
-      fontWeight={fontWeight}
-      color={tok.color}
-      shimmer={shimmer}
-    />
-  ))
+  useEffect(() => {
+    if (!live) return undefined
+    const update = () => setNow(Date.now())
+    const timer = window.setInterval(update, 100)
+    return () => window.clearInterval(timer)
+  }, [live])
+
+  const metrics = getRunMetrics(run, fileOps, now, live)
+  const label = live
+    ? t('toolCall.group.running', {
+        count: metrics.count,
+        defaultValue: `Running ${metrics.count} ${metrics.count === 1 ? 'tool' : 'tools'}`,
+      })
+    : t('toolCall.group.used', {
+        count: metrics.count,
+        defaultValue: `Used ${metrics.count} ${metrics.count === 1 ? 'tool' : 'tools'}`,
+      })
+  const failed = metrics.failed > 0
+    ? t('toolCall.group.failed', {
+        count: metrics.failed,
+        defaultValue: `${metrics.failed} failed`,
+      })
+    : ''
+  const duration = formatDuration(metrics.duration)
+  const fontSize = compact ? 'var(--text-sm)' : 'var(--text-base)'
+
+  return (
+    <AnimatedLineSwap itemKey={live ? 'running' : 'complete'}>
+      <span className="tool-run-summary-content" style={{ fontSize }}>
+        {live ? (
+          <AnimatedShimmerText
+            style={{
+              fontSize,
+              fontWeight: 400,
+              lineHeight: '20px',
+              verticalAlign: 'top',
+            }}
+          >
+            {label}
+          </AnimatedShimmerText>
+        ) : (
+          <span>{label}</span>
+        )}
+        {duration && <span className="tool-run-summary-meta"> · {duration}</span>}
+        {failed && <span style={{ color: 'var(--red)' }}> · {failed}</span>}
+      </span>
+    </AnimatedLineSwap>
+  )
 }
 
-export function ToolSectionToggle({ collapsed, onToggle, run, fileOps, t, controlsId, compact = false }) {
-  const [hovered, setHovered] = useState(false)
-  const summary = summarizeRun(run, fileOps, t)
-  const hasSummary = summary && summary.tokens.length > 0
-  const hasRunningTools = hasUnfinishedTool(run, fileOps)
-  const labelColor = hovered ? 'var(--text-secondary)' : 'var(--text-dim)'
-  const fallback = t('toolCall.toolStepsFallback', { count: run.length })
-  const tokenHeight = compact ? 12 : 13
-
+export function ToolSectionToggle({ collapsed, onToggle, run, fileOps, t, controlsId, compact = false, live = false }) {
   return (
     <button
       type="button"
-      className="quiet-toggle overflow-hidden"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: compact ? 5 : 6,
-        width: '100%',
-        background: 'transparent',
-        border: 'none',
-        padding: compact ? '1px 0' : 0,
-        cursor: 'pointer',
-        color: labelColor,
-        fontSize: compact ? 'calc(var(--text-base) - 1px)' : 'calc(var(--text-md) - 1px)',
-        textAlign: 'left',
-        transition: 'color 150ms ease',
-      }}
+      className="quiet-toggle tool-run-toggle"
       onClick={onToggle}
       aria-expanded={!collapsed}
       aria-controls={controlsId}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
     >
-      <AnimatedChevron open={!collapsed} style={{ color: 'var(--text-dim)' }}>
+      <AnimatedChevron open={!collapsed} className="tool-run-chevron">
         <ChevronDown size={12} strokeWidth={1.5} />
       </AnimatedChevron>
-      <span
-        style={{
-          minWidth: 0,
-          color: labelColor,
-          wordBreak: 'break-word',
-          flex: '1 1 auto',
-          display: 'block',
-          lineHeight: compact ? '19px' : '21px',
-        }}
-      >
-        {collapsed ? (
-          hasSummary
-            ? <SummaryTokens summary={summary} fallback={fallback} height={tokenHeight} shimmer={hasRunningTools} />
-            : <SummaryTokens fallback={fallback} height={tokenHeight} shimmer={hasRunningTools} />
-        ) : (
-          <>
-            <span>{t('toolCall.hideToolSteps')}</span>
-            <span style={{ color: 'var(--text-dim)', margin: '0 6px' }}>·</span>
-            {hasSummary
-              ? <SummaryTokens summary={summary} fallback={fallback} height={tokenHeight} shimmer={hasRunningTools} />
-              : <SummaryTokens fallback={fallback} height={tokenHeight} shimmer={hasRunningTools} />}
-          </>
-        )}
-      </span>
+      <GroupSummary live={live} run={run} fileOps={fileOps} t={t} compact={compact} />
     </button>
+  )
+}
+
+function LiveToolPreview({
+  visible,
+  latest,
+  latestIndex,
+  renderBlock,
+  getChildKey,
+}) {
+  const snapshotRef = useRef(null)
+  if (latest) snapshotRef.current = { latest, latestIndex }
+  const snapshot = snapshotRef.current
+  const reduceMotion = useReducedMotion()
+  const { mounted, onExited } = usePresence(Boolean(visible && snapshot))
+  const wrapperRef = useRef(null)
+  const enteredRef = useRef(false)
+
+  useLayoutEffect(() => {
+    const element = wrapperRef.current
+    if (!mounted || !element) return undefined
+
+    if (visible) {
+      if (!enteredRef.current) {
+        enteredRef.current = true
+        element.style.opacity = '1'
+        element.style.transform = ''
+        element.style.height = ''
+        return undefined
+      }
+      if (reduceMotion) {
+        element.style.opacity = '1'
+        element.style.transform = ''
+        element.style.height = ''
+        return undefined
+      }
+      const naturalHeight = element.scrollHeight
+      const motion = animate(element, {
+        opacity: 1,
+        translateY: '0px',
+        height: `${naturalHeight}px`,
+        duration: TOOL_SWAP_DURATION,
+        ease: EASE_SPRING,
+        onComplete: () => { element.style.height = '' },
+      })
+      return () => motion.cancel()
+    }
+
+    if (reduceMotion) {
+      onExited()
+      return undefined
+    }
+    const height = element.offsetHeight
+    element.style.height = `${height}px`
+    const motion = animate(element, {
+      opacity: 0,
+      translateY: '-8px',
+      height: '0px',
+      duration: TOOL_SWAP_DURATION,
+      ease: EASE_SPRING,
+      onComplete: onExited,
+    })
+    return () => motion.cancel()
+  }, [mounted, onExited, reduceMotion, visible])
+
+  if (!mounted || !snapshot) return null
+  const key = getChildKey
+    ? getChildKey(snapshot.latest, snapshot.latestIndex)
+    : (snapshot.latest.id || snapshot.latestIndex)
+
+  return (
+    <div ref={wrapperRef} className="tool-live-preview">
+      <div className="tool-tree tool-tree-live">
+        <div className="tool-tree-child is-last">
+          <span aria-hidden="true" className="chat-branch-connector">└─</span>
+          <div className="tool-tree-child-content">
+            <AnimatedLineSwap itemKey={key} animateOnMount block>
+              {renderBlock(snapshot.latest, snapshot.latestIndex, { livePreview: true })}
+            </AnimatedLineSwap>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -156,76 +313,35 @@ export default function ToolRunSection({
   renderBlock,
   getChildKey,
   compact = false,
+  live = false,
 }) {
   const bodyId = useId()
-  const shouldReduce = useReducedMotion()
-
-  // Compact reveal: quiet opacity + 3px drop, latched through its exit.
-  const compactOpen = compact && !collapsed
-  const { mounted: compactMounted, onExited: compactExited } = usePresence(compactOpen)
-  const compactRef = useRef(null)
-  const compactEnteredRef = useRef(compactOpen)
-
-  useLayoutEffect(() => {
-    if (!compact) return
-    if (!compactMounted) {
-      compactEnteredRef.current = false
-      return
-    }
-    const el = compactRef.current
-    if (!el) {
-      if (!compactOpen) compactExited()
-      return
-    }
-    if (shouldReduce) {
-      if (compactOpen) {
-        compactEnteredRef.current = true
-        el.style.opacity = '1'
-        el.style.transform = 'translateY(0px)'
-      } else {
-        compactExited()
-      }
-      return
-    }
-    if (compactOpen) {
-      if (!compactEnteredRef.current) {
-        // Fresh reveal: pre-paint the from-state.
-        el.style.opacity = '0'
-        el.style.transform = 'translateY(-3px)'
-      }
-      compactEnteredRef.current = true
-      animate(el, { opacity: 1, translateY: '0px', duration: DUR_MIGRATION.toolReveal, ease: EASE_TAB })
-    } else {
-      animate(el, {
-        opacity: 0,
-        translateY: '-3px',
-        duration: DUR_MIGRATION.toolReveal,
-        ease: EASE_TAB,
-        onComplete: compactExited,
-      })
-    }
-  }, [compact, compactOpen, compactMounted, shouldReduce, compactExited])
+  const latestIndex = Math.max(run.length - 1, 0)
+  const latest = run[latestIndex] || null
 
   const renderToolTree = () => (
     <div className="tool-tree">
-      {run.map((toolBlock, runIndex) => (
-        <div
-          key={getChildKey ? getChildKey(toolBlock, runIndex) : (toolBlock.id || runIndex)}
-          className="tool-tree-child"
-        >
-          <span aria-hidden="true" className="chat-branch-connector">
-            {runIndex === run.length - 1 ? '└─' : '├─'}
-          </span>
-          <div className="tool-tree-child-content">
-            {renderBlock(toolBlock, runIndex)}
+      {run.map((toolBlock, runIndex) => {
+        const last = runIndex === run.length - 1
+        return (
+          <div
+            key={getChildKey ? getChildKey(toolBlock, runIndex) : (toolBlock.id || runIndex)}
+            className={`tool-tree-child${last ? ' is-last' : ''}`}
+          >
+            <span aria-hidden="true" className="chat-branch-connector">
+              {last ? '└─' : '├─'}
+            </span>
+            <div className="tool-tree-child-content">
+              {renderBlock(toolBlock, runIndex, { livePreview: false })}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 
   return (
-    <div style={{ marginTop: compact ? 2 : 0, marginBottom: compact ? 2 : 0 }}>
+    <div className={`tool-run${compact ? ' tool-run-compact' : ''}`}>
       <ToolSectionToggle
         collapsed={collapsed}
         onToggle={onToggle}
@@ -234,25 +350,27 @@ export default function ToolRunSection({
         t={t}
         controlsId={bodyId}
         compact={compact}
+        live={live}
       />
 
-      {compact ? (
-        compactMounted ? (
-          <div id={bodyId} ref={compactRef} style={{ overflow: 'hidden' }}>
-            {renderToolTree()}
-          </div>
-        ) : null
-      ) : (
+      <div id={bodyId}>
+        <LiveToolPreview
+          visible={live && !collapsed}
+          latest={latest}
+          latestIndex={latestIndex}
+          renderBlock={renderBlock}
+          getChildKey={getChildKey}
+        />
+
         <AnimatedCollapse
-          open={!collapsed}
-          id={bodyId}
+          open={!live && !collapsed}
           animateHeight={false}
           keepMounted
           deferContentOnClose
         >
           {renderToolTree}
         </AnimatedCollapse>
-      )}
+      </div>
     </div>
   )
 }

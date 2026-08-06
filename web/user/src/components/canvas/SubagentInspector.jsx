@@ -9,6 +9,7 @@ import MarkdownRenderer from '../markdown/MarkdownRenderer'
 import ToolCallCard from '../chat/ToolCallCard'
 import FileToolCard from '../chat/FileToolCard'
 import ToolRunSection from '../chat/ToolRunSection'
+import WorkflowCard from '../chat/WorkflowCard'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 import { tweenScrollIntoView } from '@shared/motion/tweenScroll'
 
@@ -37,7 +38,12 @@ function isFileTool(block) {
 }
 
 function isCollapsibleInspectorToolBlock(block) {
-  return block?.type === 'tool_use' && !isSubagentTool(block) && !isTodoWriteTool(block)
+  return block?.type === 'tool_use'
+    && !isSubagentTool(block)
+    && !isTodoWriteTool(block)
+    && block.name !== 'Workflow'
+    && block.name !== 'AskUserQuestion'
+    && block.name !== 'AskUser'
 }
 
 function isEmptyTextBlock(block) {
@@ -219,7 +225,13 @@ function SubagentRow({ item, expanded, active, onClick, rowRef }) {
       }
 
       const sectionKey = getInspectorToolRunKey(block.id, run, runStartIndex)
-      const isCollapsed = collapsedToolSections[sectionKey] ?? true
+      const hasVisibleBlockAfterRun = children
+        .slice(index + 1)
+        .some((candidate) => !isEmptyTextBlock(candidate))
+      const isLiveRun = status === 'running' && !hasVisibleBlockAfterRun
+      const isCollapsed = Object.prototype.hasOwnProperty.call(collapsedToolSections, sectionKey)
+        ? collapsedToolSections[sectionKey]
+        : !isLiveRun
       renderedChildren.push(
         <div
           key={`tool-run-${sectionKey}`}
@@ -235,17 +247,23 @@ function SubagentRow({ item, expanded, active, onClick, rowRef }) {
             collapsed={isCollapsed}
             onToggle={() => setCollapsedToolSections((prev) => ({
               ...prev,
-              [sectionKey]: !(prev[sectionKey] ?? true),
+              [sectionKey]: !(
+                Object.prototype.hasOwnProperty.call(prev, sectionKey)
+                  ? prev[sectionKey]
+                  : !isLiveRun
+              ),
             }))}
             run={run}
             fileOps={fileOps}
             t={t}
             compact
-            renderBlock={(toolBlock, runIndex) => (
+            live={isLiveRun}
+            renderBlock={(toolBlock, runIndex, options) => (
               <SubagentMessageBlock
                 block={toolBlock}
                 indent={0}
                 wrapTool={false}
+                livePreview={options?.livePreview}
               />
             )}
             getChildKey={(toolBlock, runIndex) => `inspector-tool-child-${toolBlock.id || runStartIndex + runIndex}`}
@@ -355,11 +373,14 @@ function SubagentRow({ item, expanded, active, onClick, rowRef }) {
   )
 }
 
-function SubagentMessageBlock({ block, indent, wrapTool = true }) {
+function SubagentMessageBlock({ block, indent, wrapTool = true, livePreview = false }) {
   if (block.type === 'tool_use') {
+    if (block.name === 'Workflow') {
+      return <WorkflowCard block={block} />
+    }
     const card = isFileTool(block)
-      ? <FileToolCard kind={block.name} block={block} compact />
-      : <ToolCallCard block={block} compact />
+      ? <FileToolCard kind={block.name} block={block} compact livePreview={livePreview} />
+      : <ToolCallCard block={block} compact livePreview={livePreview} />
 
     if (!wrapTool) return card
 
