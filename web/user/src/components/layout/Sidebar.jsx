@@ -950,9 +950,9 @@ export default function Sidebar() {
         className="flex items-center flex-shrink-0"
         style={{
           height: 48,
-          // Match the primary menu's 53px text baseline (16px outer gutter
-          // + 10px row inset + 19px icon + 8px icon gap).
-          padding: collapsed ? 0 : '0 8px 0 24px',
+          // Keep the brand text on the primary menu's 53px baseline while
+          // giving the logo the full left-side space to center within.
+          padding: collapsed ? 0 : '0 8px 0 0',
           justifyContent: collapsed ? 'center' : 'space-between',
           borderBottom: '1px solid var(--border-subtle)',
         }}
@@ -969,7 +969,7 @@ export default function Sidebar() {
               <span
                 aria-hidden="true"
                 className="flex items-center justify-center flex-shrink-0"
-                style={{ width: 29, height: 28 }}
+                style={{ width: 53, height: 28 }}
               >
                 <Bot size={25} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color)' }} />
               </span>
