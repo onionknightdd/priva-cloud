@@ -26,6 +26,7 @@ from priva_common.logging import get_app_logger
 from priva_common.models.scheduler import (
     AgentRunConfig,
     CronTriggerConfig,
+    FeishuCallbackConfig,
     HttpCallConfig,
     IntervalTriggerConfig,
     ScheduledJobDefinition,
@@ -49,6 +50,128 @@ SCHEDULER_TOOL_SCOPE = (
     "'让 xxx agent 完成 xxx', or '派一个 sub agent 做 xxx', do not use scheduler tools; "
     "use the built-in Agent/sub-agent mechanism instead."
 )
+
+
+_JOB_ARGUMENT_PROPERTIES = {
+    "name": {"type": "string", "description": "Human-readable job name. Keep it short and descriptive."},
+    "job_type": {"type": "string", "enum": ["agent_run", "http_call", "user_script"], "description": "The scheduled automation kind. `agent_run` means a saved cron/interval automation that launches an agent later or repeatedly; it must not be used for current sub-agent delegation."},
+    "trigger_type": {"type": "string", "enum": ["cron", "interval"], "description": "Schedule type: 'cron' for cron expressions, 'interval' for fixed repeat intervals."},
+    "cron_expr": {"type": "string", "description": "5-field cron expression. Required when trigger_type=cron. Format: 'minute hour day month day_of_week'. Examples: '0 9 * * *', '*/15 * * * *', '0 0 1 * *'."},
+    "interval_minutes": {"type": "number", "description": "Repeat interval in minutes. Required when trigger_type=interval. Examples: 5, 30, 60, 1440."},
+    "timezone": {"type": "string", "description": "IANA timezone for the schedule. Defaults to Asia/Shanghai."},
+    "prompt": {"type": "string", "description": "[agent_run] The prompt saved for the recurring scheduled agent automation. Should be a complete, self-contained instruction for future cron/interval runs. Do not use this to ask a sub-agent to perform the current user request."},
+    "model": {"type": "string", "description": "[agent_run] Optional model override. Leave empty to use the system default."},
+    "url": {"type": "string", "description": "[http_call] The full URL to call. Must include protocol (http:// or https://)."},
+    "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE"], "description": "[http_call] HTTP method. Defaults to GET."},
+    "headers": {"type": "object", "description": "[http_call] HTTP headers as key-value pairs. Example: {\"Authorization\": \"Bearer xxx\", \"Content-Type\": \"application/json\"}"},
+    "body": {"type": "string", "description": "[http_call] Request body string. Typically JSON for POST/PUT requests."},
+    "script": {"type": "string", "description": "[user_script] Inline script content. Provide this OR file_path, not both. If provided, source is set to 'inline'."},
+    "file_path": {"type": "string", "description": "[user_script] Path to script file, relative to the user's workspace. Provide this OR script, not both. If provided, source is set to 'file'."},
+    "language": {"type": "string", "enum": ["python", "shell"], "description": "[user_script] Script language. Determines the interpreter (python3 or /bin/bash)."},
+    "timeout_seconds": {"type": "number", "description": "[http_call/user_script] Execution timeout. Defaults: 30s for http_call, 300s for user_script."},
+}
+
+
+def _build_trigger(args: dict, current=None):
+    """Build a requested schedule, preserving it for partial updates."""
+    has_schedule_update = any(
+        key in args for key in ("trigger_type", "cron_expr", "interval_minutes")
+    )
+    if current is not None and not has_schedule_update:
+        return current.model_copy(deep=True)
+
+    trigger_type = args.get("trigger_type")
+    if trigger_type is None:
+        if "cron_expr" in args or isinstance(current, CronTriggerConfig):
+            trigger_type = "cron"
+        else:
+            trigger_type = "interval"
+
+    if trigger_type == "cron":
+        current_expr = current.expr if isinstance(current, CronTriggerConfig) else "0 9 * * *"
+        return CronTriggerConfig(expr=args.get("cron_expr", current_expr))
+
+    if "interval_minutes" not in args and isinstance(current, IntervalTriggerConfig):
+        return current.model_copy(deep=True)
+    minutes = args.get("interval_minutes", 60)
+    return IntervalTriggerConfig(
+        hours=int(minutes // 60),
+        minutes=int(minutes % 60),
+    )
+
+
+def _build_job_config(args: dict, current=None):
+    """Build one typed job config while preserving omitted update fields."""
+    current_type = getattr(current, "job_type", None)
+    job_type = args.get("job_type") or current_type or "agent_run"
+
+    def value(field: str, default=None):
+        if field in args:
+            return args[field]
+        if current is not None and current_type == job_type:
+            return getattr(current, field, default)
+        return default
+
+    callback = value("callback")
+    if job_type == "agent_run":
+        return AgentRunConfig(
+            prompt=value("prompt", ""),
+            model=value("model"),
+            callback=callback,
+            timeout_seconds=int(value("timeout_seconds", 1800)),
+            max_turns=int(value("max_turns", 50)),
+        )
+    if job_type == "http_call":
+        return HttpCallConfig(
+            method=value("method", "GET"),
+            url=value("url", ""),
+            callback=callback,
+            headers=value("headers", {}),
+            body=value("body"),
+            timeout_seconds=int(value("timeout_seconds", 30)),
+        )
+    if job_type == "user_script":
+        source = value("source")
+        if "script" in args:
+            source = "inline"
+        elif "file_path" in args:
+            source = "file"
+        source = source or "file"
+        return UserScriptConfig(
+            language=value("language", "python"),
+            source=source,
+            callback=callback,
+            file_path=value("file_path") if source == "file" else None,
+            script=value("script") if source == "inline" else None,
+            timeout_seconds=int(value("timeout_seconds", 300)),
+        )
+    raise ValueError(f"Unknown job type: {job_type}")
+
+
+async def _resolve_feishu_callback(account_id: str, requested: bool):
+    """Enable callbacks only when the account has a usable bound Feishu owner."""
+    if not requested:
+        return None, None
+    try:
+        config = await asyncio.to_thread(get_client().feishu_configs.get, account_id)
+    except Exception:
+        logger.warning(
+            "Feishu binding lookup failed for account {}", account_id, exc_info=True,
+        )
+        return None, (
+            "Feishu completion notification was not enabled because the Feishu "
+            "binding could not be verified."
+        )
+    if config is None or not (getattr(config, "owner_open_id", "") or "").strip():
+        return None, (
+            "Feishu completion notification was not enabled because Feishu is not bound."
+        )
+    if not getattr(config, "effective_enabled", False):
+        return None, (
+            "Feishu completion notification was not enabled because the bound Feishu bot "
+            "is not available."
+        )
+    return FeishuCallbackConfig(type="feishu"), None
 
 
 def _resolve_account_id(username: str) -> str | None:
@@ -100,7 +223,7 @@ def _text(msg: str, *, error: bool = False) -> dict:
 
 
 def build_scheduler_tools(username: str) -> list:
-    """The 7 scheduler tools scoped to the pod's account."""
+    """The 8 scheduler tools scoped to the pod's account."""
 
     @tool(
         "scheduler_list_jobs",
@@ -174,6 +297,11 @@ def build_scheduler_tools(username: str) -> list:
             if jc.source == "file":
                 detail += f"- File: {jc.file_path}\n"
             detail += f"- Timeout: {jc.timeout_seconds}s\n"
+        callback_type = getattr(getattr(jc, "callback", None), "type", None)
+        detail += (
+            "- Feishu completion notification: "
+            f"{'enabled' if callback_type == 'feishu' else 'disabled'}\n"
+        )
         return _text(detail)
 
     @tool(
@@ -236,26 +364,19 @@ def build_scheduler_tools(username: str) -> list:
             "2. Use AskUserQuestion to present the full job config for confirmation\n"
             "3. Only call this tool after the user approves\n"
             "4. If there is no explicit schedule/recurrence requirement, do not call this tool\n"
+            "5. feishu_callback defaults to false. If true, completion notifications are "
+            "enabled only when the user's Feishu bot and owner binding are available. "
+            "If the result contains a warning, clearly relay it to the user.\n"
         ),
         {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Human-readable job name. Keep it short and descriptive."},
-                "job_type": {"type": "string", "enum": ["agent_run", "http_call", "user_script"], "description": "The scheduled automation kind. `agent_run` means a saved cron/interval automation that launches an agent later or repeatedly; it must not be used for current sub-agent delegation."},
-                "trigger_type": {"type": "string", "enum": ["cron", "interval"], "description": "Schedule type: 'cron' for cron expressions, 'interval' for fixed repeat intervals."},
-                "cron_expr": {"type": "string", "description": "5-field cron expression. Required when trigger_type=cron. Format: 'minute hour day month day_of_week'. Examples: '0 9 * * *', '*/15 * * * *', '0 0 1 * *'."},
-                "interval_minutes": {"type": "number", "description": "Repeat interval in minutes. Required when trigger_type=interval. Examples: 5, 30, 60, 1440."},
-                "timezone": {"type": "string", "description": "IANA timezone for the schedule. Defaults to Asia/Shanghai."},
-                "prompt": {"type": "string", "description": "[agent_run] The prompt saved for the recurring scheduled agent automation. Should be a complete, self-contained instruction for future cron/interval runs. Do not use this to ask a sub-agent to perform the current user request."},
-                "model": {"type": "string", "description": "[agent_run] Optional model override. Leave empty to use the system default."},
-                "url": {"type": "string", "description": "[http_call] The full URL to call. Must include protocol (http:// or https://)."},
-                "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE"], "description": "[http_call] HTTP method. Defaults to GET."},
-                "headers": {"type": "object", "description": "[http_call] HTTP headers as key-value pairs. Example: {\"Authorization\": \"Bearer xxx\", \"Content-Type\": \"application/json\"}"},
-                "body": {"type": "string", "description": "[http_call] Request body string. Typically JSON for POST/PUT requests."},
-                "script": {"type": "string", "description": "[user_script] Inline script content. Provide this OR file_path, not both. If provided, source is set to 'inline'."},
-                "file_path": {"type": "string", "description": "[user_script] Path to script file, relative to the user's workspace. Provide this OR script, not both. If provided, source is set to 'file'."},
-                "language": {"type": "string", "enum": ["python", "shell"], "description": "[user_script] Script language. Determines the interpreter (python3 or /bin/bash)."},
-                "timeout_seconds": {"type": "number", "description": "[http_call/user_script] Execution timeout. Defaults: 30s for http_call, 300s for user_script."},
+                **_JOB_ARGUMENT_PROPERTIES,
+                "feishu_callback": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Send a completion notification through the user's bound Feishu bot. Defaults to false. If Feishu is not bound or available, the job is still created without notifications and the result includes a warning.",
+                },
             },
             "required": ["name", "job_type", "trigger_type"],
         },
@@ -265,30 +386,16 @@ def build_scheduler_tools(username: str) -> list:
         if not account_id:
             return _text("Scheduler unavailable: account not resolved.", error=True)
 
-        if args["trigger_type"] == "cron":
-            trigger = CronTriggerConfig(expr=args.get("cron_expr", "0 9 * * *"))
-        else:
-            mins = args.get("interval_minutes", 60)
-            trigger = IntervalTriggerConfig(hours=int(mins // 60), minutes=int(mins % 60))
-
-        jt = args["job_type"]
-        if jt == "agent_run":
-            job_config = AgentRunConfig(prompt=args.get("prompt", ""), model=args.get("model"))
-        elif jt == "http_call":
-            job_config = HttpCallConfig(
-                method=args.get("method", "GET"), url=args.get("url", ""),
-                headers=args.get("headers", {}), body=args.get("body"),
-                timeout_seconds=int(args.get("timeout_seconds", 30)),
-            )
-        elif jt == "user_script":
-            job_config = UserScriptConfig(
-                language=args.get("language", "python"),
-                source="inline" if args.get("script") else "file",
-                file_path=args.get("file_path"), script=args.get("script"),
-                timeout_seconds=int(args.get("timeout_seconds", 300)),
-            )
-        else:
-            return _text(f"Unknown job type: {jt}", error=True)
+        trigger = _build_trigger(args)
+        try:
+            job_config = _build_job_config(args)
+        except ValueError as exc:
+            return _text(str(exc), error=True)
+        callback, callback_warning = await _resolve_feishu_callback(
+            account_id, bool(args.get("feishu_callback", False)),
+        )
+        job_config.callback = callback
+        jt = job_config.job_type
 
         now = datetime.now(timezone.utc)
         defn = ScheduledJobDefinition(
@@ -304,10 +411,94 @@ def build_scheduler_tools(username: str) -> list:
         )
         created = await asyncio.to_thread(
             get_client().scheduler.create_job, account_id, defn)
-        return _text(
+        message = (
             f"Created job **{created.name}** (id: `{created.id}`, type: {jt}, status: active). "
             f"It arms on every scheduler replica within ~30s."
         )
+        if callback_warning:
+            message += f"\n\nWarning: {callback_warning} The job was created successfully."
+        elif callback is not None:
+            message += " Feishu completion notification is enabled."
+        return _text(message)
+
+    @tool(
+        "scheduler_update_job",
+        (
+            f"{SCHEDULER_TOOL_SCOPE}\n\n"
+            "Update an existing saved scheduled automation job by ID or name. Only "
+            "provided fields are changed. Before calling this tool, use AskUserQuestion "
+            "to confirm the updated configuration with the user. For feishu_callback, "
+            "true enables completion notifications, false disables them, and omitting "
+            "the field preserves the current setting. If the user requests true but "
+            "Feishu is not bound or available, the job is still updated without "
+            "notifications and the result includes a warning that must be clearly "
+            "relayed to the user."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string", "description": "Job ID or name to update."},
+                **_JOB_ARGUMENT_PROPERTIES,
+                "feishu_callback": {
+                    "type": "boolean",
+                    "description": "Completion notification setting. true enables Feishu notification, false disables it, and omission preserves the current setting.",
+                },
+            },
+            "required": ["job_id"],
+        },
+    )
+    async def update_job(args):
+        account_id = _resolve_account_id(username)
+        if not account_id:
+            return _text("Scheduler unavailable: account not resolved.", error=True)
+        needle = args.get("job_id", "")
+        existing = await asyncio.to_thread(_find_job, account_id, needle)
+        if not existing:
+            return _text(f"Job not found: {needle}", error=True)
+
+        updated = existing.model_copy(deep=True)
+        if "name" in args:
+            updated.name = args["name"]
+        if any(key in args for key in ("trigger_type", "cron_expr", "interval_minutes")):
+            updated.trigger = _build_trigger(args, updated.trigger)
+        if "timezone" in args:
+            updated.timezone = args["timezone"]
+
+        try:
+            updated.job_config = _build_job_config(args, updated.job_config)
+        except ValueError as exc:
+            return _text(str(exc), error=True)
+
+        callback_warning = None
+        if "feishu_callback" in args:
+            callback, callback_warning = await _resolve_feishu_callback(
+                account_id, bool(args["feishu_callback"]),
+            )
+            updated.job_config.callback = callback
+
+        if isinstance(updated.job_config, AgentRunConfig):
+            updated.prompt = updated.job_config.prompt
+            updated.model = updated.job_config.model
+        else:
+            updated.prompt = ""
+            updated.model = None
+        updated.updated_at = datetime.now(timezone.utc)
+
+        saved = await asyncio.to_thread(
+            get_client().scheduler.update_job, existing.id, updated,
+        )
+        if saved is None:
+            return _text(f"Job not found: {needle}", error=True)
+        message = (
+            f"Updated job **{saved.name}** (id: `{saved.id}`, "
+            f"type: {saved.job_config.job_type}, status: {saved.status})."
+        )
+        if callback_warning:
+            message += f"\n\nWarning: {callback_warning} The job was updated successfully."
+        elif "feishu_callback" in args:
+            state = "enabled" if saved.job_config.callback is not None else "disabled"
+            message += f" Feishu completion notification is {state}."
+        return _text(message)
 
     @tool(
         "scheduler_delete_job",
@@ -423,7 +614,10 @@ def build_scheduler_tools(username: str) -> list:
         await asyncio.to_thread(get_client().scheduler.set_job_status, job.id, status)
         return _text(f"{verb} job **{job.name}** (id: `{job.id}`)")
 
-    return [list_jobs, view_job, create_job, delete_job, trigger_job, pause_job, resume_job]
+    return [
+        list_jobs, view_job, create_job, update_job, delete_job,
+        trigger_job, pause_job, resume_job,
+    ]
 
 
 def build_scheduler_mcp_server(username: str):

@@ -326,7 +326,7 @@ Executors by `job_type`:
 **Retention (D15):** a pod boot task prunes scheduler-origin session JSONLs older than
 `history_retention_days` (default 7). Run records persist in data-spine forever.
 
-**MCP tools (agent self-scheduling):** port `mcp_tools.py` (7 tools, `build_scheduler_mcp_server`) into the
+**MCP tools (agent self-scheduling):** port `mcp_tools.py` (8 tools, including create/update with the optional `feishu_callback` switch, via `build_scheduler_mcp_server`) into the
 runner as an in-process SDK MCP server registered in the options builder. Re-points: `get_job_store()` →
 the dataplane scheduler client (pod is single-account — no cross-tenant reach); `write_command("reload_user")`
 → **delete** (the 30 s re-list covers propagation, D6). The confirm-before-create UX rule

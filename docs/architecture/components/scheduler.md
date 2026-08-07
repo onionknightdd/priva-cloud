@@ -267,7 +267,7 @@ The gateway drill **deferred the scheduler↔gateway orchestration to this drill
 
 ### 7.1 `scheduler_*` tools stay in the pod, re-pointed to the data-plane (SC12)
 
-`build_scheduler_mcp_server(username)` (`mcp_tools.py:38`) — the 7 tools (`list/view/create/delete/trigger/pause/resume`) that let the **agent itself** manage the user's jobs — remains an **in-pod** in-process MCP server (it's part of the pod's tool surface). Two re-points, nothing else changes about its UX (incl. the `AskUserQuestion`-before-create rule `:150-151` and the careful "this is durable scheduling, not sub-agent delegation" scoping `:27-35`):
+`build_scheduler_mcp_server(username)` (`mcp_tools.py:38`) — the 8 tools (`list/view/create/update/delete/trigger/pause/resume`) that let the **agent itself** manage the user's jobs — remains an **in-pod** in-process MCP server (it's part of the pod's tool surface). Create and update expose an optional `feishu_callback` switch; enabling it requires an effective Feishu bot with a bound owner, while an unavailable binding degrades to a successful job mutation plus a warning. The `AskUserQuestion` confirmation rule and the careful "this is durable scheduling, not sub-agent delegation" scoping remain unchanged:
 - `get_job_store()` (direct YAML, `:213,268`) → the **data-plane** job-CRUD RPC, scoped to the pod's `account_id` (the pod is single-account, so `username`→`account_id` is implicit — no cross-tenant reach).
 - `write_command("reload_user", …)` (`:269`, file bus) → `PUBLISH scheduler:reload {account_id}` (the pod is a Redis client; it cannot write a shared-FS command file in the multi-tenant world).
 

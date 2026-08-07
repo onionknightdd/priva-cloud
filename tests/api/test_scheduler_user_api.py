@@ -261,7 +261,7 @@ def test_run_timestamps_carry_utc_offset(harness):
         assert run[field].endswith("Z") or "+00:00" in run[field], run[field]
 
 
-# --- the 7 MCP tools -----------------------------------------------------------
+# --- the 8 MCP tools -----------------------------------------------------------
 
 
 @pytest.fixture
@@ -278,8 +278,8 @@ def tools(dataplane, monkeypatch):
     assert mcp_tools.SCHEDULER_MCP_TOOL_PATTERN == "mcp__Scheduler__*"
     assert set(by_name) == {
         "scheduler_list_jobs", "scheduler_view_job", "scheduler_create_job",
-        "scheduler_delete_job", "scheduler_trigger_job", "scheduler_pause_job",
-        "scheduler_resume_job",
+        "scheduler_update_job", "scheduler_delete_job", "scheduler_trigger_job",
+        "scheduler_pause_job", "scheduler_resume_job",
     }
     return SimpleNamespace(
         by_name=by_name, dataplane=dataplane, account_id=account_id,
@@ -293,6 +293,21 @@ def _run(tool, args) -> str:
     if out.get("is_error"):
         return f"ERROR: {text}"
     return text
+
+
+def _bind_feishu(tools):
+    configs = tools.dataplane.feishu_configs
+    configs.set_user(
+        tools.account_id,
+        app_id="cli_scheduler_test",
+        app_secret="scheduler-secret",
+        user_enabled=True,
+    )
+    code, _ = configs.create_link_code(tools.account_id)
+    assert configs.bind_owner_with_code(
+        tools.account_id, code, "on_scheduler_owner", "ou_scheduler_owner",
+    )
+    assert configs.get(tools.account_id).effective_enabled is True
 
 
 def test_mcp_create_list_view_pause_resume_delete(tools):
@@ -342,6 +357,76 @@ def test_mcp_interval_create_and_trigger(tools):
     out = _run(tools.by_name["scheduler_trigger_job"], {"job_id": "poll api"})
     assert "Triggered immediate run" in out
     assert posted and posted[0].endswith(f"/internal/trigger/{job.id}")
+
+
+def test_mcp_create_feishu_callback_defaults_off_and_warns_when_unbound(tools):
+    create = tools.by_name["scheduler_create_job"]
+    callback_schema = create.input_schema["properties"]["feishu_callback"]
+    assert callback_schema["type"] == "boolean"
+    assert callback_schema["default"] is False
+
+    _run(create, {
+        "name": "no notification", "job_type": "agent_run",
+        "trigger_type": "interval", "interval_minutes": 60,
+        "prompt": "brief me",
+    })
+    default_job = tools.dataplane.scheduler.list_jobs(tools.account_id)[0]
+    assert default_job.job_config.callback is None
+
+    warning = _run(create, {
+        "name": "requested notification", "job_type": "agent_run",
+        "trigger_type": "interval", "interval_minutes": 60,
+        "prompt": "brief me", "feishu_callback": True,
+    })
+    assert "Created job **requested notification**" in warning
+    assert "Feishu is not bound" in warning
+    requested_job = tools.dataplane.scheduler.list_jobs(tools.account_id)[1]
+    assert requested_job.job_config.callback is None
+
+
+def test_mcp_create_and_update_feishu_callback_for_bound_owner(tools):
+    _bind_feishu(tools)
+    created = _run(tools.by_name["scheduler_create_job"], {
+        "name": "daily notification", "job_type": "agent_run",
+        "trigger_type": "cron", "cron_expr": "0 9 * * *",
+        "prompt": "brief me", "feishu_callback": True,
+    })
+    assert "Feishu completion notification is enabled" in created
+    (job,) = tools.dataplane.scheduler.list_jobs(tools.account_id)
+    assert job.job_config.callback.type == "feishu"
+
+    updated = _run(tools.by_name["scheduler_update_job"], {
+        "job_id": job.id, "name": "renamed notification",
+    })
+    assert "Updated job **renamed notification**" in updated
+    preserved = tools.dataplane.scheduler.get_job(job.id)
+    assert preserved.job_config.callback.type == "feishu"
+
+    disabled = _run(tools.by_name["scheduler_update_job"], {
+        "job_id": job.id, "feishu_callback": False,
+    })
+    assert "Feishu completion notification is disabled" in disabled
+    assert tools.dataplane.scheduler.get_job(job.id).job_config.callback is None
+
+
+def test_mcp_update_succeeds_with_warning_when_feishu_is_unbound(tools):
+    _run(tools.by_name["scheduler_create_job"], {
+        "name": "unbound update", "job_type": "http_call",
+        "trigger_type": "interval", "interval_minutes": 30,
+        "url": "https://example.com/health",
+    })
+    (job,) = tools.dataplane.scheduler.list_jobs(tools.account_id)
+
+    result = _run(tools.by_name["scheduler_update_job"], {
+        "job_id": job.id,
+        "name": "updated without notification",
+        "feishu_callback": True,
+    })
+    assert "Updated job **updated without notification**" in result
+    assert "Feishu is not bound" in result
+    saved = tools.dataplane.scheduler.get_job(job.id)
+    assert saved.name == "updated without notification"
+    assert saved.job_config.callback is None
 
 
 def test_mcp_tools_scoped_to_own_account(tools):
