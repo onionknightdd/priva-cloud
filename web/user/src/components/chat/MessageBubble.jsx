@@ -46,8 +46,10 @@ import {
 } from '../../utils/responseSummary'
 import { collectToolRun } from '../../utils/toolRunGrouping'
 
-const ASSISTANT_MESSAGE_GAP = 8
-const ASSISTANT_PROCESS_BLOCK_GAP = 5
+// Keep block spacing independent from markdown line-height so the assistant
+// response breathes more without changing the rhythm inside text blocks.
+const ASSISTANT_MESSAGE_GAP = 10
+const ASSISTANT_PROCESS_BLOCK_GAP = 7
 const ASSISTANT_META_MARGIN_TOP = -2
 
 /**
@@ -1653,7 +1655,7 @@ export default memo(function MessageBubble({
       const thinkSegments = parseThinkTags(block.text)
       if (thinkSegments) {
         return (
-          <div key={i} className="flex flex-col min-w-0" style={{ gap: 10 }}>
+          <div key={i} className="flex flex-col min-w-0" style={{ gap: 12 }}>
             {thinkSegments.map((seg, si) =>
               seg.type === 'thinking'
                 ? <ThinkingBlock key={si} content={seg.content} t={t} />
