@@ -35,6 +35,14 @@
 >   **deep M6 body cleanup is DONE (2026-06-18)** — agent-runner (§7/§9.6/§11/§13), data-spine (§2.6/§2.8/§4 #5), and
 >   this blueprint **§3/§4** are rewritten M6-correct, not just banner-flagged. Still under this banner by design
 >   (as with M1/M2/M5): the §2 decisions table, the system diagram, and §5/§6/§7.*
+> - **M7 — Public Agent executes in the caller tenant; restricted runs add an intra-tenant sandbox**
+>   ([ADR-0004](../adr/0004-public-agent-execution-and-bubblewrap.md), 2026-08-07). A publishes an immutable
+>   Definition and B instantiates it in B's existing per-account Pod; there is no per-Agent/per-run Pod in v1.
+>   The existing Pod remains the A↔B tenant boundary. An unreviewed public Definition that can use Bash/files
+>   must use a fail-closed `public-restricted` profile: platform-controlled outer bubblewrap, B-owned canonical
+>   RO/RW grants, inherited Pod network (`--share-net`), tool-path enforcement, private Agent state, and child
+>   credential/environment scrubbing. Trusted/owner-authored Definitions do not require bubblewrap. Installing
+>   bwrap alone does not satisfy M7; the ADR's seccomp and acceptance gates are binding.
 > - **C1 — audit log is per-user JSONL on a dedicated audit volume**, not a DB table.
 > - **C3 — spend lives in the metering proxy + Redis `spend:reserve`**, not a SQLite `budget_ledger`. *(Spend now **deferred** — see M6; the proxy/ledger/`spend:reserve` are not built "for the moment.")*
 > - **C4 — session fork is SUPPORTED** (a fork is a first-class CHILD create with a new immutable

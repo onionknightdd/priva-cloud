@@ -12,6 +12,41 @@ This document is the executable contract for the pod: §0 what is reused/strippe
 
 ---
 
+## Revision note — Public Agent restricted execution · ADR-0004 · 2026-08-07
+
+[ADR-0004](../../adr/0004-public-agent-execution-and-bubblewrap.md) is binding for
+shared/public Agent Definitions. It does **not** change the one-account/one-pod tenant model:
+A publishes an immutable Definition, B instantiates it in B's existing runner Pod, and no
+per-Agent/per-run Pod is added in v1. It adds a second, intra-tenant trust boundary because a
+third-party Definition must not automatically inherit all of B's Pod-visible files and service
+environment.
+
+- Private, owner-authored, or administrator-reviewed Definitions use the `trusted` profile;
+  bubblewrap is optional and existing behavior remains valid.
+- An unreviewed public Definition that can use Bash or file tools uses the fail-closed
+  `public-restricted` profile: a platform-controlled **outer bubblewrap** launcher wraps the whole
+  Claude CLI, mounts only server-resolved B-owned RO/RW grants plus private Agent state, and keeps
+  the Pod network namespace with `--share-net`.
+- Claude's SDK-native sandbox is not the sole enforcement boundary because its documented OS-level
+  scope is Bash and descendants. Non-Bash file tools, FileCanvas, Hooks, MCP and session mutations
+  must share the ADR's grant resolver; arbitrary Hooks/stdio MCP/env/settings are forbidden in an
+  unreviewed Definition.
+- The launcher removes runner/data-spine credentials from the inherited environment and enables
+  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`; the original platform API key and short-TTL runner token never
+  enter Claude. A private per-public-Agent `CLAUDE_CONFIG_DIR` prevents exposure of B's ordinary
+  settings and other sessions.
+- `RuntimeDefault` currently blocks bwrap's user namespace on the verified minikube/containerd
+  runtime. PoC may use `Unconfined`; production requires a narrowly extended Localhost seccomp.
+  Non-root, drop-ALL, no-new-privileges and the read-only container root remain mandatory; no
+  `SYS_ADMIN` or privileged container is introduced.
+
+This profile is **not considered implemented** merely because `bubblewrap` is installed. It ships
+only after the ADR's directory-escape, credential-scrub, settings-non-widening, network-equivalence
+and fail-closed acceptance tests pass. If the private config home, environment allowlist or tool
+path gate is absent, only `trusted` Definitions may run.
+
+---
+
 ## Revision note — M5 (no session table) · 2026-06-18
 
 A binding modification from the user (decided during the Agent-Gateway drill — `components/agent-gateway.md` §3/§13), superseding this spec wherever they conflict: **there is no central `session_index` table — the JSONL is the session store (decision 15).** Consequences for the pod:

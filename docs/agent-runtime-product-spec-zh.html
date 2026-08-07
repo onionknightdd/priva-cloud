@@ -885,7 +885,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <h2><span class="no">§11</span>设计演进与扩展路径</h2>
 <p class="lead">当前架构是为「一个用户从浏览器驱动一个 agent」而建。下述能力将其延伸至 <strong>agent 驱动 agent</strong>、<strong>人类带外审批</strong>，以及 <strong>agent 跨用户共享</strong>。对每一项，设计都已提供大部分基座；价值在于精准看清它在何处成立、又必须在何处改变。这些是设计方向，而非已承诺的路线图（§10）。</p>
 
-<div class="co info"><span class="cot">贯穿主线</span><p>每租户一 pod + EPP 转向 + 权限/hook 治理，事实证明是全部四项扩展的强力基座：<em>一个已发布的 agent 不过是一个租户，一次 A2A 调用不过是一次唤醒，一次带外审批不过是一个持久化的 <code>permission_request</code>，而经纪的 MCP 鉴权，不过是 control-panel 为工具做它早已为 runner token 所做的事。</em>而它们各自要求的回报，大多是已在 Phase 6 清单上的加固（NetworkPolicy、mTLS/JWKS、KMS/DEK），外加权限协调器的持久性。这些扩展并不与架构相抗 —— 它们兑现的是架构那些被推迟的安全支票。</p></div>
+<div class="co info"><span class="cot">贯穿主线</span><p>每租户一 pod + EPP 转向 + 权限/hook 治理，事实证明是全部四项扩展的强力基座：<em>发布配置在调用者租户内实例化，只有服务型共享运行实例才建模为独立租户；一次 A2A 调用不过是一次唤醒，一次带外审批不过是一个持久化的 <code>permission_request</code>，而经纪的 MCP 鉴权，不过是 control-panel 为工具做它早已为 runner token 所做的事。</em>而它们各自要求的回报，大多是已在 Phase 6 清单上的加固（NetworkPolicy、mTLS/JWKS、KMS/DEK），外加权限协调器的持久性。这些扩展并不与架构相抗 —— 它们兑现的是架构那些被推迟的安全支票。</p></div>
 
 <h3 id="a2a">11.1 Agent 间（A2A）互通</h3>
 <p><strong>当前基座。</strong>agent-runner 已经经 MCP <em>消费</em>工具（agent→工具）并运行 pod 内 subagents；agentgateway edge 是一个 AI 原生的 L7 代理；且 EPP 已提供每 agent 身份、按需唤醒与逐请求转向。多 agent 工作流巡视器已对多 agent 运行进行建模与持久化。</p>
@@ -917,6 +917,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
   <li><strong>(a) 发布配置</strong> —— 他人在<em>他们自己</em>隔离的 pod 中实例化该 agent。安全，且契合当前设计：隔离与 BYOK 保持在每个实例化者一侧。</li>
   <li><strong>(b) 共享一个运行中的 agent</strong> —— 他人向<em>你的</em>实例发送任务。危险：他们的输入现在驱动着一个位于持有你工作区、你的 BYOK、你的 MCP 凭证的 pod 内的 agent。</li>
 </ul>
+<div class="co info"><span class="cot">2026-08-07 绑定决策</span><p>v1 选择模型 (a)：A 发布不可变 Definition，B 在 B 已有的租户 pod 中实例化；不增加每 Agent 或每次运行 pod。这里的「安全」只表示租户 A/B 继续由 pod 隔离，不表示第三方 Definition 自动获得 B pod 的全部权限。未经审核且可使用 Bash/文件工具的 Definition 必须进入 <code>public-restricted</code> 画像，由 outer bubblewrap 只挂载 B 明确授予的目录、保留 pod 网络，并同时执行工具路径校验与凭据环境清洗；可信/自有 Definition 不强制。完整威胁模型、非目标和验收门槛见 <a href="adr/0004-public-agent-execution-and-bubblewrap.md">ADR-0004</a>。下述“已发布 agent 自成租户”仅适用于模型 (b) 的服务型共享，不是模型 (a) 的 v1 执行方式。</p></div>
 <div class="co info"><span class="cot">干净的模型</span><p>把一个已发布的 agent 当作<strong>它自己的租户</strong> —— 它自己的 <code>AgentTenant</code> CR、它自己的 pod、它自己作用域受限的卷与<em>服务</em>凭证 —— 由他人经 A2A（§11.1）在按调用方鉴权与审计之下调用。这原封不动地复用了 scale-to-zero、pod 隔离与 EPP 转向：一个可发布 agent 不过是一个「用户」为共享服务身份的租户。</p></div>
 <div class="co danger"><span class="cot">文件系统保障（模型 b，或任何入站共享的会话）</span><p>一个不受信的消费方可能要求一个共享 agent 读取作者的文件并返回 —— 混淆代理式的数据外泄。必备防护：一个仅注入 agent 所需内容的<strong>受囚禁 / 易逝暂存工作区</strong>，绝不含作者的 <code>~/.claude/projects</code>；<strong>只读或每次调用的临时目录</strong>；一个<strong>锁定的权限画像 + 强制 hooks</strong>；一条<strong>默认拒绝的出站 NetworkPolicy</strong>，使其既不能提权工具也不能外泄；以及<strong>凭证解耦</strong> —— 专用服务凭证或经纪的 MCP token（§11.4），绝不用作者的个人 BYOK。共享放大了爆炸半径，这把 §4.4 的 Web 终端 / NetworkPolicy 加固从「推迟」提升为「前置条件」。</p></div>
 
