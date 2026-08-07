@@ -9,6 +9,7 @@ import {
 } from '../api/sessions'
 import { UnauthorizedError } from '@shared/api/client'
 import safeStorage from '@shared/utils/safeStorage'
+import { normalizeSessionTags, normalizeTagColorMap } from '../utils/sessionTags'
 
 const STORAGE_KEY_WIDTH = 'sidebar-width'
 const STORAGE_KEY_COLLAPSED = 'sidebar-collapsed'
@@ -41,6 +42,7 @@ const persistWidth = (width) => {
 }
 
 function mapSession(s) {
+  const tags = normalizeSessionTags(Array.isArray(s.tags) ? s.tags : s.tag)
   return {
     id: s.session_id,
     sessionId: s.session_id,
@@ -53,7 +55,11 @@ function mapSession(s) {
     cwd: s.cwd,
     fileSize: s.file_size,
     sessionSource: s.session_source || 'project',
-    tag: s.tag || null,
+    // ``tag`` remains as a compatibility alias for code that has not migrated
+    // yet; the sidebar and API use the canonical, maximum-three ``tags`` list.
+    tag: tags[0] || null,
+    tags,
+    tagColors: normalizeTagColorMap(s.tag_colors),
     pinned: s.pinned || false,
     archived: s.archived || false,
     parentSessionId: s.parent_session_id || null,

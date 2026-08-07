@@ -126,13 +126,16 @@ export async function renameSession(sessionId, title) {
   return handleJson(res)
 }
 
-export async function tagSession(sessionId, tag) {
+export async function tagSession(sessionId, tags) {
+  const normalized = Array.isArray(tags) ? tags : []
   const res = await fetchWithWake(
     `${BASE_URL}/agent/sessions/${encodeURIComponent(sessionId)}/tag`,
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      body: JSON.stringify({ tag: tag ?? null }),
+      // Send the first tag too so a rolling deployment with an older runner
+      // still preserves the legacy single-tag behavior.
+      body: JSON.stringify({ tag: normalized[0] ?? null, tags: normalized }),
     }
   )
   return handleJson(res)

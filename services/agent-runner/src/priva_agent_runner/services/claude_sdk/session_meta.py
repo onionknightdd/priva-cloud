@@ -5,7 +5,9 @@ ourselves in a single **account-level** index next to the SDK's data:
 
     ~/.claude/priva_meta.json
     {
-      "sessions": { "<session_id>": {"pinned": bool, "archived": bool} },
+      "sessions": {
+        "<session_id>": {"pinned": bool, "archived": bool, "tags": [str, ...]}
+      },
       "workdirs":  { "<canonical_cwd>": {"pinned": bool} },
       "recent_activities": [
         {"session_id": "<session_id>", "cwd": "<canonical_cwd>"}
@@ -13,7 +15,8 @@ ourselves in a single **account-level** index next to the SDK's data:
       "scheduler_sessions": {
         "<session_id>": {"job_id": str, "job_name": str, "run_id": str}
       },
-      "recaps":   { "<session_id>": {"text": str, "turns": int} }
+      "recaps":   { "<session_id>": {"text": str, "turns": int} },
+      "tag_colors": { "<tag>": 0..99 }
     }
 
 ``scheduler_sessions`` marks sessions a scheduled job opened (design D3): the
@@ -21,11 +24,11 @@ sessions list surfaces them as ``origin='scheduler'`` (sidebar ⏰) and the D15
 boot prune uses the index to delete only scheduler-origin transcripts.
 
 ``recaps`` is deliberately a **top-level** key rather than a field on the
-``sessions`` entry: ``set_session_flags`` drops an entry outright once neither
-flag is set, so a recap parked in there would be deleted the moment a user
-un-pinned the session. The recap *toggle* is not here at all — it is user
-config, so it lives in ``.priva.user.yml`` beside ``vision_model``; this file
-stays a pure per-session index.
+``sessions`` entry: an entry is dropped once it carries neither a flag nor a
+tag, so a recap parked in there could be deleted when a user clears metadata.
+The recap *toggle* is not here at all — it is user config, so it lives in
+``.priva.user.yml`` beside ``vision_model``; this file stays a pure per-session
+index.
 
 One file (not per-session sidecars like ``session_add_dirs``) because the runner
 pod is per-account / single-writer: the sessions list reads the whole index once
@@ -33,9 +36,10 @@ per request, and the Settings → Archived panel can enumerate every archived
 session without walking each project dir. Read-modify-write goes through a
 module-level lock; writes are atomic (temp file + ``os.replace``).
 
-Pin/archive are deliberately separate from the SDK ``tag`` (a single string that
-can't hold pinned + archived + a user tag at once); keeping them out of ``tag``
-is also what excludes them from the tag-filter chips.
+The SDK ``tag`` is a single string, so Priva stores the canonical user-facing
+``tags`` list here (up to three) while mirroring its first value back to the SDK
+for older clients. ``tag_colors`` reserves one of 100 stable color slots for a
+tag name; assignments survive refreshes and session deletion.
 """
 
 from __future__ import annotations
@@ -56,6 +60,8 @@ logger = get_app_logger(__name__)
 
 _META_FILENAME = "priva_meta.json"
 _RECENT_ACTIVITIES_LIMIT = 5
+_MAX_SESSION_TAGS = 3
+_TAG_COLOR_SLOTS = 100
 # A recap is one sentence; anything longer is a model that ignored the prompt.
 _RECAP_MAX_CHARS = 120
 
@@ -75,6 +81,7 @@ def _empty() -> dict:
         "recent_activities": [],
         "scheduler_sessions": {},
         "recaps": {},
+        "tag_colors": {},
     }
 
 
@@ -120,12 +127,14 @@ def _read_raw() -> dict:
     workdirs = data.get("workdirs")
     scheduler_sessions = data.get("scheduler_sessions")
     recaps = data.get("recaps")
+    tag_colors = data.get("tag_colors")
     return {
         "sessions": sessions if isinstance(sessions, dict) else {},
         "workdirs": workdirs if isinstance(workdirs, dict) else {},
         "recent_activities": _normalize_recent_activities(data.get("recent_activities")),
         "scheduler_sessions": scheduler_sessions if isinstance(scheduler_sessions, dict) else {},
         "recaps": recaps if isinstance(recaps, dict) else {},
+        "tag_colors": tag_colors if isinstance(tag_colors, dict) else {},
     }
 
 
@@ -155,6 +164,126 @@ def get_session_flags(session_id: str, meta: dict | None = None) -> dict:
         "pinned": bool(entry.get("pinned", False)),
         "archived": bool(entry.get("archived", False)),
     }
+
+
+def _normalize_tags(raw: object, *, truncate: bool) -> list[str]:
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    tags: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        tag = item.strip()
+        folded = tag.casefold()
+        if not tag or folded in seen:
+            continue
+        if len(tags) >= _MAX_SESSION_TAGS:
+            if truncate:
+                break
+            raise ValueError(f"Maximum {_MAX_SESSION_TAGS} tags per session")
+        seen.add(folded)
+        tags.append(tag)
+    return tags
+
+
+def normalize_session_tags(raw: object) -> list[str]:
+    """Validate/normalize an API tag list while preserving user-entered case."""
+    return _normalize_tags(raw, truncate=False)
+
+
+def get_session_tags(
+    session_id: str, meta: dict | None = None, *, fallback: str | None = None
+) -> list[str]:
+    """Canonical tags for a session, falling back to the SDK's legacy tag."""
+    data = meta if meta is not None else _read_raw()
+    entry = data.get("sessions", {}).get(session_id)
+    if isinstance(entry, dict) and "tags" in entry:
+        return _normalize_tags(entry.get("tags"), truncate=True)
+    return _normalize_tags(fallback, truncate=True)
+
+
+def fallback_tag_color_index(tag: str) -> int:
+    """Stable color slot for legacy tags that predate the persisted registry."""
+    # FNV-1a is mirrored by the web client for old backends/responses that do
+    # not yet include ``tag_colors``.
+    value = 2166136261
+    for byte in tag.lower().encode("utf-8"):
+        value ^= byte
+        value = (value * 16777619) & 0xFFFFFFFF
+    return value % _TAG_COLOR_SLOTS
+
+
+def _registered_tag_color(registry: dict, tag: str) -> int | None:
+    """Find a valid slot by exact name first, then case-insensitively."""
+    direct = registry.get(tag)
+    if isinstance(direct, int) and 0 <= direct < _TAG_COLOR_SLOTS:
+        return direct
+    folded = tag.casefold()
+    for candidate, index in registry.items():
+        if (
+            isinstance(candidate, str)
+            and candidate.casefold() == folded
+            and isinstance(index, int)
+            and 0 <= index < _TAG_COLOR_SLOTS
+        ):
+            return index
+    return None
+
+
+def _reserve_tag_colors(data: dict, tags: object) -> bool:
+    """Reserve unused slots for tag names, returning whether data changed."""
+    values = [tags] if isinstance(tags, str) else tags
+    if not isinstance(values, (list, tuple, set)):
+        return False
+    registry = data.get("tag_colors")
+    if not isinstance(registry, dict):
+        registry = {}
+        data["tag_colors"] = registry
+    used = {
+        value
+        for value in registry.values()
+        if isinstance(value, int) and 0 <= value < _TAG_COLOR_SLOTS
+    }
+    changed = False
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        tag = value.strip()
+        folded = tag.casefold()
+        if not tag or folded in seen:
+            continue
+        seen.add(folded)
+        if _registered_tag_color(registry, tag) is not None:
+            continue
+        start = fallback_tag_color_index(tag)
+        slot = next(
+            (
+                (start + offset) % _TAG_COLOR_SLOTS
+                for offset in range(_TAG_COLOR_SLOTS)
+                if (start + offset) % _TAG_COLOR_SLOTS not in used
+            ),
+            start,
+        )
+        registry[tag] = slot
+        used.add(slot)
+        changed = True
+    return changed
+
+
+def get_tag_colors(tags: object, meta: dict | None = None) -> dict[str, int]:
+    """Return each tag's persisted 0..99 color slot (stable-hash fallback)."""
+    data = meta if meta is not None else _read_raw()
+    registry = data.get("tag_colors", {})
+    registry = registry if isinstance(registry, dict) else {}
+    out: dict[str, int] = {}
+    for tag in _normalize_tags(tags, truncate=True):
+        index = _registered_tag_color(registry, tag)
+        out[tag] = index if index is not None else fallback_tag_color_index(tag)
+    return out
 
 
 def get_workdir_pinned(cwd: str, meta: dict | None = None) -> bool:
@@ -203,6 +332,15 @@ def get_recap(session_id: str, meta: dict | None = None) -> dict | None:
 # --- Writes (serialized read-modify-write) ------------------------------------
 
 
+async def ensure_tag_colors(tags: object) -> dict:
+    """Migrate legacy SDK tags into the stable color registry on first list."""
+    async with _lock:
+        data = _read_raw()
+        if _reserve_tag_colors(data, tags):
+            _write_raw(data)
+        return data
+
+
 async def set_session_flags(
     session_id: str, *, pinned: bool | None = None, archived: bool | None = None
 ) -> dict:
@@ -216,9 +354,12 @@ async def set_session_flags(
             entry["pinned"] = bool(pinned)
         if archived is not None:
             entry["archived"] = bool(archived)
-        # Drop the entry entirely once it carries no active flags — keeps the
-        # index from accumulating all-False rows.
-        if not entry.get("pinned") and not entry.get("archived"):
+        # Drop the entry entirely once it carries no active flags or tags.
+        if (
+            not entry.get("pinned")
+            and not entry.get("archived")
+            and not entry.get("tags")
+        ):
             data["sessions"].pop(session_id, None)
         else:
             data["sessions"][session_id] = entry
@@ -226,6 +367,37 @@ async def set_session_flags(
         return {
             "pinned": bool(entry.get("pinned", False)),
             "archived": bool(entry.get("archived", False)),
+        }
+
+
+async def set_session_tags(session_id: str, tags: object) -> dict:
+    """Persist up to three tags and reserve stable, unique color slots.
+
+    The first 100 distinct tag names receive unique slots. The registry is kept
+    after sessions are deleted so a reused name never changes color; names added
+    after all slots are occupied fall back to their deterministic hash slot.
+    """
+    normalized = normalize_session_tags(tags)
+    async with _lock:
+        data = _read_raw()
+        entry = data["sessions"].get(session_id)
+        if not isinstance(entry, dict):
+            entry = {"pinned": False, "archived": False}
+        if normalized:
+            entry["tags"] = normalized
+        else:
+            entry.pop("tags", None)
+        if entry.get("pinned") or entry.get("archived") or entry.get("tags"):
+            data["sessions"][session_id] = entry
+        else:
+            data["sessions"].pop(session_id, None)
+
+        _reserve_tag_colors(data, normalized)
+
+        _write_raw(data)
+        return {
+            "tags": normalized,
+            "tag_colors": get_tag_colors(normalized, data),
         }
 
 

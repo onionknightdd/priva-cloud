@@ -33,7 +33,15 @@ import { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/
 import { DURATION, EASE_SPRING } from '@shared/motion/tokens'
 import DirectoryPicker from '../shared/DirectoryPicker'
 import TagFilterChip from '../shared/TagFilterChip'
+import TagBadge from '../shared/TagBadge'
 import safeStorage from '@shared/utils/safeStorage'
+import {
+  MAX_SESSION_TAGS,
+  findTagColorIndex,
+  normalizeSessionTags,
+  normalizeTagColorMap,
+  sessionTags,
+} from '../../utils/sessionTags'
 
 // Compact cwd label for a group header: the last path segment (full path in title).
 function shortCwd(p) {
@@ -130,6 +138,7 @@ function SessionItem({
   const editing = renameEditingId === session.id
   const isProject = session.sessionSource === 'project'
   const menuOpen = openMenuId === session.id
+  const tags = sessionTags(session)
   const menuItemStyle = {
     background: 'transparent',
     border: 'none',
@@ -377,7 +386,7 @@ function SessionItem({
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                 >
                   <Flag size={13} strokeWidth={1.5} />
-                  {session.tag ? t('sidebar.changeTag') : t('sidebar.setTag')}
+                  {tags.length > 0 ? t('sidebar.changeTags') : t('sidebar.setTags')}
                 </button>
                 <div style={{ height: 1, background: 'var(--border-subtle)' }} />
                 <button
@@ -412,9 +421,9 @@ function SessionItem({
           </div>
         )}
       </div>
-      {session.tag && !editing && (
+      {tags.length > 0 && !editing && (
         <div
-          className="flex items-center gap-1"
+          className="flex flex-wrap items-center gap-1 min-w-0"
           style={{
             // Regular titles start at the row edge; scheduled titles follow a
             // 13px CalendarClock plus the row's 8px gap.
@@ -423,23 +432,13 @@ function SessionItem({
             zIndex: 1,
           }}
         >
-          <span
-            className="inline-flex items-center"
-            style={{
-              background: 'var(--orange)',
-              border: 'none',
-              borderRadius: 12,
-              color: 'var(--text-inverse)',
-              fontSize: 10,
-              fontWeight: 600,
-              lineHeight: '14px',
-              padding: '0 5px',
-              maxWidth: '100%',
-            }}
-            title={session.tag}
-          >
-            <span className="truncate">{session.tag}</span>
-          </span>
+          {tags.map((tag) => (
+            <TagBadge
+              key={tag.toLowerCase()}
+              tag={tag}
+              colorIndex={findTagColorIndex(tag, session.tagColors)}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -448,23 +447,79 @@ function SessionItem({
 
 function TagPopover({ session, onClose, recentTags, onSaved }) {
   const { t } = useTranslation()
-  const [value, setValue] = useState(session.tag || '')
+  const [selectedTags, setSelectedTags] = useState(() => sessionTags(session))
+  const [value, setValue] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
-  const commit = async (nextTag) => {
+  const addTag = (candidate) => {
+    const tag = String(candidate || '').trim()
+    if (!tag) return false
+    const key = tag.toLowerCase()
+    if (selectedTags.some((item) => item.toLowerCase() === key)) {
+      setValue('')
+      setError(null)
+      return true
+    }
+    if (selectedTags.length >= MAX_SESSION_TAGS) {
+      setError(t('sidebar.tagLimit', { max: MAX_SESSION_TAGS }))
+      return false
+    }
+    setSelectedTags((current) => [...current, tag])
+    setValue('')
+    setError(null)
+    return true
+  }
+
+  const removeTag = (tag) => {
+    const key = tag.toLowerCase()
+    setSelectedTags((current) => current.filter((item) => item.toLowerCase() !== key))
+    setError(null)
+  }
+
+  const commit = async (nextTags) => {
     if (saving) return
+    const normalized = normalizeSessionTags(nextTags)
     setSaving(true)
     setError(null)
     try {
-      await apiTagSession(session.sessionId || session.id, nextTag || null)
-      onSaved(session, nextTag || null)
+      const result = await apiTagSession(session.sessionId || session.id, normalized)
+      onSaved(
+        session,
+        normalizeSessionTags(Array.isArray(result?.tags) ? result.tags : normalized.slice(0, 1)),
+        normalizeTagColorMap(result?.tag_colors),
+      )
       onClose()
     } catch (e) {
       setError(String(e?.message || e))
       setSaving(false)
     }
   }
+
+  const save = () => {
+    const pending = value.trim()
+    if (!pending) {
+      commit(selectedTags)
+      return
+    }
+    const key = pending.toLowerCase()
+    if (selectedTags.some((tag) => tag.toLowerCase() === key)) {
+      commit(selectedTags)
+      return
+    }
+    if (selectedTags.length >= MAX_SESSION_TAGS) {
+      setError(t('sidebar.tagLimit', { max: MAX_SESSION_TAGS }))
+      return
+    }
+    commit([...selectedTags, pending])
+  }
+
+  const selectedKeys = new Set(selectedTags.map((tag) => tag.toLowerCase()))
+  const suggestions = recentTags.filter(({ tag }) => !selectedKeys.has(tag.toLowerCase()))
+  const colorIndexForTag = (tag) => (
+    recentTags.find((item) => item.tag.toLowerCase() === tag.toLowerCase())?.colorIndex
+    ?? findTagColorIndex(tag, session.tagColors)
+  )
 
   return (
     <div
@@ -474,11 +529,31 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
         border: '1px solid var(--border)',
         borderRadius: 4,
         zIndex: 60,
-        minWidth: 240,
+        width: 264,
         maxWidth: 'calc(100vw - 24px)',
         padding: 10,
       }}
     >
+      <div
+        className="flex items-center justify-between"
+        style={{ color: 'var(--text-secondary)', fontSize: 11, marginBottom: 6 }}
+      >
+        <span>{t('sidebar.tags')}</span>
+        <span>{t('sidebar.tagSelectedCount', { count: selectedTags.length, max: MAX_SESSION_TAGS })}</span>
+      </div>
+      {selectedTags.length > 0 && (
+        <div className="flex flex-wrap gap-1 min-w-0" style={{ marginBottom: 6 }}>
+          {selectedTags.map((tag) => (
+            <TagBadge
+              key={tag.toLowerCase()}
+              tag={tag}
+              colorIndex={colorIndexForTag(tag)}
+              onRemove={removeTag}
+              maxWidth={180}
+            />
+          ))}
+        </div>
+      )}
       <input
         autoFocus
         type="text"
@@ -486,7 +561,7 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
         onChange={(e) => setValue(e.target.value)}
         placeholder={t('sidebar.tagPlaceholder')}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') { e.preventDefault(); commit(value.trim()) }
+          if (e.key === 'Enter') { e.preventDefault(); addTag(value) }
           else if (e.key === 'Escape') { e.preventDefault(); onClose() }
         }}
         style={{
@@ -501,26 +576,28 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
           marginBottom: 6,
         }}
       />
-      {recentTags.length > 0 && (
-        <div className="flex flex-wrap gap-1" style={{ marginBottom: 6 }}>
-          {recentTags.slice(0, 6).map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              onClick={() => setValue(tag)}
-              style={{
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 2,
-                color: 'var(--text-secondary)',
-                cursor: 'pointer',
-                fontSize: 12,
-                padding: '1px 6px',
-              }}
-            >
-              {tag}
-            </button>
-          ))}
+      {suggestions.length > 0 && (
+        <div style={{ marginBottom: 6 }}>
+          <div style={{ color: 'var(--text-dim)', fontSize: 11, marginBottom: 3 }}>
+            {t('sidebar.recentTags')}
+          </div>
+          <div className="flex flex-wrap gap-1 min-w-0">
+            {suggestions.slice(0, 8).map(({ tag, colorIndex }) => (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => addTag(tag)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                <TagBadge tag={tag} colorIndex={colorIndex} maxWidth={110} />
+              </button>
+            ))}
+          </div>
         </div>
       )}
       {error && (
@@ -529,14 +606,18 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
       <div className="flex justify-end gap-1">
         <button
           type="button"
-          onClick={() => commit('')}
-          disabled={saving}
+          onClick={() => {
+            setSelectedTags([])
+            setValue('')
+            setError(null)
+          }}
+          disabled={saving || (selectedTags.length === 0 && !value)}
           style={{
             background: 'transparent',
             border: '1px solid var(--border)',
             borderRadius: 2,
             color: 'var(--text-secondary)',
-            cursor: saving ? 'default' : 'pointer',
+            cursor: saving || (selectedTags.length === 0 && !value) ? 'default' : 'pointer',
             fontSize: 12,
             padding: '2px 8px',
           }}
@@ -545,7 +626,7 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
         </button>
         <button
           type="button"
-          onClick={() => commit(value.trim())}
+          onClick={save}
           disabled={saving}
           style={{
             background: 'var(--blue)',
@@ -623,24 +704,30 @@ export default function Sidebar() {
 
   const activeTag = useSidebarStore((s) => s.activeTag)
   const setActiveTag = useSidebarStore((s) => s.setActiveTag)
-  const availableTags = useMemo(() => {
-    const seen = new Set()
-    const out = []
-    for (const s of sessions) {
-      if (s.tag && !seen.has(s.tag)) {
-        seen.add(s.tag)
-        out.push(s.tag)
+  const tagCatalog = useMemo(() => {
+    const byName = new Map()
+    for (const session of sessions) {
+      for (const tag of sessionTags(session)) {
+        const key = tag.toLowerCase()
+        if (!byName.has(key)) {
+          byName.set(key, {
+            tag,
+            colorIndex: findTagColorIndex(tag, session.tagColors),
+          })
+        }
       }
     }
-    return out
+    return [...byName.values()]
   }, [sessions])
-
   // Group sessions by cwd (order from the store: active cwd pinned first), then
   // apply the tag + search filters WITHIN each group. Empty groups drop out.
   const renderedGroups = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     const match = (s) => {
-      if (activeTag && s.tag !== activeTag) return false
+      if (activeTag) {
+        const activeKey = activeTag.toLowerCase()
+        if (!sessionTags(s).some((tag) => tag.toLowerCase() === activeKey)) return false
+      }
       if (!q) return true
       const sid = (s.sessionId || s.id || '').toLowerCase()
       const name = (s.name || '').toLowerCase()
@@ -797,19 +884,30 @@ export default function Sidebar() {
   const handleTagStart = (session, anchorRect) => {
     if (anchorRect) {
       // Anchor below the trigger row; keep the popup body on-screen.
-      setTagPopoverTop(Math.max(60, Math.min(window.innerHeight - 240, anchorRect.bottom + 4)))
+      setTagPopoverTop(Math.max(60, Math.min(window.innerHeight - 320, anchorRect.bottom + 4)))
     }
     setTagPopoverSession(session)
   }
-  const handleTagSaved = (session, nextTag) => {
+  const handleTagSaved = (session, nextTags, nextTagColors) => {
+    const tags = normalizeSessionTags(nextTags)
     useSidebarStore.setState((s) => ({
       sessions: s.sessions.map((row) =>
-        row.id === session.id ? { ...row, tag: nextTag } : row
+        row.id === session.id
+          ? {
+              ...row,
+              tag: tags[0] || null,
+              tags,
+              tagColors: { ...(row.tagColors || {}), ...nextTagColors },
+            }
+          : row
       ),
     }))
     // If the currently-active tag filter matches a tag that no longer exists, reset.
-    if (activeTag && nextTag !== activeTag) {
-      const stillExists = useSidebarStore.getState().sessions.some((s) => s.tag === activeTag)
+    if (activeTag) {
+      const activeKey = activeTag.toLowerCase()
+      const stillExists = useSidebarStore.getState().sessions.some((row) => (
+        sessionTags(row).some((tag) => tag.toLowerCase() === activeKey)
+      ))
       if (!stillExists) setActiveTag(null)
     }
   }
@@ -1222,7 +1320,7 @@ export default function Sidebar() {
           {projectOpen && (
             <>
           {/* Tag filter bar (only when at least one tag exists) — indented to nest under PROJECT */}
-          {availableTags.length > 0 && (
+          {tagCatalog.length > 0 && (
             <div
               className="flex flex-wrap gap-1 px-3"
               style={{ borderBottom: '1px solid var(--border-subtle)', flexShrink: 0, paddingLeft: 28, paddingTop: 2, paddingBottom: 4 }}
@@ -1232,11 +1330,13 @@ export default function Sidebar() {
                 label={t('sidebar.all')}
                 onClick={() => setActiveTag(null)}
               />
-              {availableTags.map((tag) => (
+              {tagCatalog.map(({ tag, colorIndex }) => (
                 <TagFilterChip
                   key={tag}
-                  active={activeTag === tag}
+                  active={activeTag?.toLowerCase() === tag.toLowerCase()}
                   label={tag}
+                  tag={tag}
+                  colorIndex={colorIndex}
                   onClick={() => setActiveTag(tag)}
                 />
               ))}
@@ -1251,8 +1351,9 @@ export default function Sidebar() {
               style={{ top: tagPopoverTop, left: 12, zIndex: 80 }}
             >
               <TagPopover
+                key={tagPopoverSession.id}
                 session={tagPopoverSession}
-                recentTags={availableTags}
+                recentTags={tagCatalog}
                 onClose={() => setTagPopoverSession(null)}
                 onSaved={handleTagSaved}
               />

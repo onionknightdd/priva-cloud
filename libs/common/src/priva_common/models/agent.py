@@ -179,7 +179,11 @@ class SessionInfoResponse(BaseModel):
     git_branch: str | None = None
     cwd: str | None = None
     session_source: str | None = None
+    # ``tag`` remains the first tag for older clients. New clients use ``tags``
+    # plus the stable 0..99 color-slot mapping in ``tag_colors``.
     tag: str | None = None
+    tags: list[str] = Field(default_factory=list, max_length=3)
+    tag_colors: dict[str, int] = Field(default_factory=dict)
     pinned: bool = False
     archived: bool = False
     parent_session_id: str | None = None
@@ -361,7 +365,9 @@ class RenameRequest(BaseModel):
 
 
 class TagRequest(BaseModel):
+    # Legacy single-tag payload. Ignored when ``tags`` is present.
     tag: str | None = None
+    tags: list[str] | None = Field(default=None, max_length=3)
 
 
 class AddDirsRequest(BaseModel):

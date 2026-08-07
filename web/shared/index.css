@@ -140,6 +140,12 @@
   --cyan: #79c0ff;
   --orange: #ffa657;
 
+  /* Session tags: 100 evenly-spaced hue slots, with theme-safe foregrounds. */
+  --tag-color-saturation: 62%;
+  --tag-color-lightness: 48%;
+  --tag-text-light: var(--text-primary);
+  --tag-text-dark: var(--text-inverse);
+
   --syntax-comment: #8b949e;
   --syntax-keyword: #ff7b72;
   --syntax-string: #a5d6ff;
@@ -213,6 +219,11 @@
   --purple: #8250df;
   --cyan:   #0550ae;
   --orange: #bc4c00;
+
+  --tag-color-saturation: 66%;
+  --tag-color-lightness: 42%;
+  --tag-text-light: var(--text-inverse);
+  --tag-text-dark: var(--text-primary);
 
   --syntax-comment: #6e7781;
   --syntax-keyword: #cf222e;

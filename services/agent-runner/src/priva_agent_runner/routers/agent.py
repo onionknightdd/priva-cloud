@@ -147,6 +147,11 @@ def _resolve_run_add_dirs(
 def _session_info_to_response(s, meta: dict | None = None) -> SessionInfoResponse:
     flags = session_meta.get_session_flags(s.session_id, meta)
     sched = session_meta.get_scheduler_info(s.session_id, meta)
+    tags = session_meta.get_session_tags(
+        s.session_id,
+        meta,
+        fallback=getattr(s, "tag", None),
+    )
     return SessionInfoResponse(
         session_id=s.session_id,
         summary=s.summary,
@@ -157,7 +162,9 @@ def _session_info_to_response(s, meta: dict | None = None) -> SessionInfoRespons
         git_branch=s.git_branch,
         cwd=s.cwd,
         session_source="project",
-        tag=getattr(s, "tag", None),
+        tag=tags[0] if tags else None,
+        tags=tags,
+        tag_colors=session_meta.get_tag_colors(tags, meta),
         pinned=flags["pinned"],
         archived=flags["archived"],
         origin="scheduler" if sched else None,
@@ -648,6 +655,18 @@ async def list_agent_sessions(
     """
     del source  # legacy parameter, kept for client compat
     meta = session_meta.read_meta()
+    listed_sessions = list_sessions(directory=cwd if cwd and not archived else None)
+    # One-time migration for SDK-era single tags: reserve their stable slots
+    # before serializing the list, including tags that have never been edited
+    # through Priva's multi-tag endpoint.
+    listed_tags = [
+        tag
+        for session in listed_sessions
+        for tag in session_meta.get_session_tags(
+            session.session_id, meta, fallback=getattr(session, "tag", None)
+        )
+    ]
+    meta = await session_meta.ensure_tag_colors(listed_tags)
     recent_activities = session_meta.get_recent_activities(meta)
     active_cwd = (
         recent_activities[0].get("cwd")
@@ -659,7 +678,7 @@ async def list_agent_sessions(
     if archived:
         out = [
             _session_info_to_response(s, meta)
-            for s in list_sessions(directory=None)
+            for s in listed_sessions
             if session_meta.get_session_flags(s.session_id, meta)["archived"]
         ]
         out.sort(key=lambda r: r.last_modified, reverse=True)
@@ -669,7 +688,7 @@ async def list_agent_sessions(
     if cwd:
         resp = [
             _session_info_to_response(s, meta)
-            for s in list_sessions(directory=cwd)
+            for s in listed_sessions
             if not session_meta.get_session_flags(s.session_id, meta)["archived"]
         ]
         _sort_in_group(resp)
@@ -684,7 +703,7 @@ async def list_agent_sessions(
     # Grouped default: scan every project dir, bin by the session's real cwd,
     # dropping archived sessions (a fully-archived workdir thus disappears).
     by_cwd: dict[str, list[SessionInfoResponse]] = {}
-    for s in list_sessions(directory=None):
+    for s in listed_sessions:
         if session_meta.get_session_flags(s.session_id, meta)["archived"]:
             continue
         by_cwd.setdefault(s.cwd or active_cwd, []).append(
@@ -946,21 +965,32 @@ async def tag_agent_session(
     req: TagRequest,
     user: UserRecord | None = Depends(get_current_user),
 ):
-    """Set or clear a session's tag (pass tag=None to clear)."""
+    """Replace a session's tags (maximum three; legacy ``tag`` is accepted)."""
     cwd = _find_session_cwd(session_id)
     if not cwd:
         raise HTTPException(404, "Session not found")
     try:
-        sdk_tag_session(session_id=session_id, tag=req.tag, directory=cwd)
+        raw_tags = (
+            req.tags if req.tags is not None else ([req.tag] if req.tag else [])
+        )
+        tags = session_meta.normalize_session_tags(raw_tags)
+        # Keep the SDK's single tag in sync for older clients/tools. Priva's
+        # account metadata is authoritative for the full list.
+        sdk_tag_session(
+            session_id=session_id,
+            tag=tags[0] if tags else None,
+            directory=cwd,
+        )
+        result = await session_meta.set_session_tags(session_id, tags)
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(400, str(exc)) from exc
     get_audit_logger().append(AuditEntry(
         actor=user.username if user else "anonymous",
         action="session.tagged",
         target=session_id,
-        details={"tag": req.tag},
+        details={"tag": tags[0] if tags else None, "tags": tags},
     ))
-    return {"status": "ok"}
+    return {"status": "ok", **result}
 
 
 @router.put("/sessions/{session_id}/add_dirs")
