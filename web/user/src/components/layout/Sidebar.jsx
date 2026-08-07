@@ -1230,7 +1230,6 @@ export default function Sidebar() {
               <TagFilterChip
                 active={activeTag === null}
                 label={t('sidebar.all')}
-                showIcon={false}
                 onClick={() => setActiveTag(null)}
               />
               {availableTags.map((tag) => (

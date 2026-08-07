@@ -1,36 +1,35 @@
 import { useState } from 'react'
-import { Flag } from 'lucide-react'
 
-export default function TagFilterChip({ active, label, onClick, showIcon = true }) {
+export default function TagFilterChip({ active, label, onClick }) {
   const [hovered, setHovered] = useState(false)
   const color = active
-    ? 'var(--text-primary)'
-    : (hovered ? 'var(--text-secondary)' : 'var(--text-dim)')
+    ? 'var(--text-inverse)'
+    : (hovered ? 'var(--text-primary)' : 'var(--text-secondary)')
+  const background = active
+    ? 'var(--orange)'
+    : (hovered ? 'var(--border)' : 'var(--bg-elevated)')
 
   return (
     <button
       type="button"
+      aria-pressed={active}
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="inline-flex items-center uppercase"
+      className="inline-flex items-center"
       style={{
-        gap: 3,
-        background: active ? 'var(--bg-elevated)' : 'transparent',
-        border: '1px solid var(--border-subtle)',
-        borderLeft: '1px solid transparent',
-        borderRadius: 8,
-        padding: '1px 6px',
-        fontSize: 11,
-        letterSpacing: '0.05em',
+        background,
+        border: 'none',
+        borderRadius: 12,
+        padding: '0 5px',
+        fontSize: 10,
         fontWeight: 600,
-        lineHeight: 1.4,
+        lineHeight: '14px',
         color,
         cursor: 'pointer',
         transition: 'color 150ms ease, background 150ms ease',
       }}
     >
-      {showIcon && <Flag size={11} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color, currentColor)' }} />}
       <span className="truncate" style={{ maxWidth: 110 }}>{label}</span>
     </button>
   )
