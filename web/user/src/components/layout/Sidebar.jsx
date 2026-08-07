@@ -29,6 +29,8 @@ import NavItem from '@shared/components/shared/NavItem'
 import PanelHeader from '@shared/components/shared/PanelHeader'
 import Chip from '@shared/components/shared/Chip'
 import { AnimatedCollapse } from '@shared/components/shared/Accordion'
+import { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
+import { DURATION, EASE_SPRING } from '@shared/motion/tokens'
 import DirectoryPicker from '../shared/DirectoryPicker'
 import TagFilterChip from '../shared/TagFilterChip'
 import safeStorage from '@shared/utils/safeStorage'
@@ -135,7 +137,9 @@ function SessionItem({
         marginRight: 16,
         paddingLeft: Math.max(0, (indent || 12) - 16),
         paddingRight: 8,
-        background: isActive ? 'var(--bg-elevated)' : 'transparent',
+        // The active surface is a single Anime.js FLIP frame that moves from
+        // the previously selected session to this row.
+        background: 'transparent',
         borderRadius: 8,
         color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
         cursor: editing ? 'default' : 'pointer',
@@ -174,7 +178,17 @@ function SessionItem({
       onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--bg-elevated)' }}
       onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
     >
-      <div className="flex items-center gap-2 min-w-0">
+      {isActive && (
+        <SlidingTabIndicator
+          variant="frame"
+          layoutId="sidebar-session-selection"
+          duration={DURATION.canvas}
+          ease={EASE_SPRING}
+          animateInitial
+          style={{ background: 'var(--bg-elevated)', border: 'none', borderRadius: 8 }}
+        />
+      )}
+      <div className="flex items-center gap-2 min-w-0" style={{ position: 'relative', zIndex: 1 }}>
         {editing ? (
           <input
             type="text"
@@ -376,7 +390,7 @@ function SessionItem({
         )}
       </div>
       {session.tag && !editing && (
-        <div className="flex items-center gap-1" style={{ paddingLeft: 19 }}>
+        <div className="flex items-center gap-1" style={{ paddingLeft: 19, position: 'relative', zIndex: 1 }}>
           <span
             className="inline-flex items-center gap-1 px-2 uppercase"
             style={{
@@ -986,26 +1000,29 @@ export default function Sidebar() {
 
       {collapsed ? (
         /* Collapsed icon rail */
-        <div className="flex flex-col items-center flex-1 overflow-hidden" style={{ padding: '8px 0', gap: 2 }}>
-          <NavItem collapsed icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
-          <NavItem collapsed icon={CalendarClock} label={t('sidebar.scheduler')} active={activeNavTab === 'scheduler'} onClick={() => setActiveNavTab('scheduler')} />
-          <NavItem collapsed icon={PackageSearch} label={t('sidebar.plugins')} title={t('sidebar.plugins')} active={activeNavTab === 'plugins'} onClick={() => openPluginSection(activePluginSection || 'skills')} />
-          <NavItem collapsed icon={ChartColumnBig} label={t('sidebar.dataUsage')} active={activeNavTab === 'userdata'} onClick={() => openDataSection(activeSection || 'usage')} />
-          <div style={{ height: 1, width: 24, background: 'var(--border-subtle)', margin: '4px 0' }} />
-          <NavItem collapsed icon={Search} label={t('sidebar.search')} onClick={() => { setCollapsed(false); setSearchOpen(true) }} />
-          <NavItem collapsed icon={FolderGit2} label={t('sidebar.project')} onClick={() => setCollapsed(false)} />
-          <div className="flex-1" />
-          <div className="relative flex flex-col items-center gap-1">
-            <SettingsPopover />
-            <NavItem collapsed icon={Settings} label={t('sidebar.settings')} onClick={toggleSettingsPopover} />
+        <SlidingTabGroup id="sidebar-primary-collapsed">
+          <div className="flex flex-col items-center flex-1 overflow-hidden" style={{ padding: '8px 0', gap: 2 }}>
+            <NavItem collapsed icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
+            <NavItem collapsed icon={CalendarClock} label={t('sidebar.scheduler')} active={activeNavTab === 'scheduler'} selectionLayoutId="sidebar-primary-selection" onClick={() => setActiveNavTab('scheduler')} />
+            <NavItem collapsed icon={PackageSearch} label={t('sidebar.plugins')} title={t('sidebar.plugins')} active={activeNavTab === 'plugins'} selectionLayoutId="sidebar-primary-selection" onClick={() => openPluginSection(activePluginSection || 'skills')} />
+            <NavItem collapsed icon={ChartColumnBig} label={t('sidebar.dataUsage')} active={activeNavTab === 'userdata'} selectionLayoutId="sidebar-primary-selection" onClick={() => openDataSection(activeSection || 'usage')} />
+            <div style={{ height: 1, width: 24, background: 'var(--border-subtle)', margin: '4px 0' }} />
+            <NavItem collapsed icon={Search} label={t('sidebar.search')} onClick={() => { setCollapsed(false); setSearchOpen(true) }} />
+            <NavItem collapsed icon={FolderGit2} label={t('sidebar.project')} onClick={() => setCollapsed(false)} />
+            <div className="flex-1" />
+            <div className="relative flex flex-col items-center gap-1">
+              <SettingsPopover />
+              <NavItem collapsed icon={Settings} label={t('sidebar.settings')} onClick={toggleSettingsPopover} />
+            </div>
           </div>
-        </div>
+        </SlidingTabGroup>
       ) : (
         <>
           {/* Primary navigation — full-width rows aligned to the shared sidebar gutter. */}
+          <SlidingTabGroup id="sidebar-primary-expanded">
           <div style={{ padding: '6px 16px 4px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <NavItem scale="lg" icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
-            <NavItem scale="lg" icon={CalendarClock} label={t('sidebar.scheduler')} active={activeNavTab === 'scheduler'} onClick={() => setActiveNavTab('scheduler')} />
+            <NavItem scale="lg" icon={CalendarClock} label={t('sidebar.scheduler')} active={activeNavTab === 'scheduler'} selectionLayoutId="sidebar-primary-selection" onClick={() => setActiveNavTab('scheduler')} />
             {/* Keep each trigger and its animated submenu inside one stable
                 flex item. Otherwise removing the zero-height collapse shell
                 also removes one parent gap on the terminal frame. */}
@@ -1015,11 +1032,13 @@ export default function Sidebar() {
                 icon={PackageSearch}
                 label={t('sidebar.plugins')}
                 active={activeNavTab === 'plugins'}
+                selectionLayoutId="sidebar-primary-selection"
                 expandable
                 expanded={pluginsMenuOpen}
                 onClick={togglePluginsMenu}
               />
               <AnimatedCollapse open={pluginsMenuOpen}>
+                <SlidingTabGroup id="sidebar-plugin-secondary">
                 <div style={{ paddingTop: 4 }}>
                   {PLUGINS_SECTIONS.map((sec) => (
                     <NavItem
@@ -1029,10 +1048,12 @@ export default function Sidebar() {
                       label={t(sec.labelKey)}
                       indent={16}
                       active={activeNavTab === 'plugins' && activePluginSection === sec.id}
+                      selectionLayoutId="sidebar-plugin-secondary-selection"
                       onClick={() => openPluginSection(sec.id)}
                     />
                   ))}
                 </div>
+                </SlidingTabGroup>
               </AnimatedCollapse>
             </div>
             <div className="min-w-0">
@@ -1041,11 +1062,13 @@ export default function Sidebar() {
                 icon={ChartColumnBig}
                 label={t('sidebar.dataUsage')}
                 active={activeNavTab === 'userdata'}
+                selectionLayoutId="sidebar-primary-selection"
                 expandable
                 expanded={dataMenuOpen}
                 onClick={toggleDataMenu}
               />
               <AnimatedCollapse open={dataMenuOpen}>
+                <SlidingTabGroup id="sidebar-data-secondary">
                 <div style={{ paddingTop: 4 }}>
                   {DATA_SECTIONS.map((sec) => (
                     <NavItem
@@ -1055,13 +1078,16 @@ export default function Sidebar() {
                       label={t(sec.labelKey)}
                       indent={16}
                       active={activeNavTab === 'userdata' && activeSection === sec.id}
+                      selectionLayoutId="sidebar-data-secondary-selection"
                       onClick={() => openDataSection(sec.id)}
                     />
                   ))}
                 </div>
+                </SlidingTabGroup>
               </AnimatedCollapse>
             </div>
           </div>
+          </SlidingTabGroup>
 
           {/* When a nav menu is expanded, push Search + PROJECT to the sidebar bottom */}
           {projectAtBottom && <div style={{ flex: '1 1 0', minHeight: 0 }} />}
@@ -1211,6 +1237,7 @@ export default function Sidebar() {
             ref={listRef}
             style={{ flex: projectAtBottom ? '0 1 auto' : '1 1 auto', minHeight: 0 }}
           >
+            <SlidingTabGroup id="sidebar-session-list">
             <div style={{ position: 'relative', minHeight: '100%' }}>
               {sessions.length === 0 && !sessionsLoading && (
                 <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 14 }}>
@@ -1425,6 +1452,7 @@ export default function Sidebar() {
                 )
               })}
             </div>
+            </SlidingTabGroup>
           </div>
             </>
           )}
@@ -1433,6 +1461,7 @@ export default function Sidebar() {
               section is collapsed (including when a sidebar menu pushes it
               down). */}
           {!projectOpen && activeSession && activeProject && (
+            <SlidingTabGroup id="sidebar-session-collapsed-project">
             <div className="py-1" style={{ flexShrink: 0 }}>
               <div
                 className="project-group-row flex items-center gap-2 py-1 min-w-0"
@@ -1476,6 +1505,7 @@ export default function Sidebar() {
                 activeSession.origin === 'scheduler' ? SCHEDULED_SESSION_INDENT : PROJECT_SESSION_INDENT
               )}
             </div>
+            </SlidingTabGroup>
           )}
 
           {/* Chat mode with PROJECT manually collapsed: filler keeps the footer pinned to the bottom */}

@@ -1,5 +1,7 @@
 import { ChevronDown } from 'lucide-react'
 import { AnimatedChevron } from './Accordion'
+import { SlidingTabIndicator } from './Tabs'
+import { DURATION, EASE_SPRING } from '../../motion/tokens'
 
 /**
  * Shared sidebar navigation row (style guide: `.nav-item`).
@@ -19,6 +21,7 @@ import { AnimatedChevron } from './Accordion'
  *   expanded    chevron rotation state
  *   iconColor   override icon color (defaults to currentColor)
  *   scale       visual size, "md" default or "lg" for primary rows
+ *   selectionLayoutId  Anime.js FLIP group id for a moving active background
  *   onClick, title
  */
 export default function NavItem({
@@ -33,11 +36,13 @@ export default function NavItem({
   expanded = false,
   iconColor,
   scale = 'md',
+  selectionLayoutId = null,
   onClick,
   title,
 }) {
   const baseColor = active ? 'var(--text-primary)' : 'var(--text-secondary)'
   const large = scale === 'lg'
+  const animatedSelection = Boolean(selectionLayoutId)
 
   return (
     <button
@@ -58,7 +63,7 @@ export default function NavItem({
         borderLeft: 'none',
         // Active and hover fills share the same restrained row treatment.
         borderRadius: 8,
-        background: active ? 'var(--bg-elevated)' : 'transparent',
+        background: animatedSelection ? 'transparent' : (active ? 'var(--bg-elevated)' : 'transparent'),
         color: disabled ? 'var(--text-dim)' : baseColor,
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.45 : 1,
@@ -77,26 +82,41 @@ export default function NavItem({
         e.currentTarget.style.color = baseColor
       }}
     >
-      {Icon && (
-        <Icon
-          size={large ? 19 : 17}
-          strokeWidth={1.5}
-          style={{ flexShrink: 0, color: iconColor || 'var(--sidebar-icon-color, currentColor)' }}
+      {active && animatedSelection && (
+        <SlidingTabIndicator
+          variant="frame"
+          layoutId={selectionLayoutId}
+          duration={DURATION.canvas}
+          ease={EASE_SPRING}
+          animateInitial
+          style={{ background: 'var(--bg-elevated)', border: 'none', borderRadius: 8 }}
         />
       )}
-      {!collapsed && (
-        <span className="sidebar-menu-label truncate" style={{ flex: '0 1 auto', minWidth: 0, fontSize: large ? 15 : 14 }}>{label}</span>
-      )}
-      {!collapsed && badge != null && (
-        <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 600, color: 'var(--text-dim)' }}>
-          {badge}
-        </span>
-      )}
-      {!collapsed && expandable && (
-        <AnimatedChevron open={expanded} style={{ color: 'var(--sidebar-icon-color, var(--text-dim))' }}>
-          <ChevronDown size={large ? 17 : 15} strokeWidth={1.5} />
-        </AnimatedChevron>
-      )}
+      <span
+        className="flex items-center min-w-0"
+        style={{ position: 'relative', zIndex: 1, width: '100%', gap: 8, justifyContent: collapsed ? 'center' : 'flex-start' }}
+      >
+        {Icon && (
+          <Icon
+            size={large ? 19 : 17}
+            strokeWidth={1.5}
+            style={{ flexShrink: 0, color: iconColor || 'var(--sidebar-icon-color, currentColor)' }}
+          />
+        )}
+        {!collapsed && (
+          <span className="sidebar-menu-label truncate" style={{ flex: '0 1 auto', minWidth: 0, fontSize: large ? 15 : 14 }}>{label}</span>
+        )}
+        {!collapsed && badge != null && (
+          <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 600, color: 'var(--text-dim)' }}>
+            {badge}
+          </span>
+        )}
+        {!collapsed && expandable && (
+          <AnimatedChevron open={expanded} style={{ color: 'var(--sidebar-icon-color, var(--text-dim))' }}>
+            <ChevronDown size={large ? 17 : 15} strokeWidth={1.5} />
+          </AnimatedChevron>
+        )}
+      </span>
     </button>
   )
 }

@@ -51,10 +51,14 @@ export function SlidingTabIndicator({
   variant = 'underline',
   layoutId = 'tab-indicator',
   style,
+  duration = DUR_MIGRATION.tabSlide,
+  ease = EASE_TAB,
+  animateInitial = false,
 }) {
   const rects = useContext(TabGroupContext) || globalIndicatorRects
   const reducedMotion = useReducedMotion()
   const ref = useRef(null)
+  const animationRef = useRef(null)
   const reducedRef = useRef(reducedMotion)
   reducedRef.current = reducedMotion
 
@@ -63,6 +67,12 @@ export function SlidingTabIndicator({
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return undefined
+    const settle = () => {
+      el.style.opacity = ''
+      el.style.transform = ''
+      el.style.width = variant === 'left-border' ? '2px' : ''
+      el.style.height = variant === 'underline' ? '2px' : ''
+    }
     const cur = el.getBoundingClientRect()
     const prev = rects.get(layoutId)
     rects.set(layoutId, cur)
@@ -90,13 +100,7 @@ export function SlidingTabIndicator({
           onComplete: () => {
             // Restore anchored (left/right/inset) sizing so the indicator
             // keeps tracking its button through resizes.
-            el.style.transform = ''
-            el.style.width = ''
-            // anime.js owns the inline height while animating. Clearing it
-            // after an underline transition removes React's original 2px
-            // style without a subsequent render to restore it.
-            el.style.height = variant === 'underline' ? '2px' : ''
-            if (variant === 'left-border') el.style.width = '2px'
+            settle()
           },
         }
         if (!horizontalOnly) {
@@ -104,8 +108,22 @@ export function SlidingTabIndicator({
           animation.height = `${cur.height}px`
         }
         // …then play to the new tab's anchored position.
-        animate(el, animation)
+        animation.duration = duration
+        animation.ease = ease
+        animationRef.current = animate(el, animation)
+      } else {
+        // StrictMode replays layout effects against the same DOM node. Always
+        // restore the settled state when there is no meaningful FLIP delta.
+        settle()
       }
+    } else if (!prev && animateInitial && !reducedRef.current) {
+      el.style.opacity = '0'
+      animationRef.current = animate(el, {
+        opacity: 1,
+        duration,
+        ease,
+        onComplete: settle,
+      })
     }
 
     return () => {
@@ -113,6 +131,7 @@ export function SlidingTabIndicator({
       // next indicator to invert from.
       const live = el.getBoundingClientRect()
       if (live.width || live.height) rects.set(layoutId, live)
+      animationRef.current?.cancel()
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
