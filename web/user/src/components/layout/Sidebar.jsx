@@ -129,6 +129,7 @@ function SessionItem({
   }, [renameEditingId, session.id, session.name])
   const editing = renameEditingId === session.id
   const isProject = session.sessionSource === 'project'
+  const menuOpen = openMenuId === session.id
   const menuItemStyle = {
     background: 'transparent',
     border: 'none',
@@ -157,6 +158,10 @@ function SessionItem({
         // the previously selected session to this row.
         background: !isActive && hovered ? 'var(--bg-elevated)' : 'transparent',
         borderRadius: 8,
+        // Lift the whole row while its menu is open. Each session's content
+        // creates a z-index layer, so elevating only the popup lets later rows
+        // paint over it and makes the solid panel look transparent.
+        zIndex: menuOpen ? 60 : 'auto',
         color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
         cursor: editing ? 'default' : 'pointer',
         fontSize: 14,
@@ -290,7 +295,7 @@ function SessionItem({
           </button>
         )}
         {isProject && !editing && (
-          <div className="relative" ref={openMenuId === session.id ? menuRef : undefined}>
+          <div className="relative" ref={menuOpen ? menuRef : undefined}>
             <button
               style={{
                 background: 'transparent',
@@ -304,30 +309,32 @@ function SessionItem({
               }}
               onClick={(e) => {
                 e.stopPropagation()
-                onMenuToggle(openMenuId === session.id ? null : session.id)
+                onMenuToggle(menuOpen ? null : session.id)
               }}
               onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
               onMouseLeave={(e) => {
-                if (openMenuId !== session.id) {
+                if (!menuOpen) {
                   e.currentTarget.style.color = 'var(--text-dim)'
                 }
               }}
             >
               <MoreHorizontal size={12} strokeWidth={1.5} />
             </button>
-            {openMenuId === session.id && (
+            {menuOpen && (
               <div
                 className="absolute"
                 style={{
                   top: '100%',
                   right: 0,
                   marginTop: 4,
-                  background: 'var(--bg-elevated)',
+                  backgroundColor: 'var(--bg-elevated)',
                   border: '1px solid var(--border)',
                   borderRadius: 4,
-                  zIndex: 50,
+                  zIndex: 60,
                   minWidth: 124,
                   overflow: 'hidden',
+                  opacity: 1,
+                  isolation: 'isolate',
                 }}
               >
                 <button
@@ -406,15 +413,24 @@ function SessionItem({
         )}
       </div>
       {session.tag && !editing && (
-        <div className="flex items-center gap-1" style={{ paddingLeft: 19, position: 'relative', zIndex: 1 }}>
+        <div
+          className="flex items-center gap-1"
+          style={{
+            // Regular titles start at the row edge; scheduled titles follow a
+            // 13px CalendarClock plus the row's 8px gap.
+            paddingLeft: session.origin === 'scheduler' ? 21 : 0,
+            position: 'relative',
+            zIndex: 1,
+          }}
+        >
           <span
             className="inline-flex items-center"
             style={{
               background: 'var(--orange)',
               border: 'none',
-              borderRadius: 14,
+              borderRadius: 12,
               color: 'var(--text-inverse)',
-              fontSize: 9,
+              fontSize: 10,
               fontWeight: 600,
               lineHeight: '14px',
               padding: '0 5px',
