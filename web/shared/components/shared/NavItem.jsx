@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { AnimatedChevron } from './Accordion'
 import { SlidingTabIndicator } from './Tabs'
@@ -40,9 +41,16 @@ export default function NavItem({
   onClick,
   title,
 }) {
+  const [hovered, setHovered] = useState(false)
   const baseColor = active ? 'var(--text-primary)' : 'var(--text-secondary)'
   const large = scale === 'lg'
   const animatedSelection = Boolean(selectionLayoutId)
+  const rowHighlighted = active || hovered
+  const rowBackground = active && animatedSelection
+    ? 'transparent'
+    : rowHighlighted
+      ? 'var(--bg-elevated)'
+      : 'transparent'
 
   return (
     <button
@@ -63,24 +71,16 @@ export default function NavItem({
         borderLeft: 'none',
         // Active and hover fills share the same restrained row treatment.
         borderRadius: 8,
-        background: animatedSelection ? 'transparent' : (active ? 'var(--bg-elevated)' : 'transparent'),
-        color: disabled ? 'var(--text-dim)' : baseColor,
+        background: rowBackground,
+        color: disabled ? 'var(--text-dim)' : rowHighlighted ? 'var(--text-primary)' : baseColor,
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.45 : 1,
         textAlign: 'left',
         minWidth: 0,
         transition: 'background 150ms ease, color 150ms ease',
       }}
-      onMouseEnter={(e) => {
-        if (disabled || active) return
-        e.currentTarget.style.background = 'var(--bg-elevated)'
-        e.currentTarget.style.color = 'var(--text-primary)'
-      }}
-      onMouseLeave={(e) => {
-        if (disabled || active) return
-        e.currentTarget.style.background = 'transparent'
-        e.currentTarget.style.color = baseColor
-      }}
+      onMouseEnter={() => { if (!disabled) setHovered(true) }}
+      onMouseLeave={() => setHovered(false)}
     >
       {active && animatedSelection && (
         <SlidingTabIndicator

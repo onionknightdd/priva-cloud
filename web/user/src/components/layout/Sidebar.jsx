@@ -108,6 +108,7 @@ function SessionItem({
         ? ' is-unseen'
         : ''
   const [renameValue, setRenameValue] = useState(session.name || '')
+  const [hovered, setHovered] = useState(false)
   useEffect(() => {
     if (renameEditingId === session.id) setRenameValue(session.name || '')
   }, [renameEditingId, session.id, session.name])
@@ -139,7 +140,7 @@ function SessionItem({
         paddingRight: 8,
         // The active surface is a single Anime.js FLIP frame that moves from
         // the previously selected session to this row.
-        background: 'transparent',
+        background: !isActive && hovered ? 'var(--bg-elevated)' : 'transparent',
         borderRadius: 8,
         color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
         cursor: editing ? 'default' : 'pointer',
@@ -175,8 +176,8 @@ function SessionItem({
         onDragEndSession?.()
       }}
       onClick={() => { if (!editing) onSelect(session) }}
-      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--bg-elevated)' }}
-      onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+      onMouseEnter={() => { if (!editing) setHovered(true) }}
+      onMouseLeave={() => setHovered(false)}
     >
       {isActive && (
         <SlidingTabIndicator
