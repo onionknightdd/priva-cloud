@@ -8,8 +8,8 @@ export default function TagBadge({ tag, colorIndex, onRemove, maxWidth = '100%' 
       style={{
         ...tagColorStyle(tag, colorIndex),
         border: 'none',
-        borderRadius: 12,
-        fontSize: 10,
+        borderRadius: 8,
+        fontSize: 12,
         fontWeight: 600,
         lineHeight: '14px',
         padding: onRemove ? '0 3px 0 5px' : '0 5px',

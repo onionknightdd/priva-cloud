@@ -140,8 +140,8 @@
   --cyan: #79c0ff;
   --orange: #ffa657;
 
-  /* Session tags: 100 evenly-spaced hue slots, with theme-safe foregrounds. */
-  --tag-color-saturation: 62%;
+  /* Session tags: 100 adaptive-contrast hue slots with theme-safe foregrounds. */
+  --tag-color-saturation: 68%;
   --tag-color-lightness: 48%;
   --tag-text-light: var(--text-primary);
   --tag-text-dark: var(--text-inverse);
@@ -220,8 +220,6 @@
   --cyan:   #0550ae;
   --orange: #bc4c00;
 
-  --tag-color-saturation: 66%;
-  --tag-color-lightness: 42%;
   --tag-text-light: var(--text-inverse);
   --tag-text-dark: var(--text-primary);
 

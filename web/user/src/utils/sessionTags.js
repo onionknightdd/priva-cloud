@@ -1,6 +1,14 @@
 export const MAX_SESSION_TAGS = 3
 export const TAG_COLOR_SLOTS = 100
 
+const TAG_SATURATION = 0.68
+const TAG_BASE_LIGHTNESS = 0.48
+// Keep dark colors bright enough to separate from the dark sidebar, while
+// leaving enough headroom for light text. Light colors use dark text instead.
+const TAG_DARK_MIN_LUMINANCE = 0.10
+const TAG_DARK_MAX_LUMINANCE = 0.14
+const TAG_LIGHT_MIN_LUMINANCE = 0.24
+
 export function normalizeSessionTags(raw) {
   const values = typeof raw === 'string' ? [raw] : (Array.isArray(raw) ? raw : [])
   const seen = new Set()
@@ -40,12 +48,7 @@ export function resolveTagColorIndex(tag, colorIndex) {
     : fallbackTagColorIndex(tag)
 }
 
-function hueUsesDarkText(hue) {
-  // Calculate relative luminance for the shared HSL palette (62% / 48%).
-  // The CSS theme may tune those values slightly, but the light/dark text
-  // decision remains stable across both palettes.
-  const saturation = 0.62
-  const lightness = 0.48
+function relativeLuminance(hue, saturation, lightness) {
   const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation
   const segment = hue / 60
   const x = chroma * (1 - Math.abs((segment % 2) - 1))
@@ -61,16 +64,74 @@ function hueUsesDarkText(hue) {
     const value = channel + match
     return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
   })
-  return (0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]) > 0.18
+  return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
 }
+
+function moveToLuminance(hue, start, target, direction) {
+  let lightness = start
+  for (let step = 0; step < 100; step += 1) {
+    const luminance = relativeLuminance(hue, TAG_SATURATION, lightness)
+    if (direction < 0 ? luminance <= target : luminance >= target) {
+      return { lightness, luminance }
+    }
+    lightness = Math.max(0.2, Math.min(0.8, lightness + direction * 0.005))
+  }
+  return {
+    lightness,
+    luminance: relativeLuminance(hue, TAG_SATURATION, lightness),
+  }
+}
+
+function buildTagColor(index) {
+  const hue = index * (360 / TAG_COLOR_SLOTS)
+  const baseLuminance = relativeLuminance(hue, TAG_SATURATION, TAG_BASE_LIGHTNESS)
+
+  if (baseLuminance < TAG_DARK_MIN_LUMINANCE) {
+    const adjusted = moveToLuminance(
+      hue,
+      TAG_BASE_LIGHTNESS,
+      TAG_DARK_MIN_LUMINANCE,
+      1,
+    )
+    return { hue, lightness: adjusted.lightness, useDarkText: false }
+  }
+  if (baseLuminance <= TAG_DARK_MAX_LUMINANCE) {
+    return { hue, lightness: TAG_BASE_LIGHTNESS, useDarkText: false }
+  }
+  if (baseLuminance >= TAG_LIGHT_MIN_LUMINANCE) {
+    return { hue, lightness: TAG_BASE_LIGHTNESS, useDarkText: true }
+  }
+
+  // Mid-luminance colors are the only range where neither foreground has
+  // enough contrast. Move each hue to the nearest safe side of that range.
+  const dark = moveToLuminance(
+    hue,
+    TAG_BASE_LIGHTNESS,
+    TAG_DARK_MAX_LUMINANCE,
+    -1,
+  )
+  const light = moveToLuminance(
+    hue,
+    TAG_BASE_LIGHTNESS,
+    TAG_LIGHT_MIN_LUMINANCE,
+    1,
+  )
+  return Math.abs(dark.lightness - TAG_BASE_LIGHTNESS)
+    <= Math.abs(light.lightness - TAG_BASE_LIGHTNESS)
+    ? { hue, lightness: dark.lightness, useDarkText: false }
+    : { hue, lightness: light.lightness, useDarkText: true }
+}
+
+const TAG_COLORS = Array.from({ length: TAG_COLOR_SLOTS }, (_, index) => buildTagColor(index))
 
 export function tagColorStyle(tag, colorIndex) {
   const index = resolveTagColorIndex(tag, colorIndex)
-  const hue = index * (360 / TAG_COLOR_SLOTS)
+  const { hue, lightness, useDarkText } = TAG_COLORS[index]
   return {
     '--tag-hue': `${hue.toFixed(1)}deg`,
+    '--tag-color-lightness': `${(lightness * 100).toFixed(1)}%`,
     background: 'hsl(var(--tag-hue) var(--tag-color-saturation) var(--tag-color-lightness))',
-    color: hueUsesDarkText(hue) ? 'var(--tag-text-dark)' : 'var(--tag-text-light)',
+    color: useDarkText ? 'var(--tag-text-dark)' : 'var(--tag-text-light)',
   }
 }
 

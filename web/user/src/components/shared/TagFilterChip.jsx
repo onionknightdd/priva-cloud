@@ -23,14 +23,14 @@ export default function TagFilterChip({ active, label, tag, colorIndex, onClick 
         ...(tagStyle || {}),
         background,
         border: 'none',
-        borderRadius: 12,
+        borderRadius: 8,
         padding: '0 5px',
-        fontSize: 10,
+        fontSize: 12,
         fontWeight: 600,
         lineHeight: '14px',
         color,
         cursor: 'pointer',
-        opacity: tag ? (active ? 1 : (hovered ? 0.82 : 0.58)) : 1,
+        opacity: tag ? (active ? 1 : (hovered ? 0.92 : 0.78)) : 1,
         transition: 'color 150ms ease, background 150ms ease, opacity 150ms ease',
       }}
     >
