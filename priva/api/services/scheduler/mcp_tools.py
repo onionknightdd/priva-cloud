@@ -427,7 +427,7 @@ def build_scheduler_mcp_server(username: str):
         return {"content": [{"type": "text", "text": f"Resumed job **{target.name}** (id: `{target.id}`)"}]}
 
     return create_sdk_mcp_server(
-        name="priva_scheduler",
+        name="Scheduler",
         version="1.0.0",
         tools=[list_jobs, view_job, create_job, delete_job, trigger_job, pause_job, resume_job],
     )

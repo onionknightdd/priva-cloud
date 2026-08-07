@@ -36,6 +36,10 @@ from priva_common.service_token import auth_header
 logger = get_app_logger(__name__)
 
 
+SCHEDULER_MCP_SERVER_NAME = "Scheduler"
+SCHEDULER_MCP_TOOL_PATTERN = f"mcp__{SCHEDULER_MCP_SERVER_NAME}__*"
+
+
 SCHEDULER_TOOL_SCOPE = (
     "Priva scheduler tools manage durable scheduled automations only: cron jobs "
     "and recurring interval jobs saved in the scheduler. They are not sub-agent "
@@ -425,7 +429,7 @@ def build_scheduler_tools(username: str) -> list:
 def build_scheduler_mcp_server(username: str):
     """The in-process SDK MCP server registered by the options builder."""
     return create_sdk_mcp_server(
-        name="priva_scheduler",
+        name=SCHEDULER_MCP_SERVER_NAME,
         version="1.0.0",
         tools=build_scheduler_tools(username),
     )

@@ -65,9 +65,9 @@ class AgentRunRequest(BaseModel):
         description=(
             "Extra tool names/patterns to block for THIS run, appended to the "
             "runner's built-in denylist (SDK disallowed_tools; glob patterns "
-            "like 'mcp__priva_File__*' allowed). Channel callers use this to "
+            "like 'mcp__FileCanvas__*' allowed). Channel callers use this to "
             "drop tools that make no sense on their surface — e.g. the Feishu "
-            "DM connector blocks the FileCanvas tools (no canvas panel there)."
+            "DM connector blocks FileCanvas's register_file tool (no canvas panel there)."
         ),
     )
 

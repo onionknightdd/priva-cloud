@@ -229,7 +229,7 @@ async def build_agent_options(
         disallowed_tools.append("AskUserQuestion")
     for tool in extra_disallowed_tools or []:
         # Per-run channel denylist (AgentRunRequest.disallowed_tools) — e.g. the
-        # Feishu DM connector blocks the FileCanvas tools (no canvas panel there).
+        # Feishu DM connector blocks FileCanvas's register_file tool (no canvas panel there).
         if tool and tool not in disallowed_tools:
             disallowed_tools.append(tool)
 
@@ -353,43 +353,54 @@ async def build_agent_options(
     # kill the run.
     if username and auth_method == "jwt" and inject_scheduler_tools:
         try:
-            from ..scheduled_runs.mcp_tools import build_scheduler_mcp_server
+            from ..scheduled_runs.mcp_tools import (
+                SCHEDULER_MCP_SERVER_NAME,
+                SCHEDULER_MCP_TOOL_PATTERN,
+                build_scheduler_mcp_server,
+            )
 
             existing = options.mcp_servers or {}
             if not isinstance(existing, dict):
                 existing = {}
-            existing["priva_scheduler"] = build_scheduler_mcp_server(username)
+            existing[SCHEDULER_MCP_SERVER_NAME] = build_scheduler_mcp_server(username)
             options.mcp_servers = existing
 
             allowed = list(options.allowed_tools or [])
-            if not any("priva_scheduler" in t for t in allowed):
-                allowed.append("mcp__priva_scheduler__*")
+            if SCHEDULER_MCP_TOOL_PATTERN not in allowed:
+                allowed.append(SCHEDULER_MCP_TOOL_PATTERN)
             options.allowed_tools = allowed
         except Exception:
             _get_logger().warning("Failed to inject scheduler MCP tools", exc_info=True)
 
     # --- Inject FileCanvas file-registration tool for JWT-backed login sessions only ---
-    # Skipped entirely when the per-run denylist blocks priva_File (e.g. Feishu DM):
+    # Skipped entirely when the per-run denylist blocks FileCanvas (e.g. Feishu DM):
     # not injecting the server is cleaner than disallowing a visible tool — the
-    # model never sees FileCanvas at all.
-    canvas_blocked = any("priva_File" in t for t in (extra_disallowed_tools or []))
+    # model never sees register_file at all.
+    canvas_blocked = any(
+        tool in {"mcp__FileCanvas__*", "mcp__FileCanvas__register_file"}
+        for tool in (extra_disallowed_tools or [])
+    )
     if username and auth_method == "jwt" and not canvas_blocked:
         try:
-            from ..mcp.built_in import build_file_canvas_mcp_server
+            from ..mcp.built_in import (
+                FILE_CANVAS_MCP_SERVER_NAME,
+                FILE_CANVAS_MCP_TOOL_PATTERN,
+                build_file_canvas_mcp_server,
+            )
 
             generated_server = build_file_canvas_mcp_server(cwd)
             existing = options.mcp_servers or {}
             if not isinstance(existing, dict):
                 existing = {}
-            existing["priva_File"] = generated_server
+            existing[FILE_CANVAS_MCP_SERVER_NAME] = generated_server
             options.mcp_servers = existing
 
             allowed = list(options.allowed_tools or [])
-            if not any("priva_File" in t for t in allowed):
-                allowed.append("mcp__priva_File__*")
+            if FILE_CANVAS_MCP_TOOL_PATTERN not in allowed:
+                allowed.append(FILE_CANVAS_MCP_TOOL_PATTERN)
             options.allowed_tools = allowed
         except Exception:
-            _get_logger().warning("Failed to inject FileCanvas MCP tools")
+            _get_logger().warning("Failed to inject FileCanvas MCP server")
 
     # --- OpenClaw delegation tools: deferred (channel-connector, Phase 4).
     # The channels subsystem is not part of the agent-runner this phase; the

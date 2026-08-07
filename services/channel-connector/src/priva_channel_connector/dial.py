@@ -25,9 +25,9 @@ logger = get_app_logger(__name__)
 
 # Channel-level tool denylist for Feishu-DM-originated runs (user ruling
 # 2026-07-23): the DM surface has no Canvas panel, so the FileCanvas
-# registration tools are pure waste there — the runner skips injecting the
-# priva_File MCP server entirely when it sees this pattern.
-_DM_DISALLOWED_TOOLS = ("mcp__priva_File__*",)
+# register_file tool is pure waste there — the runner skips injecting the
+# FileCanvas MCP server entirely when it sees this pattern.
+_DM_DISALLOWED_TOOLS = ("mcp__FileCanvas__*",)
 
 
 class RunnerDialer:

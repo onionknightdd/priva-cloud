@@ -564,6 +564,16 @@ def test_run_summary_unknown_tool_is_other():
     assert _run_summary(steps) == "执行了 2 个其他工具"
 
 
+def test_run_summary_groups_current_file_registration_tool():
+    from priva_channel_connector.cards import _run_summary
+    from priva_channel_connector.sse import ToolStep
+    steps = [
+        ToolStep("t1", "mcp__FileCanvas__register_file", "done", "report.pdf"),
+        ToolStep("t2", "register_file", "done", "chart.png"),
+    ]
+    assert _run_summary(steps) == "预览了 2 个文件"
+
+
 # --- AskUserQuestion display: question-only, 提出了 N 个问题 -----------------
 _ASK_INPUT = {"questions": [
     {"question": "选哪个方案？", "header": "方案", "options": [{"label": "A", "description": "aaa"}], "multiSelect": False},
@@ -905,7 +915,7 @@ def test_reduce_sse_stream_error():
 # --- dial: channel-level tool denylist ---------------------------------------
 def test_dial_sends_dm_disallowed_tools():
     # Feishu-DM runs carry the channel denylist (Canvas tools — no canvas panel in
-    # DM) so the runner skips injecting the priva_File MCP server for these runs.
+    # DM) so the runner skips injecting the FileCanvas MCP server for these runs.
     import json
 
     import httpx
@@ -926,6 +936,7 @@ def test_dial_sends_dm_disallowed_tools():
         return await d.run("A", "user-A", prompt="hi")
 
     out = asyncio.run(go())
+    assert list(_DM_DISALLOWED_TOOLS) == ["mcp__FileCanvas__*"]
     assert captured["disallowed_tools"] == list(_DM_DISALLOWED_TOOLS)
     assert captured["enable_permission_feedback"] is True
     assert out.session_id == "s1"

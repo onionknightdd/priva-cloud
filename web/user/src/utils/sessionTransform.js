@@ -1,5 +1,5 @@
 import {
-  GENERATED_TOOL_LABEL,
+  GENERATED_TOOL_NAME,
   buildGeneratedFileOpId,
   getGeneratedInputPaths,
   isGeneratedToolName,
@@ -379,7 +379,7 @@ export function transformSessionMessages(sdkMessages) {
             outputBlocks.push({
               type: 'file_ref',
               id: `file-ref-${generatedOpId}`,
-              name: GENERATED_TOOL_LABEL,
+              name: GENERATED_TOOL_NAME,
               filePath: file.filePath,
             })
           })

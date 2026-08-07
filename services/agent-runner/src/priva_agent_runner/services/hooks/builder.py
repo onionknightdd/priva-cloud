@@ -11,7 +11,7 @@ User-configured hooks are likewise native (CLI-loaded ``settings.json`` at the
 user + project scope, D5). So this builder assembles only the two PROGRAMMATIC
 concerns that are not policy-driven:
 
-1. System callbacks: the hook execution logger (+ FileCanvas reminder).
+1. System callbacks: the hook execution logger (+ ``register_file`` reminder).
 2. PII masking (Settings → Sensitive patterns) — rewrites tool output in-process.
 """
 

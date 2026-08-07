@@ -541,7 +541,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <thead><tr><th>功能</th><th>组件</th><th>机制</th><th>状态</th></tr></thead>
 <tbody>
 <tr><td>Skills</td><td>agent-runner + SPA</td><td>枚举全局 <code>~/.claude/skills</code> + 项目 <code>.claude/skills</code>；每用户 <code>skill_exclude</code> 拒绝清单 → <code>options.skills</code>；skills hub / 市场弹窗</td><td><span class="st ship">已交付</span></td></tr>
-<tr><td>MCP 服务器</td><td>agent-runner + SPA</td><td>读取项目 <code>.mcp.json</code> + 全局设置；内置的进程内 <code>priva_File</code> 服务器（FileCanvas）驱动 Canvas 面板；按 <code>{level}/{name}</code> 做 CRUD，能力 + 工具校验</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>MCP 服务器</td><td>agent-runner + SPA</td><td>读取项目 <code>.mcp.json</code> + 全局设置；内置的进程内 <code>FileCanvas</code> 服务器通过 <code>register_file</code> 工具驱动 Canvas 面板；按 <code>{level}/{name}</code> 做 CRUD，能力 + 工具校验</td><td><span class="st ship">已交付</span></td></tr>
 <tr><td>钩子策略（管理员 + 用户 hooks）</td><td>agent-runner + control-panel + data-spine</td><td>管理员 hooks 存于 data-spine <code>hook_policy</code>（原生 <code>command</code>/<code>http</code> 类型；旧内置 hook 以预定义行重新播种），会话构建时拉取，作为进程内 SDK 回调运行 —— 使用构造的、无密钥的环境、exit-2 阻断语义，以及每次触发的 Prometheus 指标；优先级 <em>强制 &gt; 用户关闭 &gt; 默认开启</em>，管理员规则遮蔽冲突的用户 hook。管理员经 <em>Runtime</em> 面板编辑，用户看到仅含描述的目录。<span class="dim">仅限 SDK 会话 —— 终端启动的 <code>claude</code> 不在范围内。</span></td><td><span class="st ship">已交付</span></td></tr>
 <tr><td>PII 脱敏</td><td>agent-runner</td><td>由管理员「敏感模式」开关驱动的进程内 <code>PostToolUse</code> 过滤器（并非目录 hook）；在模型看到之前经 <code>updatedToolOutput</code> 改写工具输出</td><td><span class="st ship">已交付</span></td></tr>
 <tr><td>Subagents</td><td>agent-runner</td><td><code>/subagents</code> 目录 + 按名 CRUD + <code>POST /{name}/test/stream</code></td><td><span class="st ship">已交付</span></td></tr>
@@ -571,7 +571,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <div class="tw"><table class="wrapflag">
 <thead><tr><th>功能</th><th>当前状态</th><th>计划</th><th>状态</th></tr></thead>
 <tbody>
-<tr><td>调度器（cron / 定时 agent 作业）</td><td>已交付（Phase 4a，2026-07-13）：<code>services/scheduler</code> 独立部署 — 无主 fire→claim（<code>job_fire</code> Postgres insert-wins）→wake（AgentTenant CR）→dispatch（202 准入，按 run_id 幂等）；由每账号 pod 执行（<code>agent_run</code>/<code>http_call</code>/<code>user_script</code>）并自行写回结果；用户端 Scheduler 页面（master-detail）+ 管理端总览 + 7 个 pod 内 MCP 工具；minikube E2E 门禁通过（从零唤醒 → 成功记录）</td><td>无主 fire→claim→wake→dispatch；带退避+抖动重试 5 次</td><td><span class="st ship">已交付</span></td></tr>
+<tr><td>调度器（cron / 定时 agent 作业）</td><td>已交付（Phase 4a，2026-07-13）：<code>services/scheduler</code> 独立部署 — 无主 fire→claim（<code>job_fire</code> Postgres insert-wins）→wake（AgentTenant CR）→dispatch（202 准入，按 run_id 幂等）；由每账号 pod 执行（<code>agent_run</code>/<code>http_call</code>/<code>user_script</code>）并自行写回结果；用户端 Scheduler 页面（master-detail）+ 管理端总览 + pod 内 <code>Scheduler</code> MCP 服务器及其 7 个 <code>scheduler_*</code> 工具；minikube E2E 门禁通过（从零唤醒 → 成功记录）</td><td>无主 fire→claim→wake→dispatch；带退避+抖动重试 5 次</td><td><span class="st ship">已交付</span></td></tr>
 <tr><td>IM 渠道绑定 / channel-connector</td><td><code>channel_binding</code> 表 + <code>BindingService</code> 已存在，Feishu 形态；全新构建，无 Phase-1 写者，alpha 中未使用</td><td>IM 扇出（Feishu）</td><td><span class="st defer">Phase 4</span></td></tr>
 <tr><td>state-reader（免唤醒 transcript 读取）</td><td>在 pod 处于 0 副本时读取 transcript</td><td>可嵌入的 RO-JSONL 路由器；prod 中为挂载隔离而独立部署</td><td><span class="st defer">Phase 5</span></td></tr>
 </tbody>
@@ -612,7 +612,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <h3 id="extensibility">6.3 可扩展性模型</h3>
 <div class="cards">
   <div class="card"><div class="ct">Skills</div><p><code>.claude/skills</code> 中的 Markdown + 资产。每用户拒绝清单治理允许清单；一个 hub/市场呈现共享的 skills。由 <code>claude</code> CLI 原生读取。</p></div>
-  <div class="card"><div class="ct">MCP 服务器</div><p>标准 <code>.mcp.json</code> 配置，外加一个为 Canvas 内置的进程内 <code>priva_File</code> 服务器。由管理员治理，使 agent 在策略之下抵达内部系统。</p></div>
+  <div class="card"><div class="ct">MCP 服务器</div><p>标准 <code>.mcp.json</code> 配置，外加为 Canvas 内置的进程内 <code>FileCanvas</code> 服务器及其 <code>register_file</code> 工具。由管理员治理，使 agent 在策略之下抵达内部系统。</p></div>
   <div class="card"><div class="ct">Hooks</div><p>管理员钩子策略存于 data-spine，会话构建时下发到每个 runner，作为进程内 SDK 回调（command 子进程或 http）在构造的、无密钥的环境中运行；优先级 <em>强制 &gt; 用户关闭 &gt; 默认开启</em>，冲突时管理员遮蔽用户。运行时的治理接缝。<span class="dim">（PII 脱敏是独立的进程内过滤器，并非目录 hook。）</span></p></div>
 </div>
 </section>
@@ -922,7 +922,7 @@ status: { phase: Ready, podIP: … } <span class="c"># derived, never authoritat
 <div class="co danger"><span class="cot">文件系统保障（模型 b，或任何入站共享的会话）</span><p>一个不受信的消费方可能要求一个共享 agent 读取作者的文件并返回 —— 混淆代理式的数据外泄。必备防护：一个仅注入 agent 所需内容的<strong>受囚禁 / 易逝暂存工作区</strong>，绝不含作者的 <code>~/.claude/projects</code>；<strong>只读或每次调用的临时目录</strong>；一个<strong>锁定的权限画像 + 强制 hooks</strong>；一条<strong>默认拒绝的出站 NetworkPolicy</strong>，使其既不能提权工具也不能外泄；以及<strong>凭证解耦</strong> —— 专用服务凭证或经纪的 MCP token（§11.4），绝不用作者的个人 BYOK。共享放大了爆炸半径，这把 §4.4 的 Web 终端 / NetworkPolicy 加固从「推迟」提升为「前置条件」。</p></div>
 
 <h3 id="unified-auth">11.4 统一 MCP / skill 鉴权</h3>
-<p><strong>当前基座。</strong>MCP 配置来自 <code>.mcp.json</code> + <code>settings.json</code>；内置的 <code>priva_File</code> 服务器在进程内且无需鉴权。然而外部 MCP 服务器的凭证当前是每 pod 存放的（settings / secret 挂载）—— 实质上是每用户手动配置。</p>
+<p><strong>当前基座。</strong>MCP 配置来自 <code>.mcp.json</code> + <code>settings.json</code>；内置的 <code>FileCanvas</code> 服务器在进程内且无需鉴权。然而外部 MCP 服务器的凭证当前是每 pod 存放的（settings / secret 挂载）—— 实质上是每用户手动配置。</p>
 <p><strong>统一带来什么。</strong>当众多用户的 agent 抵达同一批内部 MCP 服务器（工单系统、数据库、内部 API）时，任何用户都不应持有原始服务凭证。沿新兴的 MCP OAuth 2.1 / resource-indicator 方向，一个中心经纪方签发<strong>每用户、每服务作用域受限的 token</strong>，把用户身份贯穿传递，使 MCP 服务器强制每用户访问，并集中轮换与吊销。</p>
 <div class="co info"><span class="cot">设计契合度</span><p>control-panel 是天然的经纪方 —— 它已在铸造 runner token 并掌握身份。它会为每个 MCP 服务器登记其鉴权方式（OAuth client / API key / mTLS），在唤醒时或按需经纪短生命周期的每用户访问 token，作用域受限地注入 pod 的 MCP 配置，以实际用户身份审计 MCP 工具调用，并在不触碰 pod 的情况下轮换。会向外部服务 shell out 的 skills，也以同样的经纪方式获得凭证，而非嵌入秘密。</p></div>
 <div class="co warn"><span class="cot">需管理的张力</span><p>这会把高价值秘密集中到控制平面 —— 与「控制平面绝不接触运行时数据」原则相冲突。化解之道是让经纪方只持有长生命周期的刷新材料，并交给 pod <strong>短生命周期、作用域受限的访问 token</strong>，这反而强化了 Phase 6 的每账号 KMS/DEK 需求，而非与之相悖。</p></div>

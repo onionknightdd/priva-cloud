@@ -273,6 +273,9 @@ def tools(dataplane, monkeypatch):
     monkeypatch.setattr(mcp_tools, "get_client", lambda: dataplane)
 
     by_name = {t.name: t for t in mcp_tools.build_scheduler_tools("carol")}
+    server = mcp_tools.build_scheduler_mcp_server("carol")
+    assert server["name"] == mcp_tools.SCHEDULER_MCP_SERVER_NAME == "Scheduler"
+    assert mcp_tools.SCHEDULER_MCP_TOOL_PATTERN == "mcp__Scheduler__*"
     assert set(by_name) == {
         "scheduler_list_jobs", "scheduler_view_job", "scheduler_create_job",
         "scheduler_delete_job", "scheduler_trigger_job", "scheduler_pause_job",

@@ -202,7 +202,7 @@ def _build_prompt_with_attachments(prompt: str, attachments: list[dict] | None) 
         f"(such as pdf, docx, xlsx, pptx, html, images, or similar rich-preview files) — "
         f"including when Bash invokes a python, node, or shell script that opens such a file "
         f"(e.g. `python parse.py data.xlsx`, `node read.js report.pdf`, `bash analyze.sh file.docx`) — "
-        f"always call `mcp__priva_File__FileCanvas` with that file's path so Priva can register it to the frontend Canvas panel.\n"
+        f"always call `mcp__FileCanvas__register_file` with that file's path so Priva can register it to the frontend Canvas panel.\n"
         f"{file_lines}\n</uploaded-files>"
     )
 

@@ -1,11 +1,31 @@
+import asyncio
 import os
 import tempfile
 import unittest
 
-from priva_agent_runner.services.mcp.built_in import resolve_file_canvas_files
+from mcp.types import ListToolsRequest
+
+from priva_agent_runner.services.mcp.built_in import (
+    FILE_CANVAS_MCP_FULL_TOOL_NAME,
+    FILE_CANVAS_MCP_SERVER_NAME,
+    FILE_CANVAS_MCP_TOOL_NAME,
+    FILE_CANVAS_MCP_TOOL_PATTERN,
+    build_file_canvas_mcp_server,
+    resolve_file_canvas_files,
+)
 
 
 class GeneratedMcpToolsTests(unittest.TestCase):
+    def test_exposes_only_the_new_mcp_identity(self) -> None:
+        server = build_file_canvas_mcp_server(".")
+        list_tools = server["instance"].request_handlers[ListToolsRequest]
+        result = asyncio.run(list_tools(ListToolsRequest()))
+
+        self.assertEqual(server["name"], FILE_CANVAS_MCP_SERVER_NAME)
+        self.assertEqual([item.name for item in result.root.tools], [FILE_CANVAS_MCP_TOOL_NAME])
+        self.assertEqual(FILE_CANVAS_MCP_FULL_TOOL_NAME, "mcp__FileCanvas__register_file")
+        self.assertEqual(FILE_CANVAS_MCP_TOOL_PATTERN, "mcp__FileCanvas__*")
+
     def test_resolves_relative_and_absolute_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             nested_dir = os.path.join(tmpdir, "reports")

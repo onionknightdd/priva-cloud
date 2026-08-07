@@ -77,11 +77,9 @@ _GROUP_PHRASE = {
     "asked": "提出了 {n} 个问题",
     "other": "执行了 {n} 个其他工具",
 }
-# FileCanvas / legacy generated-tool names → the "generated" (预览) group (generatedTool.js).
+# FileCanvas register_file names → the "generated" (预览) group (generatedTool.js).
 _GENERATED_TOOL_NAMES = {
-    "mcp__priva_File__FileCanvas", "FileCanvas",
-    "mcp__priva_generated__Generated", "Generated",
-    "mcp__priva_File__FIleCanvas", "FIleCanvas",
+    "mcp__FileCanvas__register_file", "register_file",
 }
 
 

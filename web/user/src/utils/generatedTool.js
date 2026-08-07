@@ -1,18 +1,11 @@
-export const GENERATED_TOOL_NAME = 'mcp__priva_File__FileCanvas'
+export const GENERATED_TOOL_NAME = 'mcp__FileCanvas__register_file'
+export const GENERATED_TOOL_METHOD = 'register_file'
 export const GENERATED_TOOL_LABEL = 'FileCanvas'
-export const LEGACY_GENERATED_TOOL_NAME = 'mcp__priva_generated__Generated'
-export const LEGACY_GENERATED_TOOL_LABEL = 'Generated'
-export const LEGACY_FILE_CANVAS_TOOL_NAME = 'mcp__priva_File__FIleCanvas'
-export const LEGACY_FILE_CANVAS_TOOL_LABEL = 'FIleCanvas'
 
 export function isGeneratedToolName(name) {
   return (
     name === GENERATED_TOOL_NAME ||
-    name === GENERATED_TOOL_LABEL ||
-    name === LEGACY_GENERATED_TOOL_NAME ||
-    name === LEGACY_GENERATED_TOOL_LABEL ||
-    name === LEGACY_FILE_CANVAS_TOOL_NAME ||
-    name === LEGACY_FILE_CANVAS_TOOL_LABEL
+    name === GENERATED_TOOL_METHOD
   )
 }
 
