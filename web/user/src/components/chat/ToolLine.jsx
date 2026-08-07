@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 're
 import { animate, eases } from 'animejs'
 import {
   Bot,
+  Cable,
   Check,
   Copy,
   ExternalLink,
@@ -294,9 +295,11 @@ export default function ToolLine({
     setIsOpen((open) => !open)
   }
 
-  const Icon = TOOL_ICONS[presentation.displayName]
-    || TOOL_ICONS[block?.name]
-    || Terminal
+  const Icon = presentation.rawName.startsWith('mcp__')
+    ? Cable
+    : TOOL_ICONS[presentation.displayName]
+      || TOOL_ICONS[block?.name]
+      || Terminal
   const suffix = statusText(t, presentation, reverted)
   const duration = presentation.isRunning && presentation.startTime
     ? null
