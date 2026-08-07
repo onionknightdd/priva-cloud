@@ -134,7 +134,7 @@ export default function ModelSelector() {
           minWidth: 0,
           background: 'var(--bg-surface)',
           border: '1px solid var(--border)',
-          borderRadius: 4,
+          borderRadius: 14,
           cursor: 'pointer',
           color: selectedModel ? 'var(--cyan)' : 'var(--text-dim)',
           fontSize: 11,

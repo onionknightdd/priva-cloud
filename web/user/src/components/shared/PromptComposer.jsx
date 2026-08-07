@@ -980,7 +980,7 @@ export default function PromptComposer({
         className="flex flex-col rounded relative"
         style={{
           background: 'var(--bg-elevated)',
-          border: isDragging ? '0.5px solid var(--blue)' : '0.5px solid var(--border)',
+          border: isDragging ? '0.25px solid var(--blue)' : '0.25px solid var(--border)',
           borderRadius: 12,
           transition: 'border-color 150ms ease',
         }}
