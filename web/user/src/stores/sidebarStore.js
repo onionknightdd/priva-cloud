@@ -32,6 +32,21 @@ function persistScheduledGroups(groups) {
   safeStorage.setItem(STORAGE_KEY_SCHEDULED_GROUPS, JSON.stringify(groups))
 }
 
+function normalizeActiveTags(tags) {
+  if (!Array.isArray(tags)) return []
+  const seen = new Set()
+  const normalized = []
+  for (const value of tags) {
+    if (typeof value !== 'string') continue
+    const tag = value.trim()
+    const key = tag.toLowerCase()
+    if (!tag || seen.has(key)) continue
+    seen.add(key)
+    normalized.push(tag)
+  }
+  return normalized
+}
+
 let _widthSaveTimer = null
 const persistWidth = (width) => {
   if (_widthSaveTimer) clearTimeout(_widthSaveTimer)
@@ -90,9 +105,20 @@ const useSidebarStore = create((set, get) => ({
   activeSessionId: null,
   sessionsLoading: false,   // initial grouped load
   groupLoadingCwd: null,    // a single cwd's "more" load in flight
-  // Tag filter (null = show all)
-  activeTag: null,
-  setActiveTag: (tag) => set({ activeTag: tag }),
+  // Tag filters use OR semantics; an empty list shows every session.
+  activeTags: [],
+  setActiveTags: (tags) => set({ activeTags: normalizeActiveTags(tags) }),
+  toggleActiveTag: (tag) => set((s) => {
+    const key = String(tag || '').trim().toLowerCase()
+    if (!key) return { activeTags: s.activeTags }
+    const exists = s.activeTags.some((item) => item.toLowerCase() === key)
+    return {
+      activeTags: exists
+        ? s.activeTags.filter((item) => item.toLowerCase() !== key)
+        : [...s.activeTags, String(tag).trim()],
+    }
+  }),
+  clearActiveTags: () => set({ activeTags: [] }),
 
   setWidth: (width) => {
     set({ width })
@@ -286,6 +312,7 @@ const useSidebarStore = create((set, get) => ({
     sessions: [], groups: [], activeCwd: null, recentActivities: [], expandedCwds: {},
     expandedScheduledCwds: getStoredScheduledGroups(),
     activeSessionId: null, sessionsLoading: false, groupLoadingCwd: null,
+    activeTags: [],
   }),
 }))
 

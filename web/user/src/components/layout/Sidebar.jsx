@@ -6,7 +6,7 @@ import {
   Bot, PanelLeftClose, Plus, CalendarClock, PackageSearch, ChartColumnBig,
   Maximize2, Minimize2, FolderOpenDot, FolderGit2, LogOut,
   BarChart3, TrendingUp, ScrollText, FileText, FolderOpen,
-  Cable, Webhook, BrainCircuit, NotebookPen, SquareSlash,
+  Cable, Webhook, BrainCircuit, NotebookPen, SquareSlash, Check,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSidebarStore from '../../stores/sidebarStore'
@@ -646,6 +646,156 @@ function TagPopover({ session, onClose, recentTags, onSaved }) {
   )
 }
 
+function TagFilterMenu({ tags, selectedKeys, onToggle, onClose }) {
+  const { t } = useTranslation()
+  const [query, setQuery] = useState('')
+  const inputRef = useRef(null)
+  const normalizedQuery = query.trim().toLowerCase()
+  const filteredTags = normalizedQuery
+    ? tags.filter(({ tag }) => tag.toLowerCase().includes(normalizedQuery))
+    : tags
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  return (
+    <div
+      role="dialog"
+      aria-label={t('sidebar.tagFilterMenu')}
+      style={{
+        width: 240,
+        maxWidth: 'calc(100vw - 24px)',
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--border)',
+        borderRadius: 4,
+        color: 'var(--text-primary)',
+        overflow: 'hidden',
+        isolation: 'isolate',
+      }}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div
+        className="flex items-center gap-2"
+        style={{ padding: 8, borderBottom: '1px solid var(--border-subtle)' }}
+      >
+        <Search size={13} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              onClose()
+            }
+          }}
+          placeholder={t('sidebar.searchTags')}
+          aria-label={t('sidebar.searchTags')}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-ui)',
+            fontSize: 12,
+            outline: 'none',
+            padding: 0,
+          }}
+        />
+        {query && (
+          <button
+            type="button"
+            title={t('sidebar.clearTagSearch')}
+            onClick={() => {
+              setQuery('')
+              inputRef.current?.focus()
+            }}
+            className="inline-flex items-center justify-center flex-shrink-0"
+            style={{
+              width: 18,
+              height: 18,
+              padding: 0,
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 2,
+              color: 'var(--text-dim)',
+              cursor: 'pointer',
+              transition: 'color 150ms ease',
+            }}
+            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--text-secondary)' }}
+            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--text-dim)' }}
+          >
+            <X size={12} strokeWidth={1.5} />
+          </button>
+        )}
+      </div>
+      <div
+        role="group"
+        aria-label={t('sidebar.tags')}
+        style={{
+          maxHeight: 'min(240px, calc(100vh - 200px))',
+          overflowX: 'hidden',
+          overflowY: 'auto',
+          padding: 4,
+        }}
+      >
+        {filteredTags.map(({ tag }) => {
+          const selected = selectedKeys.has(tag.toLowerCase())
+          return (
+            <button
+              key={tag.toLowerCase()}
+              type="button"
+              role="checkbox"
+              aria-checked={selected}
+              onClick={() => onToggle(tag)}
+              className="flex items-center gap-2 w-full min-w-0"
+              style={{
+                padding: '5px 6px',
+                background: selected ? 'var(--bg-surface)' : 'transparent',
+                border: 'none',
+                borderRadius: 2,
+                color: selected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                cursor: 'pointer',
+                fontSize: 12,
+                textAlign: 'left',
+                transition: 'background 150ms ease, color 150ms ease',
+              }}
+              onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--bg-surface)' }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.background = selected ? 'var(--bg-surface)' : 'transparent'
+              }}
+            >
+              <span
+                className="inline-flex items-center justify-center flex-shrink-0"
+                aria-hidden="true"
+                style={{
+                  width: 14,
+                  height: 14,
+                  background: selected ? 'var(--blue)' : 'transparent',
+                  border: `1px solid ${selected ? 'var(--blue)' : 'var(--border-strong)'}`,
+                  borderRadius: 2,
+                  color: 'var(--text-inverse)',
+                }}
+              >
+                {selected && <Check size={10} strokeWidth={1.5} />}
+              </span>
+              <span className="truncate" style={{ minWidth: 0 }}>{tag}</span>
+            </button>
+          )
+        })}
+        {filteredTags.length === 0 && (
+          <div style={{ color: 'var(--text-dim)', fontSize: 12, padding: '8px 6px' }}>
+            {t('sidebar.noMatchingTags')}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function Sidebar() {
   const { t } = useTranslation()
   const width = useSidebarStore((s) => s.width)
@@ -701,9 +851,15 @@ export default function Sidebar() {
   const [tagPopoverSession, setTagPopoverSession] = useState(null)
   const [tagPopoverTop, setTagPopoverTop] = useState(120)
   const tagPopoverRef = useRef(null)
+  const [tagFilterMenuOpen, setTagFilterMenuOpen] = useState(false)
+  const [tagFilterMenuPosition, setTagFilterMenuPosition] = useState(null)
+  const tagFilterTriggerRef = useRef(null)
+  const tagFilterMenuRef = useRef(null)
 
-  const activeTag = useSidebarStore((s) => s.activeTag)
-  const setActiveTag = useSidebarStore((s) => s.setActiveTag)
+  const activeTags = useSidebarStore((s) => s.activeTags)
+  const setActiveTags = useSidebarStore((s) => s.setActiveTags)
+  const toggleActiveTag = useSidebarStore((s) => s.toggleActiveTag)
+  const clearActiveTags = useSidebarStore((s) => s.clearActiveTags)
   const tagCatalog = useMemo(() => {
     const byName = new Map()
     for (const session of sessions) {
@@ -719,14 +875,52 @@ export default function Sidebar() {
     }
     return [...byName.values()]
   }, [sessions])
+  const tagFilterState = useMemo(() => {
+    const catalogByKey = new Map(
+      tagCatalog.map((item) => [item.tag.toLowerCase(), item])
+    )
+    const selected = activeTags
+      .map((tag) => catalogByKey.get(tag.toLowerCase()))
+      .filter(Boolean)
+    const selectedKeys = new Set(selected.map(({ tag }) => tag.toLowerCase()))
+    const unselected = tagCatalog.filter(({ tag }) => !selectedKeys.has(tag.toLowerCase()))
+    return {
+      selectedKeys,
+      visible: [
+        ...selected.slice(0, 3),
+        ...unselected.slice(0, Math.max(0, 3 - selected.length)),
+      ],
+      hiddenSelectedCount: Math.max(0, selected.length - 3),
+    }
+  }, [activeTags, tagCatalog])
+  const closeTagFilterMenu = () => {
+    setTagFilterMenuOpen(false)
+    setTagFilterMenuPosition(null)
+  }
+  const toggleTagFilterMenu = (event) => {
+    if (tagFilterMenuOpen) {
+      closeTagFilterMenu()
+      return
+    }
+    const rect = event.currentTarget.getBoundingClientRect()
+    const menuWidth = 240
+    setTagFilterMenuPosition({
+      top: Math.max(12, Math.min(rect.bottom + 4, window.innerHeight - 280)),
+      left: Math.max(12, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 12)),
+    })
+    setTagFilterMenuOpen(true)
+  }
+
   // Group sessions by cwd (order from the store: active cwd pinned first), then
   // apply the tag + search filters WITHIN each group. Empty groups drop out.
   const renderedGroups = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     const match = (s) => {
-      if (activeTag) {
-        const activeKey = activeTag.toLowerCase()
-        if (!sessionTags(s).some((tag) => tag.toLowerCase() === activeKey)) return false
+      if (tagFilterState.selectedKeys.size > 0) {
+        const matchesSelectedTag = sessionTags(s).some((tag) => (
+          tagFilterState.selectedKeys.has(tag.toLowerCase())
+        ))
+        if (!matchesSelectedTag) return false
       }
       if (!q) return true
       const sid = (s.sessionId || s.id || '').toLowerCase()
@@ -767,9 +961,9 @@ export default function Sidebar() {
     ordered.sort((a, b) => (a.pinned ? 0 : 1) - (b.pinned ? 0 : 1))
     ordered.sort((a, b) => ((a.cwd === activeCwd) ? 0 : 1) - ((b.cwd === activeCwd) ? 0 : 1))
     return ordered
-  }, [sessions, groups, searchQuery, activeTag, activeCwd])
+  }, [sessions, groups, searchQuery, tagFilterState.selectedKeys, activeCwd])
 
-  const filtersActive = !!searchQuery.trim() || !!activeTag
+  const filtersActive = !!searchQuery.trim() || activeTags.length > 0
   // Keep the currently selected session reachable when its project tree is
   // collapsed. The row is rendered from the unfiltered store list so folding
   // PROJECT does not make the active conversation disappear.
@@ -800,6 +994,21 @@ export default function Sidebar() {
   useEffect(() => {
     fetchSessions()
   }, [fetchSessions])
+
+  // A deleted/renamed last occurrence must not leave an invisible filter
+  // active. Preserve the selection order while pruning unavailable tags.
+  useEffect(() => {
+    if (sessionsLoading || activeTags.length === 0) return
+    const availableKeys = new Set(tagCatalog.map(({ tag }) => tag.toLowerCase()))
+    const next = activeTags.filter((tag) => availableKeys.has(tag.toLowerCase()))
+    if (next.length !== activeTags.length) setActiveTags(next)
+  }, [activeTags, sessionsLoading, setActiveTags, tagCatalog])
+
+  useEffect(() => {
+    if (projectOpen && tagCatalog.length > 3) return
+    setTagFilterMenuOpen(false)
+    setTagFilterMenuPosition(null)
+  }, [projectOpen, tagCatalog.length])
 
   // Focus the search input as soon as it morphs open.
   useEffect(() => {
@@ -847,6 +1056,29 @@ export default function Sidebar() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [openWorkdirMenu])
+
+  // The filter menu is portaled outside the sidebar so it remains usable at
+  // the minimum sidebar width; both the trigger and panel count as inside.
+  useEffect(() => {
+    if (!tagFilterMenuOpen) return
+    const handlePointerDown = (event) => {
+      if (tagFilterTriggerRef.current?.contains(event.target)) return
+      if (tagFilterMenuRef.current?.contains(event.target)) return
+      closeTagFilterMenu()
+    }
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') closeTagFilterMenu()
+    }
+    const handleResize = () => closeTagFilterMenu()
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('resize', handleResize)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [tagFilterMenuOpen])
 
   // Close tag popover on outside click
   useEffect(() => {
@@ -902,14 +1134,6 @@ export default function Sidebar() {
           : row
       ),
     }))
-    // If the currently-active tag filter matches a tag that no longer exists, reset.
-    if (activeTag) {
-      const activeKey = activeTag.toLowerCase()
-      const stillExists = useSidebarStore.getState().sessions.some((row) => (
-        sessionTags(row).some((tag) => tag.toLowerCase() === activeKey)
-      ))
-      if (!stillExists) setActiveTag(null)
-    }
   }
 
   const effectiveWidth = collapsed ? 48 : width
@@ -1325,22 +1549,123 @@ export default function Sidebar() {
               className="flex flex-wrap gap-1 px-3"
               style={{ borderBottom: '1px solid var(--border-subtle)', flexShrink: 0, paddingLeft: 28, paddingTop: 2, paddingBottom: 4 }}
             >
-              <TagFilterChip
-                active={activeTag === null}
-                label={t('sidebar.all')}
-                onClick={() => setActiveTag(null)}
-              />
-              {tagCatalog.map(({ tag, colorIndex }) => (
-                <TagFilterChip
-                  key={tag}
-                  active={activeTag?.toLowerCase() === tag.toLowerCase()}
-                  label={tag}
-                  tag={tag}
-                  colorIndex={colorIndex}
-                  onClick={() => setActiveTag(tag)}
-                />
-              ))}
+              {tagFilterState.visible.map(({ tag, colorIndex }) => {
+                const selected = tagFilterState.selectedKeys.has(tag.toLowerCase())
+                return (
+                  <TagFilterChip
+                    key={tag.toLowerCase()}
+                    active={selected}
+                    label={tag}
+                    tag={tag}
+                    colorIndex={colorIndex}
+                    onClick={() => toggleActiveTag(tag)}
+                    onRemove={selected ? () => toggleActiveTag(tag) : undefined}
+                    removeLabel={t('sidebar.removeTagFilter', { tag })}
+                  />
+                )
+              })}
+              {tagFilterState.hiddenSelectedCount > 0 && (
+                <span className="inline-flex items-center gap-1">
+                  <span
+                    className="inline-flex items-center justify-center"
+                    style={{
+                      minHeight: 16,
+                      padding: '1px 6px',
+                      background: 'var(--bg-elevated)',
+                      border: 'none',
+                      borderRadius: 2,
+                      color: 'var(--text-secondary)',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      lineHeight: '14px',
+                      textAlign: 'center',
+                    }}
+                  >
+                    {t('sidebar.moreTagsSelected', { count: tagFilterState.hiddenSelectedCount })}
+                  </span>
+                  <button
+                    type="button"
+                    title={t('sidebar.clearTagFilters')}
+                    aria-label={t('sidebar.clearTagFilters')}
+                    onClick={clearActiveTags}
+                    className="inline-flex items-center justify-center flex-shrink-0"
+                    style={{
+                      width: 18,
+                      minHeight: 16,
+                      padding: 1,
+                      background: 'var(--bg-elevated)',
+                      border: 'none',
+                      borderRadius: 2,
+                      color: 'var(--text-dim)',
+                      cursor: 'pointer',
+                      transition: 'color 150ms ease, background 150ms ease',
+                    }}
+                    onMouseEnter={(event) => {
+                      event.currentTarget.style.color = 'var(--text-secondary)'
+                      event.currentTarget.style.background = 'var(--border)'
+                    }}
+                    onMouseLeave={(event) => {
+                      event.currentTarget.style.color = 'var(--text-dim)'
+                      event.currentTarget.style.background = 'var(--bg-elevated)'
+                    }}
+                  >
+                    <X size={12} strokeWidth={1.5} />
+                  </button>
+                </span>
+              )}
+              {tagCatalog.length > 3 && (
+                <button
+                  ref={tagFilterTriggerRef}
+                  type="button"
+                  title={t('sidebar.moreTagFilters')}
+                  aria-label={t('sidebar.moreTagFilters')}
+                  aria-expanded={tagFilterMenuOpen}
+                  onClick={toggleTagFilterMenu}
+                  className="inline-flex items-center justify-center flex-shrink-0"
+                  style={{
+                    width: 18,
+                    minHeight: 16,
+                    padding: 1,
+                    background: tagFilterMenuOpen ? 'var(--border)' : 'var(--bg-elevated)',
+                    border: 'none',
+                    borderRadius: 2,
+                    color: tagFilterMenuOpen ? 'var(--text-secondary)' : 'var(--text-dim)',
+                    cursor: 'pointer',
+                    transition: 'color 150ms ease, background 150ms ease',
+                  }}
+                  onMouseEnter={(event) => {
+                    event.currentTarget.style.color = 'var(--text-secondary)'
+                    event.currentTarget.style.background = 'var(--border)'
+                  }}
+                  onMouseLeave={(event) => {
+                    event.currentTarget.style.color = tagFilterMenuOpen ? 'var(--text-secondary)' : 'var(--text-dim)'
+                    event.currentTarget.style.background = tagFilterMenuOpen ? 'var(--border)' : 'var(--bg-elevated)'
+                  }}
+                >
+                  <Plus size={12} strokeWidth={1.5} />
+                </button>
+              )}
             </div>
+          )}
+
+          {tagFilterMenuOpen && tagFilterMenuPosition && createPortal(
+            <div
+              ref={tagFilterMenuRef}
+              style={{
+                position: 'fixed',
+                top: tagFilterMenuPosition.top,
+                left: tagFilterMenuPosition.left,
+                zIndex: 100,
+              }}
+            >
+              <TagFilterMenu
+                tags={tagCatalog}
+                selectedKeys={tagFilterState.selectedKeys}
+                onToggle={toggleActiveTag}
+                onClose={closeTagFilterMenu}
+              />
+            </div>,
+            document.body,
           )}
 
           {/* Tag popover host — fixed-position, anchored to the trigger row */}
