@@ -16,6 +16,11 @@ ourselves in a single **account-level** index next to the SDK's data:
         "<session_id>": {"job_id": str, "job_name": str, "run_id": str}
       },
       "recaps":   { "<session_id>": {"text": str, "turns": int} },
+      "last_response_models": {
+        "<session_id>": {
+          "profile_id": str | None, "model_id": str, "observed_at": int
+        }
+      },
       "tag_colors": { "<tag>": 0..99 }
     }
 
@@ -47,6 +52,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from pathlib import Path
 
 from claude_agent_sdk._internal.sessions import (
@@ -81,6 +87,7 @@ def _empty() -> dict:
         "recent_activities": [],
         "scheduler_sessions": {},
         "recaps": {},
+        "last_response_models": {},
         "tag_colors": {},
     }
 
@@ -127,6 +134,7 @@ def _read_raw() -> dict:
     workdirs = data.get("workdirs")
     scheduler_sessions = data.get("scheduler_sessions")
     recaps = data.get("recaps")
+    last_response_models = data.get("last_response_models")
     tag_colors = data.get("tag_colors")
     return {
         "sessions": sessions if isinstance(sessions, dict) else {},
@@ -134,6 +142,9 @@ def _read_raw() -> dict:
         "recent_activities": _normalize_recent_activities(data.get("recent_activities")),
         "scheduler_sessions": scheduler_sessions if isinstance(scheduler_sessions, dict) else {},
         "recaps": recaps if isinstance(recaps, dict) else {},
+        "last_response_models": (
+            last_response_models if isinstance(last_response_models, dict) else {}
+        ),
         "tag_colors": tag_colors if isinstance(tag_colors, dict) else {},
     }
 
@@ -329,6 +340,28 @@ def get_recap(session_id: str, meta: dict | None = None) -> dict | None:
     return {"text": text, "turns": turns if isinstance(turns, int) else 0}
 
 
+def get_last_response_model(session_id: str, meta: dict | None = None) -> dict | None:
+    """Return the latest observed response model for a session, if known.
+
+    This is historical metadata and must not be used as the next run's
+    profile/model selection: the profile may have been deleted or changed.
+    """
+    data = meta if meta is not None else _read_raw()
+    entry = data.get("last_response_models", {}).get(session_id)
+    if not isinstance(entry, dict):
+        return None
+    model_id = entry.get("model_id")
+    if not isinstance(model_id, str) or not model_id:
+        return None
+    profile_id = entry.get("profile_id")
+    observed_at = entry.get("observed_at")
+    return {
+        "profile_id": profile_id if isinstance(profile_id, str) and profile_id else None,
+        "model_id": model_id,
+        "observed_at": observed_at if isinstance(observed_at, int) else None,
+    }
+
+
 # --- Writes (serialized read-modify-write) ------------------------------------
 
 
@@ -455,6 +488,31 @@ async def set_recap(session_id: str, text: str, turns: int) -> None:
         _write_raw(data)
 
 
+async def set_last_response_model(
+    session_id: str,
+    *,
+    model_id: str | None,
+    profile_id: str | None = None,
+    observed_at: int | None = None,
+) -> None:
+    """Persist the provider-reported model of the latest assistant response."""
+    if not session_id or not isinstance(model_id, str) or not model_id.strip():
+        return
+    model_id = model_id.strip()
+    if not isinstance(profile_id, str) or not profile_id.strip():
+        profile_id = None
+    if not isinstance(observed_at, int):
+        observed_at = int(time.time() * 1000)
+    async with _lock:
+        data = _read_raw()
+        data["last_response_models"][session_id] = {
+            "profile_id": profile_id.strip() if profile_id else None,
+            "model_id": model_id,
+            "observed_at": observed_at,
+        }
+        _write_raw(data)
+
+
 async def archive_workdir(session_ids: list[str]) -> None:
     """Cascade: mark every given session archived in one write."""
     async with _lock:
@@ -475,6 +533,7 @@ async def prune_session(session_id: str) -> None:
         changed = data["sessions"].pop(session_id, None) is not None
         changed = (data["scheduler_sessions"].pop(session_id, None) is not None) or changed
         changed = (data["recaps"].pop(session_id, None) is not None) or changed
+        changed = (data["last_response_models"].pop(session_id, None) is not None) or changed
         recent_activities = [
             item for item in get_recent_activities(data)
             if item.get("session_id") != session_id

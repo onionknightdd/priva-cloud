@@ -225,6 +225,15 @@ export async function sandboxPost(path, body) {
   return handleAPIResponse(res)
 }
 
+export async function sandboxPatch(path, body) {
+  const res = await fetchWithWake(`${SANDBOX_BASE}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify(body),
+  })
+  return handleAPIResponse(res)
+}
+
 export async function sandboxGet(path) {
   const res = await fetchWithWake(`${SANDBOX_BASE}${path}`, {
     headers: { ...getAuthHeaders() },

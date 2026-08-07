@@ -1,17 +1,4 @@
-"""Per-account BYOK credentials — owned by the agent-runner, persisted in the
-claude CLI's native ``$CLAUDE_CONFIG_DIR/settings.json`` ``env`` block.
-
-This is the single home for the 6 ``ANTHROPIC_*`` cred keys. The browser writes
-here through agentgateway (``/api/sandbox/credentials`` → EPP wake+route → this
-pod); control-panel/admin write the SAME endpoint on the target account's pod.
-The claude CLI reads the ``env`` block itself on every run, so a change is honored
-on the next run with NO re-wake — no process-env injection, no data-spine, no
-wake-time K8s Secret (the old plumbing that caused cred staleness).
-
-Mirrors the surface of the retired control-panel ``/auth/me/env`` + ``/resource/
-models`` endpoints, now served pod-side where the creds actually live and where
-the pod can reach the account's (LAN) ``base_url`` for the connection test.
-"""
+"""User-owned LLM profile CRUD and provider model discovery."""
 
 from __future__ import annotations
 
@@ -20,124 +7,184 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from priva_common.models.auth import UserRecord
+from priva_common.models.llm_profiles import (
+    LlmProfile,
+    LlmProfileCreateRequest,
+    LlmProfileDefaultResponse,
+    LlmProfileSummary,
+    LlmProfileUpdateRequest,
+    LlmProfilesResponse,
+)
 from priva_common.models.resource import ModelInfo, ModelListResponse
-from priva_common.models.user_env import (
-    UserEnvResponse,
-    UserEnvSettings,
-    UserEnvUpdateRequest,
-)
-from priva_common.user_env import (
-    has_settings_env,
-    read_settings_env,
-    write_settings_env,
-)
+from priva_common.skill_exclude import get_user_yaml_key, save_user_yaml_key
+
 from ..deps import require_user
+from ..services.llm_profiles import (
+    profile_summary,
+    profile_store_path,
+    store,
+    validate_endpoint,
+    validate_profile_id,
+)
 
-router = APIRouter(prefix="/api/sandbox/credentials", tags=["credentials"])
-
-
-@router.get("", response_model=UserEnvResponse)
-async def get_credentials(user: UserRecord = Depends(require_user)):
-    """Return the account's ``env`` block (the BYOK creds) from settings.json.
-
-    The token is returned unmasked: the Settings panel prefills the auth-token
-    input from this response and re-sends it on the next save, so a masked value
-    would round-trip back and clobber the real token."""
-    env = read_settings_env()
-    if not env:
-        return UserEnvResponse(has_env=False)
-    return UserEnvResponse(has_env=has_settings_env(), env=UserEnvSettings(**env))
+router = APIRouter(prefix="/api/sandbox/credentials/profiles", tags=["llm-profiles"])
 
 
-@router.put("", response_model=UserEnvResponse)
-async def update_credentials(
-    request: UserEnvUpdateRequest,
-    user: UserRecord = Depends(require_user),
-):
-    """Merge-write the provided cred keys (partial allowed) into the settings.json
-    ``env`` block. Preserves ``hooks``/``mcpServers``/etc; written atomically."""
-    creds = request.model_dump(exclude_none=True)
-    if not creds:
-        raise HTTPException(400, "No credential fields provided")
+def _migrate_legacy_vision(username: str) -> str | None:
+    value = get_user_yaml_key(username, "vision_model")
+    return value if isinstance(value, str) and value else None
 
-    write_settings_env(creds)
 
+def _ensure(username: str):
+    vision = _migrate_legacy_vision(username)
+    was_present = profile_store_path().exists()
+    profiles, default_id = store.read(vision)
+    # Once the canonical app-config store exists, the old per-user vision key
+    # is no longer read.  Remove it only after a successful store read/write.
+    if vision and profiles and not was_present:
+        save_user_yaml_key(username, "vision_model", None)
+    return profiles, default_id
+
+
+def _as_summary(profile: LlmProfile) -> LlmProfileSummary:
+    return LlmProfileSummary.model_validate(profile_summary(profile))
+
+
+async def _fetch_models(profile: LlmProfile, timeout: float = 15.0) -> list[ModelInfo]:
     try:
-        get_audit_logger().append(AuditEntry(
-            actor=user.username,
-            action="credentials.updated",
-            target=user.username,
-            details={"keys": sorted(creds.keys())},
-        ))
-    except Exception:  # pragma: no cover - audit must never block a cred write
-        pass
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            response = await client.get(
+                f"{profile.base_url.rstrip('/')}/v1/models",
+                headers={"Authorization": f"Bearer {profile.auth_token}"},
+            )
+    except httpx.ConnectError as exc:
+        raise HTTPException(502, f"Cannot connect to API: {exc}") from exc
+    except httpx.TimeoutException as exc:
+        raise HTTPException(504, f"API request timed out: {exc}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"API request failed: {exc}") from exc
 
-    env = read_settings_env()
-    return UserEnvResponse(
-        has_env=has_settings_env(),
-        env=UserEnvSettings(**env) if env else None,
+    if response.status_code == 401:
+        raise HTTPException(400, "Invalid auth token — upstream returned 401")
+    if response.status_code != 200:
+        raise HTTPException(502, f"Upstream API returned {response.status_code}: {response.text[:200]}")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HTTPException(502, "Invalid JSON response from upstream API") from exc
+    values = payload.get("data") if isinstance(payload, dict) else payload
+    if not isinstance(values, list):
+        values = []
+    return [
+        ModelInfo(id=item["id"])
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+        else ModelInfo(id=item)
+        for item in values
+        if (isinstance(item, dict) and isinstance(item.get("id"), str)) or isinstance(item, str)
+    ]
+
+
+@router.get("", response_model=LlmProfilesResponse)
+async def list_profiles(user: UserRecord = Depends(require_user)):
+    profiles, default_id = _ensure(user.username)
+    return LlmProfilesResponse(
+        profiles=[_as_summary(profile) for profile in profiles],
+        default_profile_id=default_id,
     )
 
 
-@router.get("/status")
-async def get_credentials_status(user: UserRecord = Depends(require_user)):
-    """Lightweight presence check (base_url + auth_token set) — no values."""
-    return {"has_env": has_settings_env()}
+@router.post("", response_model=LlmProfileSummary, status_code=201)
+async def create_profile(
+    request: LlmProfileCreateRequest,
+    user: UserRecord = Depends(require_user),
+):
+    profile = LlmProfile(
+        id=validate_profile_id(request.id),
+        label=request.label.strip(),
+        base_url=validate_endpoint(request.base_url),
+        auth_token=request.auth_token.strip(),
+        default_model=request.default_model or None,
+        opus_model=request.opus_model or None,
+        sonnet_model=request.sonnet_model or None,
+        haiku_model=request.haiku_model or None,
+        vision_model=request.vision_model or None,
+    )
+    if not profile.auth_token:
+        raise HTTPException(422, "auth_token is required")
+    store.upsert(profile, vision_model=_migrate_legacy_vision(user.username))
+    get_audit_logger().append(AuditEntry(
+        actor=user.username, action="llm_profile.created", target=profile.id,
+    ))
+    return _as_summary(profile)
 
 
-@router.get("/models", response_model=ModelListResponse)
-async def list_models(user: UserRecord = Depends(require_user)):
-    """Connection test: proxy ``{base_url}/v1/models`` with the account's creds.
-
-    Runs pod-side so the per-account base_url (often a LAN endpoint the pod can
-    reach but the control-panel can't) is the one being tested."""
-    return ModelListResponse(models=await load_model_list())
+@router.get("/{profile_id}", response_model=LlmProfile)
+async def get_profile(profile_id: str, user: UserRecord = Depends(require_user)):
+    return store.get(validate_profile_id(profile_id), _migrate_legacy_vision(user.username))
 
 
-async def load_model_list(timeout: float = 15.0) -> list[ModelInfo]:
-    """Fetch upstream model ids using the account's saved credentials."""
-    env = read_settings_env()
-    if not env:
-        raise HTTPException(400, "API credentials not configured")
+@router.patch("/{profile_id}", response_model=LlmProfileSummary)
+async def update_profile(
+    profile_id: str,
+    request: LlmProfileUpdateRequest,
+    user: UserRecord = Depends(require_user),
+):
+    profile_id = validate_profile_id(profile_id)
+    current = store.get(profile_id, _migrate_legacy_vision(user.username))
+    values = current.model_dump()
+    for key, value in request.model_dump(exclude_unset=True).items():
+        if key == "auth_token" and value == "":
+            raise HTTPException(422, "auth_token cannot be empty")
+        if value is not None or key == "auth_token":
+            values[key] = value.strip() if isinstance(value, str) else value
+    if "base_url" in values:
+        values["base_url"] = validate_endpoint(values["base_url"])
+    values["id"] = profile_id
+    updated = LlmProfile.model_validate(values)
+    store.upsert(updated, replacing_id=profile_id, vision_model=_migrate_legacy_vision(user.username))
+    get_audit_logger().append(AuditEntry(
+        actor=user.username, action="llm_profile.updated", target=profile_id,
+        details={"fields": sorted(request.model_dump(exclude_unset=True).keys())},
+    ))
+    return _as_summary(updated)
 
-    base_url = (env.get("ANTHROPIC_BASE_URL") or "").rstrip("/")
-    auth_token = env.get("ANTHROPIC_AUTH_TOKEN") or ""
-    if not base_url or not auth_token:
-        raise HTTPException(400, "API credentials not configured. Please set base URL and auth token.")
 
-    try:
-        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            resp = await client.get(
-                f"{base_url}/v1/models",
-                headers={"Authorization": f"Bearer {auth_token}"},
-            )
-    except httpx.ConnectError as e:
-        raise HTTPException(502, f"Cannot connect to API: {e}") from e
-    except httpx.TimeoutException as e:
-        raise HTTPException(504, f"API request timed out: {e}") from e
-    except httpx.HTTPError as e:
-        raise HTTPException(502, f"API request failed: {e}") from e
+@router.put("/{profile_id}/default", response_model=LlmProfileDefaultResponse)
+async def set_default_profile(profile_id: str, user: UserRecord = Depends(require_user)):
+    profile_id = validate_profile_id(profile_id)
+    profile = store.get(profile_id, _migrate_legacy_vision(user.username))
+    if not profile.base_url or not profile.auth_token or not profile.default_model:
+        raise HTTPException(409, "profile_not_ready")
+    store.set_default(profile_id, _migrate_legacy_vision(user.username))
+    get_audit_logger().append(AuditEntry(
+        actor=user.username, action="llm_profile.default_changed", target=profile_id,
+    ))
+    return LlmProfileDefaultResponse(default_profile_id=profile_id)
 
-    if resp.status_code == 401:
-        raise HTTPException(400, "Invalid auth token — upstream returned 401")
-    if resp.status_code != 200:
-        raise HTTPException(502, f"Upstream API returned {resp.status_code}: {resp.text[:200]}")
 
-    try:
-        data = resp.json()
-    except Exception:
-        raise HTTPException(502, "Invalid JSON response from upstream API")
+@router.delete("/{profile_id}", status_code=204)
+async def delete_profile(profile_id: str, user: UserRecord = Depends(require_user)):
+    profile_id = validate_profile_id(profile_id)
+    store.delete(profile_id, _migrate_legacy_vision(user.username))
+    get_audit_logger().append(AuditEntry(
+        actor=user.username, action="llm_profile.deleted", target=profile_id,
+    ))
 
-    # Handle both OpenAI-style {"data": [...]} and flat list responses.
-    model_list = data.get("data") if isinstance(data, dict) else data
-    if not isinstance(model_list, list):
-        model_list = []
 
-    models = []
-    for m in model_list:
-        if isinstance(m, dict) and "id" in m:
-            models.append(ModelInfo(id=m["id"]))
-        elif isinstance(m, str):
-            models.append(ModelInfo(id=m))
+@router.get("/{profile_id}/models", response_model=ModelListResponse)
+async def list_profile_models(profile_id: str, user: UserRecord = Depends(require_user)):
+    profile = store.get(validate_profile_id(profile_id), _migrate_legacy_vision(user.username))
+    return ModelListResponse(models=await _fetch_models(profile))
 
-    return models
+
+@router.post("/{profile_id}/test", response_model=ModelListResponse)
+async def test_profile(profile_id: str, user: UserRecord = Depends(require_user)):
+    profile = store.get(validate_profile_id(profile_id), _migrate_legacy_vision(user.username))
+    return ModelListResponse(models=await _fetch_models(profile))
+
+
+async def load_model_list(profile: LlmProfile | None = None, timeout: float = 15.0) -> list[ModelInfo]:
+    """Used by overview/bootstrap and tests; always targets the default profile."""
+    if profile is None:
+        profile = store.default()
+    return await _fetch_models(profile, timeout)

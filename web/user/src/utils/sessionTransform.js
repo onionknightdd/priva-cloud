@@ -19,6 +19,7 @@ import {
   recordSdkTaskToolResult,
   recordSdkTaskToolUse,
 } from './sdkTaskTracker'
+import { isAskUserInputValidationError } from './askUserQuestion'
 
 // Monotonic counter for `_cid` (stable React list keys). 's-' prefix keeps
 // load-path ids distinct from chatStore's live 'c-' ids.
@@ -418,6 +419,7 @@ export function transformSessionMessages(sdkMessages) {
           // session reload. MessageBubble renders ask_user blocks when
           // status === 'answered'. Null (declined / no recorded answer) ->
           // stays hidden, matching prior behaviour.
+          if (isAskUserInputValidationError(result)) continue
           const answered = buildAnsweredAskUserBlock(block, result)
           if (answered) {
             outputBlocks.push(answered)

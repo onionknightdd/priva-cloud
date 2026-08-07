@@ -29,15 +29,16 @@ from priva_common.models.auth import (
     UserOverviewResponse,
     UserRecord,
 )
+from priva_common.models.llm_profiles import LlmProfileSummary
 from priva_common.models.mcp import McpServerSummary
 from priva_common.models.resource import QuickAction
-from priva_common.user_env import has_settings_env, read_settings_env
 from priva_common.workspace import get_user_workspace
 from ..deps import require_user
 from ..services.claude_sdk import session_meta
 from ..services.compute_user_stats import compute_user_stats
 from ..services.mcp.config_manager import McpConfigManager
-from .credentials import load_model_list
+from .credentials import _migrate_legacy_vision
+from ..services.llm_profiles import profile_summary, store
 
 router = APIRouter(prefix="/api/sandbox/user", tags=["user-data"])
 logger = get_app_logger(__name__)
@@ -52,11 +53,6 @@ def _load_quickactions(username: str) -> list[QuickAction]:
         for item in raw
         if isinstance(item, dict) and "name" in item and "prompt" in item
     ]
-
-
-def _load_vision_model(username: str) -> str | None:
-    vm = _user_yaml.get_user_yaml_key(username, "vision_model")
-    return vm if isinstance(vm, str) and vm else None
 
 
 def _load_mcp_servers(username: str) -> list[McpServerSummary]:
@@ -86,19 +82,7 @@ def _load_mcp_servers(username: str) -> list[McpServerSummary]:
 
 
 async def _load_overview_bootstrap(user: UserRecord) -> UserOverviewBootstrap:
-    env = read_settings_env() or {}
-    default_model = env.get("ANTHROPIC_MODEL")
-    if not isinstance(default_model, str) or not default_model:
-        default_model = None
-
-    models = []
-    models_loaded = False
-    if has_settings_env():
-        try:
-            models = await load_model_list(timeout=5.0)
-            models_loaded = True
-        except Exception as exc:
-            logger.info("Overview bootstrap model prefetch skipped: %s", exc)
+    profiles, default_profile_id = store.read(_migrate_legacy_vision(user.username))
 
     recent_activities = session_meta.get_recent_activities()
     active_cwd = (
@@ -108,13 +92,11 @@ async def _load_overview_bootstrap(user: UserRecord) -> UserOverviewBootstrap:
     )
     return UserOverviewBootstrap(
         quickactions=_load_quickactions(user.username),
-        vision_model=_load_vision_model(user.username),
+        llm_profiles=[LlmProfileSummary.model_validate(profile_summary(profile)) for profile in profiles],
+        default_profile_id=default_profile_id,
         mcp_servers=_load_mcp_servers(user.username),
         active_cwd=active_cwd or get_user_workspace(user),
         recent_activities=recent_activities,
-        default_model=default_model,
-        models=models,
-        models_loaded=models_loaded,
     )
 
 

@@ -37,6 +37,10 @@ import { getSplitParams } from '../utils/splitMode'
 import { parseTaskNotification } from '../utils/taskNotification'
 import { refreshSessionRecap } from '../utils/sessionRecap'
 import { isSdkTaskToolName } from '../utils/sdkTaskTracker'
+import {
+  findMatchingAskUserBlockIndex,
+  isAskUserInputValidationError,
+} from '../utils/askUserQuestion'
 
 // Max characters of background-shell output kept in the task store; only the
 // tail is retained beyond this.
@@ -303,6 +307,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
 
   // Track tool_use_ids that are canvas-only (hidden from message flow)
   const hiddenToolIds = new Set()
+  const askUserToolIds = new Set()
   const generatedToolIds = new Set()
   const pendingToolFileTabs = new Map()
   // Track TodoWrite tool_use_ids for todo extraction
@@ -581,22 +586,32 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         if (data.tool_name === 'AskUserQuestion' && data.input?.questions) {
           if (S.chat().pendingAskUser?._permissionRequestId === data.request_id) break
           const askProcessGroupId = nextProcessGroupId()
+          const toolUseId = data.tool_use_id || data.request_id
+          const existingIndex = lastMsg?.role === 'assistant'
+            ? findMatchingAskUserBlockIndex(lastMsg.content, {
+              toolUseId,
+              questions: data.input.questions,
+            })
+            : -1
+          const existingBlock = existingIndex >= 0 ? lastMsg.content[existingIndex] : null
           const askBlock = {
-            toolUseId: data.request_id,
+            ...existingBlock,
+            type: 'ask_user',
+            id: existingBlock?.id || toolUseId,
+            toolUseId,
             questions: data.input.questions,
             _permissionRequestId: data.request_id,
+            status: existingBlock?.status || 'pending',
+            processGroupId: existingBlock?.processGroupId || askProcessGroupId,
           }
           S.chat().setPendingAskUser(askBlock)
-          // Also add ask_user block to message content
+          // The assistant tool_use normally arrives first. Reconcile the
+          // permission request into that existing block instead of appending a
+          // second copy under the unrelated permission request UUID.
           if (lastMsg && lastMsg.role === 'assistant') {
-            const newContent = [...lastMsg.content, {
-              type: 'ask_user',
-              id: data.request_id,
-              toolUseId: data.request_id,
-              questions: data.input.questions,
-              status: 'pending',
-              processGroupId: askProcessGroupId,
-            }]
+            const newContent = existingIndex >= 0
+              ? lastMsg.content.map((block, index) => index === existingIndex ? askBlock : block)
+              : [...lastMsg.content, askBlock]
             S.chatSet({
               messages: [...msgs.slice(0, lastIdx), { ...lastMsg, content: newContent }],
             })
@@ -746,6 +761,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
             'mcp__priva_openclaw__delegate_to_openclaw',
           ]
           const messageBlocks = []
+          let reconciledContent = lastMsg.content
 
           for (const block of toolBlocks) {
             // Claude Agent SDK task management is represented exclusively by
@@ -769,17 +785,34 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
             // AskUserQuestion → interactive card in chat (not a regular tool card)
             if (block.name === 'AskUserQuestion' && block.input?.questions) {
               hiddenToolIds.add(block.id)
+              askUserToolIds.add(block.id)
+              const existingIndex = findMatchingAskUserBlockIndex(reconciledContent, {
+                toolUseId: block.id,
+                questions: block.input.questions,
+              })
+              const existingBlock = existingIndex >= 0 ? reconciledContent[existingIndex] : null
               const askBlock = {
+                ...existingBlock,
                 type: 'ask_user',
                 id: block.id,
                 toolUseId: block.id,
                 questions: block.input.questions,
-                status: 'pending',
+                status: existingBlock?.status || 'pending',
+                processGroupId: existingBlock?.processGroupId || block.processGroupId,
               }
-              messageBlocks.push(askBlock)
+              if (existingIndex >= 0) {
+                reconciledContent = reconciledContent.map((item, index) => (
+                  index === existingIndex ? askBlock : item
+                ))
+              } else {
+                messageBlocks.push(askBlock)
+              }
               S.chat().setPendingAskUser({
                 toolUseId: block.id,
                 questions: block.input.questions,
+                ...(existingBlock?._permissionRequestId
+                  ? { _permissionRequestId: existingBlock._permissionRequestId }
+                  : {}),
               })
               setRunStatus('attention')
               continue
@@ -927,7 +960,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
 
           // Add blocks to message content
           if (messageBlocks.length > 0 || sdkTaskBlocks.length > 0) {
-            const newContent = [...lastMsg.content, ...messageBlocks]
+            const newContent = [...reconciledContent, ...messageBlocks]
             S.chatSet({
               messages: [
                 ...msgs.slice(0, lastIdx),
@@ -1003,6 +1036,30 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         for (const rb of allResultBlocks) {
           const isToolResultError = isErroredToolResult(rb, data.tool_use_result)
           recordSdkTaskToolResult(rb.tool_use_id, rb, data.tool_use_result)
+
+          // Invalid AskUserQuestion input never reached the permission UI.
+          // Remove its optimistic live block so it neither remains pending nor
+          // contributes to the response summary.
+          if (
+            askUserToolIds.has(rb.tool_use_id)
+            && isAskUserInputValidationError(rb, data.tool_use_result)
+          ) {
+            const currentChat = S.chat()
+            let changed = false
+            const nextMessages = currentChat.messages.map((message) => {
+              if (message.role !== 'assistant' || !Array.isArray(message.content)) return message
+              const nextContent = message.content.filter((block) => !(
+                block?.type === 'ask_user' && block.toolUseId === rb.tool_use_id
+              ))
+              if (nextContent.length === message.content.length) return message
+              changed = true
+              return { ...message, content: nextContent }
+            })
+            if (changed) S.chatSet({ messages: nextMessages })
+            if (currentChat.pendingAskUser?.toolUseId === rb.tool_use_id) {
+              S.chat().clearPendingAskUser()
+            }
+          }
           const pendingFileTab = pendingToolFileTabs.get(rb.tool_use_id)
           const handledPendingFile = Boolean(pendingFileTab)
           if (pendingFileTab) {

@@ -9,21 +9,19 @@ function hydrateOverviewBootstrap(bootstrap) {
   if (!bootstrap || typeof bootstrap !== 'object') return
 
   const settingsPatch = {}
+  if (Array.isArray(bootstrap.llm_profiles)) {
+    settingsPatch.profiles = bootstrap.llm_profiles
+    settingsPatch.profilesLoaded = true
+    settingsPatch.profilesLoading = false
+  }
+  if (Object.prototype.hasOwnProperty.call(bootstrap, 'default_profile_id')) {
+    settingsPatch.defaultProfileId = bootstrap.default_profile_id || null
+    settingsPatch.activeSettingsProfileId = bootstrap.default_profile_id || null
+    settingsPatch.hasEnv = Array.isArray(bootstrap.llm_profiles) && bootstrap.llm_profiles.length > 0
+  }
   if (Array.isArray(bootstrap.quickactions)) {
     settingsPatch.quickActions = bootstrap.quickactions
     settingsPatch.quickActionsLoaded = true
-  }
-  if (Object.prototype.hasOwnProperty.call(bootstrap, 'vision_model')) {
-    settingsPatch.visionModel = bootstrap.vision_model || null
-  }
-  if (typeof bootstrap.default_model === 'string' && bootstrap.default_model) {
-    settingsPatch.defaultModel = bootstrap.default_model
-  }
-  if (bootstrap.models_loaded && Array.isArray(bootstrap.models)) {
-    settingsPatch.models = bootstrap.models
-    settingsPatch.modelsLoading = false
-    settingsPatch.modelsLoaded = true
-    settingsPatch.modelsError = null
   }
   if (Object.keys(settingsPatch).length > 0) {
     useSettingsStore.setState(settingsPatch)

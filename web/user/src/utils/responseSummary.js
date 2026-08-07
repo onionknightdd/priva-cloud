@@ -155,6 +155,7 @@ export function summarizeResponseExecution({
       if (!block) return
 
       if (block.type === 'ask_user') {
+        if (block.status === 'error' || block.invalid === true) return
         const questionKey = block.id || block.toolUseId
         if (questionKey && visitedQuestionIds.has(questionKey)) return
         if (questionKey) visitedQuestionIds.add(questionKey)
@@ -182,7 +183,7 @@ export function summarizeResponseExecution({
         addPath(editedFiles, toolFilePath(block))
       }
       if (COMMAND_TOOL_NAMES.has(block.name) && isCompleted(block)) commands += 1
-      if (block.name === 'AskUserQuestion') {
+      if (block.name === 'AskUserQuestion' && !isFailed(block)) {
         if (block.id && visitedQuestionIds.has(block.id)) return
         if (block.id) visitedQuestionIds.add(block.id)
         questions += questionCount(block.input?.questions)

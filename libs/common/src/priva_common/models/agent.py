@@ -169,6 +169,16 @@ class HookEventPayload(BaseModel):
     data: dict[str, Any] | None = None
 
 
+class SessionResponseModel(BaseModel):
+    """Model/profile observed on the latest assistant response."""
+
+    # Nullable for legacy sessions or transcript backfills that can recover a
+    # model id but cannot prove which historical profile supplied it.
+    profile_id: str | None = None
+    model_id: str
+    observed_at: int | None = None
+
+
 class SessionInfoResponse(BaseModel):
     session_id: str
     summary: str
@@ -193,6 +203,7 @@ class SessionInfoResponse(BaseModel):
     # the runner's session-meta scheduler index; None for interactive sessions.
     origin: str | None = None
     scheduler_job_name: str | None = None
+    last_response_model: SessionResponseModel | None = None
 
 
 class SessionMessageResponse(BaseModel):

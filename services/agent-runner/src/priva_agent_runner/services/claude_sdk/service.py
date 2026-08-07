@@ -23,6 +23,7 @@ from priva_common.audit_log import AuditEntry, get_audit_logger
 from ...services.skills import _get_skills_dir
 from . import retry, session_meta, session_recap, session_title
 from .options import build_agent_options
+from ..llm_profiles import close_profile_settings_overlay, resolve_model
 from priva_common.logging import get_app_logger
 from .permission_coordinator import PermissionCoordinator, registry
 from priva_common.serialization import (
@@ -244,36 +245,83 @@ async def _make_image_prompt(content_blocks: list[dict]):
     }
 
 
-def _resolve_vision_model(username: str | None, images: list[dict] | None) -> str | None:
-    """Read vision_model from user config if images are present."""
-    if not images or not username:
-        return None
-    # vision_model lives alongside skill_exclude in the per-user .priva.user.yml;
-    # read it via the shared accessor so the runtime doesn't import a CP router.
-    from priva_common.skill_exclude import get_user_yaml_key
-    vm = get_user_yaml_key(username, "vision_model")
-    return vm if isinstance(vm, str) and vm else None
-
-
-# Vision session tracking: session_id -> vision_model_id
-_vision_sessions: dict[str, str] = {}
+# Vision session tracking: session_id -> (profile_id, vision_model_id)
+_vision_sessions: dict[str, tuple[str, str]] = {}
 _VISION_SESSIONS_MAX = 1000
 
 
-def _track_vision_session(session_id: str | None, vision_model: str | None) -> None:
-    if not session_id or not vision_model:
+def _track_vision_session(session_id: str | None, profile_id: str | None, vision_model: str | None) -> None:
+    if not session_id or not profile_id or not vision_model:
         return
     if len(_vision_sessions) >= _VISION_SESSIONS_MAX:
         # Evict oldest entry
         oldest = next(iter(_vision_sessions))
         del _vision_sessions[oldest]
-    _vision_sessions[session_id] = vision_model
+    _vision_sessions[session_id] = (profile_id, vision_model)
 
 
-def _get_sticky_vision_model(session_id: str | None) -> str | None:
+def _get_sticky_vision_model(session_id: str | None) -> tuple[str, str] | None:
     if not session_id:
         return None
     return _vision_sessions.get(session_id)
+
+
+def _resolve_vision_model(username: str | None, images: list[dict] | None) -> str | None:
+    """Compatibility seam for callers/tests; canonical vision lives on a profile."""
+    if not images:
+        return None
+    try:
+        return resolve_model(None).profile.vision_model
+    except Exception:
+        return None
+
+
+def _model_ref_for_images(model_ref: str | None, session_id: str | None, images: list[dict] | None) -> tuple[str | None, str | None, str | None]:
+    """Return (model_ref, profile_id, vision_model) for an image run."""
+    if not images and not model_ref:
+        # Let build_agent_options perform the normal default-profile gate.  This
+        # also keeps non-SDK orchestration tests that stub the builder isolated
+        # from the profile store.
+        return model_ref, None, None
+    resolved = resolve_model(model_ref)
+    if not images:
+        return model_ref, resolved.profile.id, None
+    sticky = _get_sticky_vision_model(session_id)
+    vision = sticky[1] if sticky and sticky[0] == resolved.profile.id else resolved.profile.vision_model
+    if vision:
+        return f"{resolved.profile.id}:{vision}", resolved.profile.id, vision
+    return model_ref, resolved.profile.id, None
+
+
+def _cleanup_options(options: Any) -> None:
+    close_profile_settings_overlay(getattr(options, "_priva_overlay_manager", None))
+
+
+async def _record_last_response_model(
+    session_id: str | None,
+    model_id: str | None,
+    profile_id: str | None,
+) -> None:
+    """Best-effort persistence for UI/history metadata.
+
+    A metadata-index write must never turn an otherwise completed model run
+    into a failed run.  The transcript and live response remain authoritative
+    if this auxiliary write cannot be completed.
+    """
+    if not session_id or not model_id:
+        return
+    try:
+        await session_meta.set_last_response_model(
+            session_id,
+            model_id=model_id,
+            profile_id=profile_id,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to persist last response model for session {}",
+            session_id,
+            exc_info=True,
+        )
 
 
 def _askuser_answers_map(questions: list | None, answer_text: str) -> dict[str, str]:
@@ -504,6 +552,7 @@ def _audit_run_completed(
     session_id: str | None,
     usage: dict[str, Any] | None,
     model: str | None,
+    profile_id: str | None = None,
 ) -> None:
     """Log an audit entry when an agent run completes successfully."""
     if not usage:
@@ -520,6 +569,7 @@ def _audit_run_completed(
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "model": model or "",
+            "profile_id": profile_id or "",
         },
     ))
 
@@ -556,10 +606,9 @@ async def agent_run(
     enable_file_checkpointing: bool = False,
     fork_session: bool = False,
 ) -> dict[str, Any]:
-    # Vision model: check sticky session first, then resolve from config
-    vision_model = _get_sticky_vision_model(session_id) or _resolve_vision_model(username, images)
-    if vision_model:
-        model_override = vision_model
+    model_override, selected_profile_id, vision_model = _model_ref_for_images(
+        model_override, session_id, images,
+    )
 
     options = await build_agent_options(
         session_id, permission_mode, cwd=cwd, add_dirs=add_dirs, username=username,
@@ -571,7 +620,11 @@ async def agent_run(
     )
     messages: list[dict[str, Any]] = []
     result_data: dict[str, Any] = {}
-    last_model: str | None = model_override
+    # Keep the request reference separate from the authoritative model that
+    # the provider reports on AssistantMessage.  The request may be a
+    # qualified ``profile:model`` value and is not proof that a reply was
+    # produced by that model.
+    last_model: str | None = None
     # Track the CLI-assigned session id across retries — same role as in
     # agent_run_events. See the explanation there.
     current_resume_id: str | None = session_id
@@ -591,6 +644,7 @@ async def agent_run(
 
     async def _run_one_attempt(resume_pending_turn: bool) -> None:
         nonlocal last_model, current_resume_id, title_pending, attempt_resumable
+        last_model = None
         # A transport failure while reconnecting does not make the already
         # persisted pending turn disappear; the next attempt must still resume
         # it rather than fall back to the original prompt.
@@ -686,10 +740,12 @@ async def agent_run(
                 attempt, retry.MAX_ATTEMPTS, e.payload.get("message"),
             )
             if attempt == retry.MAX_ATTEMPTS:
+                _cleanup_options(options)
                 break
             continue
         except Exception as e:
             if not retry.should_retry_exception(e):
+                _cleanup_options(options)
                 raise
             resume_in_place = bool(current_resume_id and attempt_resumable)
             last_error = {
@@ -699,12 +755,13 @@ async def agent_run(
             }
             logger.exception("[RETRY] agent_run attempt %d raised", attempt)
             if attempt == retry.MAX_ATTEMPTS:
+                _cleanup_options(options)
                 break
             continue
 
     # Track vision session for stickiness
     new_sid = result_data.get("session_id")
-    _track_vision_session(new_sid, vision_model)
+    _track_vision_session(new_sid, selected_profile_id, vision_model)
     await session_meta.record_recent_activity(options.cwd, new_sid or current_resume_id or session_id)
 
     if last_error and not result_data:
@@ -717,7 +774,16 @@ async def agent_run(
             "api_error_status": last_error.get("api_error_status"),
         }
     else:
-        _audit_run_completed(username, new_sid or session_id, result_data.get("usage"), last_model)
+        if last_model:
+            await _record_last_response_model(
+                new_sid or current_resume_id or session_id,
+                last_model,
+                getattr(options, "_priva_profile_id", None),
+            )
+        _audit_run_completed(
+            username, new_sid or session_id, result_data.get("usage"), last_model,
+            getattr(options, "_priva_profile_id", None),
+        )
         # Unlike the title, this needs no settle: it never touches the CLI, so
         # nothing it depends on dies when this function returns.
         session_recap.spawn(new_sid or current_resume_id or session_id, username, options.cwd)
@@ -725,6 +791,7 @@ async def agent_run(
     response = {"messages": messages, **result_data, "attempts": final_attempts}
     if last_error:
         response["retried_due_to"] = last_error.get("code")
+    _cleanup_options(options)
     return response
 
 
@@ -854,10 +921,9 @@ async def agent_run_events(
             next tool-result boundary (mid-turn via interrupt) or
             end-of-turn (no interrupt needed).
     """
-    # Vision model: check sticky session first, then resolve from config
-    vision_model = _get_sticky_vision_model(session_id) or _resolve_vision_model(username, images)
-    if vision_model:
-        model_override = vision_model
+    model_override, selected_profile_id, vision_model = _model_ref_for_images(
+        model_override, session_id, images,
+    )
 
     needs_permissions = True  # streaming runs always need a coordinator
     stream_id = session_id or str(uuid.uuid4())
@@ -922,7 +988,9 @@ async def agent_run_events(
         await emit("stream_init", {"stream_id": stream_id})
 
     effective_prompt = _build_prompt_with_images(prompt, images, attachments)
-    model_tracker: list[str | None] = [model_override]
+    # Track only models observed in assistant events.  A qualified request
+    # reference is not evidence that a response was produced by that model.
+    model_tracker: list[str | None] = [None]
 
     if session_id:
         healed = heal_orphan_tool_uses(session_id, options.cwd)
@@ -943,6 +1011,7 @@ async def agent_run_events(
         via a ``stream_error`` emit and not retried).
         """
         nonlocal stream_id, current_resume_id, title_pending, attempt_resumable
+        model_tracker[0] = None
         # Preserve native-resume mode across transient reconnect failures.  The
         # pending turn is already on disk even if this CLI process never starts.
         attempt_resumable = resume_pending_turn
@@ -1100,7 +1169,7 @@ async def agent_run_events(
                     if item["event"] == "result":
                         new_sid = item["data"].get("session_id")
                         if new_sid:
-                            _track_vision_session(new_sid, vision_model)
+                            _track_vision_session(new_sid, selected_profile_id, vision_model)
                             if new_sid != current_resume_id:
                                 current_resume_id = new_sid
                         if coordinator and new_sid and new_sid != stream_id:
@@ -1111,11 +1180,22 @@ async def agent_run_events(
                             new_sid or stream_id,
                             item["data"].get("usage"),
                             model_tracker[0],
+                            getattr(options, "_priva_profile_id", None),
                         )
+                        if model_tracker[0]:
+                            await _record_last_response_model(
+                                new_sid or current_resume_id or session_id,
+                                model_tracker[0],
+                                getattr(options, "_priva_profile_id", None),
+                            )
                         await session_meta.record_recent_activity(
                             options.cwd,
                             new_sid or current_resume_id or session_id,
                         )
+                        # A stream may contain queued turns.  Do not let a
+                        # previous turn's model leak into a later result that
+                        # has not emitted an assistant message yet.
+                        model_tracker[0] = None
 
                     elif (
                         item["event"] == "tool_result"
@@ -1292,6 +1372,7 @@ async def agent_run_events(
     finally:
         if coordinator:
             coordinator.cancel_all()
+        _cleanup_options(locals().get("options"))
 
 
 async def agent_run_stream(

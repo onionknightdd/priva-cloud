@@ -115,7 +115,9 @@ export default function JobDrawer({ onDelete }) {
   const editingJob = useSchedulerStore((s) => s.editingJob)
   const { closeDrawer, saveJob } = useSchedulerStore.getState()
   const models = useSettingsStore((s) => s.models)
+  const profiles = useSettingsStore((s) => s.profiles)
   const fetchModels = useSettingsStore((s) => s.fetchModels)
+  const fetchProfiles = useSettingsStore((s) => s.fetchProfiles)
   const settingsOpen = useUiStore((s) => s.settingsOpen)
   const openSettings = useUiStore((s) => s.openSettings)
 
@@ -197,7 +199,7 @@ export default function JobDrawer({ onDelete }) {
     return () => clearTimeout(previewTimer.current)
   }, [trigger, tz]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { if (jobType === 'agent_run') fetchModels?.() }, [jobType, fetchModels])
+  useEffect(() => { if (jobType === 'agent_run') { fetchProfiles?.(); fetchModels?.() } }, [jobType, fetchModels, fetchProfiles])
 
   const loadFeishuConfig = useCallback(async () => {
     // Mark the request before awaiting so React StrictMode's effect replay does
@@ -233,10 +235,19 @@ export default function JobDrawer({ onDelete }) {
     return zones.map((z) => ({ value: z, label: z }))
   }, [tz])
 
-  const modelOptions = useMemo(() => ([
-    { value: '', label: t('scheduler.defaultModel') },
-    ...models.map((m) => ({ value: m.id, label: m.id })),
-  ]), [models, t])
+  const modelOptions = useMemo(() => {
+    const options = [{ value: '', label: t('scheduler.defaultModel') }]
+    profiles.forEach((profile) => {
+      const configured = [profile.default_model, profile.opus_model, profile.sonnet_model, profile.haiku_model, profile.vision_model]
+        .filter(Boolean)
+      const unique = [...new Set(configured)]
+      unique.forEach((id) => options.push({ value: `${profile.id}:${id}`, label: `${profile.label} / ${id}` }))
+    })
+    // Include discovered models from the default profile for providers that do
+    // not use the tier mapping fields.
+    models.forEach((item) => options.push({ value: item.id, label: item.id }))
+    return options
+  }, [models, profiles, t])
 
   const buildJobConfig = () => {
     const callback = buildFeishuCallback(callbackEnabled)

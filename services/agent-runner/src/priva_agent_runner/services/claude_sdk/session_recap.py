@@ -31,7 +31,7 @@ from claude_agent_sdk import get_session_messages
 
 from priva_common.logging import get_app_logger
 from priva_common.skill_exclude import get_user_yaml_key
-from priva_common.user_env import read_settings_env
+from ..llm_profiles import store
 
 from . import session_meta
 
@@ -135,12 +135,15 @@ def _clean(raw: str) -> str:
 
 
 async def _ask_model(digest: str) -> str:
-    env = read_settings_env()
-    base_url = (env.get("ANTHROPIC_BASE_URL") or "").rstrip("/")
-    auth_token = env.get("ANTHROPIC_AUTH_TOKEN") or ""
+    try:
+        profile = store.default()
+    except Exception:
+        return ""
+    base_url = profile.base_url.rstrip("/")
+    auth_token = profile.auth_token
     # Prefer the account's small/fast model: a one-liner does not need the
     # model the session itself runs on.
-    model = env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL") or env.get("ANTHROPIC_MODEL") or ""
+    model = profile.haiku_model or profile.default_model or ""
     if not base_url or not auth_token or not model:
         # BYOK not configured, or no model id we could name. Nothing to do —
         # this account simply has no recaps.

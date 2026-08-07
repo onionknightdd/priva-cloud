@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from types import SimpleNamespace
 
 from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 
@@ -37,6 +38,21 @@ class PermissionCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         request = await queue.get()
 
         self.assertEqual(request["data"]["kind"], "ask_user")
+
+        coordinator.resolve(request["data"]["request_id"], "allow")
+        await task
+
+    async def test_tool_use_id_included_in_request_payload(self) -> None:
+        queue: asyncio.Queue = asyncio.Queue()
+        coordinator = PermissionCoordinator("stream-A", queue)
+        context = SimpleNamespace(tool_use_id="tool-123")
+
+        task = asyncio.create_task(
+            coordinator.request_permission("AskUserQuestion", {}, context, kind="ask_user")
+        )
+        request = await queue.get()
+
+        self.assertEqual(request["data"]["tool_use_id"], "tool-123")
 
         coordinator.resolve(request["data"]["request_id"], "allow")
         await task

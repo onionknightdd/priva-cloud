@@ -43,6 +43,7 @@ class PermissionCoordinator:
         kind: str = "permission",
     ) -> PermissionResultAllow | PermissionResultDeny:
         request_id = str(uuid.uuid4())
+        tool_use_id = getattr(context, "tool_use_id", None)
         logger.info("[PERM] request_permission request_id={} session_id={} tool={} risky={} queue_id={}",
                     request_id, self.session_id, tool_name, risky, id(self.event_queue))
         loop = asyncio.get_running_loop()
@@ -53,6 +54,7 @@ class PermissionCoordinator:
             "event": "permission_request",
             "data": {
                 "request_id": request_id,
+                "tool_use_id": tool_use_id,
                 "tool_name": tool_name,
                 "input": tool_input,
                 "session_id": self.session_id,
@@ -70,6 +72,7 @@ class PermissionCoordinator:
                 "event": "permission_timeout",
                 "data": {
                     "request_id": request_id,
+                    "tool_use_id": tool_use_id,
                     "tool_name": tool_name,
                     "session_id": self.session_id,
                 },

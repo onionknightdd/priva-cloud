@@ -108,6 +108,28 @@ test('counts AskUserQuestion prompts without treating approval tools as question
   assert.equal(summary.questions, 1)
 })
 
+test('does not count failed AskUserQuestion attempts', () => {
+  const summary = summarizeResponseExecution({
+    contentBlocks: [
+      {
+        type: 'ask_user',
+        id: 'ask-invalid',
+        status: 'error',
+        questions: [{ question: 'This was never shown' }],
+      },
+      {
+        type: 'tool_use',
+        id: 'ask-tool-invalid',
+        name: 'AskUserQuestion',
+        status: 'error',
+        input: { questions: [{ question: 'This also failed' }] },
+      },
+    ],
+  })
+
+  assert.equal(summary.questions, 0)
+})
+
 test('only exposes non-zero summary metrics for display', () => {
   assert.deepEqual(visibleExecutionSummaryItems({
     duration: '12s',

@@ -16,7 +16,9 @@ from fastapi import HTTPException
 
 from priva_common.models.agent import PermissionMode
 from priva_common.config import get_settings
+from priva_common.models.llm_profiles import LlmProfile
 from priva_common.user_env import read_settings_env
+from ..llm_profiles import open_profile_settings_overlay, resolve_model
 from priva_common.workspace import get_workspace_for_username
 
 _logger = None
@@ -167,22 +169,34 @@ async def build_agent_options(
         cwd = get_workspace_for_username(username)
     os.makedirs(cwd, exist_ok=True)
 
-    # Cred gate. The BYOK creds live in the CLI's own *user* settings file
-    # ($CLAUDE_CONFIG_DIR/settings.json "env" block); the claude CLI reads and
-    # applies that block itself at run time (Object.assign(process.env, …)). We do
-    # NOT inject them into options.env or os.environ — here we only GATE the run so
-    # a missing base_url/auth_token is a fast 400 instead of an opaque mid-run auth
-    # failure. (This file-on-the-PVC home is also what fixes cred staleness: a change
-    # is honored on the next run with no re-wake and no per-pod Secret.)
-    creds = read_settings_env()
-    if not creds.get("ANTHROPIC_BASE_URL") or not creds.get("ANTHROPIC_AUTH_TOKEN"):
-        raise HTTPException(400, "API credentials not configured. Please set up your API connection in Settings.")
-
-    # options.model is still set explicitly (the CLI also honors ANTHROPIC_MODEL from
-    # settings.json, but a run may override it per-request).
-    model = creds.get("ANTHROPIC_MODEL", "")
-    if model_override:
-        model = model_override
+    # Resolve the request's optional ``profile:model`` reference before creating
+    # the SDK options.  The selected profile is snapshotted for this run, so a
+    # Settings change cannot switch credentials halfway through a retry/stream.
+    try:
+        resolved = resolve_model(model_override)
+    except HTTPException:
+        # Unit/in-process callers can invoke the builder before the app
+        # lifespan has performed migration.  Read the legacy env only as a
+        # one-time migration fallback; production runs have a profile store.
+        legacy = read_settings_env()
+        if not legacy.get("ANTHROPIC_BASE_URL") or not legacy.get("ANTHROPIC_AUTH_TOKEN"):
+            raise
+        legacy_profile = LlmProfile(
+            id="default", label="Default",
+            base_url=legacy["ANTHROPIC_BASE_URL"],
+            auth_token=legacy["ANTHROPIC_AUTH_TOKEN"],
+            default_model=legacy.get("ANTHROPIC_MODEL") or None,
+            opus_model=legacy.get("ANTHROPIC_DEFAULT_OPUS_MODEL") or None,
+            sonnet_model=legacy.get("ANTHROPIC_DEFAULT_SONNET_MODEL") or None,
+            haiku_model=legacy.get("ANTHROPIC_DEFAULT_HAIKU_MODEL") or None,
+        )
+        from ..llm_profiles import ResolvedProfile
+        if model_override and ":" in model_override:
+            _, model = model_override.split(":", 1)
+        else:
+            model = model_override or legacy_profile.default_model
+        resolved = ResolvedProfile(profile=legacy_profile, model=model)
+    model = resolved.model
 
     # options.env carries ONLY non-cred runtime keys — the cred keys are deliberately
     # absent (the CLI reads them from settings.json). Point the AGENT's python/pip at
@@ -246,6 +260,16 @@ async def build_agent_options(
         include_hook_events=True,
         skills=enabled_skill_names,
     )
+    # Claude Agent SDK maps ``settings`` to --settings (highest user-controlled
+    # settings layer) and ``model`` to --model.  Keep the secret in a 0600 file
+    # under the app config path; it never appears in argv or options.env.
+    overlay_path, overlay_manager = open_profile_settings_overlay(
+        resolved.profile, model=model,
+    )
+    options.settings = overlay_path
+    options._priva_profile_id = resolved.profile.id
+    options._priva_overlay_manager = overlay_manager
+    options._priva_overlay_path = overlay_path
     if max_turns and max_turns > 0:
         # D14 runaway guard for unattended runs: the CLI stops at the cap and
         # the result message carries subtype=error_max_turns.

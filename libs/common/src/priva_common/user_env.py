@@ -117,6 +117,47 @@ def write_settings_env(creds: dict, path: Path | None = None) -> None:
         pass
 
 
+def clear_settings_env(path: Path | None = None) -> None:
+    """Remove legacy ANTHROPIC_* keys after the profile-store migration.
+
+    The rest of Claude's settings remain untouched.  This function is only
+    called after the canonical app-config profile has been written.
+    """
+    path = path or settings_json_path()
+    if not path.exists():
+        return
+    with _lock:
+        fd = os.open(path, os.O_RDWR)
+        with os.fdopen(fd, "r+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                raw = f.read()
+                try:
+                    data = json.loads(raw) if raw.strip() else {}
+                except (ValueError, TypeError):
+                    data = {}
+                if not isinstance(data, dict):
+                    return
+                env = data.get("env")
+                if not isinstance(env, dict):
+                    return
+                changed = False
+                for key in ENV_KEYS:
+                    if key in env:
+                        env.pop(key, None)
+                        changed = True
+                if not env:
+                    data.pop("env", None)
+                    changed = True
+                if changed:
+                    f.seek(0)
+                    f.truncate()
+                    json.dump(data, f, indent=2)
+                    f.write("\n")
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+
+
 # Platform-required settings.json defaults, written with setdefault semantics
 # (an explicit user value is never overridden).
 #

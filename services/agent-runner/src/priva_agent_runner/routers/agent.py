@@ -169,6 +169,7 @@ def _session_info_to_response(s, meta: dict | None = None) -> SessionInfoRespons
         archived=flags["archived"],
         origin="scheduler" if sched else None,
         scheduler_job_name=(sched or {}).get("job_name") or None,
+        last_response_model=session_meta.get_last_response_model(s.session_id, meta),
     )
 
 

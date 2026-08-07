@@ -6,7 +6,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from .mcp import McpServerSummary
-from .resource import ModelInfo, QuickAction
+from .llm_profiles import LlmProfileSummary
+from .resource import QuickAction
 from .user_env import UserEnvSettings
 
 
@@ -99,13 +100,11 @@ class UserPublic(BaseModel):
 
 class UserOverviewBootstrap(BaseModel):
     quickactions: list[QuickAction] = Field(default_factory=list)
-    vision_model: str | None = None
+    llm_profiles: list[LlmProfileSummary] = Field(default_factory=list)
+    default_profile_id: str | None = None
     mcp_servers: list[McpServerSummary] = Field(default_factory=list)
     active_cwd: str | None = None
     recent_activities: list[dict[str, Any]] = Field(default_factory=list)
-    default_model: str | None = None
-    models: list[ModelInfo] = Field(default_factory=list)
-    models_loaded: bool = False
 
 
 class UserOverviewResponse(BaseModel):

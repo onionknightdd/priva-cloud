@@ -325,19 +325,94 @@ provider token/LLM gateway，而不是把原始 BYOK 暴露给不受信子进程
 Kubernetes seccomp 作用于整个容器，因此新增 syscall 也会对 runner 父进程开放；这是一项已知
 代价。外层 tenant Pod 边界和 non-root/cap-drop 继续保留。
 
-## 8. 备选方案与结论
+## 8. 隔离组件横向对比与结论
 
-| 方案 | 结论 | 原因 |
-|---|---|---|
-| 只依赖现有每租户 Pod | 仅用于 `trusted` | 能隔离 A/B 租户，不能限制第三方 Definition 在 B Pod 内的权限。 |
-| 只用 `ClaudeAgentOptions.sandbox` | 不作为强合同的唯一边界 | 官方边界是 Bash/子进程；非 Bash 工具和扩展点仍需治理，网络语义也可能经过 Claude proxy。 |
-| outer bubblewrap + `--share-net` | **`public-restricted` 选定方案** | 能给整个 CLI 构造最小文件系统视图并保持 Pod 网络。 |
-| Landlock | 可选第二层/快速原型 | 当前节点 ABI 6 且 RuntimeDefault 下可用，但它是访问拒绝，不构造新 mount/PID 视图。 |
-| nsjail/Firejail | 不采用 | 与 K8s 功能重叠、配置/权限面更大，未提供本场景的决定性收益。 |
-| 每 Agent/每 Run Pod | 模型 (a) v1 不采用 | 已有每租户 Pod；额外调度成本不对应新的租户边界。模型 (b) 或匿名服务 Agent 可重新评估。 |
-| gVisor/Kata | 保留升级路径 | 解决 Pod→节点逃逸，不解决同一 Pod 内 public Definition 的目录最小权限。 |
+### 8.1 先区分安全边界
 
-最终建议不是“给所有 Claude 套 bubblewrap”，而是：
+这些组件不在同一层，不能只按“隔离强弱”排成一条线：
+
+| 层级 | 本方案要防的事情 | 代表组件 | 不能单独解决的事情 |
+|---|---|---|---|
+| 运行内资源授权边界 | public Definition 在 B Pod 中读取未授权目录、其他 session 或 runner 状态 | bubblewrap、Landlock、nsjail、Firejail | Pod/容器逃逸、互联网外传 |
+| Pod 到节点的内核边界 | Agent 利用 Linux 内核漏洞从租户 Pod 逃到节点或相邻 Pod | hardened runc、gVisor、Kata | 同一 B Pod 内不同运行之间的最小目录授权 |
+| 执行单元与生命周期边界 | 每次运行独立挂载、凭据、网络策略、资源和销毁周期 | 每 Run Pod、Firecracker/microVM | Definition、工具和 API 自身的授权正确性 |
+
+因此，gVisor/Kata 是现有 tenant Pod 边界的升级，bubblewrap/nsjail 是 **tenant Pod 内**的
+per-run 边界；二者可以叠加，但彼此不是替代品。无论采用哪一层，LLM/API 授权、环境清洗、
+工具路径校验和 egress 策略仍由平台负责。
+
+### 8.2 针对当前需求的比较矩阵
+
+评估使用以下硬条件：
+
+- **G1：**整个 Claude CLI 只能看到服务端授予的业务目录，而不只是限制 Bash；
+- **G2：**继续在 B 的既有 Agent Runner Pod 中运行，不新增每 Agent/每 Run Pod；
+- **G3：**保留 B Pod 当前 DNS、TCP、UDP 和公网出口行为；
+- **G4：**不使用 privileged、`SYS_ADMIN` 或 setuid helper；
+- **G5：**不要求替换集群 container runtime，且可以按单次 public run 启用。
+
+“满足 G1”只描述目录视图，不代表组件同时解决凭据泄露、工具授权或数据外传。
+
+| 方案 | G1：整个 CLI 最小目录 | G2：复用 B Pod | G3：网络不变 | G4/G5：权限与接入 | 隔离边界及主要代价 | 本项目结论 |
+|---|---|---|---|---|---|---|
+| 只依赖 hardened runc tenant Pod | 否；CLI 仍能看到 Pod 已挂载的全部 B workspace | 是 | 是 | 是 | 已经是 A/B 租户边界，但没有本次运行的子目录边界 | 只适用于 `trusted` |
+| Claude native `ClaudeAgentOptions.sandbox` | 否；官方强边界是 Bash 及其子进程 | 是 | 不保证完全等同；网络限制可经过 Claude proxy | 需要 bwrap/socat 和 SDK 设置，但不换 runtime | 与 Claude permissions 配合方便，不能覆盖 Read/Edit、in-process MCP、Hook 等所有入口 | 可做内层防御，不作为 G1 的唯一边界 |
+| **outer bubblewrap** | **是；从空 mount namespace 只 bind 系统运行文件、Definition 和 grants** | **是** | **是；`--share-net`** | 非 setuid、无 capability；需镜像和允许 userns 初始化的 Localhost seccomp | 同宿主内核；不自带策略、资源调度或网络 ACL，安全性完全取决于 launcher 参数 | **`public-restricted-v1` 选定方案** |
+| Landlock | 部分；能拒绝未授权文件操作，但不构造新的 root/mount/PID 视图 | 是 | 是；不设置网络 ruleset 即不改变网络 | 无需 user namespace/capability；依赖节点内核启用及 ABI 能力 | 可叠加且限制不可撤销；ABI 兼容和 denied-by-default rights 必须正确处理 | 可作 bwrap 内的第二层；不得作为 bwrap 失败时的降级路径 |
+| nsjail | 是；可用 mount namespace、pivot_root/chroot、RO/RW bind、私有 proc/tmpfs | 是 | 是；关闭新的 network namespace，或另配 userland network | rootless 仍依赖 userns/相关 syscall；镜像需额外二进制、Kafel/protobuf policy | 同时提供 seccomp、rlimit、cgroup 和 supervisor，能力强但与 K8s/runner 现有资源治理重叠，策略面更大 | 可行替代，但当前没有超过 bwrap 的决定性收益；仅在需要统一 per-run seccomp/rlimit supervisor 时重评 |
+| Firejail | 原理上可做目录/namespace 隔离 | 是 | 可配置 | 官方模型是 SUID sandbox，与 `allowPrivilegeEscalation:false`、非 setuid 基线冲突；功能/profile 面偏桌面应用 | namespaces、seccomp、capabilities、桌面 profile 集于一个高权限工具，审计与镜像面更大 | 不采用 |
+| 只用 seccomp/AppArmor | 否；seccomp 过滤 syscall 而非路径，静态 LSM profile 也不等于动态 mount 视图 | 是 | 是 | 需要容器/节点 profile 管理；不能按任意 grants 自动得到安全策略 | 适合减少内核攻击面和阻止危险操作，不负责组装本次运行的可见文件树 | 仅作为 Pod/bwrap 配套防御 |
+| gVisor (`runsc`) RuntimeClass | 否；它只看 OCI/Pod 已配置的 mounts，仍会看到 B Pod 内全部已挂载目录 | 是，但必须以该 RuntimeClass 重建整个 B Pod，不能只切换其中一次进程 | 目标可达性可保持，但使用 gVisor 网络/系统调用实现，需兼容测试 | 必须在节点安装 runtime/containerd shim 并配置 RuntimeClass | 用户态 application kernel 显著收窄 workload→宿主 Linux 内核攻击面；有 syscall、文件系统和性能兼容成本 | 推荐作为高风险租户 Pod 的后续加固试点，**仍需 bwrap** 做 G1 |
+| Kata Containers RuntimeClass | 否；VM 内仍能看到该 Pod 被挂载的全部 B 数据 | 是，但同样只能按 Pod 选择 runtime | 通过 VM/virtio/CNI，需端到端兼容测试 | 需要 KVM/硬件虚拟化、Kata runtime、guest kernel/rootfs 和节点池 | 每 Pod 一个轻量 VM/独立 guest kernel，边界最强；启动、内存、存储和运维成本最高 | 仅用于合规或强对抗等级；**仍需 bwrap** 做 G1 |
+| 直接使用 Firecracker | 只有把 grants 作为 microVM 唯一数据源时满足 | 否；本质上引入新的 microVM 执行单元 | 需要重新构建 tap/CNI/DNS/出口路径 | 不是可直接放进 PodSpec 的完整 K8s runtime；需 firecracker-containerd、Kata 或自建控制面，并要求 KVM | 极小 VMM/设备模型、启动快，但 guest 镜像、存储共享、快照、调度和生命周期都要平台化 | v1 不采用；若以后做 serverless/匿名 AgentRun，优先经 Kata 等成熟 CRI 集成评估，而非自建 VMM 控制面 |
+| 每 Run Pod（runc/gVisor/Kata） | 是；Pod 只挂载本次 grants 时可形成清晰目录边界 | 否 | 可用 NetworkPolicy 接近现状，但连接、预热和回收语义变化 | runc 无需换 runtime；gVisor/Kata 需要 RuntimeClass；均增加 K8s 对象与调度 | 最清晰的进程、挂载、Secret、资源和销毁边界；代价是冷启动、PVC/会话映射、并发对象数与运维复杂度 | 模型 (a) v1 不采用；模型 (b)、匿名调用或允许任意 executable 扩展时升级 |
+
+### 8.3 关键取舍
+
+#### bubblewrap 与 nsjail
+
+两者都能在现有 B Pod 内为整个 CLI 构造 mount/PID namespace，因此都能满足 G1。nsjail
+额外集成 seccomp、rlimit、cgroup、网络和进程 supervisor，适合 CTF、fuzzing 或大量短命的
+任意二进制；但 Priva 已由 Kubernetes 管理 cgroup/Pod 资源，由 runner 管理超时、取消和审计。
+本场景真正缺失的是一个小而可审计的 **filesystem-view constructor**，bubblewrap 的职责更窄，
+launcher policy 也更容易固定和测试。若未来需要在同一 Pod 内为每个 run 分配硬 cgroup 或完全
+不同的 seccomp policy，再以同一组 §10 验收用例比较 nsjail，不能只替换二进制名称。
+
+#### bubblewrap 与 Landlock
+
+Landlock 的优势是非特权、可叠加且不依赖 user namespace；限制应用后只能继续收紧。它很适合
+在 bwrap 已构造的 mount 视图内再次限制文件访问。但 Landlock 是访问控制，不会隐藏整个原始
+文件树、创建私有 `/proc`，也不替代 PID/IPC namespace；不同内核 ABI 支持的文件和网络 rights
+还不同。因此它是 defense-in-depth，不是满足“CLI 只看到指定目录”强合同的等价 fallback。
+
+#### bubblewrap 与 gVisor/Kata
+
+`runtimeClassName` 在 Pod 创建时选择，不能给同一个常驻 B Pod 中的某一次 Claude 子进程临时
+切换。把整个 B Pod 改为 gVisor 或 Kata，可以降低 public Agent 从 Pod 逃到节点的风险，却不会
+撤销 Kubernetes 已挂进该 Pod 的 sibling projects、普通 session 或 Secret。若启用这类 runtime，
+正确组合仍是：
+
+```text
+Kata 或 gVisor tenant Pod（Pod→node 边界）
+└── outer bubblewrap public run（run→B workspace/state 边界）
+    └── Claude native sandbox（Bash 子进程的额外边界，可选）
+```
+
+#### 何时才值得每 Run Pod/microVM
+
+模型 (a) 中，A 的 Definition 已在 B 的独立 tenant Pod 内运行；再创建 Pod 不会新增 A/B
+租户边界，所以 v1 不支付调度和状态迁移成本。出现以下任一条件时，应升级执行单元，而不是继续
+堆叠 bwrap 参数：
+
+- 服务由匿名或外部多租户调用，运行不再自然归属于一个既有 B Pod（模型 (b)）；
+- public Definition 可携带任意二进制、Hook、plugin 或 stdio MCP，而非平台注册能力；
+- 每次运行必须有独立 NetworkPolicy、ServiceAccount、Secret 注入、硬资源配额或销毁证明；
+- runner 无法可靠解决并发 session/config home、后代清理或父进程凭据继承。
+
+### 8.4 最终结论
+
+最终建议不是“给所有 Claude 套 bubblewrap”，也不是“用更强的 VM runtime 替换 bubblewrap”，
+而是按威胁边界分层：
 
 > **保留每租户 Pod；A 的 Definition 在 B Pod 中实例化；可信运行不强制沙箱；任何未经审核、
 > 可执行 Bash/文件工具的 public Definition 必须进入 fail-closed 的 outer-bubblewrap restricted
@@ -381,6 +456,14 @@ restricted 画像必须自动化验证：
 
 - [Bubblewrap README](https://github.com/containers/bubblewrap/blob/main/README.md)
 - [Bubblewrap manual](https://github.com/containers/bubblewrap/blob/main/bwrap.xml)
+- [Linux Landlock userspace API](https://www.kernel.org/doc/html/latest/userspace-api/landlock.html)
+- [nsjail README](https://github.com/google/nsjail/blob/master/README.md)
+- [Firejail README](https://github.com/netblue30/firejail/blob/master/README.md)
+- [gVisor security architecture](https://gvisor.dev/docs/architecture_guide/intro/)
+- [gVisor Kubernetes integration](https://gvisor.dev/docs/user_guide/quick_start/kubernetes/)
+- [Kata Containers architecture](https://github.com/kata-containers/kata-containers/blob/main/docs/design/architecture/README.md)
+- [Kata Containers virtualization and VMM comparison](https://github.com/kata-containers/kata-containers/blob/main/docs/design/virtualization.md)
+- [Firecracker architecture and integration overview](https://firecracker-microvm.github.io/)
 - [Claude Code sandboxing](https://code.claude.com/docs/en/sandboxing)
 - [Claude Code settings / sandbox keys](https://code.claude.com/docs/en/settings)
 - [Claude Code environment variables (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`)](https://code.claude.com/docs/en/env-vars)

@@ -1,23 +1,15 @@
-import { sandboxGet, sandboxRead, sandboxPut } from '@shared/api/client'
+import { sandboxGet, sandboxPost, sandboxPatch, sandboxPut, sandboxDelete, sandboxRead, sandboxReadPost } from '@shared/api/client'
 
-// BYOK creds now live in the account's agent-runner (settings.json), reached
-// through agentgateway via the /api/sandbox/* face — not the control-panel.
-export function getUserEnv() {
-  return sandboxGet('/credentials')
-}
+const PROFILE_PATH = '/credentials/profiles'
 
-export function updateUserEnv(env) {
-  return sandboxPut('/credentials', env)
-}
-
-export function getUserEnvStatus() {
-  return sandboxGet('/credentials/status')
-}
-
-// sandboxRead: aggregator providers return hundreds of model ids — can exceed the ~8KB EPP cap.
-export function fetchModels() {
-  return sandboxRead('/credentials/models')
-}
+export const listLlmProfiles = () => sandboxRead(PROFILE_PATH)
+export const getLlmProfile = (profileId) => sandboxGet(`${PROFILE_PATH}/${encodeURIComponent(profileId)}`)
+export const createLlmProfile = (profile) => sandboxPost(PROFILE_PATH, profile)
+export const updateLlmProfile = (profileId, patch) => sandboxPatch(`${PROFILE_PATH}/${encodeURIComponent(profileId)}`, patch)
+export const setDefaultLlmProfile = (profileId) => sandboxPut(`${PROFILE_PATH}/${encodeURIComponent(profileId)}/default`, {})
+export const deleteLlmProfile = (profileId) => sandboxDelete(`${PROFILE_PATH}/${encodeURIComponent(profileId)}`)
+export const fetchProfileModels = (profileId) => sandboxRead(`${PROFILE_PATH}/${encodeURIComponent(profileId)}/models`)
+export const testLlmProfile = (profileId) => sandboxReadPost(`${PROFILE_PATH}/${encodeURIComponent(profileId)}/test`, {})
 
 export function getQuickActions() {
   return sandboxGet('/resource/quickactions')
@@ -25,14 +17,6 @@ export function getQuickActions() {
 
 export function updateQuickActions(quickactions) {
   return sandboxPut('/resource/quickactions', { quickactions })
-}
-
-export function getVisionModel() {
-  return sandboxGet('/resource/vision-model')
-}
-
-export function updateVisionModel(visionModel) {
-  return sandboxPut('/resource/vision-model', { vision_model: visionModel })
 }
 
 export function getRecapSetting() {

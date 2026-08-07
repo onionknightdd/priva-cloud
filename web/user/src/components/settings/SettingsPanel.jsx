@@ -684,7 +684,7 @@ function ApiKeyTab() {
   )
 }
 
-function ModelsTab() {
+function LegacyModelsTab() {
   const { t } = useTranslation()
   const env = useSettingsStore((s) => s.env)
   const models = useSettingsStore((s) => s.models)
@@ -991,6 +991,194 @@ function ModelsTab() {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// User-owned profile editor.  The profile selector is deliberately a single
+// drop-down above the detail form (not a master/detail split pane): the same
+// surface works at narrow widths and makes the DEFAULT marker visible while
+// switching.
+function ModelsTab() {
+  const { t } = useTranslation()
+  const profiles = useSettingsStore((s) => s.profiles)
+  const defaultProfileId = useSettingsStore((s) => s.defaultProfileId)
+  const activeProfileId = useSettingsStore((s) => s.activeSettingsProfileId)
+  const modelsByProfile = useSettingsStore((s) => s.modelsByProfile)
+  const fetchProfiles = useSettingsStore((s) => s.fetchProfiles)
+  const getProfile = useSettingsStore((s) => s.getProfile)
+  const createProfile = useSettingsStore((s) => s.createProfile)
+  const updateProfile = useSettingsStore((s) => s.updateProfile)
+  const setDefaultProfile = useSettingsStore((s) => s.setDefaultProfile)
+  const deleteProfile = useSettingsStore((s) => s.deleteProfile)
+  const testProfile = useSettingsStore((s) => s.testProfile)
+  const fetchModelsForProfile = useSettingsStore((s) => s.fetchModelsForProfile)
+
+  const [profile, setProfile] = useState(null)
+  const [draft, setDraft] = useState(null)
+  const [showAuthToken, setShowAuthToken] = useState(false)
+  const [openProfiles, setOpenProfiles] = useState(false)
+  const profileDropdownRef = useRef(null)
+  const [profileSearch, setProfileSearch] = useState('')
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [status, setStatus] = useState(null)
+  const [deleteText, setDeleteText] = useState('')
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+
+  useEffect(() => { fetchProfiles() }, [fetchProfiles])
+  useEffect(() => {
+    if (!openProfiles) return undefined
+    const handler = (event) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(event.target)) {
+        setOpenProfiles(false)
+        setProfileSearch('')
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [openProfiles])
+  useEffect(() => {
+    if (!activeProfileId) return
+    setShowAuthToken(false)
+    let alive = true
+    getProfile(activeProfileId).then((value) => {
+      if (!alive) return
+      setProfile(value)
+      setDraft(value)
+      setDirty(false)
+      setStatus(null)
+      fetchModelsForProfile(activeProfileId)
+    }).catch(() => { if (alive) setProfile(null) })
+    return () => { alive = false }
+  }, [activeProfileId, getProfile, fetchModelsForProfile])
+
+  const setField = (key, value) => {
+    setDraft((current) => ({ ...(current || {}), [key]: value }))
+    setDirty(true)
+  }
+  const selectProfile = (id) => {
+    useSettingsStore.setState({ activeSettingsProfileId: id })
+    setOpenProfiles(false)
+    setProfileSearch('')
+  }
+  const handleNew = () => {
+    const id = `profile-${Date.now().toString(36)}`
+    const empty = { id, label: t('settings.newProfile'), base_url: '', auth_token: '', default_model: null, opus_model: null, sonnet_model: null, haiku_model: null, vision_model: null }
+    setShowAuthToken(false)
+    setProfile(null)
+    setDraft(empty)
+    setDirty(true)
+    useSettingsStore.setState({ activeSettingsProfileId: null })
+    setOpenProfiles(false)
+  }
+  const handleSave = async () => {
+    if (!draft?.label?.trim() || !draft?.base_url?.trim() || !draft?.auth_token?.trim()) return
+    setSaving(true)
+    try {
+      const payload = { ...draft, label: draft.label.trim(), base_url: draft.base_url.trim(), auth_token: draft.auth_token.trim() }
+      if (profile?.id) await updateProfile(profile.id, payload)
+      else {
+        const created = await createProfile(payload)
+        useSettingsStore.setState({ activeSettingsProfileId: created.id })
+      }
+      setDirty(false)
+      setStatus({ type: 'success', text: t('settings.profileSaved') })
+    } catch (err) {
+      setStatus({ type: 'error', text: err.message || t('settings.profileSaveFailed') })
+    } finally { setSaving(false) }
+  }
+  const handleTest = async () => {
+    if (!profile?.id) return
+    setTesting(true)
+    try {
+      const models = await testProfile(profile.id)
+      setStatus({ type: 'success', text: t('settings.profileConnected', { count: models.length }) })
+    } catch (err) { setStatus({ type: 'error', text: err.message || t('settings.connectionFailed') }) }
+    finally { setTesting(false) }
+  }
+  const handleDelete = async () => {
+    if (!profile?.id || deleteText !== profile.label) return
+    await deleteProfile(profile.id)
+    setDeleteText('')
+    setDeleteConfirmOpen(false)
+    setProfile(null)
+    setDraft(null)
+  }
+
+  const activeSummary = profiles.find((item) => item.id === activeProfileId) || profile
+  const visibleProfiles = profiles.filter((item) => `${item.label} ${item.id}`.toLowerCase().includes(profileSearch.toLowerCase()))
+  const models = draft?.id ? (modelsByProfile[draft.id]?.models || []).map((item) => ({ id: item.id })) : []
+  const modelFields = [
+    ['default_model', t('settings.defaultModel') || 'Default'],
+    ['opus_model', t('settings.opusModel') || 'Opus'],
+    ['sonnet_model', t('settings.sonnetModel') || 'Sonnet'],
+    ['haiku_model', t('settings.haikuModel') || 'Haiku'],
+    ['vision_model', t('settings.visionModel') || 'Vision'],
+  ]
+
+  return (
+    <div className="flex flex-col gap-5" style={{ minWidth: 0 }}>
+      <div>
+        <label style={labelStyle}>{t('settings.profileSelector')}</label>
+        <div className="relative" ref={profileDropdownRef}>
+          <button type="button" className="flex items-center justify-between w-full" onClick={() => setOpenProfiles((value) => !value)} style={{ ...inputStyle, padding: '11px 12px', textAlign: 'left', cursor: 'pointer' }}>
+            <span className="truncate" style={{ fontSize: 13 }}><span>{activeSummary?.label || t('settings.newProfile')}</span>{activeSummary?.id && <span style={{ color: 'var(--text-dim)', fontSize: 13 }}> · {activeSummary.id}</span>}</span>
+            <ChevronDown size={14} strokeWidth={1.5} />
+          </button>
+          {openProfiles && (
+            <div className="absolute left-0 right-0" style={{ top: '100%', marginTop: 2, zIndex: 80, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4 }}>
+              <div className="mx-3" style={{ borderBottom: '1px solid var(--border)' }}>
+                <div className="flex items-center gap-2 py-2">
+                  <Search size={12} strokeWidth={1.5} style={{ color: 'var(--text-dim)' }} />
+                  <input value={profileSearch} onChange={(event) => setProfileSearch(event.target.value)} autoFocus placeholder={t('settings.filterProfiles')} className="flex-1 text-xs" style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)' }} />
+                </div>
+              </div>
+              <div className="overflow-y-auto" style={{ maxHeight: 220 }}>
+                {visibleProfiles.map((item) => (
+                  <button key={item.id} type="button" onClick={() => selectProfile(item.id)} onMouseEnter={(event) => { if (item.id !== activeProfileId) event.currentTarget.style.background = 'var(--bg-surface)' }} onMouseLeave={(event) => { if (item.id !== activeProfileId) event.currentTarget.style.background = 'transparent' }} className="flex items-center justify-between w-full text-xs" style={{ margin: '2px 12px', width: 'calc(100% - 24px)', padding: '11px 12px', background: item.id === activeProfileId ? 'var(--bg-surface)' : 'transparent', border: 'none', borderRadius: 4, color: 'var(--text-primary)', textAlign: 'left', cursor: 'pointer' }}>
+                    <span className="truncate" style={{ fontSize: 13 }}><span>{item.label}</span><span style={{ color: 'var(--text-dim)', fontSize: 13 }}> · {item.id}</span></span>
+                    {item.id === defaultProfileId && <span className="text-xs" style={{ color: 'var(--text-secondary)', letterSpacing: '0.06em' }}>{t('settings.defaultProfile')}</span>}
+                  </button>
+                ))}
+                <button type="button" onClick={handleNew} onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--bg-surface)' }} onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent' }} className="flex items-center gap-2 w-full text-xs" style={{ margin: '2px 12px', width: 'calc(100% - 24px)', padding: '11px 12px', background: 'transparent', border: 'none', borderRadius: 4, color: 'var(--text-primary)', cursor: 'pointer' }}><Plus size={14} strokeWidth={1.5} /> {t('settings.newProfile')}</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {draft && <>
+        <div className="flex flex-col gap-3">
+          <div><label style={labelStyle}>{t('settings.profileLabel')}</label><input value={draft.label || ''} onChange={(event) => setField('label', event.target.value)} style={inputStyle} /></div>
+          <div><label style={labelStyle}>{t('settings.profileId')}</label><input value={draft.id || ''} disabled style={{ ...inputStyle, color: 'var(--text-dim)' }} /></div>
+          <div><label style={labelStyle}>{t('settings.baseUrl')}</label><input value={draft.base_url || ''} onChange={(event) => setField('base_url', event.target.value)} placeholder="http://your-api-server:port/" style={inputStyle} /></div>
+          <div>
+            <label style={labelStyle}>{t('settings.authToken')}</label>
+            <div className="relative">
+              <input type={showAuthToken ? 'text' : 'password'} value={draft.auth_token || ''} onChange={(event) => setField('auth_token', event.target.value)} placeholder="sk-..." style={{ ...inputStyle, paddingRight: 36 }} />
+              <button type="button" className="absolute flex items-center justify-center" style={{ right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 0 }} onClick={() => setShowAuthToken((value) => !value)} tabIndex={-1}>
+                {showAuthToken ? <EyeOff size={14} strokeWidth={1.5} /> : <Eye size={14} strokeWidth={1.5} />}
+              </button>
+            </div>
+          </div>
+        </div>
+        {status && <div className="flex items-center gap-2 px-3 py-2 text-xs" style={{ borderLeft: `2px solid ${status.type === 'success' ? 'var(--green)' : 'var(--red)'}`, background: 'var(--bg-elevated)', color: status.type === 'success' ? 'var(--green)' : 'var(--red)' }}>{status.type === 'success' ? <Check size={12} strokeWidth={1.5} /> : <AlertCircle size={12} strokeWidth={1.5} />}{status.text}</div>}
+        <div className="flex justify-end"><button type="button" onClick={handleTest} disabled={testing || !profile?.id} className="px-3 py-2 text-xs" style={{ background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 4, cursor: profile?.id ? 'pointer' : 'default' }}>{testing ? t('settings.testing') : t('settings.testConnection')}</button></div>
+        <div style={{ borderBottom: '1px solid var(--border)' }} />
+        <div className="flex flex-col gap-3">
+          <span className="text-xs font-semibold uppercase" style={{ color: 'var(--text-secondary)', letterSpacing: '0.06em' }}>{t('settings.modelMapping')}</span>
+          {modelFields.map(([key, label]) => <FilterableModelSelect key={key} label={label} models={models} value={draft[key] || ''} onChange={(value) => setField(key, value)} labelStyle={labelStyle} inputStyle={inputStyle} placeholder={t('settings.selectModel')} filterPlaceholder={t('settings.filterModels')} noMatchesText={t('settings.noMatches')} />)}
+          <div className="text-xs" style={{ color: 'var(--text-dim)' }}>{modelsByProfile[draft.id]?.loaded ? t('settings.modelsCached', { count: models.length }) : t('settings.discoverModels')}</div>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <button type="button" onClick={() => { setDeleteText(''); setDeleteConfirmOpen(true) }} className="flex items-center gap-2 px-3 py-2 text-xs" style={{ background: 'transparent', color: 'var(--red)', border: '1px solid var(--border)', borderRadius: 4, cursor: profile?.id ? 'pointer' : 'default' }} disabled={!profile?.id}><Trash2 size={14} strokeWidth={1.5} /> {t('settings.deleteProfile')}</button>
+          <div className="flex items-center gap-2"><button type="button" onClick={() => setDefaultProfile(profile.id)} disabled={!profile?.id || profile.id === defaultProfileId || !draft.default_model} className="px-3 py-2 text-xs" style={{ display: profile?.id !== defaultProfileId ? 'inline-block' : 'none', background: 'transparent', color: 'var(--blue)', border: '1px solid var(--border)', borderRadius: 4 }}>{t('settings.setAsDefault')}</button><button type="button" onClick={handleSave} disabled={!dirty || saving} className="px-4 py-2 text-xs font-semibold" style={{ background: dirty ? 'var(--blue)' : 'var(--bg-elevated)', color: dirty ? 'var(--text-inverse)' : 'var(--text-dim)', border: 'none', borderRadius: 4, cursor: dirty ? 'pointer' : 'default' }}>{saving ? t('settings.saving') : t('settings.save')}</button></div>
+        </div>
+      </>}
+
+      {deleteConfirmOpen && <div className="flex flex-col gap-2 px-3 py-3" style={{ borderLeft: '2px solid var(--red)', background: 'var(--bg-elevated)' }}><span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('settings.typeProfileToConfirm', { name: profile?.label })}</span><input value={deleteText} onChange={(event) => setDeleteText(event.target.value)} autoFocus style={inputStyle} /><div className="flex justify-end gap-2"><button type="button" onClick={() => { setDeleteText(''); setDeleteConfirmOpen(false) }} className="px-3 py-2 text-xs" style={{ background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 4 }}>{t('settings.cancel')}</button><button type="button" onClick={handleDelete} disabled={deleteText !== profile?.label} className="px-3 py-2 text-xs" style={{ background: deleteText === profile?.label ? 'var(--red)' : 'var(--bg-surface)', color: deleteText === profile?.label ? 'var(--text-inverse)' : 'var(--text-dim)', border: 'none', borderRadius: 4 }}>{t('settings.delete')}</button></div></div>}
     </div>
   )
 }

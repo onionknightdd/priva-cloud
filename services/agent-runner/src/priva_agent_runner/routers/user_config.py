@@ -1,4 +1,4 @@
-"""Per-user config faces (quickactions, vision-model) served from the agent's
+"""Per-user config faces (quickactions, recap) served from the agent's
 own workspace.
 
 These read/write the user's ``.priva.user.yml`` via the shared
@@ -20,8 +20,6 @@ from priva_common.models.resource import (
     QuickActionUpdateRequest,
     RecapSettingResponse,
     RecapSettingUpdateRequest,
-    VisionModelResponse,
-    VisionModelUpdateRequest,
 )
 from ..deps import require_user
 from ..services.claude_sdk import session_recap
@@ -53,27 +51,6 @@ async def update_quickactions(
     qa_dicts = [qa.model_dump() for qa in request.quickactions]
     _user_yaml.save_user_yaml_key(user.username, "quickactions", qa_dicts)
     return QuickActionListResponse(quickactions=request.quickactions)
-
-
-# ── Vision model config ──────────────────────────────────────────────
-
-
-@router.get("/vision-model", response_model=VisionModelResponse)
-async def get_vision_model(user: UserRecord = Depends(require_user)):
-    vm = _user_yaml.get_user_yaml_key(user.username, "vision_model")
-    return VisionModelResponse(vision_model=vm if isinstance(vm, str) and vm else None)
-
-
-@router.put("/vision-model", response_model=VisionModelResponse)
-async def update_vision_model(
-    request: VisionModelUpdateRequest,
-    user: UserRecord = Depends(require_user),
-):
-    # save_user_yaml_key pops the key when value is falsy/None.
-    _user_yaml.save_user_yaml_key(
-        user.username, "vision_model", request.vision_model or None
-    )
-    return VisionModelResponse(vision_model=request.vision_model)
 
 
 # ── Session recap ────────────────────────────────────────────────────

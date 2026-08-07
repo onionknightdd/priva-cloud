@@ -106,6 +106,25 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logger.warning("settings.json defaults seeding skipped: {}", exc)
 
+        # Migrate the retired single-provider settings into the canonical
+        # app-config profile store before the first run.  The old env keys are
+        # removed only after the profile JSON exists; subsequent CLI launches
+        # receive credentials through the per-run --settings overlay instead.
+        try:
+            import os
+            from priva_common.skill_exclude import get_user_yaml_key, save_user_yaml_key
+            from priva_common.user_env import clear_settings_env
+            from .services.llm_profiles import cleanup_stale_overlays, store
+            username = os.environ.get("USERNAME")
+            vision = get_user_yaml_key(username, "vision_model") if username else None
+            store.read(vision if isinstance(vision, str) else None)
+            if username and vision:
+                save_user_yaml_key(username, "vision_model", None)
+            clear_settings_env()
+            cleanup_stale_overlays()
+        except Exception as exc:
+            logger.warning("LLM profile migration/overlay cleanup skipped: {}", exc)
+
         # Seed runtime skills from the baked-in bundle.
         try:
             from .services.skill_hub import seed_bundled_skills
