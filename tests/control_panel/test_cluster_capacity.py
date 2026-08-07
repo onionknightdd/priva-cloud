@@ -78,11 +78,21 @@ def test_pod_effective_requests_follow_scheduler_init_and_overhead_rules():
 
 
 def test_runner_eligible_node_rejects_cordon_and_hard_taints():
-    assert P._node_is_runner_eligible(_node("ready"))
-    assert P._node_is_runner_eligible(_node("preferred", taint_effects=("PreferNoSchedule",)))
-    assert not P._node_is_runner_eligible(_node("not-ready", ready=False))
-    assert not P._node_is_runner_eligible(_node("cordoned", unschedulable=True))
-    assert not P._node_is_runner_eligible(_node("tainted", taint_effects=("NoSchedule",)))
+    assert P._node_runner_eligibility(_node("ready")) == (True, "eligible")
+    assert P._node_runner_eligibility(
+        _node("preferred", taint_effects=("PreferNoSchedule",))
+    ) == (True, "eligible")
+    assert P._node_runner_eligibility(_node("not-ready", ready=False)) == (
+        False,
+        "not_ready",
+    )
+    assert P._node_runner_eligibility(_node("cordoned", unschedulable=True)) == (
+        False,
+        "cordoned",
+    )
+    assert P._node_runner_eligibility(
+        _node("tainted", taint_effects=("NoSchedule",))
+    ) == (False, "untolerated_taint")
 
 
 def test_scrape_cluster_capacity_subtracts_only_fixed_load_on_eligible_nodes(monkeypatch):
@@ -114,7 +124,7 @@ def test_scrape_cluster_capacity_subtracts_only_fixed_load_on_eligible_nodes(mon
 
     snapshot = P.scrape_cluster_capacity({"active"})
 
-    assert snapshot == {
+    assert {key: value for key, value in snapshot.items() if key != "nodes"} == {
         "total_nodes": 2,
         "eligible_nodes": 1,
         "node_allocatable_cpu_m": pytest.approx(4000),
@@ -123,6 +133,42 @@ def test_scrape_cluster_capacity_subtracts_only_fixed_load_on_eligible_nodes(mon
         "non_runner_requested_memory_mb": pytest.approx(768),
         "pending_non_runner_pods": 1,
     }
+    assert snapshot["nodes"] == [
+        {
+            "name": "n1",
+            "eligible": True,
+            "eligibility_reason": "eligible",
+            "cpu": {
+                "allocatable": 4000,
+                "non_runner_requested": 750,
+                "runtime_requested": 2000,
+                "current_remaining": 1250,
+            },
+            "memory": {
+                "allocatable": 8192,
+                "non_runner_requested": 768,
+                "runtime_requested": 2048,
+                "current_remaining": 5376,
+            },
+        },
+        {
+            "name": "n2",
+            "eligible": False,
+            "eligibility_reason": "untolerated_taint",
+            "cpu": {
+                "allocatable": 8000,
+                "non_runner_requested": 3000,
+                "runtime_requested": 0,
+                "current_remaining": None,
+            },
+            "memory": {
+                "allocatable": 16384,
+                "non_runner_requested": 3072,
+                "runtime_requested": 0,
+                "current_remaining": None,
+            },
+        },
+    ]
 
 
 def test_cluster_capacity_route_counts_only_active_account_quotas(monkeypatch):
@@ -156,6 +202,23 @@ def test_cluster_capacity_route_counts_only_active_account_quotas(monkeypatch):
             "non_runner_requested_cpu_m": 1000,
             "non_runner_requested_memory_mb": 2000,
             "pending_non_runner_pods": 0,
+            "nodes": [{
+                "name": "worker-1",
+                "eligible": True,
+                "eligibility_reason": "eligible",
+                "cpu": {
+                    "allocatable": 10000,
+                    "non_runner_requested": 1000,
+                    "runtime_requested": 2000,
+                    "current_remaining": 7000,
+                },
+                "memory": {
+                    "allocatable": 20000,
+                    "non_runner_requested": 2000,
+                    "runtime_requested": 4096,
+                    "current_remaining": 13904,
+                },
+            }],
         }
 
     monkeypatch.setattr(P, "scrape_cluster_capacity", snapshot)
@@ -170,6 +233,9 @@ def test_cluster_capacity_route_counts_only_active_account_quotas(monkeypatch):
     assert result.cpu.overcommit_percent == 0
     assert result.memory.assignable == 18000
     assert result.memory.allocated == 5120
+    assert result.nodes[0].name == "worker-1"
+    assert result.nodes[0].cpu.runtime_requested == 2000
+    assert result.nodes[0].memory.current_remaining == 13904
 
 
 def test_capacity_metric_reports_signed_remaining_and_excess_only():

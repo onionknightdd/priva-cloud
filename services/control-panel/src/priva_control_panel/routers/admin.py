@@ -997,6 +997,7 @@ async def get_cluster_capacity():
             snapshot.get("non_runner_requested_memory_mb", 0.0),
             allocated_memory_mb,
         ),
+        nodes=snapshot.get("nodes", []),
         scraped_at=_time.time(),
     )
 

@@ -570,8 +570,8 @@ def _pod_effective_requests(pod: Any) -> tuple[float, float]:
     return cpu, memory
 
 
-def _node_is_runner_eligible(node: Any) -> bool:
-    """Whether today's Runner template can be scheduled onto ``node``.
+def _node_runner_eligibility(node: Any) -> tuple[bool, str]:
+    """Return whether today's Runner template can use ``node`` and why not.
 
     Runner Pods currently define no node selector, affinity or custom tolerations,
     so Ready + not cordoned + no NoSchedule/NoExecute taint is the exact template
@@ -585,12 +585,21 @@ def _node_is_runner_eligible(node: Any) -> bool:
         and str(getattr(condition, "status", "")).lower() == "true"
         for condition in conditions
     )
-    if not ready or bool(getattr(spec, "unschedulable", False)):
-        return False
-    return not any(
+    if not ready:
+        return False, "not_ready"
+    if bool(getattr(spec, "unschedulable", False)):
+        return False, "cordoned"
+    if any(
         getattr(taint, "effect", None) in ("NoSchedule", "NoExecute")
         for taint in (getattr(spec, "taints", None) or [])
-    )
+    ):
+        return False, "untolerated_taint"
+    return True, "eligible"
+
+
+def _node_is_runner_eligible(node: Any) -> bool:
+    """Compatibility wrapper for callers that only need the boolean result."""
+    return _node_runner_eligibility(node)[0]
 
 
 def _is_committed_runtime_pod(
@@ -627,45 +636,91 @@ def scrape_cluster_capacity(active_account_ids: set[str] | None = None) -> dict 
         logger.warning("cluster capacity snapshot unavailable: {}", exc)
         return None
 
-    eligible = [node for node in nodes if _node_is_runner_eligible(node)]
-    eligible_names = {
-        getattr(getattr(node, "metadata", None), "name", None)
-        for node in eligible
-    }
-    eligible_names.discard(None)
-
-    alloc_cpu = alloc_memory = 0.0
-    for node in eligible:
+    node_capacity: dict[str, dict[str, Any]] = {}
+    for node in nodes:
+        name = getattr(getattr(node, "metadata", None), "name", None)
+        if not name:
+            continue
+        eligible, reason = _node_runner_eligibility(node)
         allocatable = getattr(getattr(node, "status", None), "allocatable", None) or {}
-        alloc_cpu += _cpu_to_millicores(str(allocatable.get("cpu", "")))
-        alloc_memory += _mem_to_mib(str(allocatable.get("memory", "")))
+        node_capacity[name] = {
+            "name": name,
+            "eligible": eligible,
+            "eligibility_reason": reason,
+            "alloc_cpu": _cpu_to_millicores(str(allocatable.get("cpu", ""))),
+            "alloc_memory": _mem_to_mib(str(allocatable.get("memory", ""))),
+            "fixed_cpu": 0.0,
+            "fixed_memory": 0.0,
+            "runtime_cpu": 0.0,
+            "runtime_memory": 0.0,
+        }
 
-    fixed_cpu = fixed_memory = 0.0
     pending_non_runner_pods = 0
     for pod in pods:
         phase = str(getattr(getattr(pod, "status", None), "phase", "") or "")
         if phase in ("Succeeded", "Failed"):
             continue
-        if _is_committed_runtime_pod(pod, active_account_ids):
-            continue
+        committed_runtime = _is_committed_runtime_pod(pod, active_account_ids)
         node_name = getattr(getattr(pod, "spec", None), "node_name", None)
         if not node_name:
-            pending_non_runner_pods += 1
+            if not committed_runtime:
+                pending_non_runner_pods += 1
             continue
-        if node_name not in eligible_names:
+        node_row = node_capacity.get(node_name)
+        if node_row is None:
             continue
         cpu, memory = _pod_effective_requests(pod)
-        fixed_cpu += cpu
-        fixed_memory += memory
+        if committed_runtime:
+            node_row["runtime_cpu"] += cpu
+            node_row["runtime_memory"] += memory
+        else:
+            node_row["fixed_cpu"] += cpu
+            node_row["fixed_memory"] += memory
+
+    alloc_cpu = alloc_memory = 0.0
+    fixed_cpu = fixed_memory = 0.0
+    node_rows: list[dict[str, Any]] = []
+    for row in sorted(
+        node_capacity.values(),
+        key=lambda item: (not item["eligible"], item["name"]),
+    ):
+        if row["eligible"]:
+            alloc_cpu += row["alloc_cpu"]
+            alloc_memory += row["alloc_memory"]
+            fixed_cpu += row["fixed_cpu"]
+            fixed_memory += row["fixed_memory"]
+
+        def resource_metric(resource: str) -> dict[str, float | None]:
+            allocatable = row[f"alloc_{resource}"]
+            fixed = row[f"fixed_{resource}"]
+            runtime = row[f"runtime_{resource}"]
+            remaining = allocatable - fixed - runtime if row["eligible"] else None
+            return {
+                "allocatable": round(allocatable, 1),
+                "non_runner_requested": round(fixed, 1),
+                "runtime_requested": round(runtime, 1),
+                "current_remaining": (
+                    round(remaining, 1) if remaining is not None else None
+                ),
+            }
+
+        node_rows.append({
+            "name": row["name"],
+            "eligible": row["eligible"],
+            "eligibility_reason": row["eligibility_reason"],
+            "cpu": resource_metric("cpu"),
+            "memory": resource_metric("memory"),
+        })
 
     return {
         "total_nodes": len(nodes),
-        "eligible_nodes": len(eligible),
+        "eligible_nodes": sum(1 for row in node_capacity.values() if row["eligible"]),
         "node_allocatable_cpu_m": alloc_cpu,
         "node_allocatable_memory_mb": alloc_memory,
         "non_runner_requested_cpu_m": fixed_cpu,
         "non_runner_requested_memory_mb": fixed_memory,
         "pending_non_runner_pods": pending_non_runner_pods,
+        "nodes": node_rows,
     }
 
 

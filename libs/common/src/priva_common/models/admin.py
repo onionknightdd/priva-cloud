@@ -169,6 +169,28 @@ class ClusterCapacityMetric(BaseModel):
     overcommit_percent: float | None = None
 
 
+class ClusterNodeCapacityMetric(BaseModel):
+    """Current scheduler-request view for one resource on one Node.
+
+    CPU values are millicores and memory values are MiB. Runtime requests are
+    active Runner + Terminal Pods currently resident on the Node. They are kept
+    separate from fixed requests because sleeping account quota has no Node yet.
+    """
+    allocatable: float = 0.0
+    non_runner_requested: float = 0.0
+    runtime_requested: float = 0.0
+    current_remaining: float | None = None
+
+
+class ClusterCapacityNode(BaseModel):
+    """Per-Node capacity detail; excluded Nodes retain inventory for diagnosis."""
+    name: str
+    eligible: bool = False
+    eligibility_reason: str = "not_ready"
+    cpu: ClusterNodeCapacityMetric = Field(default_factory=ClusterNodeCapacityMetric)
+    memory: ClusterNodeCapacityMetric = Field(default_factory=ClusterNodeCapacityMetric)
+
+
 class ClusterCapacityResponse(BaseModel):
     """Cluster-wide capacity that can be committed to tenant runtimes.
 
@@ -184,6 +206,7 @@ class ClusterCapacityResponse(BaseModel):
     active_accounts: int = 0
     cpu: ClusterCapacityMetric = Field(default_factory=ClusterCapacityMetric)
     memory: ClusterCapacityMetric = Field(default_factory=ClusterCapacityMetric)
+    nodes: list[ClusterCapacityNode] = Field(default_factory=list)
     scraped_at: float = 0.0
 
 
