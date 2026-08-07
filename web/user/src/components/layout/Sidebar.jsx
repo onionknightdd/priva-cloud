@@ -56,6 +56,21 @@ function ProjectGroupIcon({ expanded }) {
   )
 }
 
+function ProjectGroupTitle({ cwd, total }) {
+  return (
+    <span
+      className="flex items-center gap-1 min-w-0"
+      style={{ flex: '0 1 auto', maxWidth: '100%', textAlign: 'left' }}
+    >
+      <span className="truncate" style={{ minWidth: 0, fontSize: 15 }}>
+        {shortCwd(cwd)}
+      </span>
+      <span aria-hidden="true" style={{ flexShrink: 0, fontSize: 12 }}>•</span>
+      <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 600 }}>{total}</span>
+    </span>
+  )
+}
+
 // Dropdown item style shared by the workdir (sliders) menu.
 const WD_MENU_ITEM_STYLE = {
   background: 'transparent',
@@ -393,22 +408,20 @@ function SessionItem({
       {session.tag && !editing && (
         <div className="flex items-center gap-1" style={{ paddingLeft: 19, position: 'relative', zIndex: 1 }}>
           <span
-            className="inline-flex items-center gap-1 px-2 uppercase"
+            className="inline-flex items-center"
             style={{
-              background: 'transparent',
-              border: '1px solid var(--border-subtle)',
-              borderLeft: '1px solid var(--orange)',
-              borderRadius: 2,
-              color: 'var(--text-dim)',
-              fontSize: 11,
-              letterSpacing: '0.06em',
+              background: 'var(--orange)',
+              border: 'none',
+              borderRadius: 14,
+              color: 'var(--text-inverse)',
+              fontSize: 9,
               fontWeight: 600,
-              padding: '1px 6px',
+              lineHeight: '14px',
+              padding: '0 5px',
               maxWidth: '100%',
             }}
             title={session.tag}
           >
-            <Flag size={11} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color)', flexShrink: 0 }} />
             <span className="truncate">{session.tag}</span>
           </span>
         </div>
@@ -1302,14 +1315,11 @@ export default function Sidebar() {
                         onMouseLeave={(e) => { e.currentTarget.style.color = 'inherit' }}
                       >
                         <ProjectGroupIcon expanded={isExpanded} />
-                        <span className="flex-1 truncate" style={{ fontSize: 15, minWidth: 0, textAlign: 'left' }}>
-                          {shortCwd(group.cwd)}
-                        </span>
+                        <ProjectGroupTitle cwd={group.cwd} total={group.total} />
                       </button>
                       {group.pinned && (
                       <Pin size={11} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--sidebar-icon-color)' }} />
                       )}
-                      <span style={{ fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{group.total}</span>
                       {/* Workdir menu (sliders) */}
                       <div className="relative" ref={openWorkdirMenu === group.cwd ? workdirMenuRef : undefined} style={{ flexShrink: 0 }}>
                         <button
@@ -1378,27 +1388,37 @@ export default function Sidebar() {
                           <div style={{ marginTop: regularSessions.length > 0 ? 2 : 0 }}>
                             <button
                               type="button"
-                              className="flex items-center gap-1 w-full py-1 min-w-0"
+                              className="flex items-center gap-1 w-full py-1.5 min-w-0"
                               style={{
                                 background: 'transparent',
                                 border: 'none',
                                 color: 'var(--text-dim)',
                                 cursor: 'pointer',
-                                paddingLeft: 28,
+                                fontSize: 13,
+                                // Chevron + CalendarClock + gaps still place the
+                                // title at the same 53px column as More/session rows.
+                                paddingLeft: 19,
                                 paddingRight: 12,
-                                transition: 'color 150ms ease',
+                                opacity: 0.65,
+                                transition: 'color 150ms ease, opacity 150ms ease',
                               }}
                               onClick={() => toggleScheduledGroup(group.cwd)}
-                              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-                              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-dim)' }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.color = 'var(--text-secondary)'
+                                e.currentTarget.style.opacity = '0.85'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.color = 'var(--text-dim)'
+                                e.currentTarget.style.opacity = '0.65'
+                              }}
                             >
                               {scheduledExpanded
                                 ? <ChevronDown size={13} strokeWidth={1.5} style={{ flexShrink: 0 }} />
                                 : <ChevronRight size={13} strokeWidth={1.5} style={{ flexShrink: 0 }} />}
                               <CalendarClock size={13} strokeWidth={1.5} style={{ flexShrink: 0 }} />
                               <span
-                                className="flex-1 truncate uppercase"
-                                style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', minWidth: 0, textAlign: 'left' }}
+                                className="flex-1 truncate"
+                                style={{ minWidth: 0, textAlign: 'left' }}
                               >
                                 {t('sidebar.scheduledSessions', { defaultValue: 'Scheduled sessions' })}
                               </span>
@@ -1492,14 +1512,11 @@ export default function Sidebar() {
                   onMouseLeave={(e) => { e.currentTarget.style.color = 'inherit' }}
                 >
                   <ProjectGroupIcon expanded={false} />
-                  <span className="flex-1 truncate" style={{ fontSize: 15, minWidth: 0, textAlign: 'left' }}>
-                    {shortCwd(activeProject.cwd)}
-                  </span>
+                  <ProjectGroupTitle cwd={activeProject.cwd} total={activeProject.total} />
                 </button>
                 {activeProject.pinned && (
                   <Pin size={11} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--sidebar-icon-color)' }} />
                 )}
-                <span style={{ fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{activeProject.total}</span>
               </div>
               {renderSessionItem(
                 activeSession,
