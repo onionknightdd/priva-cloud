@@ -17,6 +17,15 @@ export class UnauthorizedError extends Error {
   }
 }
 
+export class APIError extends Error {
+  constructor(status, body) {
+    super(`API error ${status}: ${body}`)
+    this.name = 'APIError'
+    this.status = status
+    this.body = body
+  }
+}
+
 function getAuthHeaders() {
   const token = getToken()
   if (token) {
@@ -135,7 +144,8 @@ export async function fetchWithWake(url, init) {
   return res
 }
 
-export async function handleAPIResponse(res) {
+export async function handleAPIResponse(res, options = {}) {
+  const silentStatuses = Array.isArray(options.silentStatuses) ? options.silentStatuses : []
   if (res.status === 401) {
     window.dispatchEvent(new Event('auth:unauthorized'))
     const text = await res.text()
@@ -152,8 +162,8 @@ export async function handleAPIResponse(res) {
     // 503 is the edge EPP's transient "sandbox is waking" signal — never surface
     // it as a hard error toast. The waking/ready toasts (fetchWithWake) cover it,
     // and the request still throws so callers fall back / retry.
-    if (res.status !== 503) pushApiToast(res.status, text)
-    throw new Error(`API error ${res.status}: ${text}`)
+    if (res.status !== 503 && !silentStatuses.includes(res.status)) pushApiToast(res.status, text)
+    throw new APIError(res.status, text)
   }
   const data = await res.json()
   debugLog('recv', `${res.status} ${res.url}`, data)
@@ -228,13 +238,13 @@ export async function sandboxGet(path) {
 // is a drop-in sandboxGet → sandboxRead swap. Plain writes stay on sandboxPost/Put/etc
 // (their responses are small), but the EPP truncates the *response* body regardless of
 // method — a POST whose reply is large (see sandboxReadPost) truncates just like a GET.
-export async function sandboxRead(path) {
+export async function sandboxRead(path, responseOptions = {}) {
   try {
     const res = await fetchWithWake(`/api/cp-proxy${path}`, { headers: { ...getAuthHeaders() } })
-    if (res.status !== 404) return handleAPIResponse(res)
+    if (res.status !== 404) return handleAPIResponse(res, responseOptions)
   } catch { /* network error → fall back to the direct lane */ }
   const res = await fetchWithWake(`${SANDBOX_BASE}${path}`, { headers: { ...getAuthHeaders() } })
-  return handleAPIResponse(res)
+  return handleAPIResponse(res, responseOptions)
 }
 
 // Large-body-safe POST: the sandboxRead cp-proxy lane for POSTs whose *response* can

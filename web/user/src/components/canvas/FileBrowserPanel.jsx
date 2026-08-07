@@ -327,7 +327,7 @@ function getPptxSelectionMeta(range, root) {
 
 async function readTextFile(filePath, options = {}) {
   try {
-    const data = await previewFile(filePath, options)
+    const data = await previewFile(filePath, { ...options, silentNotFound: true })
     if (typeof data?.content === 'string') return data.content
   } catch { /* fall back to the download lane below */ }
 
@@ -352,20 +352,32 @@ function previewCacheKeyForTab(tab) {
   return `${tab.filePath}:${tab.refreshKey}:${tab.mimeType || ''}`
 }
 
-function useTabPreviewLoaders(tab) {
-  const previewFile = useMemo(() => previewFileForTab(tab), [tab])
-  const cacheKey = previewCacheKeyForTab(tab)
-  const loadBlob = useCallback(
-    async () => downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' }),
-    [tab.filePath, tab.refreshKey]
+function useTabPreviewLoaders(tab, onLoadSuccess, onLoadError) {
+  const previewFile = useMemo(
+    () => previewFileForTab(tab),
+    [tab.extension, tab.filePath, tab.mimeType, tab.name],
   )
-  const loadText = useCallback(async () => {
-    return readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey })
-  }, [tab.filePath, tab.refreshKey])
-  const loadArrayBuffer = useCallback(async () => {
+  const cacheKey = previewCacheKeyForTab(tab)
+  const reportLoad = useCallback(async (load) => {
+    try {
+      const value = await load()
+      onLoadSuccess?.()
+      return value
+    } catch (error) {
+      onLoadError?.(error)
+      throw error
+    }
+  }, [onLoadError, onLoadSuccess])
+  const loadBlob = useCallback(() => reportLoad(
+    () => downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' }),
+  ), [reportLoad, tab.filePath, tab.refreshKey])
+  const loadText = useCallback(() => reportLoad(
+    () => readTextFile(tab.filePath, { cacheBustKey: tab.refreshKey }),
+  ), [reportLoad, tab.filePath, tab.refreshKey])
+  const loadArrayBuffer = useCallback(() => reportLoad(async () => {
     const blob = await downloadFile(tab.filePath, { cacheBustKey: tab.refreshKey, cacheMode: 'no-store' })
     return blob.arrayBuffer()
-  }, [tab.filePath, tab.refreshKey])
+  }), [reportLoad, tab.filePath, tab.refreshKey])
 
   return { previewFile, cacheKey, loadText, loadArrayBuffer, loadBlob }
 }
@@ -430,8 +442,8 @@ function CopyPathButton({ path }) {
   )
 }
 
-function RawTextView({ tab, onTextLoaded }) {
-  const { previewFile, cacheKey, loadText } = useTabPreviewLoaders(tab)
+function RawTextView({ tab, onTextLoaded, onLoadSuccess, onLoadError }) {
+  const { previewFile, cacheKey, loadText } = useTabPreviewLoaders(tab, onLoadSuccess, onLoadError)
   return (
     <RawFilePreview
       file={previewFile}
@@ -483,8 +495,8 @@ function NonPlainRawNotice({ onPreview }) {
   )
 }
 
-function PreviewView({ tab, onTextLoaded }) {
-  const { previewFile, cacheKey, loadText, loadArrayBuffer, loadBlob } = useTabPreviewLoaders(tab)
+function PreviewView({ tab, onTextLoaded, onLoadSuccess, onLoadError }) {
+  const { previewFile, cacheKey, loadText, loadArrayBuffer, loadBlob } = useTabPreviewLoaders(tab, onLoadSuccess, onLoadError)
 
   return (
     <FilePreviewRenderer
@@ -521,7 +533,7 @@ function FileTreeSidebar({
       return { ...cache, [path]: { loading: true, entries: null, error: null } }
     })
     try {
-      const data = await listDirectory(path)
+      const data = await listDirectory(path, { silentNotFound: true })
       setDirCache((cache) => ({
         ...cache,
         [path]: {
@@ -754,6 +766,7 @@ export default function FileBrowserPanel() {
   const closeAllFiles = useFileBrowserStore((s) => s.closeAllFiles)
   const setMode = useFileBrowserStore((s) => s.setMode)
   const refreshFile = useFileBrowserStore((s) => s.refreshFile)
+  const setFileMissing = useFileBrowserStore((s) => s.setFileMissing)
   const openFileTab = useFileBrowserStore((s) => s.openFile)
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null
   const fileTabUnderline = useSlidingUnderline(activeTab?.id)
@@ -779,6 +792,12 @@ export default function FileBrowserPanel() {
     const resolved = resolveAgainstCwd(activeTab.filePath, activeCwd)
     return resolved === activeTab.filePath ? activeTab : { ...activeTab, filePath: resolved }
   }, [activeTab, activeCwd])
+  const handlePreviewLoadSuccess = useCallback(() => {
+    if (activeTabId) setFileMissing(activeTabId, false)
+  }, [activeTabId, setFileMissing])
+  const handlePreviewLoadError = useCallback((error) => {
+    if (activeTabId && Number(error?.status) === 404) setFileMissing(activeTabId, true)
+  }, [activeTabId, setFileMissing])
   const treeRootPath = useMemo(() => {
     const filePath = resolvedActiveTab?.filePath || ''
     const fileDir = dirname(filePath)
@@ -1077,7 +1096,17 @@ export default function FileBrowserPanel() {
                 title={tab.filePath}
               >
                 <FileText size={12} strokeWidth={1.5} style={{ color: active ? 'var(--blue)' : 'var(--text-dim)', flexShrink: 0, position: 'relative', zIndex: 1 }} />
-                <span className="truncate text-xs" style={{ fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace", minWidth: 0, position: 'relative', zIndex: 1 }}>
+                <span
+                  className="truncate text-xs"
+                  style={{
+                    fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+                    minWidth: 0,
+                    position: 'relative',
+                    zIndex: 1,
+                    textDecoration: tab.missing ? 'line-through' : 'none',
+                    textDecorationThickness: tab.missing ? '1px' : undefined,
+                  }}
+                >
                   {tab.name}
                 </span>
                 <span
@@ -1283,9 +1312,23 @@ export default function FileBrowserPanel() {
         <div ref={previewContentRef} className="flex-1 min-w-0 min-h-0 overflow-hidden">
           {mode === 'raw'
             ? plain
-              ? <RawTextView tab={resolvedActiveTab} onTextLoaded={handleTextLoaded} />
+              ? (
+                <RawTextView
+                  tab={resolvedActiveTab}
+                  onTextLoaded={handleTextLoaded}
+                  onLoadSuccess={handlePreviewLoadSuccess}
+                  onLoadError={handlePreviewLoadError}
+                />
+              )
               : <NonPlainRawNotice onPreview={() => setMode(activeTab.id, 'preview')} />
-            : <PreviewView tab={resolvedActiveTab} onTextLoaded={handleTextLoaded} />}
+            : (
+              <PreviewView
+                tab={resolvedActiveTab}
+                onTextLoaded={handleTextLoaded}
+                onLoadSuccess={handlePreviewLoadSuccess}
+                onLoadError={handlePreviewLoadError}
+              />
+            )}
         </div>
       </div>
 

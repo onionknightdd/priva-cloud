@@ -1006,19 +1006,9 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
           const pendingFileTab = pendingToolFileTabs.get(rb.tool_use_id)
           const handledPendingFile = Boolean(pendingFileTab)
           if (pendingFileTab) {
-            if (isToolResultError) {
-              const staleTab = S.fileBrowser().tabs.find((tab) => tab.toolUseId === rb.tool_use_id)
-              if (staleTab) S.fileBrowser().closeFile(staleTab.id)
-            } else {
-              openFileBrowserTab(pendingFileTab)
-              if (pendingFileTab.sourceTool === 'Read') fxShowCanvas('file-browser')
-            }
+            openFileBrowserTab(pendingFileTab)
+            if (pendingFileTab.sourceTool === 'Read') fxShowCanvas('file-browser')
             pendingToolFileTabs.delete(rb.tool_use_id)
-          } else if (isToolResultError) {
-            const staleTab = S.fileBrowser().tabs.find((tab) =>
-              tab.toolUseId === rb.tool_use_id && FILE_TOOL_NAMES.has(tab.sourceTool)
-            )
-            if (staleTab) S.fileBrowser().closeFile(staleTab.id)
           }
 
           // Update message flow only for visible tools
@@ -1121,10 +1111,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
                 toolUseResult: tur,
               })
               if ((op.type === 'write' || op.type === 'edit') && !handledPendingFile) {
-                if (isErrorResult) {
-                  const staleTab = S.fileBrowser().tabs.find((tab) => tab.toolUseId === op.id)
-                  if (staleTab) S.fileBrowser().closeFile(staleTab.id)
-                } else if (op.filePath) {
+                if (op.filePath) {
                   const sourceTool = op.type === 'edit' ? 'Edit' : 'Write'
                   openFileBrowserTab({
                     filePath: op.filePath,

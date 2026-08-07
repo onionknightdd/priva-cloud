@@ -9,7 +9,7 @@ function fileName(filePath) {
 
 function buildTab(file) {
   const path = file.filePath || file.path || ''
-  return {
+  const tab = {
     id: path,
     filePath: path,
     name: file.name || fileName(path),
@@ -23,6 +23,8 @@ function buildTab(file) {
     mode: file.mode || 'preview',
     refreshKey: Date.now(),
   }
+  if (typeof file.missing === 'boolean') tab.missing = file.missing
+  return tab
 }
 
 // One file-browser slice per session runtime — see runtime/registry.js.
@@ -85,6 +87,15 @@ export const createFileBrowserStore = () => createStore((set, get) => ({
   refreshFile: (id) =>
     set((s) => ({
       tabs: s.tabs.map((tab) => (tab.id === id ? { ...tab, refreshKey: Date.now() } : tab)),
+    })),
+
+  setFileMissing: (id, missing) =>
+    set((s) => ({
+      tabs: s.tabs.map((tab) => (
+        tab.id === id && tab.missing !== Boolean(missing)
+          ? { ...tab, missing: Boolean(missing) }
+          : tab
+      )),
     })),
 
   setTabs: (tabs) => {

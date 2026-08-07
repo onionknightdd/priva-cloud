@@ -67,10 +67,8 @@ export function isErroredToolResult(result, toolUseResult = null) {
   })
 }
 
-export function shouldOpenToolFileInBrowser(block, result, toolUseResult = null) {
-  if (!block || !FILE_TOOL_NAMES.has(block.name)) return false
-  if (isErroredToolResult(result, toolUseResult)) return false
-  return true
+export function shouldOpenToolFileInBrowser(block) {
+  return Boolean(block && FILE_TOOL_NAMES.has(block.name))
 }
 
 export function fileTabsFromGeneratedFiles(files, browserSource = FILE_SOURCE_CURRENT, toolUseId = null) {

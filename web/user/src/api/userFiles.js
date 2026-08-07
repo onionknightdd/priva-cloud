@@ -10,8 +10,12 @@ function buildFileQuery(path, cacheBustKey = null) {
 }
 
 // sandboxRead: big directories (node_modules-scale) run well past the ~8KB EPP cap.
-export function listDirectory(path) {
-  return sandboxRead(`/files/list?path=${encodeURIComponent(path)}`)
+export function listDirectory(path, options = {}) {
+  const { silentNotFound = false } = options
+  return sandboxRead(
+    `/files/list?path=${encodeURIComponent(path)}`,
+    silentNotFound ? { silentStatuses: [404] } : undefined,
+  )
 }
 
 export function createDirectory(directory, name) {
@@ -20,8 +24,11 @@ export function createDirectory(directory, name) {
 
 // sandboxRead: text previews carry up to 1MB of file content in JSON.
 export function previewFile(path, options = {}) {
-  const { cacheBustKey = null } = options
-  return sandboxRead(`/files/preview?${buildFileQuery(path, cacheBustKey).toString()}`)
+  const { cacheBustKey = null, silentNotFound = false } = options
+  return sandboxRead(
+    `/files/preview?${buildFileQuery(path, cacheBustKey).toString()}`,
+    silentNotFound ? { silentStatuses: [404] } : undefined,
+  )
 }
 
 export async function downloadFile(path, options = {}) {
@@ -46,7 +53,9 @@ export async function downloadFile(path, options = {}) {
   }
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`Download error ${res.status}: ${text}`)
+    const error = new Error(`Download error ${res.status}: ${text}`)
+    error.status = res.status
+    throw error
   }
   return res.blob()
 }
