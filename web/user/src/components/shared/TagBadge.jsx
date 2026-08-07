@@ -4,15 +4,16 @@ import { tagColorStyle } from '../../utils/sessionTags'
 export default function TagBadge({ tag, colorIndex, onRemove, maxWidth = '100%' }) {
   return (
     <span
-      className="inline-flex items-center min-w-0"
+      className="inline-flex items-center justify-center min-w-0"
       style={{
         ...tagColorStyle(tag, colorIndex),
         border: 'none',
-        borderRadius: 8,
+        borderRadius: 2,
         fontSize: 12,
         fontWeight: 600,
         lineHeight: '14px',
-        padding: onRemove ? '0 3px 0 5px' : '0 5px',
+        padding: onRemove ? '1px 4px 1px 6px' : '1px 6px',
+        textAlign: 'center',
         maxWidth,
       }}
       title={tag}
