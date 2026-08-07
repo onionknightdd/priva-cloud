@@ -351,6 +351,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     if (rt.key !== sid) {
       const oldKey = rt.key
       rekeyRuntime(oldKey, sid)
+      useSettingsStore.getState().rekeySessionModel(oldKey, sid)
       statusStore().rekey(oldKey, sid)
     }
     rt.meta.sidebarRowId = rt.meta.sidebarRowId || sid

@@ -18,6 +18,31 @@ import {
 import { getMyApiKey, generateMyApiKey, revokeMyApiKey } from '@shared/api/auth'
 import { getPresetPrompt, updatePresetPrompt } from '@shared/api/admin'
 
+const SESSION_MODEL_DRAFT_KEY = '__draft__'
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object, key)
+}
+
+function modelSelectionFromResponse(lastResponseModel, profiles, defaultProfileId) {
+  const modelId = lastResponseModel?.model_id || lastResponseModel?.modelId
+  if (typeof modelId !== 'string' || !modelId.trim()) return null
+
+  const profileId = lastResponseModel?.profile_id || lastResponseModel?.profileId
+  if (!profileId) {
+    const defaultProfile = profiles.find((profile) => profile.id === defaultProfileId)
+    return defaultProfile?.default_model === modelId ? null : modelId
+  }
+
+  // A profile-qualified reference is valid even before the profile list has
+  // finished loading. Once profiles are available, do not restore a deleted
+  // profile as the next-run selection.
+  if (profiles.length > 0 && !profiles.some((profile) => profile.id === profileId)) return null
+  const profile = profiles.find((item) => item.id === profileId)
+  if (profileId === defaultProfileId && profile?.default_model === modelId) return null
+  return `${profileId}:${modelId}`
+}
+
 const useSettingsStore = create((set, get) => ({
   env: null,
   hasEnv: null,
@@ -35,6 +60,12 @@ const useSettingsStore = create((set, get) => ({
   quickActions: [],
   quickActionsLoaded: false,
   selectedModel: null,
+  // The model picker is rendered globally, but its selection belongs to the
+  // active conversation. The server-side last_response_model seeds a session
+  // after a refresh; an explicit local selection takes precedence thereafter.
+  activeModelSessionKey: null,
+  selectedModelBySession: {},
+  selectedModelSourceBySession: {},
   defaultModel: null,
   apiKey: null,
   apiKeyLoading: false,
@@ -229,7 +260,66 @@ const useSettingsStore = create((set, get) => ({
     set({ debugMode: on })
   },
 
-  setSelectedModel: (model) => set({ selectedModel: model }),
+  activateSessionModel: (sessionKey, lastResponseModel = null, options = {}) => {
+    const key = sessionKey || SESSION_MODEL_DRAFT_KEY
+    const current = get()
+    const selections = current.selectedModelBySession || {}
+    const sources = current.selectedModelSourceBySession || {}
+    if (hasOwn(selections, key) && sources[key] === 'explicit') {
+      set({ activeModelSessionKey: key, selectedModel: selections[key] })
+      return selections[key]
+    }
+
+    const selectedModel = options.preserveCurrent
+      ? current.selectedModel
+      : modelSelectionFromResponse(lastResponseModel, current.profiles, current.defaultProfileId)
+    set({
+      activeModelSessionKey: key,
+      selectedModel,
+      selectedModelBySession: { ...selections, [key]: selectedModel },
+      selectedModelSourceBySession: { ...sources, [key]: 'server' },
+    })
+    return selectedModel
+  },
+
+  rekeySessionModel: (oldKey, newKey) => {
+    if (!oldKey || !newKey || oldKey === newKey) return
+    set((state) => {
+      const selections = state.selectedModelBySession || {}
+      const sources = state.selectedModelSourceBySession || {}
+      if (!hasOwn(selections, oldKey)) {
+        return state.activeModelSessionKey === oldKey
+          ? { activeModelSessionKey: newKey }
+          : {}
+      }
+      const next = { ...selections, [newKey]: selections[oldKey] }
+      const nextSources = { ...sources, [newKey]: sources[oldKey] || 'server' }
+      delete next[oldKey]
+      delete nextSources[oldKey]
+      return {
+        activeModelSessionKey: state.activeModelSessionKey === oldKey
+          ? newKey
+          : state.activeModelSessionKey,
+        selectedModelBySession: next,
+        selectedModelSourceBySession: nextSources,
+      }
+    })
+  },
+
+  setSelectedModel: (model) => set((state) => {
+    const key = state.activeModelSessionKey || SESSION_MODEL_DRAFT_KEY
+    return {
+      selectedModel: model,
+      selectedModelBySession: {
+        ...(state.selectedModelBySession || {}),
+        [key]: model,
+      },
+      selectedModelSourceBySession: {
+        ...(state.selectedModelSourceBySession || {}),
+        [key]: 'explicit',
+      },
+    }
+  }),
 
   fetchApiKey: async () => {
     set({ apiKeyLoading: true })
@@ -302,6 +392,9 @@ const useSettingsStore = create((set, get) => ({
     quickActions: [],
     quickActionsLoaded: false,
     selectedModel: null,
+    activeModelSessionKey: null,
+    selectedModelBySession: {},
+    selectedModelSourceBySession: {},
     defaultModel: null,
     apiKey: null,
     apiKeyLoading: false,

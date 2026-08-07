@@ -14,6 +14,7 @@ import {
 } from '../stores/runtime/registry'
 import useSessionStatusStore from '../stores/sessionStatusStore'
 import useSidebarStore from '../stores/sidebarStore'
+import useSettingsStore from '../stores/settingsStore'
 import useUiStore from '@shared/stores/uiStore'
 import useToastStore from '@shared/stores/toastStore'
 import { UnauthorizedError } from '@shared/api/client'
@@ -85,6 +86,17 @@ export async function openSession(sessionOrId, opts = {}) {
   const row = sessionOrId && typeof sessionOrId === 'object' ? sessionOrId : null
   const rawSessionId = row ? (row.sessionId || row.id) : sessionOrId
   if (!rawSessionId) return false
+  const knownRow = useSidebarStore.getState().sessions.find((item) => (
+    (item.sessionId || item.id) === rawSessionId
+  ))
+  const rowHasResponseModel = row && Object.prototype.hasOwnProperty.call(row, 'lastResponseModel')
+  const knownRowHasResponseModel = knownRow && Object.prototype.hasOwnProperty.call(
+    knownRow, 'lastResponseModel',
+  )
+  const hasRowResponseModel = !!(rowHasResponseModel || knownRowHasResponseModel)
+  const responseModel = rowHasResponseModel
+    ? row.lastResponseModel
+    : (knownRowHasResponseModel ? knownRow.lastResponseModel : null)
   // Resume rotates session ids per turn — a sidebar row may still hold a
   // former id. Resolve to the live runtime's canonical key so switching back
   // to a running (e.g. mid-workflow) session finds it instead of cold-loading
@@ -97,6 +109,12 @@ export async function openSession(sessionOrId, opts = {}) {
   if (navigate) useUiStore.getState().setActiveNavTab('priva')
 
   if (sessionId === getActiveKey()) {
+    const rt = getRuntime(sessionId)
+    if (rt && !hasRowResponseModel && rt.meta.lastResponseModel !== undefined) {
+      useSettingsStore.getState().activateSessionModel(sessionId, rt.meta.lastResponseModel)
+    } else {
+      useSettingsStore.getState().activateSessionModel(sessionId, responseModel)
+    }
     useSidebarStore.getState().setActiveSessionId(rowId)
     statusStore.markSeen(sessionId)
     return true
@@ -106,7 +124,11 @@ export async function openSession(sessionOrId, opts = {}) {
     snapshotActiveUi()
     const rt = getRuntime(sessionId)
     rt.meta.sidebarRowId = rowId
+    if (hasRowResponseModel || rt.meta.lastResponseModel === undefined) {
+      rt.meta.lastResponseModel = responseModel
+    }
     setActiveKey(sessionId)
+    useSettingsStore.getState().activateSessionModel(sessionId, rt.meta.lastResponseModel)
     applyUiSnapshot(rt.meta.ui)
     useSidebarStore.getState().setActiveSessionId(rowId)
     statusStore.markSeen(sessionId)
@@ -122,6 +144,7 @@ export async function openSession(sessionOrId, opts = {}) {
 
     const rt = ensureRuntime(sessionId)
     rt.meta.sidebarRowId = rowId
+    rt.meta.lastResponseModel = responseModel
     const chat = getSlice(sessionId, 'chat')
     const taskSlice = getSlice(sessionId, 'tasks')
     const fileOpsSlice = getSlice(sessionId, 'fileOps')
@@ -142,6 +165,7 @@ export async function openSession(sessionOrId, opts = {}) {
     if (token !== selectToken) return false
     snapshotActiveUi()
     setActiveKey(sessionId)
+    useSettingsStore.getState().activateSessionModel(sessionId, rt.meta.lastResponseModel)
     const tab = canvasTabFor({ fileBrowserTabs, fileOps, messages, sdkTaskTracker })
     applyUiSnapshot(tab ? { canvasVisible: true, activeCanvasTab: tab, canvasOpenTabs: [tab] } : null)
     useSidebarStore.getState().setActiveSessionId(rowId)
@@ -174,6 +198,7 @@ export function newDraftSession(opts = {}) {
   const { cwd = null, pendingComposerSend = null } = opts
   snapshotActiveUi()
   const key = newDraftRuntime()
+  useSettingsStore.getState().activateSessionModel(key, null, { preserveCurrent: true })
   applyUiSnapshot(null)
   useSidebarStore.getState().setActiveSessionId(null)
   const chat = getSlice(key, 'chat')

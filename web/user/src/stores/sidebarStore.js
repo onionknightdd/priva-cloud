@@ -58,6 +58,15 @@ const persistWidth = (width) => {
 
 function mapSession(s) {
   const tags = normalizeSessionTags(Array.isArray(s.tags) ? s.tags : s.tag)
+  const responseModel = s.last_response_model
+  const lastResponseModel = responseModel && typeof responseModel === 'object'
+    && typeof responseModel.model_id === 'string'
+    ? {
+        profileId: responseModel.profile_id || null,
+        modelId: responseModel.model_id,
+        observedAt: responseModel.observed_at || null,
+      }
+    : null
   return {
     id: s.session_id,
     sessionId: s.session_id,
@@ -83,6 +92,7 @@ function mapSession(s) {
     // Scheduler-origin sessions (D3): the sidebar marks these ⏰.
     origin: s.origin || null,
     schedulerJobName: s.scheduler_job_name || null,
+    lastResponseModel,
   }
 }
 
