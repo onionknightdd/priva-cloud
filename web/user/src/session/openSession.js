@@ -198,7 +198,7 @@ export function newDraftSession(opts = {}) {
   const { cwd = null, pendingComposerSend = null } = opts
   snapshotActiveUi()
   const key = newDraftRuntime()
-  useSettingsStore.getState().activateSessionModel(key, null, { preserveCurrent: true })
+  useSettingsStore.getState().activateSessionModel(key, null)
   applyUiSnapshot(null)
   useSidebarStore.getState().setActiveSessionId(null)
   const chat = getSlice(key, 'chat')
