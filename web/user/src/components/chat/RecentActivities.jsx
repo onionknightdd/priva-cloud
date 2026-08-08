@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useStaggerEntrance } from '@shared/motion/useStaggerEntrance'
 import useSidebarStore from '../../stores/sidebarStore'
 import useUserDataStore from '../../stores/userDataStore'
@@ -41,13 +42,13 @@ function buildRows(recentActivities, sessions) {
     const session = byId.get(sessionId)
     const cwd = session?.cwd || activity.cwd || ''
     const title = session?.customTitle || session?.firstPrompt || session?.name || activity.title || cwdLabel(cwd) || shortSessionId(sessionId)
-    const summary = session?.summary || activity.summary || (cwd ? cwd : shortSessionId(sessionId))
+    const recap = activity.recap || session?.recap || ''
     const lastModified = session?.createdAt || activity.last_modified || activity.lastModified || null
     return {
       id: sessionId || `${cwd}:${title}`,
       sessionId,
       title,
-      summary,
+      recap,
       time: compactRelativeTime(lastModified),
     }
   })
@@ -71,11 +72,14 @@ function RecentActivitySkeleton() {
 }
 
 export default function RecentActivities({ showTitle = true }) {
+  const { t } = useTranslation()
   const recentActivities = useSidebarStore((s) => s.recentActivities)
   const sessions = useSidebarStore((s) => s.sessions)
+  const dismissRecentActivity = useSidebarStore((s) => s.dismissRecentActivity)
   const overviewLoading = useUserDataStore((s) => s.overviewLoading)
   const fetchOverview = useUserDataStore((s) => s.fetchOverview)
   const [loadingSessionId, setLoadingSessionId] = useState(null)
+  const [dismissingSessionId, setDismissingSessionId] = useState(null)
   const entranceRef = useStaggerEntrance({ duration: 220, rise: 6, stepMs: 35 })
 
   // The overview bootstrap hydrates recent_activities. Keep this dependency
@@ -88,7 +92,7 @@ export default function RecentActivities({ showTitle = true }) {
   )
 
   const openActivity = async (row) => {
-    if (!row.sessionId || loadingSessionId) return
+    if (!row.sessionId || loadingSessionId || dismissingSessionId) return
     setLoadingSessionId(row.sessionId)
     try {
       await openSession(row.sessionId)
@@ -97,6 +101,13 @@ export default function RecentActivities({ showTitle = true }) {
     } finally {
       setLoadingSessionId(null)
     }
+  }
+
+  const closeActivity = async (row) => {
+    if (!row.sessionId || loadingSessionId || dismissingSessionId) return
+    setDismissingSessionId(row.sessionId)
+    await dismissRecentActivity(row.sessionId)
+    setDismissingSessionId(null)
   }
 
   return (
@@ -136,24 +147,18 @@ export default function RecentActivities({ showTitle = true }) {
         ) : (
           rows.map((row) => {
             const loading = loadingSessionId === row.sessionId
+            const dismissing = dismissingSessionId === row.sessionId
             return (
-              <button
+              <div
                 key={row.id}
                 ref={entranceRef(row.id)}
-                type="button"
-                disabled={loading}
-                onClick={() => openActivity(row)}
-                className="flex items-center gap-2 min-w-0"
+                className="flex items-center min-w-0"
                 style={{
                   minHeight: 32,
                   width: '100%',
-                  padding: '5px 8px',
                   background: 'var(--bg-elevated)',
-                  border: 'none',
                   borderRadius: 4,
                   color: 'var(--text-secondary)',
-                  cursor: loading ? 'default' : 'pointer',
-                  textAlign: 'left',
                   transition: 'background 150ms ease, color 150ms ease',
                 }}
                 onMouseEnter={(event) => {
@@ -165,48 +170,90 @@ export default function RecentActivities({ showTitle = true }) {
                   event.currentTarget.style.color = 'var(--text-secondary)'
                 }}
               >
-                <div className="flex items-center min-w-0 flex-1" style={{ gap: 5 }}>
-                  <span
-                    className="truncate"
-                    style={{
-                      color: 'var(--text-primary)',
-                      fontSize: 11,
-                      fontWeight: 500,
-                      maxWidth: '38%',
-                      minWidth: 0,
-                    }}
-                    title={row.title}
-                  >
-                    {row.title}
-                  </span>
-                  <span
-                    className="truncate"
-                    style={{
-                      color: 'var(--text-secondary)',
-                      fontSize: 10,
-                      fontWeight: 300,
-                      minWidth: 0,
-                      flex: 1,
-                    }}
-                    title={row.summary}
-                  >
-                    {row.summary}
-                  </span>
-                </div>
-                {row.time && (
-                  <span
-                    style={{
-                      color: 'var(--text-dim)',
-                      fontSize: 9,
-                      fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {row.time}
-                  </span>
-                )}
-                <ChevronRight size={12} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
-              </button>
+                <button
+                  type="button"
+                  disabled={loading || dismissing}
+                  onClick={() => openActivity(row)}
+                  className="flex items-center gap-2 min-w-0 flex-1"
+                  style={{
+                    alignSelf: 'stretch',
+                    padding: '5px 4px 5px 8px',
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'inherit',
+                    cursor: loading || dismissing ? 'default' : 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <div className="flex items-center min-w-0 flex-1" style={{ gap: 5 }}>
+                    <span
+                      className="truncate"
+                      style={{
+                        color: 'var(--text-primary)',
+                        fontSize: 11,
+                        fontWeight: 500,
+                        maxWidth: '38%',
+                        minWidth: 0,
+                      }}
+                      title={row.title}
+                    >
+                      {row.title}
+                    </span>
+                    {row.recap && (
+                      <span
+                        className="truncate"
+                        style={{
+                          color: 'var(--text-secondary)',
+                          fontSize: 10,
+                          fontWeight: 300,
+                          minWidth: 0,
+                          flex: 1,
+                        }}
+                        title={row.recap}
+                      >
+                        {row.recap}
+                      </span>
+                    )}
+                  </div>
+                  {row.time && (
+                    <span
+                      style={{
+                        color: 'var(--text-dim)',
+                        fontSize: 9,
+                        fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {row.time}
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  disabled={loading || dismissing}
+                  onClick={() => closeActivity(row)}
+                  title={t('chat.recentActivityDismiss')}
+                  aria-label={t('chat.recentActivityDismiss')}
+                  className="flex-shrink-0 inline-flex items-center justify-center"
+                  style={{
+                    alignSelf: 'stretch',
+                    padding: '0 8px 0 4px',
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-dim)',
+                    cursor: loading || dismissing ? 'default' : 'pointer',
+                    transition: 'color 150ms ease',
+                  }}
+                  onMouseEnter={(event) => {
+                    event.currentTarget.style.color = 'var(--text-primary)'
+                  }}
+                  onMouseLeave={(event) => {
+                    event.currentTarget.style.color = 'var(--text-dim)'
+                  }}
+                >
+                  <X size={12} strokeWidth={1.5} />
+                </button>
+              </div>
             )
           })
         )}

@@ -108,6 +108,7 @@
   "chat": {
     "placeholder": "输入 / 选择技能\n输入 @ 附加已上传文件",
     "recapDismiss": "隐藏摘要",
+    "recentActivityDismiss": "关闭最近活动",
     "newChat": "新建对话",
     "attach": "附件",
     "stopEscape": "停止 (Escape)",

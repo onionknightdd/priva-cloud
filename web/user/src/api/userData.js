@@ -1,4 +1,4 @@
-import { getJSON, sandboxGet, sandboxRead } from '@shared/api/client'
+import { getJSON, sandboxDelete, sandboxGet, sandboxRead } from '@shared/api/client'
 
 // Per-account readiness + first-page bootstrap (returns { workspace, username }).
 // Served by the agent-runner via the gateway; cold-starts wake the sandbox, which
@@ -9,6 +9,10 @@ export const getAgentHealth = () => sandboxGet('/health')
 // state served by the agent-runner from the account's /workspace PVC.
 // sandboxRead: the 183-day heatmap + daily model-token series run past the ~8KB EPP cap.
 export const getUserOverview = () => sandboxRead('/user/overview')
+
+export const dismissRecentActivity = (sessionId) => (
+  sandboxDelete(`/user/recent-activities/${encodeURIComponent(sessionId)}`)
+)
 
 export const getUserStats = () => sandboxGet('/user/stats')
 

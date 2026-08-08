@@ -69,7 +69,7 @@ _RECENT_ACTIVITIES_LIMIT = 5
 _MAX_SESSION_TAGS = 3
 _TAG_COLOR_SLOTS = 100
 # A recap is one sentence; anything longer is a model that ignored the prompt.
-_RECAP_MAX_CHARS = 120
+_RECAP_MAX_CHARS = 200
 
 # Guards read-modify-write of the index. The pod is single-writer, but turns and
 # list requests are concurrent coroutines, so serialize mutations.
@@ -460,6 +460,22 @@ async def record_recent_activity(cwd: str | None, session_id: str | None) -> lis
         data["recent_activities"] = [entry, *activities][:_RECENT_ACTIVITIES_LIMIT]
         _write_raw(data)
         return data["recent_activities"]
+
+
+async def dismiss_recent_activity(session_id: str) -> list[dict]:
+    """Remove one session from the home-screen recent-activity list only."""
+    if not session_id:
+        return get_recent_activities()
+    async with _lock:
+        data = _read_raw()
+        activities = [
+            item for item in get_recent_activities(data)
+            if item.get("session_id") != session_id
+        ]
+        if len(activities) != len(data.get("recent_activities", [])):
+            data["recent_activities"] = activities
+            _write_raw(data)
+        return activities
 
 
 async def set_scheduler_session(

@@ -108,6 +108,7 @@
   "chat": {
     "placeholder": "Use / to select a skill\nUse @ to attach an uploaded file",
     "recapDismiss": "Hide recap",
+    "recentActivityDismiss": "Dismiss recent activity",
     "newChat": "New chat",
     "attach": "Attach",
     "stopEscape": "Stop (Escape)",

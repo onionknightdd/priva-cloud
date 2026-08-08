@@ -1670,6 +1670,7 @@ export default memo(function MessageBubble({
         )
       }
       // Parse <think>...</think> tags from model output
+      const assistantBody = finalResultIndexSet.has(i)
       const thinkSegments = parseThinkTags(block.text)
       const markdownStreaming = Boolean(block._streamState && block._streamState !== 'complete')
       const wasStreamed = Boolean(block._streamKey)
@@ -1679,7 +1680,7 @@ export default memo(function MessageBubble({
             {thinkSegments.map((seg, si) =>
               seg.type === 'thinking'
                 ? <ThinkingBlock key={si} content={seg.content} t={t} streaming={markdownStreaming} />
-                : <MarkdownRenderer key={si} content={seg.content} mermaidCollapsible streaming={markdownStreaming} streamed={wasStreamed} />
+                : <MarkdownRenderer key={si} content={seg.content} mermaidCollapsible streaming={markdownStreaming} streamed={wasStreamed} assistantBody={assistantBody} />
             )}
           </div>
         )
@@ -1691,6 +1692,7 @@ export default memo(function MessageBubble({
           mermaidCollapsible
           streaming={markdownStreaming}
           streamed={wasStreamed}
+          assistantBody={assistantBody}
         />
       )
     }
@@ -1993,13 +1995,13 @@ export default memo(function MessageBubble({
               )}
             </div>
             {hasCompletedResult && finalResultText && (
-              <MarkdownRenderer content={finalResultText} mermaidCollapsible />
+              <MarkdownRenderer content={finalResultText} mermaidCollapsible assistantBody />
             )}
           </>
         ) : (
           <>
             {renderedContent}
-            {hasStandaloneResult && <MarkdownRenderer content={finalResultText} mermaidCollapsible />}
+            {hasStandaloneResult && <MarkdownRenderer content={finalResultText} mermaidCollapsible assistantBody />}
           </>
         ))}
         {/* Empty response fallback */}
@@ -2027,7 +2029,7 @@ export default memo(function MessageBubble({
 
   return (
     <div
-      className="message-bubble flex px-4 py-2"
+      className="message-bubble flex px-1 py-2"
       style={{
         background: 'transparent',
         justifyContent: isUser ? 'flex-end' : 'flex-start',

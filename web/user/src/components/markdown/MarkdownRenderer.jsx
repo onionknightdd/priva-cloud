@@ -25,6 +25,7 @@ function MarkdownRenderer({
   mermaidCollapsible = false,
   streaming = false,
   streamed = false,
+  assistantBody = false,
 }) {
   const components = useMemo(
     () => createMarkdownComponents({ mermaidCollapsible }),
@@ -35,7 +36,10 @@ function MarkdownRenderer({
   const normalizedContent = normalizeLeadingMetadataBreaks(content)
 
   return (
-    <div className="markdown-body overflow-hidden" style={{ wordBreak: 'break-word' }}>
+    <div
+      className={`markdown-body overflow-hidden${assistantBody ? ' assistant-message-body' : ''}`}
+      style={{ wordBreak: 'break-word' }}
+    >
       <Streamdown
         // Keep a once-streamed block on Streamdown's block-based tree after
         // completion so code/diagram nodes are not remounted at hand-off.

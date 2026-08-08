@@ -81,10 +81,22 @@ def _load_mcp_servers(username: str) -> list[McpServerSummary]:
     return servers
 
 
+def _recent_activities_with_recaps(meta: dict) -> list[dict]:
+    activities = []
+    for activity in session_meta.get_recent_activities(meta):
+        recap = session_meta.get_recap(activity.get("session_id") or "", meta)
+        activities.append({
+            **activity,
+            "recap": recap["text"] if recap else None,
+        })
+    return activities
+
+
 async def _load_overview_bootstrap(user: UserRecord) -> UserOverviewBootstrap:
     profiles, default_profile_id = store.read(_migrate_legacy_vision(user.username))
 
-    recent_activities = session_meta.get_recent_activities()
+    meta = session_meta.read_meta()
+    recent_activities = _recent_activities_with_recaps(meta)
     active_cwd = (
         recent_activities[0].get("cwd")
         if recent_activities and isinstance(recent_activities[0], dict)
@@ -98,6 +110,17 @@ async def _load_overview_bootstrap(user: UserRecord) -> UserOverviewBootstrap:
         active_cwd=active_cwd or get_user_workspace(user),
         recent_activities=recent_activities,
     )
+
+
+@router.delete("/recent-activities/{session_id}")
+async def dismiss_recent_activity(
+    session_id: str,
+    user: UserRecord = Depends(require_user),
+):
+    """Dismiss a home-screen activity without changing its session."""
+    del user  # auth only
+    await session_meta.dismiss_recent_activity(session_id)
+    return {"dismissed": True, "session_id": session_id}
 
 
 @router.get("/overview", response_model=UserOverviewResponse)

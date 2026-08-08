@@ -22,6 +22,7 @@ export default function MessageList() {
   const messages = useChatStore((s) => s.messages)
   const sessionId = useChatStore((s) => s.sessionId)
   const isStreaming = useChatStore((s) => s.isStreaming)
+  const showRecapBoundaryFade = useChatStore((s) => Boolean(s.recap) && !s.recapDismissed && !s.isStreaming)
   const enableFileCheckpointing = useChatStore((s) => s.enableFileCheckpointing)
   const findCheckpointForAssistant = useChatStore((s) => s.findCheckpointForAssistant)
   const rewindMarker = useChatStore((s) => s.rewindMarker)
@@ -443,6 +444,25 @@ export default function MessageList() {
         </div>
         <div ref={bottomRef} />
       </div>
+
+      {showRecapBoundaryFade && (
+        /* Soften the boundary between the scrolling transcript and the pinned
+           recap area without taking up layout space. */
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 'var(--session-summary-layout-width, 0px)',
+            bottom: 0,
+            height: 24,
+            background: 'linear-gradient(to bottom, transparent, var(--bg-base))',
+            pointerEvents: 'none',
+            transition: 'right var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1))',
+            zIndex: 10,
+          }}
+        />
+      )}
 
       {/* Jump to latest */}
       {showJump && (

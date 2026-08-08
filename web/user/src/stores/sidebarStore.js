@@ -10,6 +10,7 @@ import {
 import { UnauthorizedError } from '@shared/api/client'
 import safeStorage from '@shared/utils/safeStorage'
 import { normalizeSessionTags, normalizeTagColorMap } from '../utils/sessionTags'
+import { dismissRecentActivity as dismissRecentActivityApi } from '../api/userData'
 
 const STORAGE_KEY_WIDTH = 'sidebar-width'
 const STORAGE_KEY_COLLAPSED = 'sidebar-collapsed'
@@ -182,6 +183,24 @@ const useSidebarStore = create((set, get) => ({
   updateSession: (id, data) => set((s) => ({
     sessions: s.sessions.map((sess) => (sess.id === id ? { ...sess, ...data } : sess)),
   })),
+
+  dismissRecentActivity: async (sessionId) => {
+    if (!sessionId) return false
+    try {
+      await dismissRecentActivityApi(sessionId)
+      set((s) => ({
+        recentActivities: s.recentActivities.filter((activity) => (
+          (activity.session_id || activity.sessionId) !== sessionId
+        )),
+      }))
+      return true
+    } catch (err) {
+      if (!(err instanceof UnauthorizedError)) {
+        console.error('Failed to dismiss recent activity:', err)
+      }
+      return false
+    }
+  },
 
   // --- Pin / archive (API-first, then patch local state — no refetch, so
   // expansion + already-loaded "more" pages are preserved). Render derives the

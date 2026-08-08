@@ -1073,6 +1073,16 @@ html, body {
 .markdown-body > *:first-child { margin-top: 0; }
 .markdown-body > *:last-child { margin-bottom: 0; }
 
+/* Assistant final-answer prose is three pixels tighter than the shared markdown
+   rhythm. Scope this to paragraphs/list items so code, tool, thinking, summary,
+   and inter-block spacing remain unchanged. */
+.assistant-message-body p {
+  line-height: calc(1.8em - 3px) !important;
+}
+.assistant-message-body li {
+  line-height: calc(1.7em - 3px) !important;
+}
+
 /* Compact markdown when mirrored inside the Canvas Inspector tree. */
 .canvas-inspector-message .markdown-body {
   font-size: var(--text-xs);

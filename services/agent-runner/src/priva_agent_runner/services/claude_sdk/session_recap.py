@@ -43,7 +43,7 @@ logger = get_app_logger(__name__)
 _ENABLED_KEY = "recap_enabled"
 
 _TIMEOUT_SEC = 30.0
-_MAX_TOKENS = 80
+_MAX_TOKENS = 256
 # Budget for the digest we hand the model. Comfortably inside any context
 # window while still carrying the shape of a long session.
 _MAX_DIGEST_CHARS = 6000
@@ -59,7 +59,7 @@ _SYSTEM_PROMPT = (
     "Given a transcript digest, reply with a single sentence describing what "
     "the session is about — what the user is trying to do and where it got to.\n"
     "Write in the same language the conversation uses.\n"
-    "Keep it under 30 characters for Chinese, or 15 words for English.\n"
+    "Keep it under 200 characters.\n"
     "Output only that sentence: no quotes, no label, no bullet, no markdown, "
     "no trailing period-only filler, no newlines."
 )
@@ -141,9 +141,9 @@ async def _ask_model(digest: str) -> str:
         return ""
     base_url = profile.base_url.rstrip("/")
     auth_token = profile.auth_token
-    # Prefer the account's small/fast model: a one-liner does not need the
-    # model the session itself runs on.
-    model = profile.haiku_model or profile.default_model or ""
+    # Recaps always use the account's explicitly configured Haiku option. Do
+    # not silently spend the default model when that option is absent.
+    model = profile.haiku_model or ""
     if not base_url or not auth_token or not model:
         # BYOK not configured, or no model id we could name. Nothing to do —
         # this account simply has no recaps.
