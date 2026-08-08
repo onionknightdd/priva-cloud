@@ -302,14 +302,14 @@
 .sidebar-session-title.is-running {
   background: linear-gradient(
     90deg,
-    var(--text-dim) 0%,
-    var(--text-dim) 38%,
-    var(--text-secondary) 44%,
-    var(--text-primary) 49%,
-    var(--text-primary) 53%,
-    var(--text-secondary) 59%,
-    var(--text-dim) 66%,
-    var(--text-dim) 100%
+    color-mix(in srgb, var(--text-dim) 52%, transparent) 0%,
+    color-mix(in srgb, var(--text-dim) 52%, transparent) 36%,
+    var(--text-secondary) 43%,
+    var(--text-primary) 48%,
+    var(--text-primary) 56%,
+    var(--text-secondary) 62%,
+    color-mix(in srgb, var(--text-dim) 52%, transparent) 69%,
+    color-mix(in srgb, var(--text-dim) 52%, transparent) 100%
   );
   background-position-x: 200%;
   background-size: 200% 100%;
