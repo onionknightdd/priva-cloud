@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from fastapi import HTTPException
 
 from priva_agent_runner.routers.agent import _validate_attachments
+from priva_agent_runner.services.claude_sdk.service import _build_prompt_with_attachments
 
 
 class AgentAttachmentValidationTests(unittest.TestCase):
@@ -50,6 +51,57 @@ class AgentAttachmentValidationTests(unittest.TestCase):
 
             self.assertEqual(ctx.exception.status_code, 400)
             self.assertIn("outside workspace", ctx.exception.detail)
+
+
+class AgentAttachmentPromptTests(unittest.TestCase):
+    def test_returns_original_prompt_without_attachments(self) -> None:
+        self.assertEqual(
+            _build_prompt_with_attachments("Summarize this.", None),
+            "Summarize this.",
+        )
+
+    def test_marks_single_attachment_as_current_turn_input(self) -> None:
+        result = _build_prompt_with_attachments(
+            "这个文件有什么内容",
+            [{"path": "/workspace/admin/current.jsonl", "name": "current.jsonl"}],
+        )
+
+        self.assertTrue(result.startswith("<current-turn-attachments>\n"))
+        self.assertIn(
+            "These files are task inputs, not background metadata or system reminders.",
+            result,
+        )
+        self.assertIn(
+            'phrases such as "this file", "the file", "这个文件", or "附件" refer to that file',
+            result,
+        )
+        self.assertIn(
+            "Do not substitute a file from an earlier conversation turn",
+            result,
+        )
+        self.assertIn("- current.jsonl: /workspace/admin/current.jsonl", result)
+        self.assertTrue(
+            result.endswith("<user-request>\n这个文件有什么内容\n</user-request>")
+        )
+        self.assertLess(
+            result.index("- current.jsonl: /workspace/admin/current.jsonl"),
+            result.index("<user-request>"),
+        )
+
+    def test_requires_inspection_and_preserves_binary_file_guidance(self) -> None:
+        result = _build_prompt_with_attachments(
+            "Compare the files.",
+            [
+                {"path": "/workspace/admin/report.pdf", "name": "report.pdf"},
+                {"path": "/workspace/admin/notes.txt", "name": None},
+            ],
+        )
+
+        self.assertIn("inspect the relevant attached file", result)
+        self.assertIn("Never read binary formats", result)
+        self.assertIn("`mcp__FileCanvas__register_file`", result)
+        self.assertIn("- report.pdf: /workspace/admin/report.pdf", result)
+        self.assertIn("- /workspace/admin/notes.txt", result)
 
 
 if __name__ == "__main__":

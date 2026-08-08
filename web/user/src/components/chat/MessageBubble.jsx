@@ -1103,7 +1103,7 @@ function parseSkillCommand(text, availableSkills) {
 /**
  * Parse attached file paths from a user message.
  * Supports both formats:
- *   - XML: <uploaded-files>...- /path...</uploaded-files>
+ *   - XML: <current-turn-attachments> or legacy <uploaded-files>
  *   - Code block: [Attached files ...]\n```\n/path\n```
  * Returns { cleanText, files: [{ name }] } or null if not found.
  */
@@ -1119,11 +1119,13 @@ function parseUploadedFiles(text) {
     inner = codeMatch[1]
     cleanText = text.replace(/\n?\n?\[Attached files[^\]]*\]\s*\n```\n[\s\S]*?\n```/, '').trim()
   } else {
-    // Fallback: XML format (for old session history)
-    const xmlMatch = text.match(/<uploaded-files>\s*([\s\S]*?)\s*<\/uploaded-files>/)
+    // XML format used by current and legacy session history.
+    const xmlMatch = text.match(/<(current-turn-attachments|uploaded-files)>\s*([\s\S]*?)\s*<\/\1>/)
     if (xmlMatch) {
-      inner = xmlMatch[1]
-      cleanText = text.replace(/<uploaded-files>[\s\S]*?<\/uploaded-files>/, '').trim()
+      inner = xmlMatch[2]
+      cleanText = text.replace(xmlMatch[0], '').trim()
+      const requestMatch = cleanText.match(/^<user-request>\s*([\s\S]*?)\s*<\/user-request>$/)
+      if (requestMatch) cleanText = requestMatch[1].trim()
     }
   }
 
@@ -1133,12 +1135,12 @@ function parseUploadedFiles(text) {
   const lines = inner.split('\n')
   for (const line of lines) {
     // Match "- original_name: /path" or "- /path" or bare "/path"
-    const namedMatch = line.match(/^-\s+(.+?):\s*(\/\S+)\s*$/)
+    const namedMatch = line.match(/^-\s+(.+?):\s*(\/.+?)\s*$/)
     if (namedMatch) {
       files.push({ name: namedMatch[1].trim(), path: namedMatch[2].trim() })
       continue
     }
-    const pathMatch = line.match(/^-\s+`?(.+?)`?\s*$/) || line.match(/^(\/\S+)$/)
+    const pathMatch = line.match(/^-\s+`?(\/.+?)`?\s*$/) || line.match(/^(\/.+)$/)
     if (pathMatch) {
       const fullPath = pathMatch[1].trim()
       const parts = fullPath.split('/')
@@ -1177,7 +1179,7 @@ function parseQuoteContent(text) {
 }
 
 function hasUserReferenceMarkup(text) {
-  return /<selected-file>|<selected-xlsx>|<file-reference|<uploaded-files>|\[Attached files/.test(text || '')
+  return /<selected-file>|<selected-xlsx>|<file-reference|<current-turn-attachments>|<uploaded-files>|\[Attached files/.test(text || '')
 }
 
 function isCollapsibleToolBlock(block) {
@@ -1589,7 +1591,7 @@ export default memo(function MessageBubble({
     }
     if (block.type === 'text' && block.text?.trim()) {
       if (isUser) {
-        // Check for <uploaded-files> XML in text (from session history)
+        // Check for current or legacy attachment XML in session history.
         const uploadedParsed = parseUploadedFiles(block.text)
         const displayText = uploadedParsed ? uploadedParsed.cleanText : block.text
         const parsedFiles = uploadedParsed ? uploadedParsed.files : null

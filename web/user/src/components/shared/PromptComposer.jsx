@@ -577,7 +577,15 @@ export default function PromptComposer({
       addAttachment({ id, name: file.name, size: file.size, status: 'uploading', path: null })
       try {
         const result = await uploadFile(file)
-        updateAttachment(id, { status: 'done', path: result.path, serverName: result.filesystem_name, originalName: result.upload_name, uuid: result.uuid })
+        const attachmentId = result.attachment_id ?? result.uuid
+        updateAttachment(id, {
+          status: 'done',
+          path: result.path,
+          serverName: result.safe_name ?? result.filesystem_name,
+          originalName: result.name ?? result.upload_name ?? file.name,
+          attachmentId,
+          uuid: attachmentId,
+        })
       } catch (err) {
         updateAttachment(id, { status: 'error', error: String(err?.message || err) })
       }
@@ -587,7 +595,7 @@ export default function PromptComposer({
   const handleRemoveAttachment = useCallback(async (att) => {
     onAttachmentsChange((prev) => prev.filter((a) => a.id !== att.id))
     if (att.status === 'done') {
-      const deleteId = att.uuid || att.serverName
+      const deleteId = att.attachmentId || att.uuid || att.serverName
       if (deleteId) {
         try { await deleteUploadedFile(deleteId) } catch { /* ignore */ }
       }
@@ -604,7 +612,7 @@ export default function PromptComposer({
     onAttachmentsChange(() => [])
     await Promise.all(snapshot.map(async (att) => {
       if (att.isImage || att.status !== 'done') return
-      const deleteId = att.uuid || att.serverName
+      const deleteId = att.attachmentId || att.uuid || att.serverName
       if (!deleteId) return
       try { await deleteUploadedFile(deleteId) } catch { /* ignore */ }
     }))
@@ -794,9 +802,10 @@ export default function PromptComposer({
       size: file.size,
       status: 'done',
       path: file.path,
-      serverName: file.source === 'uploaded' ? file.stored_name : undefined,
+      serverName: file.source === 'uploaded' ? (file.safe_name || file.stored_name) : undefined,
       originalName: file.original_name || file.name,
-      uuid: file.source === 'uploaded' ? file.uuid : undefined,
+      attachmentId: file.source === 'uploaded' ? (file.attachment_id || file.uuid) : undefined,
+      uuid: file.source === 'uploaded' ? (file.attachment_id || file.uuid) : undefined,
     })
 
     setTimeout(() => el?.focus(), 0)

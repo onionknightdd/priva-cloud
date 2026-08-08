@@ -178,7 +178,7 @@ class WorkflowDrainTracker:
 
 
 def _build_prompt_with_attachments(prompt: str, attachments: list[dict] | None) -> str:
-    """Inject uploaded file paths into the prompt via XML tags.
+    """Inject current-turn file paths and reference-resolution guidance.
 
     Each attachment is a dict with 'path' (UUID-based on disk) and optional 'name' (original filename).
     """
@@ -194,17 +194,30 @@ def _build_prompt_with_attachments(prompt: str, attachments: list[dict] | None) 
             lines.append(f"- {path}")
     file_lines = "\n".join(lines)
     return (
-        f"{prompt}\n\n<uploaded-files>\n"
-        f"Use the EXACT file path on each line to read the file:\n"
-        f"Do NOT directly read non-plain-text binary files as plaintext. "
-        f"For files such as pdf, docx, xlsx, pptx, images, archives, or other binary formats, "
-        f"use an appropriate tool or processing method instead of treating them as plain text.\n"
-        f"If you create, convert, render, export, modify, or even just read a non-plain-text file "
-        f"(such as pdf, docx, xlsx, pptx, html, images, or similar rich-preview files) — "
-        f"including when Bash invokes a python, node, or shell script that opens such a file "
-        f"(e.g. `python parse.py data.xlsx`, `node read.js report.pdf`, `bash analyze.sh file.docx`) — "
-        f"always call `mcp__FileCanvas__register_file` with that file's path so Priva can register it to the frontend Canvas panel.\n"
-        f"{file_lines}\n</uploaded-files>"
+        "<current-turn-attachments>\n"
+        "The user attached the following file(s) to THIS message.\n"
+        "These files are task inputs, not background metadata or system reminders.\n\n"
+        "Reference resolution:\n"
+        "- If exactly one file is attached, phrases such as \"this file\", \"the file\", "
+        "\"这个文件\", or \"附件\" refer to that file unless the user explicitly names another file.\n"
+        "- Do not substitute a file from an earlier conversation turn merely because it was recently discussed.\n"
+        "- If multiple files are attached, resolve the reference from the user's wording. "
+        "Ask for clarification only when the intended file cannot be determined.\n\n"
+        "File handling:\n"
+        "- When the user asks about a file's contents, inspect the relevant attached file "
+        "using its EXACT path before answering.\n"
+        "- Do not answer from memory or assumptions when the attached file has not been inspected.\n"
+        "- Choose an appropriate reading method for the file type. Never read binary formats "
+        "such as PDF, DOCX, XLSX, PPTX, images, or archives as plain text.\n"
+        "- If a non-plain-text file is created, converted, rendered, exported, modified, "
+        "or inspected—even through a Python, Node.js, or shell command—call "
+        "`mcp__FileCanvas__register_file` with the relevant final file path.\n\n"
+        "Attached files:\n"
+        f"{file_lines}\n"
+        "</current-turn-attachments>\n\n"
+        "<user-request>\n"
+        f"{prompt}\n"
+        "</user-request>"
     )
 
 
