@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage
 
+from priva_agent_runner.routers import agent as agent_router
 from priva_agent_runner.routers.agent import _session_info_to_response
 from priva_agent_runner.services.claude_sdk import session_meta
 from priva_agent_runner.services.claude_sdk import service
@@ -55,9 +58,10 @@ class SessionResponseModelMetadataTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SessionInfoResponseModelTests(unittest.TestCase):
-    def test_session_info_includes_persisted_response_model(self) -> None:
-        source = SimpleNamespace(
-            session_id="session-1",
+    @staticmethod
+    def _source(session_id: str = "session-1") -> SimpleNamespace:
+        return SimpleNamespace(
+            session_id=session_id,
             summary="hello",
             last_modified=100,
             file_size=200,
@@ -67,6 +71,8 @@ class SessionInfoResponseModelTests(unittest.TestCase):
             cwd="/workspace/user",
             tag=None,
         )
+
+    def test_session_info_includes_persisted_response_model(self) -> None:
         meta = {
             "sessions": {},
             "scheduler_sessions": {},
@@ -80,11 +86,113 @@ class SessionInfoResponseModelTests(unittest.TestCase):
             "tag_colors": {},
         }
 
-        response = _session_info_to_response(source, meta)
+        response = _session_info_to_response(self._source(), meta)
 
         self.assertIsNotNone(response.last_response_model)
         self.assertEqual(response.last_response_model.profile_id, "default")
         self.assertEqual(response.last_response_model.model_id, "claude-sonnet-4-5")
+
+    def test_session_info_backfills_latest_real_model_from_legacy_transcript(self) -> None:
+        rows = [
+            {
+                "type": "assistant",
+                "timestamp": "2026-07-15T14:37:00.000Z",
+                "message": {"model": "older-model"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2026-07-15T14:38:26.123Z",
+                "message": {"model": "legacy-model"},
+            },
+            {
+                "type": "assistant",
+                "isSidechain": True,
+                "timestamp": "2026-07-15T14:39:00.000Z",
+                "message": {"model": "sidechain-model"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2026-07-15T14:40:00.000Z",
+                "message": {"model": "<synthetic>"},
+            },
+        ]
+        meta = {
+            "sessions": {},
+            "scheduler_sessions": {},
+            "last_response_models": {},
+            "tag_colors": {},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "session-legacy.jsonl"
+            transcript.write_text(
+                "\n".join(json.dumps(row) for row in rows),
+                encoding="utf-8",
+            )
+            agent_router._cached_transcript_response_model.cache_clear()
+            with patch.object(
+                agent_router,
+                "_session_jsonl_path",
+                return_value=transcript,
+            ):
+                response = _session_info_to_response(
+                    self._source("session-legacy"),
+                    meta,
+                    {"legacy-model": "profile-legacy"},
+                )
+
+        self.assertIsNotNone(response.last_response_model)
+        self.assertEqual(response.last_response_model.profile_id, "profile-legacy")
+        self.assertEqual(response.last_response_model.model_id, "legacy-model")
+        self.assertEqual(response.last_response_model.observed_at, 1784126306123)
+
+    def test_session_info_infers_missing_profile_for_persisted_model(self) -> None:
+        meta = {
+            "sessions": {},
+            "scheduler_sessions": {},
+            "last_response_models": {
+                "session-1": {
+                    "profile_id": None,
+                    "model_id": "configured-model",
+                    "observed_at": 123,
+                }
+            },
+            "tag_colors": {},
+        }
+
+        response = _session_info_to_response(
+            self._source(),
+            meta,
+            {"configured-model": "profile-a"},
+        )
+
+        self.assertIsNotNone(response.last_response_model)
+        self.assertEqual(response.last_response_model.profile_id, "profile-a")
+
+    def test_profile_inference_requires_unique_model_owner(self) -> None:
+        profiles = [
+            SimpleNamespace(
+                id="profile-a",
+                default_model="shared-model",
+                opus_model="unique-a",
+            ),
+            SimpleNamespace(
+                id="profile-b",
+                default_model="shared-model",
+                haiku_model="unique-b",
+            ),
+        ]
+
+        with patch.object(
+            agent_router.llm_profile_store,
+            "read",
+            return_value=(profiles, "profile-a"),
+        ):
+            profile_by_model = agent_router._configured_profile_by_model()
+
+        self.assertIsNone(profile_by_model["shared-model"])
+        self.assertEqual(profile_by_model["unique-a"], "profile-a")
+        self.assertEqual(profile_by_model["unique-b"], "profile-b")
 
 
 class AgentRunResponseModelTests(unittest.IsolatedAsyncioTestCase):

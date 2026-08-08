@@ -5,6 +5,8 @@ import base64
 import binascii
 import json
 import re
+from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -59,6 +61,7 @@ from priva_common.models.agent import (
     WsQueueFrame,
 )
 from ..services.claude_sdk.options import build_agent_options
+from ..services.llm_profiles import store as llm_profile_store
 from ..services.claude_sdk.session_add_dirs import (
     delete_add_dirs,
     read_add_dirs,
@@ -144,7 +147,11 @@ def _resolve_run_add_dirs(
     return read_add_dirs(cwd, session_id)
 
 
-def _session_info_to_response(s, meta: dict | None = None) -> SessionInfoResponse:
+def _session_info_to_response(
+    s,
+    meta: dict | None = None,
+    profile_by_model: dict[str, str | None] | None = None,
+) -> SessionInfoResponse:
     flags = session_meta.get_session_flags(s.session_id, meta)
     sched = session_meta.get_scheduler_info(s.session_id, meta)
     tags = session_meta.get_session_tags(
@@ -152,6 +159,21 @@ def _session_info_to_response(s, meta: dict | None = None) -> SessionInfoRespons
         meta,
         fallback=getattr(s, "tag", None),
     )
+    last_response_model = session_meta.get_last_response_model(s.session_id, meta)
+    model_profiles = profile_by_model or {}
+    if last_response_model is None:
+        last_response_model = _last_response_model_from_transcript(
+            getattr(s, "cwd", None),
+            s.session_id,
+            model_profiles,
+        )
+    elif last_response_model.get("profile_id") is None:
+        inferred_profile = model_profiles.get(last_response_model["model_id"])
+        if inferred_profile:
+            last_response_model = {
+                **last_response_model,
+                "profile_id": inferred_profile,
+            }
     return SessionInfoResponse(
         session_id=s.session_id,
         summary=s.summary,
@@ -169,7 +191,7 @@ def _session_info_to_response(s, meta: dict | None = None) -> SessionInfoRespons
         archived=flags["archived"],
         origin="scheduler" if sched else None,
         scheduler_job_name=(sched or {}).get("job_name") or None,
-        last_response_model=session_meta.get_last_response_model(s.session_id, meta),
+        last_response_model=last_response_model,
     )
 
 
@@ -233,6 +255,135 @@ def _iter_jsonl_dicts(path: Path):
                 continue
             if isinstance(item, dict):
                 yield item
+
+
+def _iter_jsonl_dicts_reverse(path: Path, chunk_size: int = 64 * 1024):
+    """Yield JSONL objects newest-first without loading the transcript at once."""
+    if not path.exists():
+        return
+
+    with path.open("rb") as handle:
+        handle.seek(0, 2)
+        position = handle.tell()
+        remainder = b""
+        while position > 0:
+            read_size = min(chunk_size, position)
+            position -= read_size
+            handle.seek(position)
+            remainder = handle.read(read_size) + remainder
+            lines = remainder.split(b"\n")
+            remainder = lines[0]
+            for line in reversed(lines[1:]):
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    item = json.loads(raw)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                if isinstance(item, dict):
+                    yield item
+
+        raw = remainder.strip()
+        if raw:
+            try:
+                item = json.loads(raw)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return
+            if isinstance(item, dict):
+                yield item
+
+
+def _timestamp_millis(value: object) -> int | None:
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+        return int(numeric if numeric >= 1_000_000_000_000 else numeric * 1000)
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return int(parsed.timestamp() * 1000)
+
+
+@lru_cache(maxsize=2048)
+def _cached_transcript_response_model(
+    path_value: str,
+    file_size: int,
+    modified_ns: int,
+) -> tuple[str, int | None] | None:
+    """Return the newest real assistant model; stat fields invalidate cache."""
+    del file_size, modified_ns
+    for raw in _iter_jsonl_dicts_reverse(Path(path_value)):
+        if raw.get("type") != "assistant" or raw.get("isSidechain") is True:
+            continue
+        message = raw.get("message")
+        if not isinstance(message, dict):
+            continue
+        model_id = message.get("model")
+        if not isinstance(model_id, str) or not model_id.strip():
+            continue
+        model_id = model_id.strip()
+        if model_id.lower() in {"<synthetic>", "synthetic"}:
+            continue
+        return model_id, _timestamp_millis(raw.get("timestamp"))
+    return None
+
+
+def _last_response_model_from_transcript(
+    cwd: str | None,
+    session_id: str,
+    profile_by_model: dict[str, str | None],
+) -> dict | None:
+    """Backfill legacy sessions from their newest real assistant JSONL row."""
+    if not cwd or not session_id:
+        return None
+    try:
+        path = _session_jsonl_path(cwd, session_id)
+        stat = path.stat()
+        observed = _cached_transcript_response_model(
+            str(path),
+            stat.st_size,
+            stat.st_mtime_ns,
+        )
+    except (OSError, ValueError):
+        return None
+    if observed is None:
+        return None
+    model_id, observed_at = observed
+    return {
+        "profile_id": profile_by_model.get(model_id),
+        "model_id": model_id,
+        "observed_at": observed_at,
+    }
+
+
+def _configured_profile_by_model() -> dict[str, str | None]:
+    """Map configured model IDs to a profile only when ownership is unique."""
+    try:
+        profiles, _ = llm_profile_store.read()
+    except Exception:
+        logger.warning("Failed to read LLM profiles for session model inference", exc_info=True)
+        return {}
+
+    owners: dict[str, set[str]] = {}
+    fields = (
+        "default_model",
+        "opus_model",
+        "sonnet_model",
+        "haiku_model",
+        "vision_model",
+    )
+    for profile in profiles:
+        for field in fields:
+            model_id = getattr(profile, field, None)
+            if isinstance(model_id, str) and model_id:
+                owners.setdefault(model_id, set()).add(profile.id)
+    return {
+        model_id: next(iter(profile_ids)) if len(profile_ids) == 1 else None
+        for model_id, profile_ids in owners.items()
+    }
 
 
 def _message_content_blocks(raw: dict) -> list[dict]:
@@ -668,6 +819,7 @@ async def list_agent_sessions(
         )
     ]
     meta = await session_meta.ensure_tag_colors(listed_tags)
+    profile_by_model = _configured_profile_by_model()
     recent_activities = session_meta.get_recent_activities(meta)
     active_cwd = (
         recent_activities[0].get("cwd")
@@ -678,7 +830,7 @@ async def list_agent_sessions(
     # Archived view (Settings → Archived): every archived session, flat.
     if archived:
         out = [
-            _session_info_to_response(s, meta)
+            _session_info_to_response(s, meta, profile_by_model)
             for s in listed_sessions
             if session_meta.get_session_flags(s.session_id, meta)["archived"]
         ]
@@ -688,7 +840,7 @@ async def list_agent_sessions(
     # Single-cwd page (the "more in this dir" loader); archived excluded.
     if cwd:
         resp = [
-            _session_info_to_response(s, meta)
+            _session_info_to_response(s, meta, profile_by_model)
             for s in listed_sessions
             if not session_meta.get_session_flags(s.session_id, meta)["archived"]
         ]
@@ -708,7 +860,7 @@ async def list_agent_sessions(
         if session_meta.get_session_flags(s.session_id, meta)["archived"]:
             continue
         by_cwd.setdefault(s.cwd or active_cwd, []).append(
-            _session_info_to_response(s, meta)
+            _session_info_to_response(s, meta, profile_by_model)
         )
 
     groups: list[SessionGroupResponse] = []
