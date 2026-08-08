@@ -236,13 +236,12 @@ async def get_logs(
     limit: int = Query(default=50, ge=1, le=200),
     before: str | None = Query(default=None),
     after: str | None = Query(default=None),
-    user: UserRecord = Depends(require_user),
+    _user: UserRecord = Depends(require_user),
 ):
     """Hook execution history for this user."""
     store = get_hook_log_store()
     entries, next_cursor, prev_cursor, total = await asyncio.to_thread(
         store.query_cursor,
-        username=user.username,
         event_type=event_type,
         limit=limit,
         before=before,

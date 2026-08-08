@@ -44,7 +44,7 @@ def make_hook_execution_logger(enable_file_canvas_reminder: bool = True):
         """Record hook execution metadata for the web UI Logs tab.
 
         This is a lightweight post-tool callback that records timing data
-        into the per-user hook log store. When enabled, it also injects a
+        into the single-pod hook log store. When enabled, it also injects a
         default reminder after every Bash tool call instructing the agent
         to register any generated or updated Canvas files via
         ``mcp__FileCanvas__register_file``.
@@ -68,9 +68,8 @@ def make_hook_execution_logger(enable_file_canvas_reminder: bool = True):
                 error=None,
             )
 
-            # Use "system" as username for in-process callbacks
             store = get_hook_log_store()
-            store.append("system", entry)
+            store.append(entry)
         except Exception as exc:
             logger.warning("hook_execution_logger callback error: {}", exc)
 

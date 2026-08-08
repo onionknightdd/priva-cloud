@@ -182,13 +182,13 @@ async def _ask_model(digest: str) -> str:
     )
 
 
-def is_enabled(username: str) -> bool:
+def is_enabled() -> bool:
     """Whether this account wants a model call per turn spent on recaps."""
-    return bool(get_user_yaml_key(username, _ENABLED_KEY, True))
+    return bool(get_user_yaml_key(_ENABLED_KEY, True))
 
 
 async def _refresh(session_id: str, username: str, cwd: str | None) -> None:
-    if not is_enabled(username):
+    if not is_enabled():
         # Checked before any work, so switching the toggle off really does cost
         # zero model calls rather than just hiding the result.
         return

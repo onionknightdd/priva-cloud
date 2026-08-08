@@ -30,19 +30,19 @@ from ..services.llm_profiles import (
 router = APIRouter(prefix="/api/sandbox/credentials/profiles", tags=["llm-profiles"])
 
 
-def _migrate_legacy_vision(username: str) -> str | None:
-    value = get_user_yaml_key(username, "vision_model")
+def _migrate_legacy_vision() -> str | None:
+    value = get_user_yaml_key("vision_model")
     return value if isinstance(value, str) and value else None
 
 
-def _ensure(username: str):
-    vision = _migrate_legacy_vision(username)
+def _ensure():
+    vision = _migrate_legacy_vision()
     was_present = profile_store_path().exists()
     profiles, default_id = store.read(vision)
     # Once the canonical app-config store exists, the old per-user vision key
     # is no longer read.  Remove it only after a successful store read/write.
     if vision and profiles and not was_present:
-        save_user_yaml_key(username, "vision_model", None)
+        save_user_yaml_key("vision_model", None)
     return profiles, default_id
 
 
@@ -86,7 +86,7 @@ async def _fetch_models(profile: LlmProfile, timeout: float = 15.0) -> list[Mode
 
 @router.get("", response_model=LlmProfilesResponse)
 async def list_profiles(user: UserRecord = Depends(require_user)):
-    profiles, default_id = _ensure(user.username)
+    profiles, default_id = _ensure()
     return LlmProfilesResponse(
         profiles=[_as_summary(profile) for profile in profiles],
         default_profile_id=default_id,
@@ -111,7 +111,7 @@ async def create_profile(
     )
     if not profile.auth_token:
         raise HTTPException(422, "auth_token is required")
-    store.upsert(profile, vision_model=_migrate_legacy_vision(user.username))
+    store.upsert(profile, vision_model=_migrate_legacy_vision())
     get_audit_logger().append(AuditEntry(
         actor=user.username, action="llm_profile.created", target=profile.id,
     ))
@@ -120,7 +120,7 @@ async def create_profile(
 
 @router.get("/{profile_id}", response_model=LlmProfile)
 async def get_profile(profile_id: str, user: UserRecord = Depends(require_user)):
-    return store.get(validate_profile_id(profile_id), _migrate_legacy_vision(user.username))
+    return store.get(validate_profile_id(profile_id), _migrate_legacy_vision())
 
 
 @router.patch("/{profile_id}", response_model=LlmProfileSummary)
@@ -130,7 +130,7 @@ async def update_profile(
     user: UserRecord = Depends(require_user),
 ):
     profile_id = validate_profile_id(profile_id)
-    current = store.get(profile_id, _migrate_legacy_vision(user.username))
+    current = store.get(profile_id, _migrate_legacy_vision())
     values = current.model_dump()
     for key, value in request.model_dump(exclude_unset=True).items():
         if key == "auth_token" and value == "":
@@ -141,7 +141,7 @@ async def update_profile(
         values["base_url"] = validate_endpoint(values["base_url"])
     values["id"] = profile_id
     updated = LlmProfile.model_validate(values)
-    store.upsert(updated, replacing_id=profile_id, vision_model=_migrate_legacy_vision(user.username))
+    store.upsert(updated, replacing_id=profile_id, vision_model=_migrate_legacy_vision())
     get_audit_logger().append(AuditEntry(
         actor=user.username, action="llm_profile.updated", target=profile_id,
         details={"fields": sorted(request.model_dump(exclude_unset=True).keys())},
@@ -152,10 +152,10 @@ async def update_profile(
 @router.put("/{profile_id}/default", response_model=LlmProfileDefaultResponse)
 async def set_default_profile(profile_id: str, user: UserRecord = Depends(require_user)):
     profile_id = validate_profile_id(profile_id)
-    profile = store.get(profile_id, _migrate_legacy_vision(user.username))
+    profile = store.get(profile_id, _migrate_legacy_vision())
     if not profile.base_url or not profile.auth_token or not profile.default_model:
         raise HTTPException(409, "profile_not_ready")
-    store.set_default(profile_id, _migrate_legacy_vision(user.username))
+    store.set_default(profile_id, _migrate_legacy_vision())
     get_audit_logger().append(AuditEntry(
         actor=user.username, action="llm_profile.default_changed", target=profile_id,
     ))
@@ -165,7 +165,7 @@ async def set_default_profile(profile_id: str, user: UserRecord = Depends(requir
 @router.delete("/{profile_id}", status_code=204)
 async def delete_profile(profile_id: str, user: UserRecord = Depends(require_user)):
     profile_id = validate_profile_id(profile_id)
-    store.delete(profile_id, _migrate_legacy_vision(user.username))
+    store.delete(profile_id, _migrate_legacy_vision())
     get_audit_logger().append(AuditEntry(
         actor=user.username, action="llm_profile.deleted", target=profile_id,
     ))
@@ -173,13 +173,13 @@ async def delete_profile(profile_id: str, user: UserRecord = Depends(require_use
 
 @router.get("/{profile_id}/models", response_model=ModelListResponse)
 async def list_profile_models(profile_id: str, user: UserRecord = Depends(require_user)):
-    profile = store.get(validate_profile_id(profile_id), _migrate_legacy_vision(user.username))
+    profile = store.get(validate_profile_id(profile_id), _migrate_legacy_vision())
     return ModelListResponse(models=await _fetch_models(profile))
 
 
 @router.post("/{profile_id}/test", response_model=ModelListResponse)
 async def test_profile(profile_id: str, user: UserRecord = Depends(require_user)):
-    profile = store.get(validate_profile_id(profile_id), _migrate_legacy_vision(user.username))
+    profile = store.get(validate_profile_id(profile_id), _migrate_legacy_vision())
     return ModelListResponse(models=await _fetch_models(profile))
 
 

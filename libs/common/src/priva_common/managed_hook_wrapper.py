@@ -23,6 +23,7 @@ hook's real exit code).
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import subprocess
@@ -80,18 +81,18 @@ def build_scrubbed_env(allowed_env_vars: list[str]) -> dict[str, str]:
 
 
 def _log_path() -> str | None:
-    """Per-account daily hook-log file, matching services/hooks/log_store.py.
+    """Single-pod daily hook-log file, matching services/hooks/log_store.py.
 
-    ``{work_dir}/{username}/.priva.hooks.log.{YYYY-MM-DD}.jsonl``. Resolved from
-    the wrapper's own (unscrubbed) env, which still has WORKSPACE_DIR/USERNAME.
-    Returns None when either is missing (logging is then skipped, not fatal).
+    ``{priva_home}/.priva.hooks.log.{YYYY-MM-DD}.jsonl``.  To match
+    ``priva_common.paths.priva_home`` without importing application modules,
+    this resolves to ``$PRIVA_HOME/priva`` or defaults to ``~/.config/priva``.
     """
-    work_dir = os.environ.get("WORKSPACE_DIR") or os.environ.get("PRIVA_SERVER__WORK_DIR")
-    username = os.environ.get("USERNAME")
-    if not work_dir or not username:
-        return None
+    parent = os.environ.get("PRIVA_HOME") or os.path.join(
+        os.path.expanduser("~"), ".config"
+    )
+    app_dir = os.path.join(parent, "priva")
     day = time.strftime("%Y-%m-%d", time.gmtime())
-    return os.path.join(work_dir, username, f".priva.hooks.log.{day}.jsonl")
+    return os.path.join(app_dir, f".priva.hooks.log.{day}.jsonl")
 
 
 def _append_log(hook_id: str, payload: dict, exit_code: int, duration_ms: int, error: str) -> None:
@@ -113,7 +114,12 @@ def _append_log(hook_id: str, payload: dict, exit_code: int, duration_ms: int, e
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                f.write(json.dumps(entry) + "\n")
+                f.flush()
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
     except OSError:
         pass  # observability must never break the hook
 

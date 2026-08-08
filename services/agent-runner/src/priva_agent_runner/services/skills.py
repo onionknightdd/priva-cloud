@@ -147,15 +147,15 @@ def _resolve_skills_dir(scope: SkillScope, cwd: str | None) -> Path:
     raise HTTPException(400, f"Unknown skill scope: {scope}")
 
 
-def _get_skill_exclude(username: str) -> list[str]:
-    """Read the skill_exclude denylist (with lazy migration) from .priva.user.yml.
+def _get_skill_exclude() -> list[str]:
+    """Read the skill_exclude denylist from .priva.user.yml.
 
     Delegates to the shared ``priva_common.skill_exclude`` helper. Failures fall
     back to ``[]`` so all discovered skills stay enabled rather than crashing a run.
     """
     from priva_common.skill_exclude import get_skill_exclude
     try:
-        value = get_skill_exclude(username)
+        value = get_skill_exclude()
     except Exception:
         logger.warning("get_skill_exclude failed; defaulting to empty denylist", exc_info=True)
         return []
@@ -169,7 +169,7 @@ def compute_enabled_skill_names(username: str) -> list[str]:
     the user's ``skill_exclude`` denylist. Result is an allowlist suitable for
     direct assignment.
     """
-    exclude = set(_get_skill_exclude(username))
+    exclude = set(_get_skill_exclude())
     seen: set[str] = set()
     enabled: list[str] = []
     for level in ("project", "global"):
@@ -337,7 +337,7 @@ def _scan_skills_dir(
 def list_skills(username: str) -> SkillListResponse:
     """All skills for the user: personal (~/.claude/skills) + one group per
     workdir ({cwd}/.claude/skills). Empty workdir groups are omitted."""
-    exclude = set(_get_skill_exclude(username))
+    exclude = set(_get_skill_exclude())
 
     personal = _scan_skills_dir(_personal_skills_dir(), "personal", None, exclude)
 

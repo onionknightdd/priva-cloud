@@ -111,15 +111,13 @@ def create_app() -> FastAPI:
         # removed only after the profile JSON exists; subsequent CLI launches
         # receive credentials through the per-run --settings overlay instead.
         try:
-            import os
             from priva_common.skill_exclude import get_user_yaml_key, save_user_yaml_key
             from priva_common.user_env import clear_settings_env
             from .services.llm_profiles import cleanup_stale_overlays, store
-            username = os.environ.get("USERNAME")
-            vision = get_user_yaml_key(username, "vision_model") if username else None
+            vision = get_user_yaml_key("vision_model")
             store.read(vision if isinstance(vision, str) else None)
-            if username and vision:
-                save_user_yaml_key(username, "vision_model", None)
+            if vision:
+                save_user_yaml_key("vision_model", None)
             clear_settings_env()
             cleanup_stale_overlays()
         except Exception as exc:

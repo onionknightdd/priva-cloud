@@ -44,8 +44,8 @@ router = APIRouter(prefix="/api/sandbox/user", tags=["user-data"])
 logger = get_app_logger(__name__)
 
 
-def _load_quickactions(username: str) -> list[QuickAction]:
-    raw = _user_yaml.get_user_yaml_key(username, "quickactions", [])
+def _load_quickactions() -> list[QuickAction]:
+    raw = _user_yaml.get_user_yaml_key("quickactions", [])
     if not isinstance(raw, list):
         return []
     return [
@@ -93,7 +93,7 @@ def _recent_activities_with_recaps(meta: dict) -> list[dict]:
 
 
 async def _load_overview_bootstrap(user: UserRecord) -> UserOverviewBootstrap:
-    profiles, default_profile_id = store.read(_migrate_legacy_vision(user.username))
+    profiles, default_profile_id = store.read(_migrate_legacy_vision())
 
     meta = session_meta.read_meta()
     recent_activities = _recent_activities_with_recaps(meta)
@@ -103,7 +103,7 @@ async def _load_overview_bootstrap(user: UserRecord) -> UserOverviewBootstrap:
         else None
     )
     return UserOverviewBootstrap(
-        quickactions=_load_quickactions(user.username),
+        quickactions=_load_quickactions(),
         llm_profiles=[LlmProfileSummary.model_validate(profile_summary(profile)) for profile in profiles],
         default_profile_id=default_profile_id,
         mcp_servers=_load_mcp_servers(user.username),

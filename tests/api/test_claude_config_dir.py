@@ -48,6 +48,25 @@ def test_claude_config_dir_falls_back_to_home(tmp_path, monkeypatch):
     assert claude_config_dir() == tmp_path / ".claude"
 
 
+def test_user_yaml_ignores_workspace_copy(tmp_path, monkeypatch):
+    from priva_common import skill_exclude
+
+    state_parent = tmp_path / "state"
+    app_dir = state_parent / "priva"
+    work_dir = tmp_path / "workspace"
+    legacy = work_dir / "alice" / ".priva.user.yml"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("legacy: kept\nshared: old\n")
+    monkeypatch.setenv("PRIVA_HOME", str(state_parent))
+
+    assert skill_exclude.get_user_yaml_key("legacy") is None
+    skill_exclude.save_user_yaml_key("shared", "current")
+
+    assert legacy.exists()
+    assert (app_dir / ".priva.user.yml").exists()
+    assert skill_exclude.get_user_yaml_key("shared") == "current"
+
+
 def test_service_paths_resolve_through_config_dir(isolated_dirs):
     home, cfg = isolated_dirs
     from priva_agent_runner.services.subagents import _agents_dir
@@ -61,17 +80,6 @@ def test_service_paths_resolve_through_config_dir(isolated_dirs):
     # Nothing may resolve into the legacy (CLI-invisible) home tree.
     for p in (_agents_dir("alice", scope="user"), _personal_skills_dir()):
         assert not str(p).startswith(str(home))
-
-
-def test_skill_exclude_walk_uses_config_dir(isolated_dirs):
-    home, cfg = isolated_dirs
-    from priva_common.skill_exclude import _list_global_skill_names
-
-    (cfg / "skills" / "real-skill").mkdir(parents=True)
-    (cfg / "skills" / "real-skill" / "SKILL.md").write_text("# s")
-    (home / ".claude" / "skills" / "ghost").mkdir(parents=True)
-    (home / ".claude" / "skills" / "ghost" / "SKILL.md").write_text("# g")
-    assert _list_global_skill_names() == ["real-skill"]
 
 
 # --- global MCP store is the CLI-native .claude.json ----------------------------

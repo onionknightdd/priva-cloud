@@ -1412,7 +1412,7 @@ class ChannelDaemon:
         if not username:
             return
         logger.info("Connect command for user: {}", username)
-        config = self._config_store.get_config(username)
+        config = self._config_store.get_config()
         if not config.enabled:
             logger.info("User {} config not enabled, skipping connect", username)
             return
@@ -1432,7 +1432,7 @@ class ChannelDaemon:
             return
         logger.info("Reconnect command for user: {}", username)
         await self._disconnect_user(username)
-        config = self._config_store.get_config(username)
+        config = self._config_store.get_config()
         if config.enabled:
             await self._connect_user(username, config)
 
@@ -1440,7 +1440,7 @@ class ChannelDaemon:
         if not username:
             return
         logger.info("Update config command for user: {}", username)
-        new_config = self._config_store.get_config(username)
+        new_config = self._config_store.get_config()
         conn = self._connections.get(username)
 
         if conn:
@@ -1491,7 +1491,7 @@ class ChannelDaemon:
         if not username:
             return
         logger.info("OpenClaw connect command for user: {}", username)
-        config = self._config_store.get_openclaw_config(username)
+        config = self._config_store.get_openclaw_config()
         if not config.enabled:
             logger.info("User {} openclaw config not enabled, skipping", username)
             return
@@ -1510,7 +1510,7 @@ class ChannelDaemon:
             return
         logger.info("OpenClaw reconnect command for user: {}", username)
         await self._disconnect_openclaw_user(username)
-        config = self._config_store.get_openclaw_config(username)
+        config = self._config_store.get_openclaw_config()
         if config.enabled:
             await self._connect_openclaw_user(username, config)
 
@@ -1518,7 +1518,7 @@ class ChannelDaemon:
         if not username:
             return
         logger.info("OpenClaw update config command for user: {}", username)
-        new_config = self._config_store.get_openclaw_config(username)
+        new_config = self._config_store.get_openclaw_config()
         bridge = self._oc_bridges.get(username)
 
         if bridge:

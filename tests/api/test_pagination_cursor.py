@@ -188,14 +188,17 @@ class AuditCursorTests(unittest.TestCase):
 class HookLogCursorTests(unittest.TestCase):
     def test_append_and_page(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("priva_agent_runner.services.hooks.log_store._get_work_dir", return_value=Path(tmpdir)):
+            app_dir = Path(tmpdir) / "app"
+            with patch(
+                "priva_agent_runner.services.hooks.log_store._get_log_dir",
+                return_value=app_dir,
+            ):
                 from priva_agent_runner.services.hooks.log_store import HookLogStore
                 store = HookLogStore()
-                (Path(tmpdir) / "alice").mkdir()
 
                 base = datetime(2026, 5, 15, 10, 0, 0, tzinfo=timezone.utc)
                 for i in range(5):
-                    store.append("alice", HookLogEntry(
+                    store.append(HookLogEntry(
                         timestamp=(base + timedelta(minutes=i)).isoformat(),
                         event_type="PreToolUse",
                         handler_type="command",
@@ -203,65 +206,66 @@ class HookLogCursorTests(unittest.TestCase):
                         duration_ms=10,
                     ))
 
-                entries, c, p, total = store.query_cursor("alice", limit=3)
+                entries, c, p, total = store.query_cursor(limit=3)
                 self.assertEqual(len(entries), 3)
                 self.assertEqual(total, 5)
                 self.assertIsNotNone(c)
                 self.assertIsNone(p)
 
-                entries2, c2, _, _ = store.query_cursor("alice", limit=3, before=c)
+                entries2, c2, _, _ = store.query_cursor(limit=3, before=c)
                 self.assertEqual(len(entries2), 2)
                 self.assertIsNone(c2)
+                self.assertTrue((app_dir / ".priva.hooks.log.2026-05-15.jsonl").exists())
 
     def test_event_type_filter(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("priva_agent_runner.services.hooks.log_store._get_work_dir", return_value=Path(tmpdir)):
+            app_dir = Path(tmpdir) / "app"
+            with patch(
+                "priva_agent_runner.services.hooks.log_store._get_log_dir",
+                return_value=app_dir,
+            ):
                 from priva_agent_runner.services.hooks.log_store import HookLogStore
                 store = HookLogStore()
-                (Path(tmpdir) / "alice").mkdir()
 
                 base = datetime(2026, 5, 15, 10, 0, 0, tzinfo=timezone.utc)
                 for i, et in enumerate(["A", "B", "A", "B", "A"]):
-                    store.append("alice", HookLogEntry(
+                    store.append(HookLogEntry(
                         timestamp=(base + timedelta(minutes=i)).isoformat(),
                         event_type=et, handler_type="command",
                         exit_code=0, duration_ms=10,
                     ))
 
-                entries, _, _, total = store.query_cursor("alice", limit=10, event_type="A")
+                entries, _, _, total = store.query_cursor(limit=10, event_type="A")
                 self.assertEqual(len(entries), 3)
                 self.assertIsNone(total)  # filter active
 
-    def test_migration_from_legacy(self):
+    def test_workspace_logs_are_ignored(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("priva_agent_runner.services.hooks.log_store._get_work_dir", return_value=Path(tmpdir)):
+            work_dir = Path(tmpdir) / "workspace"
+            app_dir = Path(tmpdir) / "app"
+            with patch(
+                "priva_agent_runner.services.hooks.log_store._get_log_dir",
+                return_value=app_dir,
+            ):
                 from priva_agent_runner.services.hooks.log_store import HookLogStore
 
-                user_dir = Path(tmpdir) / "alice"
-                user_dir.mkdir()
-                legacy = user_dir / ".priva.hooks.log.jsonl"
-
-                with open(legacy, "w") as f:
-                    e1 = HookLogEntry(
-                        timestamp="2026-03-30T10:00:00+00:00",
-                        event_type="PreToolUse", handler_type="command",
-                        exit_code=0, duration_ms=10,
-                    )
-                    e2 = HookLogEntry(
-                        timestamp="2026-03-31T14:00:00+00:00",
-                        event_type="PostToolUse", handler_type="command",
-                        exit_code=0, duration_ms=10,
-                    )
-                    f.write(e1.model_dump_json() + "\n")
-                    f.write(e2.model_dump_json() + "\n")
+                user_dir = work_dir / "alice"
+                user_dir.mkdir(parents=True)
+                old_log = user_dir / ".priva.hooks.log.2026-03-30.jsonl"
+                old_log.write_text(HookLogEntry(
+                    timestamp="2026-03-30T10:00:00+00:00",
+                    event_type="PreToolUse",
+                    handler_type="command",
+                    exit_code=0,
+                    duration_ms=10,
+                ).model_dump_json() + "\n")
 
                 store = HookLogStore()
-                entries, _, _, total = store.query_cursor("alice", limit=10)
-                self.assertEqual(len(entries), 2)
-                self.assertEqual(total, 2)
-                self.assertFalse(legacy.exists())
-                self.assertTrue((user_dir / ".priva.hooks.log.2026-03-30.jsonl").exists())
-                self.assertTrue((user_dir / ".priva.hooks.log.2026-03-31.jsonl").exists())
+                entries, _, _, total = store.query_cursor(limit=10)
+                self.assertEqual(entries, [])
+                self.assertEqual(total, 0)
+                self.assertTrue(old_log.exists())
+                self.assertEqual(list(app_dir.glob(".priva.hooks.log.*.jsonl")), [])
 
 
 if __name__ == "__main__":

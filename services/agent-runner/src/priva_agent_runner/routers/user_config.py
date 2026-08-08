@@ -1,11 +1,10 @@
 """Per-user config faces (quickactions, recap) served from the agent's
 own workspace.
 
-These read/write the user's ``.priva.user.yml`` via the shared
+These read/write the pod's ``.priva.user.yml`` via the shared
 ``priva_common.skill_exclude`` accessors, so the values land in
-``$work_dir/<username>/.priva.user.yml`` — on the agent-runner the per-account
-PVC (/workspace/<username>), the SAME file the agent reads (``vision_model`` at
-claude_sdk/service.py).
+``priva_home()/.priva.user.yml`` (default ``~/.config/priva/.priva.user.yml``),
+outside the project workspace.
 """
 
 from __future__ import annotations
@@ -32,7 +31,7 @@ router = APIRouter(prefix="/api/sandbox/resource", tags=["user-config"])
 
 @router.get("/quickactions", response_model=QuickActionListResponse)
 async def list_quickactions(user: UserRecord = Depends(require_user)):
-    raw = _user_yaml.get_user_yaml_key(user.username, "quickactions", [])
+    raw = _user_yaml.get_user_yaml_key("quickactions", [])
     if not isinstance(raw, list):
         raw = []
     actions = [
@@ -49,7 +48,7 @@ async def update_quickactions(
     user: UserRecord = Depends(require_user),
 ):
     qa_dicts = [qa.model_dump() for qa in request.quickactions]
-    _user_yaml.save_user_yaml_key(user.username, "quickactions", qa_dicts)
+    _user_yaml.save_user_yaml_key("quickactions", qa_dicts)
     return QuickActionListResponse(quickactions=request.quickactions)
 
 
@@ -58,7 +57,7 @@ async def update_quickactions(
 
 @router.get("/recap-setting", response_model=RecapSettingResponse)
 async def get_recap_setting(user: UserRecord = Depends(require_user)):
-    return RecapSettingResponse(recap_enabled=session_recap.is_enabled(user.username))
+    return RecapSettingResponse(recap_enabled=session_recap.is_enabled())
 
 
 @router.put("/recap-setting", response_model=RecapSettingResponse)
@@ -68,7 +67,5 @@ async def update_recap_setting(
 ):
     # Stored explicitly either way: an absent key means "on", so turning the
     # feature off has to write ``False`` rather than pop the key.
-    _user_yaml.save_user_yaml_key(
-        user.username, "recap_enabled", bool(request.recap_enabled)
-    )
+    _user_yaml.save_user_yaml_key("recap_enabled", bool(request.recap_enabled))
     return RecapSettingResponse(recap_enabled=request.recap_enabled)

@@ -9,29 +9,23 @@ from pathlib import Path
 
 import yaml
 
-from ..config import get_settings
-from ..user_store import get_user_store
 from ...models.channels import OpenClawChannelConfig, WeComChannelConfig
 from ...middleware.logging import get_channels_logger
+from priva_common.paths import priva_home
 
 logger = get_channels_logger(__name__)
 
 
-def _get_work_dir() -> Path:
-    settings = get_settings()
-    return Path(settings.server.work_dir).expanduser()
-
-
-def _get_user_config_path(username: str) -> Path:
-    return _get_work_dir() / username / ".priva.user.yml"
+def _get_user_config_path() -> Path:
+    return priva_home() / ".priva.user.yml"
 
 
 class ChannelConfigStore:
     def __init__(self):
         self._lock = threading.Lock()
 
-    def get_config(self, username: str) -> WeComChannelConfig:
-        path = _get_user_config_path(username)
+    def get_config(self) -> WeComChannelConfig:
+        path = _get_user_config_path()
         if not path.exists():
             return WeComChannelConfig()
 
@@ -43,7 +37,7 @@ class ChannelConfigStore:
                 finally:
                     fcntl.flock(f, fcntl.LOCK_UN)
         except Exception:
-            logger.warning("Failed to read channel config for user {}", username)
+            logger.warning("Failed to read channel config")
             return WeComChannelConfig()
 
         channels = data.get("channels", {})
@@ -57,11 +51,11 @@ class ChannelConfigStore:
         try:
             return WeComChannelConfig.model_validate(wecom)
         except Exception:
-            logger.warning("Invalid channel config for user {}, using defaults", username)
+            logger.warning("Invalid channel config, using defaults")
             return WeComChannelConfig()
 
-    def save_config(self, username: str, config: WeComChannelConfig) -> None:
-        path = _get_user_config_path(username)
+    def save_config(self, config: WeComChannelConfig) -> None:
+        path = _get_user_config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
 
         with self._lock:
@@ -105,9 +99,9 @@ class ChannelConfigStore:
 
     # -- Generic .priva.user.yml key accessors --
 
-    def _read_user_yaml(self, username: str) -> dict:
+    def _read_user_yaml(self) -> dict:
         """Read full .priva.user.yml as a dict."""
-        path = _get_user_config_path(username)
+        path = _get_user_config_path()
         if not path.exists():
             return {}
         try:
@@ -118,21 +112,21 @@ class ChannelConfigStore:
                 finally:
                     fcntl.flock(f, fcntl.LOCK_UN)
         except Exception:
-            logger.warning("Failed to read user yaml for {}", username)
+            logger.warning("Failed to read .priva.user.yml")
             return {}
 
-    def get_user_yaml_key(self, username: str, key: str, default: Any = None) -> Any:
+    def get_user_yaml_key(self, key: str, default: Any = None) -> Any:
         """Read a top-level key from .priva.user.yml."""
-        return self._read_user_yaml(username).get(key, default)
+        return self._read_user_yaml().get(key, default)
 
-    def save_user_yaml_key(self, username: str, key: str, value: Any) -> None:
+    def save_user_yaml_key(self, key: str, value: Any) -> None:
         """Atomically set (or delete, when ``value`` is ``None``) a top-level
         key in .priva.user.yml. Passing ``None`` pops the key entirely."""
-        path = _get_user_config_path(username)
+        path = _get_user_config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
 
         with self._lock:
-            existing = self._read_user_yaml(username)
+            existing = self._read_user_yaml()
             if value is None:
                 existing.pop(key, None)
             else:
@@ -156,62 +150,19 @@ class ChannelConfigStore:
                     pass
                 raise
 
-    def _list_global_skill_names(self) -> list[str]:
-        """Filesystem walk of ~/.claude/skills/ — used by migration only."""
-        global_dir = Path.home() / ".claude" / "skills"
-        if not global_dir.exists():
-            return []
-        names: list[str] = []
-        try:
-            for entry in global_dir.iterdir():
-                if entry.is_dir() and (entry / "SKILL.md").exists():
-                    names.append(entry.name)
-        except OSError:
-            return []
-        return names
+    def get_skill_exclude(self) -> list[str]:
+        """Return the single-pod skill_exclude denylist."""
+        value = self._read_user_yaml().get("skill_exclude", [])
+        return list(value) if isinstance(value, list) else []
 
-    def get_skill_exclude(self, username: str) -> list[str]:
-        """Return the skill_exclude denylist for ``username``.
-
-        Lazily migrates legacy ``enable_global_skills`` into ``skill_exclude``
-        on first read:
-        - ``'auto'`` / unset → ``[]`` (nothing excluded)
-        - ``['a', 'b']`` (allowlist) → exclude every currently-discovered
-          global skill not in the list
-        - ``null`` / ``[]`` → exclude every currently-discovered global skill
-        """
-        raw = self._read_user_yaml(username)
-        if "skill_exclude" in raw:
-            value = raw.get("skill_exclude")
-            return list(value) if isinstance(value, list) else []
-
-        if "enable_global_skills" not in raw:
-            return []
-
-        legacy = raw.get("enable_global_skills")
-        discovered = self._list_global_skill_names()
-        if legacy == "auto":
-            migrated: list[str] = []
-        elif legacy is None or legacy == [] or legacy == "":
-            migrated = list(discovered)
-        elif isinstance(legacy, list):
-            allowed = set(legacy)
-            migrated = [n for n in discovered if n not in allowed]
-        else:
-            migrated = []
-
-        self.save_user_yaml_key(username, "skill_exclude", migrated)
-        self.save_user_yaml_key(username, "enable_global_skills", None)
-        return migrated
-
-    def save_skill_exclude(self, username: str, value: list[str]) -> None:
+    def save_skill_exclude(self, value: list[str]) -> None:
         """Write the explicit skill_exclude denylist."""
-        self.save_user_yaml_key(username, "skill_exclude", list(value or []))
+        self.save_user_yaml_key("skill_exclude", list(value or []))
 
     # -- OpenClaw config (stored under channels.openclaw) --
 
-    def get_openclaw_config(self, username: str) -> OpenClawChannelConfig:
-        path = _get_user_config_path(username)
+    def get_openclaw_config(self) -> OpenClawChannelConfig:
+        path = _get_user_config_path()
         if not path.exists():
             return OpenClawChannelConfig()
 
@@ -223,7 +174,7 @@ class ChannelConfigStore:
                 finally:
                     fcntl.flock(f, fcntl.LOCK_UN)
         except Exception:
-            logger.warning("Failed to read openclaw config for user {}", username)
+            logger.warning("Failed to read openclaw config")
             return OpenClawChannelConfig()
 
         channels = data.get("channels", {})
@@ -237,11 +188,11 @@ class ChannelConfigStore:
         try:
             return OpenClawChannelConfig.model_validate(openclaw)
         except Exception:
-            logger.warning("Invalid openclaw config for user {}, using defaults", username)
+            logger.warning("Invalid openclaw config, using defaults")
             return OpenClawChannelConfig()
 
-    def save_openclaw_config(self, username: str, config: OpenClawChannelConfig) -> None:
-        path = _get_user_config_path(username)
+    def save_openclaw_config(self, config: OpenClawChannelConfig) -> None:
+        path = _get_user_config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
 
         with self._lock:
@@ -281,39 +232,27 @@ class ChannelConfigStore:
                 raise
 
     def list_enabled_openclaw_configs(self) -> dict[str, OpenClawChannelConfig]:
-        """Return {username: config} for all users with openclaw enabled=True."""
-        store = get_user_store()
-        users = store.list_users()
-        result = {}
-        for user in users:
-            config = self.get_openclaw_config(user.username)
-            if config.enabled:
-                result[user.username] = config
-        return result
+        """Return the pod account's enabled OpenClaw config."""
+        username = os.environ.get("USERNAME")
+        config = self.get_openclaw_config()
+        return {username: config} if username and config.enabled else {}
 
     def list_enabled_configs(self) -> dict[str, WeComChannelConfig]:
-        """Return {username: config} for all users with enabled=True."""
-        store = get_user_store()
-        users = store.list_users()
-        result = {}
-        for user in users:
-            config = self.get_config(user.username)
-            if config.enabled:
-                result[user.username] = config
-        return result
+        """Return the pod account's enabled WeCom config."""
+        username = os.environ.get("USERNAME")
+        config = self.get_config()
+        return {username: config} if username and config.enabled else {}
 
     def find_bot_id_owner(self, bot_id: str, exclude_username: str | None = None) -> str | None:
         """Check if any user already has this bot_id with enabled=True. Returns username or None."""
         if not bot_id:
             return None
-        store = get_user_store()
-        users = store.list_users()
-        for user in users:
-            if exclude_username and user.username == exclude_username:
-                continue
-            config = self.get_config(user.username)
-            if config.enabled and config.bot_id == bot_id:
-                return user.username
+        username = os.environ.get("USERNAME")
+        if not username or username == exclude_username:
+            return None
+        config = self.get_config()
+        if config.enabled and config.bot_id == bot_id:
+            return username
         return None
 
 

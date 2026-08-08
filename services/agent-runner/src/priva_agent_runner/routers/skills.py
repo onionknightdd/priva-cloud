@@ -49,7 +49,7 @@ async def list_all_skills(user: UserRecord = Depends(require_user)):
 
 @router.get("/config", response_model=SkillsConfigResponse)
 async def get_skills_config(user: UserRecord = Depends(require_user)):
-    value = _skill_exclude.get_skill_exclude(user.username)
+    value = _skill_exclude.get_skill_exclude()
     return SkillsConfigResponse(skill_exclude=list(value))
 
 
@@ -58,7 +58,7 @@ async def update_skills_config(
     request: SkillsConfigRequest,
     user: UserRecord = Depends(require_user),
 ):
-    _skill_exclude.save_skill_exclude(user.username, list(request.skill_exclude or []))
+    _skill_exclude.save_skill_exclude(list(request.skill_exclude or []))
 
     audit = get_audit_logger()
     audit.append(

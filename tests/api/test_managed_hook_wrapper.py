@@ -86,17 +86,16 @@ def test_exit_code_and_streams_passthrough(tmp_path):
 
 def test_fire_is_logged(tmp_path):
     hook = _write_hook(tmp_path, "print('{}')")
-    ws = tmp_path / "ws"
-    (ws / "alice").mkdir(parents=True)
+    state_parent = tmp_path / "state"
+    app_dir = state_parent / "priva"
     env = {
         "PATH": "/usr/bin:/bin",
         "HOME": str(tmp_path),
-        "WORKSPACE_DIR": str(ws),
-        "USERNAME": "alice",
+        "PRIVA_HOME": str(state_parent),
     }
     r = _run(hook, {"hook_event_name": "PreToolUse", "tool_name": "Bash"}, env)
     assert r.returncode == 0
-    logs = list((ws / "alice").glob(".priva.hooks.log.*.jsonl"))
+    logs = list(app_dir.glob(".priva.hooks.log.*.jsonl"))
     assert len(logs) == 1
     rec = json.loads(logs[0].read_text().strip())
     assert rec["hook_id"] == "test-hook"
@@ -108,9 +107,15 @@ def test_fire_is_logged(tmp_path):
 
 
 def test_logging_failure_never_breaks_hook(tmp_path):
-    """No WORKSPACE_DIR/USERNAME -> logging skipped, hook still runs + exits cleanly."""
+    """An unwritable app-dir shape never changes the hook's outcome."""
     hook = _write_hook(tmp_path, "import sys; sys.stdout.write('OK'); sys.exit(0)")
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
+    not_a_dir = tmp_path / "file"
+    not_a_dir.write_text("x")
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "PRIVA_HOME": str(not_a_dir),
+    }
     r = _run(hook, {"hook_event_name": "PreToolUse"}, env)
     assert r.returncode == 0
     assert r.stdout == "OK"

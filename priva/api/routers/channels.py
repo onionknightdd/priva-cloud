@@ -96,7 +96,7 @@ def _config_to_response(config) -> WeComConfigResponse:
 @router.get("/wecom/config", response_model=WeComConfigResponse)
 async def get_wecom_config(user: UserRecord = Depends(require_user)):
     store = get_channel_config_store()
-    config = store.get_config(user.username)
+    config = store.get_config()
     return _config_to_response(config)
 
 
@@ -106,7 +106,7 @@ async def update_wecom_config(
     user: UserRecord = Depends(require_user),
 ):
     store = get_channel_config_store()
-    config = store.get_config(user.username)
+    config = store.get_config()
 
     # Apply partial updates
     update_data = req.model_dump(exclude_none=True)
@@ -127,7 +127,7 @@ async def update_wecom_config(
                 f"Bot ID '{config.bot_id}' is already in use by user '{owner}'",
             )
 
-    store.save_config(user.username, config)
+    store.save_config(config)
 
     # Notify daemon of config change
     write_command("update_config", {"username": user.username})
@@ -141,7 +141,7 @@ async def update_wecom_config(
 @router.post("/wecom/connect")
 async def connect_wecom(user: UserRecord = Depends(require_user)):
     store = get_channel_config_store()
-    config = store.get_config(user.username)
+    config = store.get_config()
 
     if not config.bot_id or not config.secret:
         raise HTTPException(400, "Bot ID and Secret must be configured before connecting")
@@ -157,7 +157,7 @@ async def connect_wecom(user: UserRecord = Depends(require_user)):
 
     # Set enabled=true and save
     config.enabled = True
-    store.save_config(user.username, config)
+    store.save_config(config)
     write_command("connect", {"username": user.username})
 
     return {"status": "accepted", "message": "Connect command sent to channel daemon"}
@@ -166,11 +166,11 @@ async def connect_wecom(user: UserRecord = Depends(require_user)):
 @router.post("/wecom/disconnect")
 async def disconnect_wecom(user: UserRecord = Depends(require_user)):
     store = get_channel_config_store()
-    config = store.get_config(user.username)
+    config = store.get_config()
 
     # Set enabled=false and save
     config.enabled = False
-    store.save_config(user.username, config)
+    store.save_config(config)
     write_command("disconnect", {"username": user.username})
 
     return {"status": "accepted", "message": "Disconnect command sent to channel daemon"}
@@ -179,7 +179,7 @@ async def disconnect_wecom(user: UserRecord = Depends(require_user)):
 @router.post("/wecom/reconnect")
 async def reconnect_wecom(user: UserRecord = Depends(require_user)):
     store = get_channel_config_store()
-    config = store.get_config(user.username)
+    config = store.get_config()
 
     if not config.enabled:
         raise HTTPException(400, "Channel is not enabled. Use connect first.")
@@ -238,7 +238,7 @@ def _oc_config_to_response(config) -> OpenClawConfigResponse:
 @router.get("/openclaw/config", response_model=OpenClawConfigResponse)
 async def get_openclaw_config(user: UserRecord = Depends(require_user)):
     store = get_channel_config_store()
-    config = store.get_openclaw_config(user.username)
+    config = store.get_openclaw_config()
     return _oc_config_to_response(config)
 
 
@@ -248,7 +248,7 @@ async def update_openclaw_config(
     user: UserRecord = Depends(require_user),
 ):
     store = get_channel_config_store()
-    config = store.get_openclaw_config(user.username)
+    config = store.get_openclaw_config()
 
     update_data = req.model_dump(exclude_none=True)
 
@@ -259,7 +259,7 @@ async def update_openclaw_config(
     for key, value in update_data.items():
         setattr(config, key, value)
 
-    store.save_openclaw_config(user.username, config)
+    store.save_openclaw_config(config)
     write_command("openclaw_update_config", {"username": user.username})
     await _apply_openclaw_config_in_process(user.username, config)
 
@@ -272,13 +272,13 @@ async def update_openclaw_config(
 @router.post("/openclaw/connect")
 async def connect_openclaw(user: UserRecord = Depends(require_user)):
     store = get_channel_config_store()
-    config = store.get_openclaw_config(user.username)
+    config = store.get_openclaw_config()
 
     if not config.gateway_url:
         raise HTTPException(400, "Gateway URL must be configured before connecting")
 
     config.enabled = True
-    store.save_openclaw_config(user.username, config)
+    store.save_openclaw_config(config)
     write_command("openclaw_connect", {"username": user.username})
     await _apply_openclaw_config_in_process(user.username, config)
 
@@ -288,10 +288,10 @@ async def connect_openclaw(user: UserRecord = Depends(require_user)):
 @router.post("/openclaw/disconnect")
 async def disconnect_openclaw(user: UserRecord = Depends(require_user)):
     store = get_channel_config_store()
-    config = store.get_openclaw_config(user.username)
+    config = store.get_openclaw_config()
 
     config.enabled = False
-    store.save_openclaw_config(user.username, config)
+    store.save_openclaw_config(config)
     write_command("openclaw_disconnect", {"username": user.username})
     await _apply_openclaw_config_in_process(user.username, config)
 
@@ -301,7 +301,7 @@ async def disconnect_openclaw(user: UserRecord = Depends(require_user)):
 @router.post("/openclaw/reconnect")
 async def reconnect_openclaw(user: UserRecord = Depends(require_user)):
     store = get_channel_config_store()
-    config = store.get_openclaw_config(user.username)
+    config = store.get_openclaw_config()
 
     if not config.enabled:
         raise HTTPException(400, "OpenClaw is not enabled. Use connect first.")
