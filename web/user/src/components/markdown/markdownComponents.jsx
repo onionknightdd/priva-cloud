@@ -1,4 +1,5 @@
 import { createElement } from 'react'
+import { useIsCodeFenceIncomplete } from 'streamdown'
 import CopyButton from '@shared/components/shared/CopyButton'
 import MermaidDiagram from './MermaidDiagram'
 import ExcalidrawDiagram from './ExcalidrawDiagram'
@@ -92,6 +93,26 @@ function createMarkdownComponents({ mermaidCollapsible = false } = {}) {
       color: 'var(--text-secondary)', margin: '16px 0 6px',
     }}>{children}</h3>
   ),
+  h4: ({ children }) => (
+    <h4 style={{
+      fontSize: 'var(--text-base)', fontWeight: 600,
+      color: 'var(--text-secondary)', margin: '14px 0 6px',
+    }}>{children}</h4>
+  ),
+  h5: ({ children }) => (
+    <h5 style={{
+      fontSize: 'var(--text-sm)', fontWeight: 600,
+      color: 'var(--text-secondary)', margin: '12px 0 6px',
+      letterSpacing: 'var(--tracking-wide)',
+    }}>{children}</h5>
+  ),
+  h6: ({ children }) => (
+    <h6 style={{
+      fontSize: 'var(--text-xs)', fontWeight: 600,
+      color: 'var(--text-dim)', margin: '12px 0 6px',
+      letterSpacing: 'var(--tracking-wide)', textTransform: 'uppercase',
+    }}>{children}</h6>
+  ),
   p: ({ children }) => (
     <p style={{
       fontSize: 'var(--text-base)', color: 'var(--text-primary)',
@@ -115,14 +136,15 @@ function createMarkdownComponents({ mermaidCollapsible = false } = {}) {
       <code className={className} {...props}>{children}</code>
     )
   },
-  pre: ({ children }) => {
+  pre: function MarkdownPre({ children }) {
+    const isCodeFenceIncomplete = useIsCodeFenceIncomplete()
     const rawChildren = children?.props?.children
     const codeContent = extractText(rawChildren)
     const codeClassName = children?.props?.className || ''
-    if (/\blanguage-excalidraw\b/.test(codeClassName)) {
+    if (!isCodeFenceIncomplete && /\blanguage-excalidraw\b/.test(codeClassName)) {
       return <ExcalidrawDiagram code={codeContent} collapsible={mermaidCollapsible} />
     }
-    if (/\blanguage-mermaid\b/.test(codeClassName)) {
+    if (!isCodeFenceIncomplete && /\blanguage-mermaid\b/.test(codeClassName)) {
       return <MermaidDiagram code={codeContent} collapsible={mermaidCollapsible} />
     }
     const highlightedLines = splitHighlightedLines(rawChildren)
@@ -225,6 +247,9 @@ function createMarkdownComponents({ mermaidCollapsible = false } = {}) {
       }}>{children}</table>
     </div>
   ),
+  thead: ({ children, node: _node, ...props }) => <thead {...props}>{children}</thead>,
+  tbody: ({ children, node: _node, ...props }) => <tbody {...props}>{children}</tbody>,
+  tr: ({ children, node: _node, ...props }) => <tr {...props}>{children}</tr>,
   th: ({ children }) => (
     <th style={{
       padding: '6px 12px', textAlign: 'left', fontWeight: 600,
@@ -240,8 +265,9 @@ function createMarkdownComponents({ mermaidCollapsible = false } = {}) {
     }}>{children}</td>
   ),
   hr: () => <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '20px 0' }} />,
-  a: ({ href, children }) => (
+  a: ({ href, children, node: _node, ...props }) => (
     <a
+      {...props}
       href={href}
       target="_blank"
       rel="noreferrer"
@@ -257,6 +283,11 @@ function createMarkdownComponents({ mermaidCollapsible = false } = {}) {
   ),
   em: ({ children }) => (
     <em style={{ fontStyle: 'italic', color: 'var(--text-secondary)' }}>{children}</em>
+  ),
+  sup: ({ children, node: _node, ...props }) => <sup {...props}>{children}</sup>,
+  sub: ({ children, node: _node, ...props }) => <sub {...props}>{children}</sub>,
+  section: ({ children, node: _node, ...props }) => (
+    <section {...props} style={{ minWidth: 0, overflow: 'hidden' }}>{children}</section>
   ),
   img: ({ src, alt }) => (
     <img

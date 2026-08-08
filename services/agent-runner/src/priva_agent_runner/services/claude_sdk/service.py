@@ -906,6 +906,7 @@ async def agent_run_events(
     enable_permission_feedback: bool = False,
     max_turns: int | None = None,
     extra_disallowed_tools: list[str] | None = None,
+    include_partial_messages: bool = False,
 ) -> None:
     """Run agent and push events to emit callback.
 
@@ -982,10 +983,14 @@ async def agent_run_events(
         enable_permission_feedback=enable_permission_feedback,
         max_turns=max_turns,
         extra_disallowed_tools=extra_disallowed_tools,
+        include_partial_messages=include_partial_messages,
     )
 
     if coordinator:
-        await emit("stream_init", {"stream_id": stream_id})
+        await emit("stream_init", {
+            "stream_id": stream_id,
+            "include_partial_messages": include_partial_messages,
+        })
 
     effective_prompt = _build_prompt_with_images(prompt, images, attachments)
     # Track only models observed in assistant events.  A qualified request

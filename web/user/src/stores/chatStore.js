@@ -11,6 +11,43 @@ const REWIND_STORAGE_PREFIX = 'priva-rewind:'
 let cidCounter = 0
 const withCid = (message) => (message && !message._cid ? { ...message, _cid: `c-${++cidCounter}` } : message)
 
+const isUnfinishedStreamBlock = (block) => (
+  typeof block?._streamState === 'string' && block._streamState !== 'complete'
+)
+
+function applyBlockPatches(blocks, patches) {
+  let next = blocks
+  let changed = false
+  for (const patch of patches) {
+    const index = next.findIndex((block) => block?._streamKey === patch.streamKey)
+    if (index >= 0) {
+      if (!changed) next = [...next]
+      next[index] = { ...next[index], ...patch.block }
+      changed = true
+    } else {
+      if (!changed) next = [...next]
+      next.push(patch.block)
+      changed = true
+    }
+  }
+  return changed ? next : blocks
+}
+
+function mapStreamBlocks(blocks, mapper) {
+  let changed = false
+  const next = blocks.map((block) => {
+    if (!isUnfinishedStreamBlock(block)) return block
+    const mapped = mapper(block)
+    if (mapped !== block) changed = true
+    return mapped
+  }).filter((block) => {
+    if (block !== null) return true
+    changed = true
+    return false
+  })
+  return changed ? next : blocks
+}
+
 // One chat slice per session runtime. `getSibling(name)` resolves another
 // slice of the SAME runtime (never the active one) — see runtime/registry.js.
 export const createChatStore = (getSibling) => createStore((set, get) => ({
@@ -251,6 +288,105 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
       msgs[msgs.length - 1] = { ...last, content }
     }
     return { messages: msgs }
+  }),
+
+  // One Zustand mutation per assembler batch (normally 40ms), regardless of
+  // how many provider deltas arrived in that window.
+  applyStreamBlockPatches: (patches) => set((s) => {
+    if (!Array.isArray(patches) || patches.length === 0) return {}
+    const mainPatches = patches.filter((patch) => !patch.parentToolUseId)
+    const subPatches = patches.filter((patch) => patch.parentToolUseId)
+    const next = {}
+
+    if (mainPatches.length > 0) {
+      let assistantIndex = -1
+      for (let index = s.messages.length - 1; index >= 0; index -= 1) {
+        if (s.messages[index]?.role === 'assistant') { assistantIndex = index; break }
+      }
+      if (assistantIndex >= 0) {
+        const message = s.messages[assistantIndex]
+        const content = applyBlockPatches(message.content || [], mainPatches)
+        if (content !== message.content) {
+          const messages = [...s.messages]
+          messages[assistantIndex] = { ...message, content }
+          next.messages = messages
+        }
+      }
+    }
+
+    if (subPatches.length > 0) {
+      let subagentContent = s.subagentContent
+      let subChanged = false
+      const grouped = new Map()
+      for (const patch of subPatches) {
+        const group = grouped.get(patch.parentToolUseId) || []
+        group.push(patch)
+        grouped.set(patch.parentToolUseId, group)
+      }
+      for (const [parentId, group] of grouped) {
+        const current = subagentContent[parentId] || []
+        const content = applyBlockPatches(current, group)
+        if (content !== current) {
+          if (!subChanged) subagentContent = { ...subagentContent }
+          subagentContent[parentId] = content
+          subChanged = true
+        }
+      }
+      if (subChanged) next.subagentContent = subagentContent
+    }
+    return next
+  }),
+
+  // A reconnect older than the 4000-event replay tail cannot safely continue
+  // provisional blocks. Drop only unfinished partials; complete transcript
+  // content is retained and later authoritative events heal the conversation.
+  clearUnfinishedStreamBlocks: () => set((s) => {
+    let messagesChanged = false
+    const messages = s.messages.map((message) => {
+      if (message?.role !== 'assistant' || !Array.isArray(message.content)) return message
+      const content = mapStreamBlocks(message.content, () => null)
+      if (content === message.content) return message
+      messagesChanged = true
+      return { ...message, content }
+    })
+    let subChanged = false
+    const subagentContent = {}
+    for (const [parentId, blocks] of Object.entries(s.subagentContent)) {
+      const content = mapStreamBlocks(blocks, () => null)
+      if (content !== blocks) subChanged = true
+      subagentContent[parentId] = content
+    }
+    return {
+      ...(messagesChanged ? { messages } : {}),
+      ...(subChanged ? { subagentContent } : {}),
+    }
+  }),
+
+  finalizeStreamBlocks: () => set((s) => {
+    const finish = (block) => ({
+      ...block,
+      _streamState: 'complete',
+      endTime: block.endTime || Date.now(),
+    })
+    let messagesChanged = false
+    const messages = s.messages.map((message) => {
+      if (message?.role !== 'assistant' || !Array.isArray(message.content)) return message
+      const content = mapStreamBlocks(message.content, finish)
+      if (content === message.content) return message
+      messagesChanged = true
+      return { ...message, content }
+    })
+    let subChanged = false
+    const subagentContent = {}
+    for (const [parentId, blocks] of Object.entries(s.subagentContent)) {
+      const content = mapStreamBlocks(blocks, finish)
+      if (content !== blocks) subChanged = true
+      subagentContent[parentId] = content
+    }
+    return {
+      ...(messagesChanged ? { messages } : {}),
+      ...(subChanged ? { subagentContent } : {}),
+    }
   }),
 
   // Append blocks (text/thinking/tool_use) to a subagent's content bucket.

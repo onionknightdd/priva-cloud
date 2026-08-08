@@ -118,6 +118,13 @@ class AssistantMessagePayload(BaseModel):
     parent_tool_use_id: str | None = None
     error: str | None = None
     is_synthetic: bool | None = None
+    # SDK message identity is required to reconcile partial StreamEvent blocks
+    # with the authoritative AssistantMessage that closes them.  These fields
+    # are optional for compatibility with older CLI/SDK versions.
+    message_id: str | None = None
+    session_id: str | None = None
+    uuid: str | None = None
+    stop_reason: str | None = None
 
 
 class RetryAttemptEvent(BaseModel):
@@ -300,6 +307,9 @@ class WsInitFrame(BaseModel):
     enable_file_checkpointing: bool = False
     fork_session: bool = False
     enable_permission_feedback: bool = False
+    # Opt-in stays scoped to the WebUI websocket.  Every other caller keeps the
+    # SDK's complete-message behaviour unless it explicitly asks for partials.
+    include_partial_messages: bool = False
 
 
 class WsPermissionFrame(BaseModel):

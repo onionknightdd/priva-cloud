@@ -156,6 +156,7 @@ async def build_agent_options(
     enable_permission_feedback: bool = True,
     max_turns: int | None = None,
     extra_disallowed_tools: list[str] | None = None,
+    include_partial_messages: bool = False,
 ) -> ClaudeAgentOptions:
     settings = get_settings()
 
@@ -258,6 +259,7 @@ async def build_agent_options(
         disallowed_tools=disallowed_tools,
         stderr=_stderr_logger,
         include_hook_events=True,
+        include_partial_messages=include_partial_messages,
         skills=enabled_skill_names,
     )
     # Claude Agent SDK maps ``settings`` to --settings (highest user-controlled

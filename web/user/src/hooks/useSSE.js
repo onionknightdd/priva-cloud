@@ -37,6 +37,8 @@ import { getSplitParams } from '../utils/splitMode'
 import { parseTaskNotification } from '../utils/taskNotification'
 import { refreshSessionRecap } from '../utils/sessionRecap'
 import { isSdkTaskToolName } from '../utils/sdkTaskTracker'
+import { createStreamingBlockAssembler } from '../utils/streamingBlocks'
+import { debugLog } from '@shared/utils/debugLog'
 import {
   findMatchingAskUserBlockIndex,
   isAskUserInputValidationError,
@@ -45,6 +47,17 @@ import {
 // Max characters of background-shell output kept in the task store; only the
 // tail is retained beyond this.
 const MAX_LIVE_OUTPUT = 200_000
+const STREAM_FLUSH_BOUNDARY_EVENTS = new Set([
+  'user_message',
+  'assistant',
+  'tool_use',
+  'tool_result',
+  'result',
+  'queue_flush',
+  'retry_exhausted',
+  'stream_error',
+  'error',
+])
 
 function broadcastSplitStop(sessionId) {
   if (!sessionId || typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') return
@@ -129,14 +142,14 @@ export function stopSessionStream(sessionIdOrKey, options = {}) {
   const chatSlice = getSlice(key, 'chat')
   const {
     sessionId, streamAbort, setStreaming, setStreamAbort, setWsSendPermission,
-    clearPermissions, abortRunningTools, bumpStreamGeneration,
+    clearPermissions, abortRunningTools, bumpStreamGeneration, finalizeStreamBlocks,
   } = chatSlice.getState()
   if (broadcast) broadcastSplitStop(sessionId)
-  // Invalidate in-flight onEvent/onComplete callbacks even when the abort
-  // handle is already gone.
-  bumpStreamGeneration()
   if (streamAbort) {
+    // Flush the final visible batch before invalidating this generation.
     streamAbort()
+    bumpStreamGeneration()
+    finalizeStreamBlocks()
     abortRunningTools()
     markCurrentResponseInterrupted(chatSlice)
     getSlice(key, 'tasks').getState().abortRunningTasks()
@@ -149,6 +162,9 @@ export function stopSessionStream(sessionIdOrKey, options = {}) {
     if (key in statuses) {
       useSessionStatusStore.getState().setStatus(key, terminalStatusFor(key))
     }
+  } else {
+    // Invalidate in-flight callbacks even when the abort handle is gone.
+    bumpStreamGeneration()
   }
 }
 
@@ -315,6 +331,123 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   // Buffer hook_event payloads keyed by tool_use_id when they arrive before
   // the matching tool_use block is rendered. Flushed on tool_use arrival.
   const pendingHookEvents = new Map()
+  const streamProcessGroups = new Map()
+  const seenAssistantBlocks = new Set()
+  const finalizedToolUseIds = new Set()
+
+  const streamAssembler = createStreamingBlockAssembler({
+    batchMs: 40,
+    onFlush: ({ patches, logs }) => {
+      if (S.chat().streamGeneration !== streamGen) return
+      if (patches.length > 0) {
+        const enriched = patches.map((patch) => {
+          let processGroupId = streamProcessGroups.get(patch.streamKey)
+          if (!processGroupId) {
+            processGroupId = nextProcessGroupId()
+            streamProcessGroups.set(patch.streamKey, processGroupId)
+          }
+          return {
+            ...patch,
+            block: { ...patch.block, processGroupId },
+          }
+        })
+        S.chat().applyStreamBlockPatches(enriched)
+      }
+      // Preserve the existing console shape, but log one accumulated visible
+      // delta per batch. Tool JSON and signatures never reach either logger.
+      for (const entry of logs) {
+        const field = entry.deltaType === 'thinking_delta' ? 'thinking' : 'text'
+        const aggregated = {
+          type: 'stream_event',
+          parent_tool_use_id: entry.parentToolUseId,
+          message_id: entry.messageId,
+          event: {
+            type: 'content_block_delta',
+            index: entry.index,
+            delta: { type: entry.deltaType, [field]: entry.content },
+          },
+          aggregated_event_count: entry.eventCount,
+        }
+        console.debug('[SSE]', 'stream_event', aggregated)
+        debugLog('recv', 'WS ◀ stream_event (aggregated)', aggregated)
+      }
+    },
+  })
+
+  const reconcileNarrativeBlocks = (data, authoritativeEntries) => {
+    const eventGroupId = nextProcessGroupId()
+    const narrative = (authoritativeEntries || [])
+      .map((entry, ordinal) => ({ entry, ordinal }))
+      .filter(({ entry }) => {
+        const block = entry.block
+        if (block?.type === 'thinking') return Boolean(block.thinking?.trim())
+        return block?.type === 'text' && Boolean(block.text?.trim())
+      })
+      .filter(({ entry, ordinal }) => {
+        const identities = [
+          entry.streamKey,
+          data?.uuid ? `${data.uuid}:${entry.block.type}:${ordinal}` : null,
+        ].filter(Boolean)
+        if (identities.some((identity) => seenAssistantBlocks.has(identity))) return false
+        identities.forEach((identity) => seenAssistantBlocks.add(identity))
+        return true
+      })
+
+    if (narrative.length === 0) return
+    const parentId = data.parent_tool_use_id || null
+    const finishBlock = (entry, existing) => {
+      // Reasoning signatures are protocol metadata, not display state.
+      const { signature: _signature, ...safeBlock } = entry.block
+      return {
+        ...(existing || {}),
+        ...safeBlock,
+        ...(entry.streamKey ? { _streamKey: entry.streamKey } : {}),
+        _streamState: 'complete',
+        startTime: existing?.startTime || entry.startTime,
+        endTime: entry.endTime,
+        processGroupId: existing?.processGroupId
+          || streamProcessGroups.get(entry.streamKey)
+          || eventGroupId,
+      }
+    }
+    const merge = (content) => {
+      let next = content
+      for (const { entry } of narrative) {
+        const index = entry.streamKey
+          ? next.findIndex((block) => block?._streamKey === entry.streamKey)
+          : -1
+        if (index >= 0) {
+          if (next === content) next = [...content]
+          next[index] = finishBlock(entry, next[index])
+        } else {
+          if (next === content) next = [...content]
+          next.push(finishBlock(entry, null))
+        }
+      }
+      return next
+    }
+
+    if (parentId) {
+      const chat = S.chat()
+      const current = chat.subagentContent[parentId] || []
+      const content = merge(current)
+      S.chatSet({
+        subagentContent: { ...chat.subagentContent, [parentId]: content },
+      })
+      return
+    }
+
+    const chat = S.chat()
+    let assistantIndex = -1
+    for (let index = chat.messages.length - 1; index >= 0; index -= 1) {
+      if (chat.messages[index]?.role === 'assistant') { assistantIndex = index; break }
+    }
+    if (assistantIndex < 0) return
+    const message = chat.messages[assistantIndex]
+    const messages = [...chat.messages]
+    messages[assistantIndex] = { ...message, content: merge(message.content || []) }
+    S.chatSet({ messages })
+  }
 
   const selectedModel = useSettingsStore.getState().selectedModel
   const transport = useSettingsStore.getState().transport
@@ -377,10 +510,29 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   )
 
   const onEvent = (event, data) => {
-    const state = S.chat()
+    const initialState = S.chat()
     // Stale stream (stopped / reloaded since this stream began): drop the
     // event so it can't overwrite the freshly loaded state.
-    if (state.streamGeneration !== streamGen) return
+    if (initialState.streamGeneration !== streamGen) {
+      streamAssembler.dispose()
+      return
+    }
+    if (event === 'stream_event') {
+      streamAssembler.accept(data)
+      return
+    }
+
+    if (event === 'attach_ok' && data?.replay_gap) {
+      streamAssembler.resetForReplayGap()
+      S.chat().clearUnfinishedStreamBlocks()
+    }
+    // Only ordering boundaries flush early. Provider telemetry such as Qwen's
+    // thinking_tokens system events must not defeat the 40ms UI batching.
+    if (STREAM_FLUSH_BOUNDARY_EVENTS.has(event)) streamAssembler.flush()
+    const authoritativeEntries = (event === 'assistant' || event === 'tool_use')
+      ? streamAssembler.reconcileAssistant(data)
+      : null
+    const state = S.chat()
     const msgs = [...state.messages]
     const lastIdx = msgs.length - 1
     const lastMsg = msgs[lastIdx]
@@ -677,49 +829,55 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         // Increment round counter for file ops grouping
         incrementRound()
         if (!data.content) break
-        // Stamp arrival time so a thinking block can render "Thought for Xs"
-        // once it's finished (duration = gap before the block appeared).
-        const blockArrivalTs = Date.now()
-        const assistantProcessGroupId = nextProcessGroupId()
-        const assistantBlocks = data.content
-          .filter((b) => b.type === 'thinking' || b.type === 'text')
-          .map((b) => ({ ...b, startTime: blockArrivalTs, processGroupId: assistantProcessGroupId }))
-
-        // Subagent assistant frame: route content to the subagent's bucket
-        // keyed by parent_tool_use_id instead of the main thread.
-        if (data.parent_tool_use_id) {
-          if (assistantBlocks.length > 0) {
-            S.chat().appendToSubagentContent(data.parent_tool_use_id, assistantBlocks)
-          }
-          break
-        }
-
-        if (lastMsg && lastMsg.role === 'assistant') {
-          const newContent = [...lastMsg.content, ...assistantBlocks]
-          S.chatSet({
-            messages: [
-              ...msgs.slice(0, lastIdx),
-              { ...lastMsg, content: newContent },
-            ],
-          })
-        }
+        reconcileNarrativeBlocks(data, authoritativeEntries)
         break
       }
 
       case 'tool_use': {
         if (!data.content) break
+        // Some providers return text/thinking and a tool in one complete
+        // AssistantMessage. Reconcile those blocks even though the backend
+        // labels the envelope by its tool_use content.
+        reconcileNarrativeBlocks(data, authoritativeEntries)
         const toolProcessGroupId = nextProcessGroupId()
+        const toolEntries = new Map(
+          (authoritativeEntries || [])
+            .filter((entry) => entry.block?.type === 'tool_use' && entry.block.id)
+            .map((entry) => [entry.block.id, entry]),
+        )
+        const currentChat = S.chat()
+        const currentParentBlocks = data.parent_tool_use_id
+          ? (currentChat.subagentContent[data.parent_tool_use_id] || [])
+          : ([...currentChat.messages].reverse().find((message) => message.role === 'assistant')?.content || [])
         const toolBlocks = data.content
-          .filter((b) => b.type === 'tool_use')
+          .filter((b) => b.type === 'tool_use' && !finalizedToolUseIds.has(b.id))
           .map((b) => {
+            const entry = toolEntries.get(b.id)
+            const existing = currentParentBlocks.find((block) => (
+              (entry?.streamKey && block?._streamKey === entry.streamKey) ||
+              (block?.type === 'tool_use' && block.id === b.id && block._streamState !== 'complete')
+            ))
             const buffered = pendingHookEvents.get(b.id)
-            const base = { ...b, status: 'running', startTime: Date.now(), processGroupId: toolProcessGroupId }
+            const base = {
+              ...(existing || {}),
+              ...b,
+              status: existing?.status || 'running',
+              startTime: existing?.startTime || entry?.startTime || Date.now(),
+              processGroupId: existing?.processGroupId
+                || streamProcessGroups.get(entry?.streamKey)
+                || toolProcessGroupId,
+              ...(entry?.streamKey ? { _streamKey: entry.streamKey } : {}),
+              _streamState: 'complete',
+            }
             if (buffered && buffered.length) {
               base.metadata = { ...(base.metadata || {}), hookEvents: buffered }
               pendingHookEvents.delete(b.id)
             }
+            finalizedToolUseIds.add(b.id)
             return base
           })
+
+        if (toolBlocks.length === 0) break
 
         const sdkTaskBlocks = toolBlocks.filter((block) => isSdkTaskToolName(block.name))
         for (const block of sdkTaskBlocks) {
@@ -748,13 +906,30 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
           const visibleSubagentBlocks = toolBlocks.filter(
             (block) => !isSdkTaskToolName(block.name),
           )
-          if (visibleSubagentBlocks.length > 0) {
-            S.chat().appendToSubagentContent(data.parent_tool_use_id, visibleSubagentBlocks)
-          }
+          const chat = S.chat()
+          const current = chat.subagentContent[data.parent_tool_use_id] || []
+          const streamKeys = new Set(toolBlocks.map((block) => block._streamKey).filter(Boolean))
+          const toolIds = new Set(toolBlocks.map((block) => block.id))
+          const withoutProvisional = current.filter((block) => !(
+            (block?._streamKey && streamKeys.has(block._streamKey)) ||
+            (block?.type === 'tool_use' && toolIds.has(block.id) && block._streamState !== 'complete')
+          ))
+          S.chatSet({
+            subagentContent: {
+              ...chat.subagentContent,
+              [data.parent_tool_use_id]: [...withoutProvisional, ...visibleSubagentBlocks],
+            },
+          })
           break
         }
 
-        if (lastMsg && lastMsg.role === 'assistant') {
+        const toolMsgs = S.chat().messages
+        let toolLastIdx = -1
+        for (let index = toolMsgs.length - 1; index >= 0; index -= 1) {
+          if (toolMsgs[index]?.role === 'assistant') { toolLastIdx = index; break }
+        }
+        const toolLastMsg = toolLastIdx >= 0 ? toolMsgs[toolLastIdx] : null
+        if (toolLastMsg) {
           const TASK_TOOLS = [
             'TaskOutput', 'TaskStop',
             // OpenClaw delegations — render as live canvas tasks, not inline cards
@@ -762,7 +937,12 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
             'mcp__priva_openclaw__delegate_to_openclaw',
           ]
           const messageBlocks = []
-          let reconciledContent = lastMsg.content
+          const streamKeys = new Set(toolBlocks.map((block) => block._streamKey).filter(Boolean))
+          const toolIds = new Set(toolBlocks.map((block) => block.id))
+          let reconciledContent = toolLastMsg.content.filter((block) => !(
+            (block?._streamKey && streamKeys.has(block._streamKey)) ||
+            (block?.type === 'tool_use' && toolIds.has(block.id) && block._streamState !== 'complete')
+          ))
 
           for (const block of toolBlocks) {
             // Claude Agent SDK task management is represented exclusively by
@@ -960,16 +1140,21 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
           }
 
           // Add blocks to message content
-          if (messageBlocks.length > 0 || sdkTaskBlocks.length > 0) {
+          if (
+            messageBlocks.length > 0 ||
+            sdkTaskBlocks.length > 0 ||
+            reconciledContent.length !== toolLastMsg.content.length
+          ) {
             const newContent = [...reconciledContent, ...messageBlocks]
             S.chatSet({
               messages: [
-                ...msgs.slice(0, lastIdx),
+                ...toolMsgs.slice(0, toolLastIdx),
                 {
-                  ...lastMsg,
+                  ...toolLastMsg,
                   content: newContent,
                   ...(sdkTaskBlocks.length > 0 ? { hasSdkTaskActivity: true } : {}),
                 },
+                ...toolMsgs.slice(toolLastIdx + 1),
               ],
             })
           }
@@ -1755,8 +1940,14 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   }
 
   const onComplete = () => {
-    const { streamGeneration, messages: doneMsgs } = S.chat()
-    if (streamGeneration !== streamGen) return
+    const { streamGeneration } = S.chat()
+    if (streamGeneration !== streamGen) {
+      streamAssembler.dispose()
+      return
+    }
+    streamAssembler.dispose({ flushPending: true })
+    S.chat().finalizeStreamBlocks()
+    const doneMsgs = S.chat().messages
     setStreaming(false)
     setStreamAbort(null)
     setWsSendPermission(null)
@@ -1783,12 +1974,16 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   // Connection banners belong to the session on screen; background sockets
   // reconnect silently (their terminal errors surface via toast + dot).
   const surfaceConnUi = () => getActiveKey() === rt.key
+  const bindAbort = (abort) => () => {
+    streamAssembler.dispose({ flushPending: true })
+    abort()
+  }
 
   if (attach) {
     const { abort, sendPermission, sendQueue, sendQueueCancel } = attachAgentRunWS(
       attach.sessionId, attach.sinceSeq ?? 0, onEvent, onComplete, { tabId }, surfaceConnUi,
     )
-    setStreamAbort(abort)
+    setStreamAbort(bindAbort(abort))
     setWsSendPermission(sendPermission)
     S.chat().setQueueSender({ sendQueue, sendQueueCancel })
     return
@@ -1803,12 +1998,12 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
 
   if (transport === 'ws') {
     const { abort, sendPermission, sendQueue, sendQueueCancel } = streamAgentRunWS(message, sessionIdAtSend, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, { tabId }, enableFileCheckpointing, cwdForRun, addDirs, surfaceConnUi)
-    setStreamAbort(abort)
+    setStreamAbort(bindAbort(abort))
     setWsSendPermission(sendPermission)
     S.chat().setQueueSender({ sendQueue, sendQueueCancel })
   } else {
     const { abort } = streamAgentRun(message, sessionIdAtSend, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, enableFileCheckpointing, cwdForRun, addDirs)
-    setStreamAbort(abort)
+    setStreamAbort(bindAbort(abort))
   }
 }
 

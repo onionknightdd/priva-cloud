@@ -1187,6 +1187,9 @@ function isCollapsibleToolBlock(block) {
     return ['Read', 'Write', 'Edit'].includes(getToolDisplayName(block.name))
   }
   if (block?.type !== 'tool_use') return false
+  // A partial tool has only its stable id/name; keep it in the generic tool
+  // run until authoritative JSON arrives and selects the specialized card.
+  if (block._streamState && block._streamState !== 'complete') return true
   // SubagentFrame and TodoWriteCard manage their own collapse UX — keep them
   // out of the outer tool-steps section so they render as top-level nodes.
   if (block.name === 'Agent' || block.name === 'Task') return false
@@ -1484,6 +1487,16 @@ export default memo(function MessageBubble({
     }
     if (block.type === 'tool_use') {
       const reverted = revertedToolUseIds?.has(block.id) || false
+      if (block._streamState && block._streamState !== 'complete') {
+        return (
+          <ToolCallCard
+            key={block._streamKey || block.id || i}
+            block={block}
+            reverted={reverted}
+            livePreview={livePreview}
+          />
+        )
+      }
       if (block.name === 'Read' || block.name === 'Write' || block.name === 'Edit') {
         return (
           <TextFileTool
@@ -1548,11 +1561,16 @@ export default memo(function MessageBubble({
         hasLater = true
         break
       }
-      const finished = hasLater || !isStreaming
+      const hasExplicitStreamState = Boolean(block._streamState)
+      const finished = hasExplicitStreamState
+        ? block._streamState !== 'streaming'
+        : hasLater || !isStreaming
       // Duration ≈ the gap before this block appeared (previous block's arrival
       // → this thinking block's arrival), i.e. the time spent thinking.
       let durationMs = null
-      if (finished && block.startTime) {
+      if (finished && block.startTime && block.endTime) {
+        durationMs = Math.max(0, block.endTime - block.startTime)
+      } else if (finished && block.startTime) {
         let prevStart = message.timestamp
         for (let j = i - 1; j >= 0; j -= 1) {
           if (contentBlocks[j]?.startTime) { prevStart = contentBlocks[j].startTime; break }
@@ -1561,7 +1579,7 @@ export default memo(function MessageBubble({
       }
       return (
         <ThinkingBlock
-          key={block.id || i}
+          key={block._streamKey || block.id || i}
           content={block.thinking}
           t={t}
           streaming={!finished}
@@ -1653,18 +1671,28 @@ export default memo(function MessageBubble({
       }
       // Parse <think>...</think> tags from model output
       const thinkSegments = parseThinkTags(block.text)
+      const markdownStreaming = Boolean(block._streamState && block._streamState !== 'complete')
+      const wasStreamed = Boolean(block._streamKey)
       if (thinkSegments) {
         return (
           <div key={i} className="flex flex-col min-w-0" style={{ gap: 12 }}>
             {thinkSegments.map((seg, si) =>
               seg.type === 'thinking'
-                ? <ThinkingBlock key={si} content={seg.content} t={t} />
-                : <MarkdownRenderer key={si} content={seg.content} mermaidCollapsible />
+                ? <ThinkingBlock key={si} content={seg.content} t={t} streaming={markdownStreaming} />
+                : <MarkdownRenderer key={si} content={seg.content} mermaidCollapsible streaming={markdownStreaming} streamed={wasStreamed} />
             )}
           </div>
         )
       }
-      return <MarkdownRenderer key={i} content={block.text} mermaidCollapsible />
+      return (
+        <MarkdownRenderer
+          key={block._streamKey || i}
+          content={block.text}
+          mermaidCollapsible
+          streaming={markdownStreaming}
+          streamed={wasStreamed}
+        />
+      )
     }
     return null
   }

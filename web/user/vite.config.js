@@ -121,6 +121,8 @@ export default defineConfig({
           if (pkg === 'papaparse') return 'vendor-csv'
           if (
             pkg === 'react-markdown' ||
+            pkg === 'streamdown' ||
+            pkg === 'remend' ||
             pkg?.startsWith('rehype') ||
             pkg?.startsWith('remark') ||
             pkg?.startsWith('micromark') ||

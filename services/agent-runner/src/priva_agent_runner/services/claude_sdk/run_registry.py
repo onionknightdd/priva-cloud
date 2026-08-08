@@ -123,6 +123,10 @@ class RunRecord:
     def replay_since(self, since_seq: int) -> list[tuple[int, str, dict]]:
         return [e for e in self.events if e[0] > since_seq]
 
+    def has_replay_gap(self, since_seq: int) -> bool:
+        """Whether the requested next event predates the retained tail."""
+        return since_seq < self.first_seq - 1
+
 
 class RunRegistry:
     def __init__(self) -> None:

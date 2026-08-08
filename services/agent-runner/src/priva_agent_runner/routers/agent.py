@@ -1276,6 +1276,7 @@ async def _execute_run(
             enable_file_checkpointing=frame.enable_file_checkpointing,
             fork_session=frame.fork_session,
             enable_permission_feedback=frame.enable_permission_feedback,
+            include_partial_messages=frame.include_partial_messages,
         )
     except asyncio.CancelledError:
         # Process shutdown — finalize synchronously and let cancellation flow.
@@ -1343,6 +1344,7 @@ async def _ws_follow(
                 "started_at": record.started_at,
                 "first_user_uuid": record.first_user_uuid,
                 "replay_from": max(since_seq + 1, record.first_seq),
+                "replay_gap": record.has_replay_gap(since_seq),
                 "queued": record.queued_entries(),
             })
         # Replay the buffer. permission_requests already resolved are filtered

@@ -66,8 +66,27 @@ def serialize_assistant_message(message: AssistantMessage) -> dict[str, Any]:
         parent_tool_use_id=message.parent_tool_use_id,
         error=message.error,
         is_synthetic=True if is_synthetic else None,
+        message_id=getattr(message, "message_id", None),
+        session_id=getattr(message, "session_id", None),
+        uuid=getattr(message, "uuid", None),
+        stop_reason=getattr(message, "stop_reason", None),
     )
     return payload.model_dump(exclude_none=True)
+
+
+def serialize_stream_event(message: StreamEvent) -> dict[str, Any]:
+    """Serialize only the public partial-message envelope.
+
+    Keeping this explicit avoids leaking SDK implementation fields while
+    preserving the provider-native event payload used by the UI assembler.
+    """
+    return {
+        "type": "stream_event",
+        "uuid": message.uuid,
+        "session_id": message.session_id,
+        "parent_tool_use_id": message.parent_tool_use_id,
+        "event": message.event,
+    }
 
 
 def serialize_rate_limit_event(event: RateLimitEvent) -> dict[str, Any]:
@@ -166,7 +185,7 @@ def get_event_label(message: Any) -> str | None:
     if isinstance(message, RateLimitEvent):
         return "rate_limit_status"
     if isinstance(message, StreamEvent):
-        return None
+        return "stream_event"
     return None
 
 
@@ -184,6 +203,8 @@ def serialize_message(message: Any) -> dict[str, Any]:
         return serialize_system_message(message)
     if isinstance(message, RateLimitEvent):
         return serialize_rate_limit_event(message)
+    if isinstance(message, StreamEvent):
+        return serialize_stream_event(message)
     if isinstance(message, (TaskStartedMessage, TaskProgressMessage, TaskNotificationMessage)):
         return {"type": message.subtype, **dataclasses.asdict(message)}
     return dataclasses.asdict(message)

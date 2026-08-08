@@ -65,6 +65,9 @@ function openAgentWS({ mode, message, sessionId, runId, sinceSeq = 0, onEvent, p
     // WebUI can resolve prompts (permission card / AskUserQuestion), so opt in
     // to synchronous feedback. The API default is false (non-interactive safe).
     init.enable_permission_feedback = true
+    // Partial SDK messages are intentionally enabled only for the Agent UI
+    // websocket. HTTP/SSE and non-UI callers keep complete-message delivery.
+    init.include_partial_messages = true
     wsSend(init)
   }
 
@@ -137,7 +140,10 @@ function openAgentWS({ mode, message, sessionId, runId, sinceSeq = 0, onEvent, p
         const { event, data, seq } = JSON.parse(evt.data)
         if (typeof seq === 'number' && seq > (lastSeq || 0)) lastSeq = seq
         if (event === 'keepalive') return
-        debugLog('recv', `WS ◀ ${event}`, data)
+        // Partial payloads can arrive dozens of times per second. The stream
+        // assembler logs the throttled, aggregated text/thinking updates; keep
+        // the transport logger aligned with the prior complete-event volume.
+        if (event !== 'stream_event') debugLog('recv', `WS ◀ ${event}`, data)
         // Track run/session identity so a reconnect can re-attach to the run.
         if (event === 'result' && data?.session_id) activeSessionId = data.session_id
         if (event === 'system' && data?.subtype === 'init' && data?.data?.session_id) {
