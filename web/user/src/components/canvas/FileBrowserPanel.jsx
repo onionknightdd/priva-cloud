@@ -1255,7 +1255,7 @@ export default function FileBrowserPanel() {
             boxSizing: 'border-box',
             border: 'none',
             borderRadius: 2,
-            background: 'transparent',
+            background: treeOpen ? 'var(--bg-elevated)' : 'transparent',
             color: treeOpen ? 'var(--text-primary)' : 'var(--text-dim)',
             cursor: 'pointer',
             transition: 'color 150ms ease, background 150ms ease',
@@ -1266,7 +1266,7 @@ export default function FileBrowserPanel() {
           }}
           onMouseLeave={(event) => {
             event.currentTarget.style.color = treeOpen ? 'var(--text-primary)' : 'var(--text-dim)'
-            event.currentTarget.style.background = 'transparent'
+            event.currentTarget.style.background = treeOpen ? 'var(--bg-elevated)' : 'transparent'
           }}
         >
           <FolderTree size={16} strokeWidth={1.5} />
