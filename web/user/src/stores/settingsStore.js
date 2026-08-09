@@ -16,11 +16,14 @@ import {
   updateQuickActions as updateQuickActionsAPI,
   getRecapSetting as getRecapSettingAPI,
   updateRecapSetting as updateRecapSettingAPI,
+  getRuntimeSettings as getRuntimeSettingsAPI,
+  updateRuntimeSettings as updateRuntimeSettingsAPI,
 } from '../api/settings'
 import { getMyApiKey, generateMyApiKey, revokeMyApiKey } from '@shared/api/auth'
-import { getPresetPrompt, updatePresetPrompt } from '@shared/api/admin'
 
 const SESSION_MODEL_DRAFT_KEY = '__draft__'
+const storedRunMode = safeStorage.getItem('priva-run-mode')
+export const RUN_MODE_CHANNEL = 'priva-run-mode'
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object, key)
@@ -46,7 +49,16 @@ function modelSelectionFromResponse(lastResponseModel, profiles, defaultProfileI
 }
 
 const useSettingsStore = create((set, get) => ({
-  env: null,
+  // User-defined runtime environment only. LLM credentials live exclusively
+  // in profiles and must never be mixed into this map.
+  env: {},
+  extraEnvEnabled: false,
+  promptSuggestionEnabled: false,
+  runtimeSettingsLoaded: false,
+  runtimeSettingsLoading: false,
+  runtimeSettingsSaving: false,
+  runtimeSettingsError: null,
+  draftRunMode: storedRunMode === 'code' ? 'code' : 'agent',
   hasEnv: null,
   profiles: [],
   defaultProfileId: null,
@@ -71,8 +83,6 @@ const useSettingsStore = create((set, get) => ({
   defaultModel: null,
   apiKey: null,
   apiKeyLoading: false,
-  presetPrompt: null,
-  presetPromptLoading: false,
   visionModel: null,
   // Server-side, not localStorage: this gates a per-turn model call the backend
   // makes, so the pod is the one that has to know. Optimistic default matches
@@ -107,11 +117,11 @@ const useSettingsStore = create((set, get) => ({
     return !!data?.default_profile_id
   },
 
-  fetchEnv: async () => {
+  fetchDefaultProfileEnv: async () => {
     try {
       const profiles = get().profiles.length ? get().profiles : (await get().fetchProfiles())?.profiles || []
       const id = get().defaultProfileId || profiles[0]?.id
-      if (!id) { set({ env: null, hasEnv: false }); return { env: null, has_env: false } }
+      if (!id) return { env: null, has_env: false }
       const profile = await getLlmProfile(id)
       const env = {
         ANTHROPIC_BASE_URL: profile.base_url,
@@ -121,15 +131,13 @@ const useSettingsStore = create((set, get) => ({
         ANTHROPIC_DEFAULT_SONNET_MODEL: profile.sonnet_model || '',
         ANTHROPIC_DEFAULT_HAIKU_MODEL: profile.haiku_model || '',
       }
-      set({ env, hasEnv: true })
       return { env, has_env: true }
     } catch {
-      set({ env: null, hasEnv: false })
       return null
     }
   },
 
-  saveEnv: async (envData) => {
+  saveDefaultProfile: async (envData) => {
     let profiles = get().profiles
     if (!profiles.length) await get().fetchProfiles()
     profiles = get().profiles
@@ -148,8 +156,114 @@ const useSettingsStore = create((set, get) => ({
     }
     const profile = existing ? await updateLlmProfile(id, payload) : await createLlmProfile(payload)
     if (!existing) set({ defaultProfileId: id })
-    set({ env: envData, hasEnv: true, profiles: existing ? get().profiles.map((p) => p.id === id ? { ...p, ...profile } : p) : [...get().profiles, profile] })
+    set({ hasEnv: true, profiles: existing ? get().profiles.map((p) => p.id === id ? { ...p, ...profile } : p) : [...get().profiles, profile] })
     return { env: envData, has_env: true }
+  },
+
+  fetchRuntimeSettings: async () => {
+    set({ runtimeSettingsLoading: true, runtimeSettingsError: null })
+    try {
+      const data = await getRuntimeSettingsAPI()
+      set({
+        env: data.extra_env || {},
+        extraEnvEnabled: data.extra_env_enabled === true,
+        promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
+        runtimeSettingsLoaded: true,
+        runtimeSettingsLoading: false,
+      })
+      return data
+    } catch (err) {
+      set({
+        runtimeSettingsLoaded: true,
+        runtimeSettingsLoading: false,
+        runtimeSettingsError: err?.message || String(err),
+      })
+      return null
+    }
+  },
+
+  saveRuntimeEnv: async (envData, enabled = get().extraEnvEnabled) => {
+    const previous = { env: get().env, extraEnvEnabled: get().extraEnvEnabled }
+    set({
+      env: { ...envData },
+      extraEnvEnabled: !!enabled,
+      runtimeSettingsSaving: true,
+      runtimeSettingsError: null,
+    })
+    try {
+      const data = await updateRuntimeSettingsAPI({
+        extra_env: envData,
+        extra_env_enabled: !!enabled,
+      })
+      set({
+        env: data.extra_env || {},
+        extraEnvEnabled: data.extra_env_enabled === true,
+        promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
+        runtimeSettingsSaving: false,
+        runtimeSettingsLoaded: true,
+      })
+      return data
+    } catch (err) {
+      set({
+        ...previous,
+        runtimeSettingsSaving: false,
+        runtimeSettingsError: err?.message || String(err),
+      })
+      throw err
+    }
+  },
+
+  setRuntimeEnvEnabled: async (enabled) => {
+    const previous = get().extraEnvEnabled
+    set({ extraEnvEnabled: !!enabled, runtimeSettingsError: null })
+    try {
+      const data = await updateRuntimeSettingsAPI({ extra_env_enabled: !!enabled })
+      set({
+        env: data.extra_env || {},
+        extraEnvEnabled: data.extra_env_enabled === true,
+        promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
+        runtimeSettingsLoaded: true,
+      })
+      return data
+    } catch (err) {
+      set({ extraEnvEnabled: previous, runtimeSettingsError: err?.message || String(err) })
+      throw err
+    }
+  },
+
+  setPromptSuggestionEnabled: async (enabled) => {
+    const previous = get().promptSuggestionEnabled
+    set({ promptSuggestionEnabled: !!enabled, runtimeSettingsError: null })
+    try {
+      const data = await updateRuntimeSettingsAPI({ prompt_suggestion_enabled: !!enabled })
+      set({
+        env: data.extra_env || {},
+        extraEnvEnabled: data.extra_env_enabled === true,
+        promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
+        runtimeSettingsLoaded: true,
+      })
+      return data
+    } catch (err) {
+      set({ promptSuggestionEnabled: previous, runtimeSettingsError: err?.message || String(err) })
+      throw err
+    }
+  },
+
+  setDraftRunMode: (mode, { broadcast = true } = {}) => {
+    const next = mode === 'code' ? 'code' : 'agent'
+    safeStorage.setItem('priva-run-mode', next)
+    set({ draftRunMode: next })
+    if (!broadcast || typeof window === 'undefined') return
+    window.dispatchEvent(new CustomEvent('priva:run-mode', { detail: next }))
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        const channel = new BroadcastChannel(RUN_MODE_CHANNEL)
+        channel.postMessage({ type: 'run-mode', runMode: next })
+        channel.close()
+      } catch {
+        // local state and storage persistence still succeeded
+      }
+    }
   },
 
   fetchModels: async () => {
@@ -374,26 +488,15 @@ const useSettingsStore = create((set, get) => ({
     }
   },
 
-  fetchPresetPrompt: async () => {
-    set({ presetPromptLoading: true })
-    try {
-      const data = await getPresetPrompt()
-      set({ presetPrompt: data, presetPromptLoading: false })
-      return data
-    } catch {
-      set({ presetPromptLoading: false })
-      return null
-    }
-  },
-
-  savePresetPrompt: async (data) => {
-    const result = await updatePresetPrompt(data)
-    set({ presetPrompt: result })
-    return result
-  },
-
   reset: () => set({
-    env: null,
+    env: {},
+    extraEnvEnabled: false,
+    promptSuggestionEnabled: false,
+    runtimeSettingsLoaded: false,
+    runtimeSettingsLoading: false,
+    runtimeSettingsSaving: false,
+    runtimeSettingsError: null,
+    draftRunMode: safeStorage.getItem('priva-run-mode') === 'code' ? 'code' : 'agent',
     hasEnv: null,
     profiles: [],
     defaultProfileId: null,
@@ -415,8 +518,6 @@ const useSettingsStore = create((set, get) => ({
     defaultModel: null,
     apiKey: null,
     apiKeyLoading: false,
-    presetPrompt: null,
-    presetPromptLoading: false,
     visionModel: null,
     recapEnabled: true,
     transport: safeStorage.getItem('priva-transport') || 'ws',

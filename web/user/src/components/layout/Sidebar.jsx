@@ -24,6 +24,7 @@ import { openSession, newDraftSession } from '../../session/openSession'
 import { stopSessionStream } from '../../hooks/useSSE'
 import { getActiveKey, removeRuntime, resolveKey } from '../../stores/runtime/registry'
 import SidebarResizer from './SidebarResizer'
+import RunModeSwitcher from './RunModeSwitcher'
 import SettingsPopover from '../settings/SettingsPopover'
 import NavItem from '@shared/components/shared/NavItem'
 import PanelHeader from '@shared/components/shared/PanelHeader'
@@ -1349,6 +1350,8 @@ export default function Sidebar() {
           </>
         )}
       </div>
+
+      {!collapsed && <RunModeSwitcher />}
 
       {collapsed ? (
         /* Collapsed icon rail */

@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 PermissionDecision = Literal["allow", "deny"]
+RunMode = Literal["agent", "code"]
+McpServersSelection = Literal["auto", "disable"] | list[str] | None
 
 
 class AttachmentItem(BaseModel):
@@ -53,10 +55,17 @@ class AgentRunRequest(BaseModel):
         ),
     )
     permission_mode: PermissionMode | None = None
+    run_mode: RunMode = Field(
+        default="agent",
+        description=(
+            "System-prompt mode. New sessions default to 'agent'. Resumed "
+            "sessions inherit their immutable mode when this field is omitted."
+        ),
+    )
     model: str | None = None
     attachments: list[AttachmentItem] | None = None
     images: list[ImageItem] | None = None
-    mcp_servers: str | list[str] | None = Field(
+    mcp_servers: McpServersSelection = Field(
         default="auto",
         description=(
             "'auto' or omit: use all configured MCP servers. "
@@ -227,6 +236,7 @@ class SessionInfoResponse(BaseModel):
     origin: str | None = None
     scheduler_job_name: str | None = None
     last_response_model: SessionResponseModel | None = None
+    run_mode: RunMode
 
 
 class SessionMessageResponse(BaseModel):
@@ -250,6 +260,7 @@ class SessionMessagesResponse(BaseModel):
     # The session's stored additional directories (SDK --add-dir), recovered
     # from the server-side sidecar so the UI chip hydrates on open/resume.
     add_dirs: list[str] = Field(default_factory=list)
+    run_mode: RunMode
 
 
 class SessionGroupResponse(BaseModel):
@@ -295,6 +306,7 @@ class AgentRunResponse(BaseModel):
     attempts: int = 1
     retried_due_to: str | None = None
     api_error_status: int | None = None
+    run_mode: RunMode | None = None
 
 
 # WebSocket frame models
@@ -309,10 +321,17 @@ class WsInitFrame(BaseModel):
     cwd: str | None = None
     add_dirs: list[str] | None = None
     permission_mode: PermissionMode | None = None
+    run_mode: RunMode = Field(
+        default="agent",
+        description=(
+            "System-prompt mode. New sessions default to 'agent'. Resumed "
+            "sessions inherit their immutable mode when omitted."
+        ),
+    )
     model: str | None = None
     attachments: list[AttachmentItem] | None = None
     images: list[ImageItem] | None = None
-    mcp_servers: str | list[str] | None = Field(
+    mcp_servers: McpServersSelection = Field(
         default="auto",
         description=(
             "'auto' or omit: use all configured MCP servers. "
@@ -395,6 +414,7 @@ class ForkResponse(BaseModel):
     new_session_id: str
     parent_session_id: str
     title: str | None = None
+    run_mode: RunMode
 
 
 class RenameRequest(BaseModel):

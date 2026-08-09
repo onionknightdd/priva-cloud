@@ -83,7 +83,10 @@ class RunnerDialer:
             images=[ImageItem(**img) for img in images] if images else None,
             enable_permission_feedback=True,
             disallowed_tools=list(_DM_DISALLOWED_TOOLS),
-        ).model_dump(mode="json", exclude_none=True)
+        # Do not serialize model defaults. In particular, an omitted run_mode
+        # lets the runner inherit an existing session's immutable mode; new
+        # sessions still receive the API default (Agent) server-side.
+        ).model_dump(mode="json", exclude_none=True, exclude_unset=True)
         headers = {"X-Priva-Runner-Token": mint(account_id, username or "")}
 
         try:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 
 import pytest
 from claude_agent_sdk import AssistantMessage, TextBlock
@@ -17,7 +16,7 @@ from priva_common.serialization import get_event_label, serialize_message
 
 
 def _build_options(monkeypatch, tmp_path, **overrides):
-    from priva_agent_runner.services import priva_plugin, sandbox_venv, skills
+    from priva_agent_runner.services import sandbox_venv, skills
     from priva_agent_runner.services.hooks import builder as hooks_builder
     from priva_common import user_store
 
@@ -25,11 +24,15 @@ def _build_options(monkeypatch, tmp_path, **overrides):
         def get_runtime_config(self):
             return {}
 
-    class PluginManager:
-        async def execute_all(self, username, runtime):
-            return SimpleNamespace(system_prompt_append=None)
-
-    monkeypatch.setattr(options_module, "get_settings", lambda: SimpleNamespace())
+    monkeypatch.setattr(
+        options_module,
+        "read_runtime_settings",
+        lambda: {
+            "extra_env_enabled": False,
+            "extra_env": {},
+            "prompt_suggestion_enabled": False,
+        },
+    )
     monkeypatch.setattr(
         options_module,
         "read_settings_env",
@@ -42,7 +45,6 @@ def _build_options(monkeypatch, tmp_path, **overrides):
     monkeypatch.setattr(sandbox_venv, "venv_env_overlay", lambda _env: {})
     monkeypatch.setattr(skills, "compute_enabled_skill_names", lambda _username: [])
     monkeypatch.setattr(user_store, "get_user_store", lambda: RuntimeStore())
-    monkeypatch.setattr(priva_plugin, "get_plugin_manager", lambda: PluginManager())
     monkeypatch.setattr(hooks_builder, "build_hooks", lambda *_args, **_kwargs: {})
 
     return asyncio.run(options_module.build_agent_options(

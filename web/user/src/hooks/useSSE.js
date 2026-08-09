@@ -44,6 +44,7 @@ import {
   isAskUserInputValidationError,
 } from '../utils/askUserQuestion'
 import { parseAgentMessageEnvelope } from '../utils/agentCommunication'
+import { normalizeRunMode } from '../utils/runMode'
 
 // Max characters of background-shell output kept in the task store; only the
 // tail is retained beyond this.
@@ -256,10 +257,22 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   const {
     setStreaming, setStreamAbort, setWsSendPermission, addMessage, updateToolResult,
     setStreamId, setPendingPermission, queuePermission, setCompacting, setSessionId,
-    recordCheckpoint, setRetryState, clearRetryState, setLastUserPrompt,
+    recordCheckpoint, setRetryState, clearRetryState, setLastUserPrompt, lockRunMode,
+    clearPromptSuggestion,
   } = chatApi
   const sessionIdAtSend = attach ? (attach.sessionId || S.chat().sessionId) : S.chat().sessionId
+  const runModeAtSend = sessionIdAtSend
+    ? normalizeRunMode(S.chat().runMode, 'code')
+    : normalizeRunMode(S.chat().runMode, useSettingsStore.getState().draftRunMode)
   const enableFileCheckpointing = S.chat().enableFileCheckpointing
+
+  // Snapshot before any async work so a double click cannot change the mode
+  // between request construction and system.init. A session id makes this
+  // permanent; a transport failure before any id is assigned unlocks below.
+  if (!attach) {
+    lockRunMode(runModeAtSend)
+    clearPromptSuggestion()
+  }
 
   const promptPreview = attach
     ? `(attach ${String(attach.sessionId || '').slice(0, 8)})`
@@ -603,6 +616,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         if (data.stream_id) {
           setStreamId(data.stream_id)
         }
+        if (data.run_mode) lockRunMode(normalizeRunMode(data.run_mode, runModeAtSend))
         break
       }
 
@@ -615,6 +629,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
           })
         }
         if (data?.session_id) adoptSessionId(data.session_id)
+        if (data?.run_mode) lockRunMode(normalizeRunMode(data.run_mode, 'code'))
         break
       }
 
@@ -1485,6 +1500,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
       }
 
       case 'result': {
+        if (data.run_mode) lockRunMode(normalizeRunMode(data.run_mode, runModeAtSend))
         // Set duration on the assistant message
         const finalMsgs = [...S.chat().messages]
         const finalIdx = finalMsgs.length - 1
@@ -1532,6 +1548,11 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
             duration: data.duration_ms,
           })
         }
+        break
+      }
+
+      case 'prompt_suggestion': {
+        S.chat().setPromptSuggestion(data?.suggestion)
         break
       }
 
@@ -2033,6 +2054,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     setWsSendPermission(null)
     S.chat().setQueueSender(null)
     S.chat().clearQueuedMessages()
+    if (!S.chat().sessionId) S.chat().unlockUnclaimedRunMode()
     // Stream-end fallback: finalize any still-'running' workflow honestly
     // (completed only when all agents finished; else failed/stopped — never a
     // false green DONE on a clean close; never touches 'pending').
@@ -2077,12 +2099,12 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   const cwdForRun = sessionIdAtSend ? null : (cwdDraft || null)
 
   if (transport === 'ws') {
-    const { abort, sendPermission, sendQueue, sendQueueCancel } = streamAgentRunWS(message, sessionIdAtSend, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, { tabId }, enableFileCheckpointing, cwdForRun, addDirs, surfaceConnUi)
+    const { abort, sendPermission, sendQueue, sendQueueCancel } = streamAgentRunWS(message, sessionIdAtSend, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, { tabId }, enableFileCheckpointing, cwdForRun, addDirs, runModeAtSend, surfaceConnUi)
     setStreamAbort(bindAbort(abort))
     setWsSendPermission(sendPermission)
     S.chat().setQueueSender({ sendQueue, sendQueueCancel })
   } else {
-    const { abort } = streamAgentRun(message, sessionIdAtSend, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, enableFileCheckpointing, cwdForRun, addDirs)
+    const { abort } = streamAgentRun(message, sessionIdAtSend, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, enableFileCheckpointing, cwdForRun, addDirs, runModeAtSend)
     setStreamAbort(bindAbort(abort))
   }
   return true

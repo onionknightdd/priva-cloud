@@ -939,4 +939,5 @@ def test_dial_sends_dm_disallowed_tools():
     assert list(_DM_DISALLOWED_TOOLS) == ["mcp__FileCanvas__*"]
     assert captured["disallowed_tools"] == list(_DM_DISALLOWED_TOOLS)
     assert captured["enable_permission_feedback"] is True
+    assert "run_mode" not in captured
     assert out.session_id == "s1"

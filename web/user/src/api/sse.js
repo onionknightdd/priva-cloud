@@ -21,7 +21,7 @@ const PROTOCOL_AUTH_CLOSE_CODES = new Set([1000, 1001, 4000, 4001])
 // `surfaceConnUi` gates the global connection banner: only the stream whose
 // session is on screen paints reconnecting/disconnected state — background
 // sessions reconnect silently.
-function openAgentWS({ mode, message, sessionId, runId, sinceSeq = 0, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, trace, enableFileCheckpointing = false, cwd = null, addDirs = null, surfaceConnUi = null }) {
+function openAgentWS({ entryMode, message, sessionId, runId, sinceSeq = 0, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, trace, enableFileCheckpointing = false, cwd = null, addDirs = null, runMode = 'agent', surfaceConnUi = null }) {
   let ws = null
   let userAborted = false
   let completed = false
@@ -29,7 +29,7 @@ function openAgentWS({ mode, message, sessionId, runId, sinceSeq = 0, onEvent, p
   let reconnectTimer = null
   let activeSessionId = sessionId
   let activeRunId = runId || null
-  let lastSeq = mode === 'attach' ? (sinceSeq || 0) : null // null = legacy backend (no seq seen)
+  let lastSeq = entryMode === 'attach' ? (sinceSeq || 0) : null // null = legacy backend (no seq seen)
 
   const connUi = () => (surfaceConnUi ? surfaceConnUi() : true)
   const marks = {
@@ -49,6 +49,7 @@ function openAgentWS({ mode, message, sessionId, runId, sinceSeq = 0, onEvent, p
   const sendInit = () => {
     const token = getToken()
     const init = { type: 'init', message }
+    init.run_mode = runMode === 'code' ? 'code' : 'agent'
     if (trace?.tabId) init.client_tab_id = trace.tabId
     if (token) init.token = token
     if (activeSessionId) init.session_id = activeSessionId
@@ -124,7 +125,7 @@ function openAgentWS({ mode, message, sessionId, runId, sinceSeq = 0, onEvent, p
       // out of `disconnected`/`reconnecting` cleanly.
       marks.connected()
       reconnectAttempt = 0
-      if (mode === 'attach') {
+      if (entryMode === 'attach') {
         sendAttach()
       } else if (isReconnect && lastSeq !== null) {
         // Registry backend: rejoin the SAME run losslessly instead of
@@ -261,11 +262,11 @@ function openAgentWS({ mode, message, sessionId, runId, sinceSeq = 0, onEvent, p
  * [1, 2, 4, 8, 16] seconds for up to 5 attempts. Reconnects re-attach to
  * the same run (registry backend) or re-init with the same session_id.
  */
-export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, trace, enableFileCheckpointing = false, cwd = null, addDirs = null, surfaceConnUi = null) {
+export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, trace, enableFileCheckpointing = false, cwd = null, addDirs = null, runMode = 'agent', surfaceConnUi = null) {
   return openAgentWS({
-    mode: 'init',
+    entryMode: 'init',
     message, sessionId, onEvent, permissionMode, onComplete, model, attachments,
-    mcpServers, images, trace, enableFileCheckpointing, cwd, addDirs, surfaceConnUi,
+    mcpServers, images, trace, enableFileCheckpointing, cwd, addDirs, runMode, surfaceConnUi,
   })
 }
 
@@ -276,7 +277,7 @@ export function streamAgentRunWS(message, sessionId, onEvent, permissionMode, on
  */
 export function attachAgentRunWS(sessionId, sinceSeq, onEvent, onComplete, trace, surfaceConnUi = null) {
   return openAgentWS({
-    mode: 'attach',
+    entryMode: 'attach',
     sessionId, sinceSeq, onEvent, onComplete, trace, surfaceConnUi,
   })
 }
@@ -285,11 +286,12 @@ export function attachAgentRunWS(sessionId, sinceSeq, onEvent, onComplete, trace
  * POST-based SSE client.
  * Returns { abort } — call abort() to cancel the stream.
  */
-export function streamAgentRun(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, enableFileCheckpointing = false, cwd = null, addDirs = null) {
+export function streamAgentRun(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, enableFileCheckpointing = false, cwd = null, addDirs = null, runMode = 'agent') {
   const controller = new AbortController()
 
   const run = async () => {
     const body = { message, session_id: sessionId }
+    body.run_mode = runMode === 'code' ? 'code' : 'agent'
     if (permissionMode) {
       body.permission_mode = permissionMode
     }

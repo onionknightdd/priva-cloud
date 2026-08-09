@@ -180,7 +180,7 @@ function SetupWizardBody({ onComplete, onDismissed, active, panelRef, backdropRe
   const [saving, setSaving] = useState(false)
 
   const models = useSettingsStore((s) => s.models)
-  const saveEnv = useSettingsStore((s) => s.saveEnv)
+  const saveDefaultProfile = useSettingsStore((s) => s.saveDefaultProfile)
   const saveVisionModel = useSettingsStore((s) => s.saveVisionModel)
   const fetchModels = useSettingsStore((s) => s.fetchModels)
 
@@ -192,7 +192,7 @@ function SetupWizardBody({ onComplete, onDismissed, active, panelRef, backdropRe
 
     // Save credentials first so the backend can use them
     try {
-      await saveEnv({
+      await saveDefaultProfile({
         ANTHROPIC_BASE_URL: baseUrl.trim(),
         ANTHROPIC_AUTH_TOKEN: authToken.trim(),
       })
@@ -215,7 +215,7 @@ function SetupWizardBody({ onComplete, onDismissed, active, panelRef, backdropRe
       const err = useSettingsStore.getState().modelsError
       setConnectionError(err || 'No models found')
     }
-  }, [baseUrl, authToken, saveEnv, fetchModels, defaultModel, opusModel, sonnetModel, haikuModel])
+  }, [baseUrl, authToken, saveDefaultProfile, fetchModels, defaultModel, opusModel, sonnetModel, haikuModel])
 
   // Debounced auto-fetch
   useEffect(() => {
@@ -230,7 +230,7 @@ function SetupWizardBody({ onComplete, onDismissed, active, panelRef, backdropRe
   const handleFinish = async () => {
     setSaving(true)
     try {
-      await saveEnv({
+      await saveDefaultProfile({
         ANTHROPIC_BASE_URL: baseUrl.trim(),
         ANTHROPIC_AUTH_TOKEN: authToken.trim(),
         ANTHROPIC_MODEL: defaultModel,

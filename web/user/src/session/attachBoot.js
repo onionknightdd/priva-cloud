@@ -63,7 +63,14 @@ export async function restoreRunningSessions() {
       const taskSlice = getSlice(sessionId, 'tasks')
       taskSlice.getState().clearTasks()
       getSlice(sessionId, 'fileOps').getState().clearFileOps()
-      chat.getState().loadSession(sessionId, messages, null, subagentContent, data.add_dirs || [])
+      chat.getState().loadSession(
+        sessionId,
+        messages,
+        null,
+        subagentContent,
+        data.add_dirs || [],
+        data.run_mode || run.run_mode,
+      )
       for (const op of fileOps) getSlice(sessionId, 'fileOps').getState().addFileOp(op)
       getSlice(sessionId, 'fileBrowser').getState().setTabs(fileBrowserTabs)
       for (const task of tasks) taskSlice.getState().addTask(task)

@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 
 import pytest
+from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
 
 from priva_agent_runner.services.claude_sdk import options as options_module
 
 
 def _build_options(monkeypatch, tmp_path, **overrides):
-    from priva_agent_runner.services import priva_plugin, sandbox_venv, skills
+    from priva_agent_runner.services import sandbox_venv, skills
     from priva_agent_runner.services.hooks import builder as hooks_builder
     from priva_common import user_store
 
@@ -17,11 +17,19 @@ def _build_options(monkeypatch, tmp_path, **overrides):
         def get_runtime_config(self):
             return {}
 
-    class PluginManager:
-        async def execute_all(self, username, runtime):
-            return SimpleNamespace(system_prompt_append=None)
-
-    monkeypatch.setattr(options_module, "get_settings", lambda: SimpleNamespace())
+    runtime_settings = overrides.pop(
+        "_runtime_settings",
+        {
+            "extra_env_enabled": False,
+            "extra_env": {},
+            "prompt_suggestion_enabled": False,
+        },
+    )
+    monkeypatch.setattr(
+        options_module,
+        "read_runtime_settings",
+        lambda: runtime_settings,
+    )
     monkeypatch.setattr(
         options_module,
         "read_settings_env",
@@ -34,7 +42,6 @@ def _build_options(monkeypatch, tmp_path, **overrides):
     monkeypatch.setattr(sandbox_venv, "venv_env_overlay", lambda _env: {})
     monkeypatch.setattr(skills, "compute_enabled_skill_names", lambda _username: [])
     monkeypatch.setattr(user_store, "get_user_store", lambda: RuntimeStore())
-    monkeypatch.setattr(priva_plugin, "get_plugin_manager", lambda: PluginManager())
     monkeypatch.setattr(hooks_builder, "build_hooks", lambda *_args, **_kwargs: {})
 
     kwargs = {
@@ -121,3 +128,82 @@ def test_current_builtin_names_pass_subagent_tool_validation(tool_name):
     from priva_agent_runner.services.subagents import _validate_tool
 
     _validate_tool(tool_name)
+
+
+def _cli_command(options):
+    transport = SubprocessCLITransport("test", options)
+    transport._cli_path = "/usr/bin/claude"
+    return transport._build_command()
+
+
+def test_agent_mode_passes_explicit_empty_system_prompt(monkeypatch, tmp_path):
+    options = _build_options(monkeypatch, tmp_path, run_mode="agent")
+
+    command = _cli_command(options)
+
+    index = command.index("--system-prompt")
+    assert command[index + 1] == ""
+    assert "--append-system-prompt" not in command
+
+
+def test_code_mode_uses_unmodified_claude_code_preset(monkeypatch, tmp_path):
+    options = _build_options(monkeypatch, tmp_path, run_mode="code")
+
+    command = _cli_command(options)
+
+    assert options.system_prompt == {"type": "preset", "preset": "claude_code"}
+    assert "--system-prompt" not in command
+    assert "--append-system-prompt" not in command
+
+
+def test_dead_tools_and_request_denylist_are_combined(monkeypatch, tmp_path):
+    options = _build_options(
+        monkeypatch,
+        tmp_path,
+        extra_disallowed_tools=["Bash", "PushNotification"],
+    )
+
+    for tool in (
+        "PushNotification",
+        "DesignSync",
+        "ScheduleWakeup",
+        "ReportFindings",
+        "Bash",
+    ):
+        assert tool in options.disallowed_tools
+    assert options.disallowed_tools.count("PushNotification") == 1
+
+
+def test_streaming_prompt_suggestion_requires_server_toggle(monkeypatch, tmp_path):
+    enabled = _build_options(
+        monkeypatch,
+        tmp_path,
+        enable_prompt_suggestions=True,
+        _runtime_settings={
+            "extra_env_enabled": True,
+            "extra_env": {"MY_RUNTIME_VALUE": "enabled"},
+            "prompt_suggestion_enabled": True,
+        },
+    )
+
+    assert enabled.env["MY_RUNTIME_VALUE"] == "enabled"
+    assert enabled.env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] == "true"
+    assert "ANTHROPIC_AUTH_TOKEN" not in enabled.env
+    assert "ANTHROPIC_BASE_URL" not in enabled.env
+    assert enabled.extra_args["prompt-suggestions"] == "true"
+    assert enabled._priva_prompt_suggestion_enabled is True
+
+    disabled = _build_options(
+        monkeypatch,
+        tmp_path,
+        enable_prompt_suggestions=True,
+        _runtime_settings={
+            "extra_env_enabled": True,
+            "extra_env": {"MY_RUNTIME_VALUE": "enabled"},
+            "prompt_suggestion_enabled": False,
+        },
+    )
+
+    assert "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION" not in disabled.env
+    assert "prompt-suggestions" not in disabled.extra_args
+    assert disabled._priva_prompt_suggestion_enabled is False

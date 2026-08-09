@@ -86,6 +86,8 @@ export default function ChatInput({ cwd, cwdPlacement = 'top', summaryAware = fa
   const { t } = useTranslation()
   const inputText = useChatStore((s) => s.inputText)
   const setInputText = useChatStore((s) => s.setInputText)
+  const promptSuggestion = useChatStore((s) => s.promptSuggestion)
+  const clearPromptSuggestion = useChatStore((s) => s.clearPromptSuggestion)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const clearMessages = useChatStore((s) => s.clearMessages)
   const pendingAskUser = useChatStore((s) => s.pendingAskUser)
@@ -133,6 +135,16 @@ export default function ChatInput({ cwd, cwdPlacement = 'top', summaryAware = fa
   const effectiveVisionModel = resolveVisionModelForSelection(selectedModel, profiles, defaultProfileId, visionModel)
   const textareaRef = useRef(null)
   const isBlocked = !!pendingAskUser || !!pendingPermission || !!pendingPlanApproval
+
+  const handleComposerChange = useCallback((value) => {
+    if (promptSuggestion) clearPromptSuggestion()
+    setInputText(value)
+  }, [clearPromptSuggestion, promptSuggestion, setInputText])
+
+  const acceptPromptSuggestion = useCallback((suggestion) => {
+    setInputText(suggestion)
+    clearPromptSuggestion()
+  }, [clearPromptSuggestion, setInputText])
 
   const [selectedSkill, setSelectedSkill] = useState(null)
   const [showPermissionMenu, setShowPermissionMenu] = useState(false)
@@ -204,7 +216,8 @@ export default function ChatInput({ cwd, cwdPlacement = 'top', summaryAware = fa
     const removed = current.filter((a) => !next.find((n) => n.id === a.id))
     removed.forEach((a) => { if (a.previewUrl) URL.revokeObjectURL(a.previewUrl) })
     useChatStore.setState({ attachments: next })
-  }, [])
+    if (promptSuggestion) clearPromptSuggestion()
+  }, [clearPromptSuggestion, promptSuggestion])
 
   // Fetch MCP servers on mount
   useEffect(() => {
@@ -280,7 +293,10 @@ export default function ChatInput({ cwd, cwdPlacement = 'top', summaryAware = fa
       ? { text: pendingComposerSend, autoSend: true }
       : (pendingComposerSend || {})
     if ('skill' in payload) setSelectedSkill(payload.skill || null)
-    if (payload.text != null) setInputText(payload.text)
+    if (payload.text != null) {
+      setInputText(payload.text)
+      clearPromptSuggestion()
+    }
     clearPendingComposerSend()
     if (!payload.autoSend) return undefined
     const raf1 = requestAnimationFrame(() => {
@@ -1111,7 +1127,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top', summaryAware = fa
         ) : (
           <PromptComposer
             value={inputText}
-            onChange={setInputText}
+            onChange={handleComposerChange}
             attachments={attachments}
             onAttachmentsChange={setAttachments}
             skill={selectedSkill}
@@ -1128,6 +1144,8 @@ export default function ChatInput({ cwd, cwdPlacement = 'top', summaryAware = fa
             currentDirectory={displayCwd}
             active={composerActive}
             onRegisterWarn={(fn) => { composerWarnRef.current = fn }}
+            suggestion={promptSuggestion}
+            onAcceptSuggestion={acceptPromptSuggestion}
           />
         )}
 

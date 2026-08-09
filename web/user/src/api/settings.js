@@ -31,3 +31,11 @@ export function getRecapSetting() {
 export function updateRecapSetting(enabled) {
   return sandboxPut('/resource/recap-setting', { recap_enabled: enabled })
 }
+
+export function getRuntimeSettings() {
+  return sandboxGet('/resource/runtime-settings')
+}
+
+export function updateRuntimeSettings(patch) {
+  return sandboxPatch('/resource/runtime-settings', patch)
+}

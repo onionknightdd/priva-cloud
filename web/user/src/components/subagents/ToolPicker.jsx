@@ -3,7 +3,10 @@ import { X, ChevronDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import usePopoverTransition from '@shared/motion/usePopoverTransition'
 
-const KNOWN_TOOLS = new Set(['Read', 'Write', 'Edit', 'Grep', 'Glob', 'Bash', 'TodoWrite'])
+const KNOWN_TOOLS = new Set([
+  'Read', 'Write', 'Edit', 'Bash',
+  'TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate', 'SendMessage',
+])
 const monoFont = "'JetBrains Mono', 'Source Han Mono SC', monospace"
 
 function useDescribe(t) {

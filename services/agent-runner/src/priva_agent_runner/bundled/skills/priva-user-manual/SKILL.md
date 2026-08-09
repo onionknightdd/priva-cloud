@@ -188,10 +188,10 @@ Priva 是一个 AI Agent 对话与管理平台。你可以通过浏览器与 Cla
 - **LLM 提供商**：配置 Base URL + Auth Token（自动测试连接），选择 Default/Opus/Sonnet/Haiku 模型（可搜索下拉），配置 Vision 模型
 - **快捷操作**：创建聊天欢迎页快捷按钮（名称 + 提示词模板 + 50+ 图标选择），支持 `{变量}` 占位符
 - **Channels**：WeCom 机器人配置（Bot ID、Secret、代理 URL、用户白名单、欢迎/拒绝消息、模型覆盖、队列/超时），实时连接状态轮询；Feishu 即将推出
-- **Advanced**：传输模式切换（WebSocket / SSE）
+- **Advanced**：传输模式、下一步 Prompt Suggestion、开发者模式与额外环境变量 K/V
 
 **管理员专属：**
-- **Runtime**：全局系统提示词（开关 + 编辑/预览 + 字符计数），历史保留天数，CLI 路径，工具重试配置（重试次数/间隔 + Script/WeCom 回调）
+- **Runtime**：历史保留天数、CLI 路径、工具重试配置（重试次数/间隔 + Script/WeCom 回调）；不再支持 append 自定义 system prompt
 - **Plugins**：MCP 插件管理（启用/禁用 + URL/工具名/超时/请求头配置）
 
 > 详细操作请读取 `references/webapp-settings.md`
@@ -304,7 +304,6 @@ JWT 令牌通过登录接口获取，API Key 在设置页面生成。公开端�
 | | GET | /api/admin/audit | 审计日志 |
 | | GET | /api/admin/users/{username}/skills | 查看用户技能 |
 | | GET | /api/admin/users/{username}/mcp | 查看用户 MCP |
-| | GET/PUT | /api/admin/presetprompt | 系统提示词 |
 | | GET/PUT | /api/admin/clipath | CLI 路径 |
 | | GET/PUT | /api/admin/history-retention | 历史保留 |
 | | GET/PUT | /api/admin/retryable-tools | 工具重试 |

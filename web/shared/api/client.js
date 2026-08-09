@@ -298,8 +298,10 @@ export async function sandboxDelete(path) {
   return handleAPIResponse(res)
 }
 
-export async function agentRun(message, sessionId) {
-  return sandboxPost('/agent/run', { message, session_id: sessionId })
+export async function agentRun(message, sessionId, runMode) {
+  const body = { message, session_id: sessionId }
+  if (runMode === 'agent' || runMode === 'code') body.run_mode = runMode
+  return sandboxPost('/agent/run', body)
 }
 
 /**

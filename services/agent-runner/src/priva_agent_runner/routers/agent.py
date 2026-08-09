@@ -47,6 +47,7 @@ from priva_common.models.agent import (
     RenameRequest,
     RewindRequest,
     RewindResponse,
+    RunMode,
     SessionGroupResponse,
     SessionInfoResponse,
     SessionListResponse,
@@ -156,6 +157,34 @@ def _resolve_run_add_dirs(
     return read_add_dirs(cwd, session_id)
 
 
+def _explicit_run_mode(request: AgentRunRequest | WsInitFrame) -> RunMode | None:
+    """Preserve the API's default while distinguishing an omitted resume field."""
+    return request.run_mode if "run_mode" in request.model_fields_set else None
+
+
+async def _resolve_request_run_mode(
+    session_id: str | None,
+    requested: RunMode | None,
+) -> RunMode:
+    if not session_id:
+        return requested or "agent"
+    try:
+        return await session_meta.ensure_existing_session_run_mode(
+            session_id,
+            requested=requested,
+        )
+    except session_meta.RunModeMismatchError as exc:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "RunModeMismatch",
+                "message": str(exc),
+                "expected_run_mode": exc.expected,
+                "requested_run_mode": exc.requested,
+            },
+        ) from exc
+
+
 def _session_info_to_response(
     s,
     meta: dict | None = None,
@@ -201,6 +230,7 @@ def _session_info_to_response(
         origin="scheduler" if sched else None,
         scheduler_job_name=(sched or {}).get("job_name") or None,
         last_response_model=last_response_model,
+        run_mode=session_meta.get_session_run_mode(s.session_id, meta),
     )
 
 
@@ -1002,6 +1032,10 @@ async def run_agent(
     request: AgentRunRequest,
     user: UserRecord | None = Depends(get_current_user),
 ):
+    effective_run_mode = await _resolve_request_run_mode(
+        request.session_id,
+        _explicit_run_mode(request),
+    )
     cwd = _resolve_run_cwd(request.cwd, request.session_id, user)
     add_dirs = _resolve_run_add_dirs(request.add_dirs, cwd, request.session_id)
     username = user.username if user else None
@@ -1014,10 +1048,12 @@ async def run_agent(
         result = await agent_run(
             request.message, request.session_id, request.permission_mode,
             cwd=cwd, add_dirs=add_dirs, username=username, model_override=request.model,
+            run_mode=effective_run_mode,
             auth_method=auth_method,
             attachments=attachments, images=images, mcp_servers=request.mcp_servers,
             enable_file_checkpointing=request.enable_file_checkpointing,
             fork_session=request.fork_session,
+            extra_disallowed_tools=request.disallowed_tools,
         )
     except asyncio.CancelledError:
         outcome = "cancelled"
@@ -1036,6 +1072,10 @@ async def run_agent_stream(
     request: AgentRunRequest,
     user: UserRecord | None = Depends(get_current_user),
 ):
+    effective_run_mode = await _resolve_request_run_mode(
+        request.session_id,
+        _explicit_run_mode(request),
+    )
     cwd = _resolve_run_cwd(request.cwd, request.session_id, user)
     add_dirs = _resolve_run_add_dirs(request.add_dirs, cwd, request.session_id)
     username = user.username if user else None
@@ -1046,6 +1086,7 @@ async def run_agent_stream(
         agent_run_stream(
             request.message, request.session_id, request.permission_mode,
             cwd=cwd, add_dirs=add_dirs, username=username, model_override=request.model,
+            run_mode=effective_run_mode,
             auth_method=auth_method,
             attachments=attachments, images=images, mcp_servers=request.mcp_servers,
             mask_output=(auth_method == "api_key"),
@@ -1097,6 +1138,11 @@ async def list_agent_sessions(
     del source  # legacy parameter, kept for client compat
     meta = session_meta.read_meta()
     listed_sessions = list_sessions(directory=cwd if cwd and not archived else None)
+    # Any transcript that predates run_mode is immutable Code. Repair the
+    # durable meta before returning it so every frontend load is authoritative.
+    meta = await session_meta.ensure_existing_session_run_modes(
+        [s.session_id for s in listed_sessions]
+    )
     # One-time migration for SDK-era single tags: reserve their stable slots
     # before serializing the list, including tags that have never been edited
     # through Priva's multi-tag endpoint.
@@ -1218,6 +1264,7 @@ async def get_agent_session_messages(
             for m in messages
         ] + sidechain_messages,
         add_dirs=read_add_dirs(cwd, session_id),
+        run_mode=await session_meta.ensure_existing_session_run_mode(session_id),
     )
 
 
@@ -1370,10 +1417,15 @@ async def fork_agent_session(
         target=req.session_id,
         details={"new_session_id": result.session_id, "up_to": req.up_to_message_uuid},
     ))
+    inherited_run_mode = await session_meta.inherit_session_run_mode(
+        req.session_id,
+        result.session_id,
+    )
     return ForkResponse(
         new_session_id=result.session_id,
         parent_session_id=req.session_id,
         title=req.title,
+        run_mode=inherited_run_mode,
     )
 
 
@@ -1648,9 +1700,32 @@ async def ws_run(websocket: WebSocket):
             await websocket.close(code=4000)
             return
 
-    record = run_registry.create(session_id=frame.session_id)
+    try:
+        effective_run_mode = await _resolve_request_run_mode(
+            frame.session_id,
+            _explicit_run_mode(frame),
+        )
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+        await websocket.send_json({"event": "stream_error", "data": {
+            "code": detail.get("code", "RunModeMismatch"),
+            "message": detail.get("message", "Session run mode mismatch"),
+            "fatal": True,
+            "expected_run_mode": detail.get("expected_run_mode"),
+            "requested_run_mode": detail.get("requested_run_mode"),
+        }})
+        await websocket.close(code=4000)
+        return
+
+    record = run_registry.create(
+        session_id=frame.session_id,
+        run_mode=effective_run_mode,
+    )
     record.task = asyncio.create_task(
-        _execute_run(record, frame, cwd, add_dirs, username, attachments, images),
+        _execute_run(
+            record, frame, cwd, add_dirs, username, attachments, images,
+            effective_run_mode,
+        ),
         name=f"agent-run-{record.run_id[:8]}",
     )
     await _ws_follow(
@@ -1671,6 +1746,7 @@ async def _execute_run(
     username: str | None,
     attachments: list | None,
     images: list | None,
+    effective_run_mode: RunMode,
 ) -> None:
     """Registry-owned run task: pump agent_run_events into the record.
 
@@ -1709,6 +1785,7 @@ async def _execute_run(
             username,
             frame.model,
             auth_method="jwt",
+            run_mode=effective_run_mode,
             add_dirs=add_dirs,
             emit=emit,
             cancelled=record.cancelled,
@@ -1793,6 +1870,7 @@ async def _ws_follow(
                 "replay_from": max(since_seq + 1, record.first_seq),
                 "replay_gap": record.has_replay_gap(since_seq),
                 "queued": record.queued_entries(),
+                "run_mode": record.run_mode,
             })
         # Replay the buffer. permission_requests already resolved are filtered
         # so a stale approval card can't reappear after a refresh.

@@ -125,6 +125,8 @@ function getCaretCoordinates(el, position) {
  *   currentDirectory — directory whose files are available through @ references
  *   disabled       — disable the textarea
  *   active         — false closes transient picker/menu UI while host page is hidden
+ *   suggestion     — optional next-prompt ghost text shown while value is empty
+ *   onAcceptSuggestion — accepts suggestion on Tab / ArrowRight
  */
 // Shared upload dropdown for the compact toolbar and the modal footer.
 // Module-level (not nested in PromptComposer) so its identity is stable across
@@ -188,6 +190,8 @@ export default function PromptComposer({
   disabled,
   active = true,
   onRegisterWarn,
+  suggestion,
+  onAcceptSuggestion,
 }) {
   const { t } = useTranslation()
   const internalTextareaRef = useRef(null)
@@ -197,6 +201,14 @@ export default function PromptComposer({
   const modalTextareaRef = useRef(null)
   const clearAllExitKeysRef = useRef(new Set())
   const textareaHeightAnimRef = useRef(null)
+  const showSuggestion = Boolean(suggestion && !value && !skill && attachments.length === 0 && !disabled)
+
+  const acceptSuggestion = () => {
+    if (!showSuggestion || !onAcceptSuggestion) return false
+    onAcceptSuggestion(suggestion)
+    requestAnimationFrame(() => focusActiveTextarea())
+    return true
+  }
 
   // Expanded modal for long-form text entry
   const [expanded, setExpanded] = useState(false)
@@ -399,6 +411,14 @@ export default function PromptComposer({
   }, [expanded, textareaRef])
 
   const handleModalKeyDown = (e) => {
+    if (
+      !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey
+      && (e.key === 'Tab' || e.key === 'ArrowRight')
+      && acceptSuggestion()
+    ) {
+      e.preventDefault()
+      return
+    }
     // File picker nav/select/escape — mirrors the compact path so `@` works the same way.
     if (showFilePicker) {
       if (e.key === 'ArrowDown') {
@@ -818,6 +838,14 @@ export default function PromptComposer({
   }
 
   const handleKeyDown = (e) => {
+    if (
+      !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey
+      && (e.key === 'Tab' || e.key === 'ArrowRight')
+      && acceptSuggestion()
+    ) {
+      e.preventDefault()
+      return
+    }
     if (showFilePicker) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -1341,38 +1369,71 @@ export default function PromptComposer({
           </div>
         </AnimatedCollapse>
 
-        {/* Textarea */}
-        <textarea
-          ref={textareaRef}
-          className="flex-1 px-3 pb-2 text-sm chat-textarea"
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--text-primary)',
-            resize: 'none',
-            outline: 'none',
-            fontFamily: 'var(--font-ui)',
-            fontSize: 14,
-            lineHeight: 1.5,
-            minHeight,
-            maxHeight: 200,
-            overflowY: value ? 'auto' : 'hidden',
-            paddingTop: 6,
-            paddingBottom: 2,
-            paddingLeft: 16,
-          }}
-          placeholder={skill
-            ? (skill.level === 'builtin' ? t('skillPicker.commandPlaceholder') : t('skillPicker.instructionPlaceholder'))
-            : (placeholder || t('chat.placeholder'))}
-          value={value}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          onFocus={() => { if (containerRef.current) containerRef.current.style.borderColor = 'var(--border-strong)' }}
-          onBlur={() => { if (containerRef.current && !isDragging) containerRef.current.style.borderColor = 'var(--border)' }}
-          rows={1}
-          disabled={disabled}
-        />
+        {/* Textarea + non-interactive next-prompt ghost. */}
+        <div className="relative flex-1 min-w-0">
+          {showSuggestion && (
+            <div
+              aria-hidden="true"
+              className="absolute"
+              title={suggestion}
+              style={{
+                top: 6,
+                left: 16,
+                right: 36,
+                maxHeight: 42,
+                overflow: 'hidden',
+                color: 'var(--text-dim)',
+                fontFamily: 'var(--font-ui)',
+                fontSize: 14,
+                lineHeight: 1.5,
+                pointerEvents: 'none',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {suggestion}
+            </div>
+          )}
+          <textarea
+            ref={textareaRef}
+            className="px-3 pb-2 text-sm chat-textarea"
+            style={{
+              display: 'block',
+              width: '100%',
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-primary)',
+              resize: 'none',
+              outline: 'none',
+              fontFamily: 'var(--font-ui)',
+              fontSize: 14,
+              lineHeight: 1.5,
+              minHeight,
+              maxHeight: 200,
+              overflowY: value ? 'auto' : 'hidden',
+              paddingTop: 6,
+              paddingBottom: 2,
+              paddingLeft: 16,
+            }}
+            placeholder={showSuggestion ? '' : (skill
+              ? (skill.level === 'builtin' ? t('skillPicker.commandPlaceholder') : t('skillPicker.instructionPlaceholder'))
+              : (placeholder || t('chat.placeholder')))}
+            value={value}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            onFocus={() => { if (containerRef.current) containerRef.current.style.borderColor = 'var(--border-strong)' }}
+            onBlur={() => { if (containerRef.current && !isDragging) containerRef.current.style.borderColor = 'var(--border)' }}
+            rows={1}
+            disabled={disabled}
+          />
+        </div>
+
+        {showSuggestion && (
+          <div className="flex items-center justify-end px-3" style={{ color: 'var(--text-dim)', fontSize: 11, minWidth: 0 }}>
+            <span className="truncate">{t('chat.acceptSuggestionHint')}</span>
+          </div>
+        )}
 
         {/* Toolbar row */}
         <div className="flex items-center justify-between px-2 pb-1" style={{ paddingTop: 2 }}>
@@ -1481,13 +1542,35 @@ export default function PromptComposer({
             </button>
 
             {/* Large textarea */}
+            {showSuggestion && (
+              <div
+                aria-hidden="true"
+                title={suggestion}
+                className="absolute"
+                style={{
+                  top: 44,
+                  left: 20,
+                  right: 48,
+                  color: 'var(--text-dim)',
+                  fontFamily: 'var(--font-ui)',
+                  fontSize: 14,
+                  lineHeight: 1.6,
+                  pointerEvents: 'none',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  zIndex: 1,
+                }}
+              >
+                {suggestion}
+              </div>
+            )}
             <textarea
               ref={modalTextareaRef}
               value={value}
               onChange={handleInputChange}
               onKeyDown={handleModalKeyDown}
               onPaste={handlePaste}
-              placeholder={placeholder || t('chat.placeholder')}
+              placeholder={showSuggestion ? '' : (placeholder || t('chat.placeholder'))}
               className="flex-1 chat-textarea"
               disabled={disabled}
               style={{
@@ -1584,7 +1667,7 @@ export default function PromptComposer({
                   extra={plusMenuExtra}
                 />
               </div>
-              <span>{t('chat.modalFooterHint')}</span>
+              <span>{showSuggestion ? t('chat.acceptSuggestionHint') : t('chat.modalFooterHint')}</span>
             </div>
           </div>
         </div>,

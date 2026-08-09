@@ -19,7 +19,10 @@ from priva_common.models.resource import (
     QuickActionUpdateRequest,
     RecapSettingResponse,
     RecapSettingUpdateRequest,
+    RuntimeSettingsResponse,
+    RuntimeSettingsUpdateRequest,
 )
+from priva_common.runtime_settings import read_runtime_settings, update_runtime_settings
 from ..deps import require_user
 from ..services.claude_sdk import session_recap
 
@@ -69,3 +72,22 @@ async def update_recap_setting(
     # feature off has to write ``False`` rather than pop the key.
     _user_yaml.save_user_yaml_key("recap_enabled", bool(request.recap_enabled))
     return RecapSettingResponse(recap_enabled=request.recap_enabled)
+
+
+# ── Runtime environment / prompt suggestions ───────────────────────
+
+
+@router.get("/runtime-settings", response_model=RuntimeSettingsResponse)
+async def get_runtime_settings(user: UserRecord = Depends(require_user)):
+    del user
+    return RuntimeSettingsResponse(**read_runtime_settings())
+
+
+@router.patch("/runtime-settings", response_model=RuntimeSettingsResponse)
+async def patch_runtime_settings(
+    request: RuntimeSettingsUpdateRequest,
+    user: UserRecord = Depends(require_user),
+):
+    del user
+    patch = request.model_dump(exclude_unset=True, exclude_none=True)
+    return RuntimeSettingsResponse(**update_runtime_settings(patch))

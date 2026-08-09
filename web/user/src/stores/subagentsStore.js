@@ -13,7 +13,10 @@ import {
 const DEFAULT_TEST_WIDTH = 480
 const STORAGE_KEY = 'subagents-test-width'
 
-const DEFAULT_ALLOWED_TOOLS = ['Read', 'Write', 'Edit', 'Grep', 'Glob', 'Bash']
+const DEFAULT_ALLOWED_TOOLS = [
+  'Read', 'Write', 'Edit', 'Bash',
+  'TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate', 'SendMessage',
+]
 
 const emptyDraft = () => ({
   __mode: 'create', // 'create' or 'edit'

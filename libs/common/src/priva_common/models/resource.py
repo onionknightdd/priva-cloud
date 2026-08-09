@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from priva_common.runtime_settings import validate_extra_env
 
 
 class ModelInfo(BaseModel):
@@ -39,3 +41,20 @@ class RecapSettingResponse(BaseModel):
 
 class RecapSettingUpdateRequest(BaseModel):
     recap_enabled: bool
+
+
+class RuntimeSettingsResponse(BaseModel):
+    extra_env_enabled: bool = False
+    extra_env: dict[str, str] = Field(default_factory=dict)
+    prompt_suggestion_enabled: bool = False
+
+
+class RuntimeSettingsUpdateRequest(BaseModel):
+    extra_env_enabled: bool | None = None
+    extra_env: dict[str, str] | None = None
+    prompt_suggestion_enabled: bool | None = None
+
+    @field_validator("extra_env")
+    @classmethod
+    def validate_env(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        return None if value is None else validate_extra_env(value)

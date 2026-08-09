@@ -161,7 +161,14 @@ export async function openSession(sessionOrId, opts = {}) {
     // Idempotent re-hydration (a previously evicted runtime re-opens clean).
     taskSlice.getState().clearTasks()
     fileOpsSlice.getState().clearFileOps()
-    chat.getState().loadSession(sessionId, messages, forkParentId, subagentContent, data.add_dirs || [])
+    chat.getState().loadSession(
+      sessionId,
+      messages,
+      forkParentId,
+      subagentContent,
+      data.add_dirs || [],
+      data.run_mode,
+    )
     // Whatever recap this session already has; not awaited, so it fades in
     // after the transcript rather than holding the switch.
     refreshSessionRecap(sessionId, chat.getState)

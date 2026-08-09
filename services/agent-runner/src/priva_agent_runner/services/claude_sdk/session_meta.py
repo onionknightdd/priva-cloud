@@ -6,7 +6,10 @@ ourselves in a single **account-level** index next to the SDK's data:
     ~/.claude/priva_meta.json
     {
       "sessions": {
-        "<session_id>": {"pinned": bool, "archived": bool, "tags": [str, ...]}
+        "<session_id>": {
+          "pinned": bool, "archived": bool, "tags": [str, ...],
+          "run_mode": "agent" | "code"
+        }
       },
       "workdirs":  { "<canonical_cwd>": {"pinned": bool} },
       "recent_activities": [
@@ -29,8 +32,8 @@ sessions list surfaces them as ``origin='scheduler'`` (sidebar ⏰) and the D15
 boot prune uses the index to delete only scheduler-origin transcripts.
 
 ``recaps`` is deliberately a **top-level** key rather than a field on the
-``sessions`` entry: an entry is dropped once it carries neither a flag nor a
-tag, so a recap parked in there could be deleted when a user clears metadata.
+``sessions`` entry. Session entries carry flags, tags, and the immutable
+``run_mode``; recap payloads remain separately enumerable and lifecycle-owned.
 The recap *toggle* is not here at all — it is user config, so it lives in
 ``.priva.user.yml`` beside ``vision_model``; this file stays a pure per-session
 index.
@@ -54,6 +57,7 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import Literal
 
 from claude_agent_sdk._internal.sessions import (
     _canonicalize_path,
@@ -70,6 +74,8 @@ _MAX_SESSION_TAGS = 3
 _TAG_COLOR_SLOTS = 100
 # A recap is one sentence; anything longer is a model that ignored the prompt.
 _RECAP_MAX_CHARS = 200
+RunMode = Literal["agent", "code"]
+_RUN_MODES = frozenset({"agent", "code"})
 
 # Guards read-modify-write of the index. The pod is single-writer, but turns and
 # list requests are concurrent coroutines, so serialize mutations.
@@ -175,6 +181,32 @@ def get_session_flags(session_id: str, meta: dict | None = None) -> dict:
         "pinned": bool(entry.get("pinned", False)),
         "archived": bool(entry.get("archived", False)),
     }
+
+
+class RunModeMismatchError(ValueError):
+    def __init__(self, expected: RunMode, requested: RunMode):
+        self.expected = expected
+        self.requested = requested
+        super().__init__(
+            f"Session run mode is locked to {expected!r}; requested {requested!r}"
+        )
+
+
+def get_session_run_mode(
+    session_id: str,
+    meta: dict | None = None,
+    *,
+    fallback: RunMode = "code",
+) -> RunMode:
+    """Read a session mode without mutating the index.
+
+    Existing sessions without a valid field are legacy sessions and therefore
+    project as Code until an async read path persists the repair.
+    """
+    data = meta if meta is not None else _read_raw()
+    entry = data.get("sessions", {}).get(session_id)
+    value = entry.get("run_mode") if isinstance(entry, dict) else None
+    return value if value in _RUN_MODES else fallback
 
 
 def _normalize_tags(raw: object, *, truncate: bool) -> list[str]:
@@ -374,6 +406,88 @@ async def ensure_tag_colors(tags: object) -> dict:
         return data
 
 
+async def ensure_existing_session_run_mode(
+    session_id: str,
+    requested: RunMode | None = None,
+) -> RunMode:
+    """Repair/read an existing session's immutable mode.
+
+    Missing or invalid legacy metadata is first repaired to ``code``. An
+    explicit conflicting request is then rejected without changing the stored
+    value. The single lock makes concurrent resume attempts deterministic.
+    """
+    async with _lock:
+        data = _read_raw()
+        entry = data["sessions"].get(session_id)
+        if not isinstance(entry, dict):
+            entry = {"pinned": False, "archived": False}
+        mode = entry.get("run_mode")
+        changed = False
+        if mode not in _RUN_MODES:
+            if mode is not None:
+                logger.warning(
+                    "Repairing invalid run_mode {!r} for legacy session {} to code",
+                    mode,
+                    session_id,
+                )
+            mode = "code"
+            entry["run_mode"] = mode
+            data["sessions"][session_id] = entry
+            changed = True
+        if changed:
+            _write_raw(data)
+        if requested is not None and requested != mode:
+            raise RunModeMismatchError(mode, requested)
+        return mode
+
+
+async def ensure_existing_session_run_modes(session_ids: list[str]) -> dict:
+    """Batch-repair legacy sessions to Code and return the updated index."""
+    async with _lock:
+        data = _read_raw()
+        changed = False
+        for session_id in session_ids:
+            if not session_id:
+                continue
+            entry = data["sessions"].get(session_id)
+            if not isinstance(entry, dict):
+                entry = {"pinned": False, "archived": False}
+            if entry.get("run_mode") not in _RUN_MODES:
+                entry["run_mode"] = "code"
+                data["sessions"][session_id] = entry
+                changed = True
+        if changed:
+            _write_raw(data)
+        return data
+
+
+async def claim_new_session_run_mode(session_id: str, run_mode: RunMode) -> RunMode:
+    """Bind a CLI-assigned new/rotated session id to the run's mode."""
+    if run_mode not in _RUN_MODES:
+        raise ValueError(f"Invalid run mode: {run_mode!r}")
+    async with _lock:
+        data = _read_raw()
+        entry = data["sessions"].get(session_id)
+        if not isinstance(entry, dict):
+            entry = {"pinned": False, "archived": False}
+        existing = entry.get("run_mode")
+        if existing in _RUN_MODES and existing != run_mode:
+            raise RunModeMismatchError(existing, run_mode)
+        if existing != run_mode:
+            entry["run_mode"] = run_mode
+            data["sessions"][session_id] = entry
+            _write_raw(data)
+        return run_mode
+
+
+async def inherit_session_run_mode(
+    parent_session_id: str,
+    child_session_id: str,
+) -> RunMode:
+    mode = await ensure_existing_session_run_mode(parent_session_id)
+    return await claim_new_session_run_mode(child_session_id, mode)
+
+
 async def set_session_flags(
     session_id: str, *, pinned: bool | None = None, archived: bool | None = None
 ) -> dict:
@@ -387,11 +501,13 @@ async def set_session_flags(
             entry["pinned"] = bool(pinned)
         if archived is not None:
             entry["archived"] = bool(archived)
-        # Drop the entry entirely once it carries no active flags or tags.
+        # Drop only metadata-free entries. A run_mode permanently locks the
+        # session even after its flags/tags are cleared.
         if (
             not entry.get("pinned")
             and not entry.get("archived")
             and not entry.get("tags")
+            and entry.get("run_mode") not in _RUN_MODES
         ):
             data["sessions"].pop(session_id, None)
         else:
@@ -420,7 +536,12 @@ async def set_session_tags(session_id: str, tags: object) -> dict:
             entry["tags"] = normalized
         else:
             entry.pop("tags", None)
-        if entry.get("pinned") or entry.get("archived") or entry.get("tags"):
+        if (
+            entry.get("pinned")
+            or entry.get("archived")
+            or entry.get("tags")
+            or entry.get("run_mode") in _RUN_MODES
+        ):
             data["sessions"][session_id] = entry
         else:
             data["sessions"].pop(session_id, None)

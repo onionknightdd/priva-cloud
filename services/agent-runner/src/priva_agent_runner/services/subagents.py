@@ -20,7 +20,6 @@ from priva_common.models.subagents import (
 )
 from priva_common.paths import claude_config_dir
 from priva_common.workspace import get_user_workspace
-from priva_common.user_store import get_user_store
 
 logger = get_app_logger(__name__)
 
@@ -43,13 +42,23 @@ BUILTIN_TOOL_CATALOG = [
     "Read",
     "Write",
     "Edit",
-    "Grep",
-    "Glob",
     "Bash",
-    "TodoWrite",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
+    "SendMessage",
 ]
 
-FORBIDDEN_TOOLS = {"Agent", "Task"}
+FORBIDDEN_TOOLS = {
+    "Agent",
+    "Task",
+    "DesignSync",
+    "PushNotification",
+    "ScheduleWakeup",
+    "ReportFindings",
+}
+LEGACY_REMOVED_TOOLS = {"Skill", "Grep", "Glob", "TodoWrite"}
 
 MCP_TOOL_RE = re.compile(r"^mcp__[a-zA-Z0-9_]+__[a-zA-Z0-9_*]+$")
 
@@ -185,11 +194,15 @@ def _parse_agent_md(path: Path, scope: str = "project", cwd: str | None = None) 
     name = fm.get("name") or path.stem
     description = fm.get("description") or ""
 
-    # SDK 0.1.81 deprecated listing "Skill" in tools — it's auto-injected via
-    # ``options.skills``. Strip it on read so the picker reflects the new
-    # model; the next save writes the migrated frontmatter back to disk.
-    raw_tools = [t for t in _normalize_list_value(fm.get("tools")) if t != "Skill"]
-    raw_disallowed = [t for t in _normalize_list_value(fm.get("disallowedTools")) if t != "Skill"]
+    # Normalize old Claude Code catalogs on read. The next save writes the
+    # migrated frontmatter back without tools that no longer exist or that a
+    # subagent must never receive.
+    stripped = LEGACY_REMOVED_TOOLS | FORBIDDEN_TOOLS
+    raw_tools = [t for t in _normalize_list_value(fm.get("tools")) if t not in stripped]
+    raw_disallowed = [
+        t for t in _normalize_list_value(fm.get("disallowedTools"))
+        if t not in stripped
+    ]
 
     return SubAgentDetail(
         name=str(name),

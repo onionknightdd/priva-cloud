@@ -41,9 +41,6 @@ export const getAuditLog = (params = {}) => {
   return getJSON(`/admin/audit?${query}`)
 }
 
-export const getPresetPrompt = () => getJSON('/admin/presetprompt')
-export const updatePresetPrompt = (data) => putJSON('/admin/presetprompt', data)
-
 export const getCliPath = () => getJSON('/admin/clipath')
 export const updateCliPath = (data) => putJSON('/admin/clipath', data)
 

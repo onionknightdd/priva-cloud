@@ -279,6 +279,16 @@
 .sidebar-menu button:hover {
   border-radius: 8px !important;
 }
+
+/* Agent/Code mirrors the compact raised segmented control used by the
+   product mode picker: a soft group surface with a solid selected tile. */
+.sidebar-menu .run-mode-switcher .run-mode-tab {
+  border-radius: 8px !important;
+}
+.sidebar-menu .run-mode-switcher .run-mode-help-button,
+.run-mode-help-close {
+  border-radius: 4px !important;
+}
 .sidebar-menu .project-group-row,
 .sidebar-menu .sidebar-session-item,
 .sidebar-menu .sidebar-panel-header {

@@ -14,12 +14,12 @@ from claude_agent_sdk.types import (
 )
 from fastapi import HTTPException
 
-from priva_common.models.agent import PermissionMode
-from priva_common.config import get_settings
+from priva_common.models.agent import McpServersSelection, PermissionMode, RunMode
 from priva_common.models.llm_profiles import LlmProfile
 from priva_common.user_env import read_settings_env
 from ..llm_profiles import open_profile_settings_overlay, resolve_model
 from priva_common.workspace import get_workspace_for_username
+from priva_common.runtime_settings import read_runtime_settings
 
 _logger = None
 
@@ -43,6 +43,10 @@ BUILTIN_DISALLOWED_TOOLS = [
     "ExitWorktree",
     "NotebookEdit",
     "RemoteTrigger",
+    "PushNotification",
+    "DesignSync",
+    "ScheduleWakeup",
+    "ReportFindings",
     "WebFetch",
     "WebSearch",
 ]
@@ -97,7 +101,8 @@ def _ensure_executable(cli_path: str) -> str:
 
     wrapper = f"#!/bin/sh\nexec {node_path} {real_path} \"$@\"\n".encode()
     try:
-        import ctypes, ctypes.util
+        import ctypes
+        import ctypes.util
         libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
         fd = libc.memfd_create(b"claude-wrapper", 0)
         if fd < 0:
@@ -146,20 +151,34 @@ async def build_agent_options(
     add_dirs: list[str] | None = None,
     username: str | None = None,
     model_override: str | None = None,
+    run_mode: RunMode = "agent",
     auth_method: Literal["jwt", "api_key", "anonymous"] = "jwt",
-    mcp_servers: str | list[str] | None = "auto",
+    mcp_servers: McpServersSelection = "auto",
     inject_scheduler_tools: bool = False,  # deferred (Phase 4); kept for signature compat
     enable_file_checkpointing: bool = False,
     fork_session: bool = False,
     extra_allowed_tools: list[str] | None = None,
     inject_openclaw_tools: bool = False,
-    enable_permission_feedback: bool = True,
+    enable_permission_feedback: bool = False,
+    enable_prompt_suggestions: bool = False,
     max_turns: int | None = None,
     extra_disallowed_tools: list[str] | None = None,
     include_partial_messages: bool = False,
     vision_image_paths: list[str] | None = None,
 ) -> ClaudeAgentOptions:
-    settings = get_settings()
+    if run_mode not in {"agent", "code"}:
+        raise HTTPException(422, f"Invalid run_mode: {run_mode!r}")
+    valid_mcp_selection = (
+        mcp_servers is None
+        or mcp_servers == "auto"
+        or mcp_servers == "disable"
+        or (
+            isinstance(mcp_servers, list)
+            and all(isinstance(name, str) for name in mcp_servers)
+        )
+    )
+    if not valid_mcp_selection:
+        raise HTTPException(422, "mcp_servers must be 'auto', 'disable', a string array, or null")
 
     if username is None:
         raise HTTPException(400, "Authentication required for agent runs")
@@ -213,7 +232,11 @@ async def build_agent_options(
     # MERGED onto the CLI subprocess's inherited os.environ (per-key override), so the
     # runner SERVICE's own os.environ is untouched and a user-installed package can't
     # shadow a dependency this service imports.
+    runtime_settings = read_runtime_settings()
     env_dict: dict[str, str] = {}
+    if runtime_settings["extra_env_enabled"]:
+        # read_runtime_settings has already validated names, values and limits.
+        env_dict.update(runtime_settings["extra_env"])
     try:
         from ..sandbox_venv import venv_env_overlay
         env_dict.update(venv_env_overlay(env_dict))
@@ -269,7 +292,15 @@ async def build_agent_options(
         include_hook_events=True,
         include_partial_messages=include_partial_messages,
         skills=enabled_skill_names,
+        # SDK 0.2.x serializes None as --system-prompt "". A pure preset
+        # object is the only representation that preserves Claude Code's
+        # native preset without passing a system-prompt flag.
+        system_prompt=(
+            "" if run_mode == "agent"
+            else {"type": "preset", "preset": "claude_code"}
+        ),
     )
+    options._priva_run_mode = run_mode
     # Claude Agent SDK maps ``settings`` to --settings (highest user-controlled
     # settings layer) and ``model`` to --model.  Keep the secret in a 0600 file
     # under the app config path; it never appears in argv or options.env.
@@ -303,31 +334,15 @@ async def build_agent_options(
     if cli_path:
         cli_path = _ensure_executable(str(cli_path))
         options.cli_path = cli_path
-    preset_cfg = runtime.get("append_systemprompt", {})
-    if preset_cfg.get("enable") and preset_cfg.get("content"):
-        options.system_prompt = {
-            "type": "preset",
-            "preset": "claude_code",
-            "append": preset_cfg["content"],
-        }
-
-    # --- Plugin system: execute all enabled plugins ---
-    try:
-        from ..priva_plugin import get_plugin_manager
-        manager = get_plugin_manager()
-        plugin_result = await manager.execute_all(username, runtime)
-        if plugin_result.system_prompt_append:
-            if options.system_prompt and isinstance(options.system_prompt, dict):
-                existing_append = options.system_prompt.get("append", "")
-                options.system_prompt["append"] = (existing_append + "\n\n" + plugin_result.system_prompt_append).strip()
-            else:
-                options.system_prompt = {
-                    "type": "preset",
-                    "preset": "claude_code",
-                    "append": plugin_result.system_prompt_append,
-                }
-    except Exception:
-        _get_logger().warning("Plugin system execution failed", exc_info=True)
+    prompt_suggestions = bool(
+        enable_prompt_suggestions
+        and runtime_settings["prompt_suggestion_enabled"]
+    )
+    if prompt_suggestions:
+        # Claude Code requires BOTH the environment gate and CLI flag.
+        options.env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] = "true"
+        options.extra_args["prompt-suggestions"] = "true"
+    options._priva_prompt_suggestion_enabled = prompt_suggestions
 
     if session_id:
         options.resume = session_id

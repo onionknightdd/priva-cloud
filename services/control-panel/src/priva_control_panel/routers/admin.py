@@ -19,8 +19,6 @@ from priva_common.models.admin import (
     HistoryRetentionResponse,
     HistoryRetentionUpdate,
     PendingRegistrationResponse,
-    PresetPromptResponse,
-    PresetPromptUpdate,
     ResourceUsageAccountEntry,
     ResourceUsageResponse,
     RunnerDefaultsResponse,
@@ -1363,34 +1361,6 @@ async def get_audit_log(
         total=total,
         limit=limit,
     )
-
-
-@router.get("/presetprompt", response_model=PresetPromptResponse)
-async def get_preset_prompt():
-    store = get_user_store()
-    runtime = store.get_runtime_config()
-    cfg = runtime.get("append_systemprompt", {})
-    return PresetPromptResponse(enable=cfg.get("enable", False), content=cfg.get("content"))
-
-
-@router.put("/presetprompt", response_model=PresetPromptResponse)
-async def update_preset_prompt(
-    request: PresetPromptUpdate,
-    current_user: UserRecord = Depends(require_admin),
-):
-    store = get_user_store()
-    store.update_runtime_config("append_systemprompt", {
-        "enable": request.enable,
-        "content": request.content,
-    })
-    audit = get_audit_logger()
-    audit.append(AuditEntry(
-        actor=current_user.username,
-        action="runtime.presetprompt_updated",
-        target="append_systemprompt",
-        details={"enable": request.enable, "content_length": len(request.content or "")},
-    ))
-    return PresetPromptResponse(enable=request.enable, content=request.content)
 
 
 @router.get("/clipath", response_model=CliPathResponse)

@@ -17,7 +17,7 @@ const TEMPLATES = [
         '- Design: appropriate abstraction level, no premature optimization\n' +
         '- Tests: missing coverage for new behavior\n\n' +
         'Be direct. Cite file paths and line numbers. Suggest concrete fixes.',
-      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      tools: ['Read', 'Bash'],
       model: '',
     },
   },
@@ -34,7 +34,7 @@ const TEMPLATES = [
         '3. Form a hypothesis. Test it.\n' +
         '4. When confident in the root cause, propose the smallest fix that addresses it.\n' +
         '5. Cite file paths and line numbers in your final answer.',
-      tools: ['Read', 'Edit', 'Grep', 'Glob', 'Bash'],
+      tools: ['Read', 'Edit', 'Bash'],
       model: '',
     },
   },
@@ -51,7 +51,7 @@ const TEMPLATES = [
         '- Lead with the practical: what does this do, when do I use it, how do I call it.\n' +
         '- Keep examples short and runnable.\n' +
         '- Don\'t pad with marketing language.',
-      tools: ['Read', 'Write', 'Edit', 'Grep', 'Glob'],
+      tools: ['Read', 'Write', 'Edit'],
       model: '',
     },
   },
@@ -68,7 +68,7 @@ const TEMPLATES = [
         '2. Run the suite.\n' +
         '3. For each failing test, classify: real regression vs flaky vs already-known.\n' +
         '4. Report: a count, the regressions with file:line, and any test that needs author attention.',
-      tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      tools: ['Read', 'Bash'],
       model: '',
     },
   },

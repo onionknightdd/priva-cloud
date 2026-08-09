@@ -93,6 +93,7 @@ function mapSession(s) {
     // Scheduler-origin sessions (D3): the sidebar marks these ⏰.
     origin: s.origin || null,
     schedulerJobName: s.scheduler_job_name || null,
+    runMode: s.run_mode === 'agent' ? 'agent' : 'code',
     lastResponseModel,
   }
 }

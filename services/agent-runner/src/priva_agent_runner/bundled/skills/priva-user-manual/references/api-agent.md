@@ -27,6 +27,7 @@ curl -X POST /api/sandbox/agent/run \
   -d '{
     "message": "帮我写一个 Python Hello World",
     "session_id": null,
+    "run_mode": "agent",
     "permission_mode": "default",
     "model": null,
     "attachments": [],
@@ -40,10 +41,13 @@ curl -X POST /api/sandbox/agent/run \
 |------|------|------|------|
 | message | string | 是 | 发送给 Agent 的消息 |
 | session_id | string | 否 | 会话 ID（传入则继续已有会话，不传则新建） |
+| run_mode | string | 否 | `agent`（默认，空 system prompt）或 `code`（Claude Code 原生 preset）。会话首次运行后永久锁定；恢复会话时省略该字段会继承已存模式 |
 | permission_mode | string | 否 | 权限模式：`default`/`acceptEdits`/`plan`/`bypassPermissions` |
 | model | string | 否 | 指定模型（不传则使用默认） |
 | attachments | array | 否 | 附件列表（已上传文件的路径） |
-| mcp_servers | string/array | 否 | MCP 服务器：`"auto"`/`"disable"`/`["server1","server2"]` |
+| mcp_servers | string/array/null | 否 | MCP 服务器：`"auto"`/`"disable"`/`["server1","server2"]`/`null`；不接受其他字符串 |
+| disallowed_tools | array | 否 | 本次运行额外禁用的工具名称或 pattern；同步、SSE 均会生效 |
+| enable_permission_feedback | boolean | 否 | 仅流式接口生效；同步 `/run` 始终按 `false` 运行，不等待交互式权限反馈 |
 
 ### 响应
 
@@ -66,7 +70,8 @@ curl -X POST /api/sandbox/agent/run \
   "num_turns": 2,
   "duration_ms": 3500,
   "total_cost_usd": 0.015,
-  "stop_reason": "end_turn"
+  "stop_reason": "end_turn",
+  "run_mode": "agent"
 }
 ```
 
@@ -82,7 +87,8 @@ curl -X POST /api/sandbox/agent/run/stream \
   --no-buffer
 ```
 
-请求参数与同步模式相同。
+请求参数与同步模式相同。若“高级”中启用下一步提示建议，流式运行还会在
+`result` 之后发送可选的 `prompt_suggestion` 事件；同步 `/run` 不生成该事件。
 
 ### SSE 事件格式
 
@@ -99,8 +105,11 @@ data: {"tool_name": "Read", "tool_input": {"file_path": "main.py"}}
 event: tool_result
 data: {"tool_name": "Read", "content": "...文件内容..."}
 
-event: done
-data: {"session_id": "abc123", "num_turns": 3, "duration_ms": 5000}
+event: result
+data: {"session_id": "abc123", "num_turns": 3, "duration_ms": 5000, "run_mode": "agent"}
+
+event: prompt_suggestion
+data: {"session_id": "abc123", "suggestion": "继续为这个模块补充单元测试"}
 ```
 
 ---
@@ -129,12 +138,16 @@ new WebSocket("ws://<host>/api/sandbox/agent/ws/run", ["priva.ws.v1", `priva.tok
   "type": "init",
   "message": "帮我创建一个文件",
   "session_id": null,
+  "run_mode": "code",
   "permission_mode": "default",
   "model": null,
   "attachments": [],
   "mcp_servers": "auto"
 }
 ```
+
+`run_mode` 的默认值、会话锁定和恢复规则与 HTTP 接口一致。模式不一致的恢复
+请求会收到 `RunModeMismatch`，不会修改已有会话 metadata。
 
 ### 接收事件
 
@@ -177,6 +190,9 @@ new WebSocket("ws://<host>/api/sandbox/agent/ws/run", ["priva.ws.v1", `priva.tok
 ---
 
 ## 会话管理
+
+会话列表和消息响应都包含 `run_mode`。历史会话若没有该字段，服务端会按
+`code` 修复 metadata 并永久锁定，前端加载后只展示该模式而不允许切换。
 
 ### 获取会话列表
 

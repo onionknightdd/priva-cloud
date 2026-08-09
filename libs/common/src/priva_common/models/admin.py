@@ -399,16 +399,6 @@ class HookPolicySeedResponse(BaseModel):
     default_on: bool
 
 
-class PresetPromptResponse(BaseModel):
-    enable: bool = False
-    content: str | None = None
-
-
-class PresetPromptUpdate(BaseModel):
-    enable: bool
-    content: str | None = None
-
-
 class CliPathResponse(BaseModel):
     cli_path: str | None = None
 

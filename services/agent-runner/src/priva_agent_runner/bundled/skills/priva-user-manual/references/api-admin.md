@@ -18,8 +18,6 @@
 | DELETE | /api/admin/users/{username}/skills/{level}/{name} | 删除用户技能 |
 | GET | /api/admin/users/{username}/mcp | 查看用户 MCP 配置 |
 | DELETE | /api/admin/users/{username}/mcp/{level}/{name} | 删除用户 MCP 配置 |
-| GET | /api/admin/presetprompt | 获取系统预设提示词 |
-| PUT | /api/admin/presetprompt | 更新系统预设提示词 |
 
 ---
 
@@ -180,29 +178,6 @@ curl -X DELETE /api/admin/users/user1/skills/project/my-skill \
 ```bash
 curl GET /api/admin/users/user1/mcp \
   -H "Authorization: Bearer <admin_token>"
-```
-
----
-
-## 系统预设提示词
-
-### 获取
-
-```bash
-curl GET /api/admin/presetprompt \
-  -H "Authorization: Bearer <admin_token>"
-```
-
-### 更新
-
-```bash
-curl -X PUT /api/admin/presetprompt \
-  -H "Authorization: Bearer <admin_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "enabled": true,
-    "content": "你是一个专业的技术助手，请使用中文回答。"
-  }'
 ```
 
 ---

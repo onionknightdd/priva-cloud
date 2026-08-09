@@ -1,6 +1,6 @@
 """Runtime config store — the PVC-owned half of the old UserStore.
 
-`runtime.*` settings (cli_path, append_systemprompt, history_retention_days,
+`runtime.*` settings (cli_path, history_retention_days,
 retryable_tools, pii_masking, skill_exclude) live in the
 ``runtime`` section of ``.priva.settings.yml`` and stay file-backed (Phase-1
 decision: runtime config is pod/PVC-owned, NOT in data-spine). UserStore
@@ -81,7 +81,6 @@ class RuntimeConfigStore:
     def update_runtime_config(self, key: str, value: dict | None) -> dict:
         # Known runtime keys (schemaless dict; each feature owns its own schema):
         #   cli_path               : str | None
-        #   append_systemprompt    : dict {enable, content}
         #   history_retention_days : int
         #   retryable_tools        : list[dict]
         #   pii_masking            : dict {enable, patterns}

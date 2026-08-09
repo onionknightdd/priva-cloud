@@ -43,9 +43,15 @@ RUN_END_EVENT = "__run_end__"
 
 
 class RunRecord:
-    def __init__(self, run_id: str, session_id: str | None = None):
+    def __init__(
+        self,
+        run_id: str,
+        session_id: str | None = None,
+        run_mode: str = "agent",
+    ):
         self.run_id = run_id
         self.session_id = session_id
+        self.run_mode = run_mode
         self.cancelled = asyncio.Event()
         # Same out-param protocol agent_run_events already speaks.
         self.coordinator_out: list = [None]
@@ -133,10 +139,19 @@ class RunRegistry:
         self._by_run_id: dict[str, RunRecord] = {}
         self._by_session_id: dict[str, RunRecord] = {}
 
-    def create(self, session_id: str | None = None, run_id: str | None = None) -> RunRecord:
+    def create(
+        self,
+        session_id: str | None = None,
+        run_id: str | None = None,
+        run_mode: str = "agent",
+    ) -> RunRecord:
         """New registry-owned record. ``run_id`` lets a caller with an external
         identity (the scheduler's minted run_id, D13) key the record by it."""
-        record = RunRecord(run_id=run_id or str(uuid.uuid4()), session_id=session_id)
+        record = RunRecord(
+            run_id=run_id or str(uuid.uuid4()),
+            session_id=session_id,
+            run_mode=run_mode,
+        )
         self._by_run_id[record.run_id] = record
         if session_id:
             self._by_session_id[session_id] = record
@@ -209,6 +224,7 @@ class RunRegistry:
                 "last_seq": record.next_seq - 1,
                 "first_user_uuid": record.first_user_uuid,
                 "pending_permission": record.pending_permission,
+                "run_mode": record.run_mode,
             })
         return out
 

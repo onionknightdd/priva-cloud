@@ -154,6 +154,12 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
   // hydrated in loadSession from sessionTransform.
   subagentContent: {},
   sessionId: null,
+  // ``null`` means a fresh draft still follows the global preference. Once a
+  // run starts the value is snapshotted and locked; any durable session is
+  // permanently immutable.
+  runMode: null,
+  runModeLocked: false,
+  promptSuggestion: null,
   // One-line server-generated recap of this session, shown above the composer.
   // `recapTurns` is the message count it was derived from — used to tell a
   // refreshed recap from the one already on screen. `recapDismissed` is the ×:
@@ -253,6 +259,22 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
   setPendingComposerSend: (text) => set({ pendingComposerSend: text }),
   clearPendingComposerSend: () => set({ pendingComposerSend: null }),
   setInputText: (text) => set({ inputText: text }),
+  setRunMode: (mode) => set((state) => (
+    state.runModeLocked || state.sessionId
+      ? {}
+      : { runMode: mode === 'code' ? 'code' : 'agent' }
+  )),
+  lockRunMode: (mode) => set({
+    runMode: mode === 'code' ? 'code' : 'agent',
+    runModeLocked: true,
+  }),
+  unlockUnclaimedRunMode: () => set((state) => (
+    state.sessionId ? {} : { runMode: null, runModeLocked: false }
+  )),
+  setPromptSuggestion: (value) => set({
+    promptSuggestion: typeof value === 'string' && value.trim() ? value : null,
+  }),
+  clearPromptSuggestion: () => set({ promptSuggestion: null }),
   addAttachment: (attachment) => set((s) => ({
     attachments: [...s.attachments, attachment],
   })),
@@ -314,7 +336,11 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
       safeStorage.removeItem(`${REWIND_STORAGE_PREFIX}${sessionId}`)
     }
   },
-  setSessionId: (id) => set({ sessionId: id }),
+  setSessionId: (id) => set((state) => ({
+    sessionId: id,
+    ...(id ? { runModeLocked: true } : {}),
+    ...(id && !state.runMode ? { runMode: 'code' } : {}),
+  })),
   setRecap: (text, turns) => set((s) => (
     // A newer recap un-dismisses: × means "I've read this one", not "never
     // show recaps for this session".
@@ -652,6 +678,10 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
 
   setResult: (data) => set({
     sessionId: data.session_id,
+    ...(data.run_mode === 'agent' || data.run_mode === 'code'
+      ? { runMode: data.run_mode }
+      : {}),
+    runModeLocked: Boolean(data.session_id),
     isStreaming: false,
     isCompacting: false,
     streamAbort: null,
@@ -666,6 +696,7 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
     checkpoints: [], forkParentId: null, enableFileCheckpointing: false,
     rewindMarker: null, queuedUserMessages: [], retryState: null, lastUserPrompt: null,
     cwdDraft: null, addDirs: [], pendingComposerSend: null,
+    runMode: null, runModeLocked: false, promptSuggestion: null,
   }),
 
   reset: () => set({
@@ -680,10 +711,11 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
     rewindMarker: null, queuedUserMessages: [], queueSender: null,
     retryState: null, lastUserPrompt: null,
     cwdDraft: null, addDirs: [], pendingComposerSend: null,
+    runMode: null, runModeLocked: false, promptSuggestion: null,
   }),
 
   // For loading a session
-  loadSession: (sessionId, messages, parentId = null, subagentContent = {}, addDirs = []) => {
+  loadSession: (sessionId, messages, parentId = null, subagentContent = {}, addDirs = [], runMode = 'code') => {
     const restored = safeStorage.getBoolean(`${CKPT_STORAGE_PREFIX}${sessionId}`)
     let rewindMarker = null
     const parsed = safeStorage.getJSON(`${REWIND_STORAGE_PREFIX}${sessionId}`)
@@ -698,6 +730,9 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
     getSibling('workflow').getState().clear()
     set((s) => ({
       sessionId,
+      runMode: runMode === 'agent' ? 'agent' : 'code',
+      runModeLocked: true,
+      promptSuggestion: null,
       messages,
       subagentContent: subagentContent || {},
       isStreaming: false,

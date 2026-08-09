@@ -100,7 +100,14 @@ export default function EmbeddedSessionLoader() {
           sdkTaskTracker,
           subagentContent,
         } = transformSessionMessages(data.messages || [])
-        useChatStore.getState().loadSession(sessionId, messages, null, subagentContent, data.add_dirs || [])
+        useChatStore.getState().loadSession(
+          sessionId,
+          messages,
+          null,
+          subagentContent,
+          data.add_dirs || [],
+          data.run_mode,
+        )
         hydrateCanvas(
           messages,
           fileOps,

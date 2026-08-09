@@ -17,9 +17,10 @@ from claude_agent_sdk import (
     UserMessage,
     get_session_info,
 )
+from claude_agent_sdk._internal.message_parser import parse_message
 from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
 
-from priva_common.models.agent import PermissionMode
+from priva_common.models.agent import McpServersSelection, PermissionMode, RunMode
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from ...services.skills import _get_skills_dir
 from . import retry, session_meta, session_recap, session_title
@@ -60,6 +61,12 @@ _BG_IDLE_TIMEOUT = 600
 # short, because a re-invocation starts promptly if it's coming at all (some
 # terminal paths, e.g. TaskStop, produce none).
 _BG_SETTLE_SECONDS = 15
+
+# Prompt suggestions are generated asynchronously after the CLI's ``result``
+# frame.  The public Python SDK stops reading at ``result`` and (as of 0.2.134)
+# does not parse ``prompt_suggestion`` at all, so the streaming bridge performs
+# a short, bounded raw-message drain when the feature is enabled.
+_PROMPT_SUGGESTION_DRAIN_SECONDS = 10.0
 
 
 def should_stop_bg_drain(outstanding_count: int, idle_seconds: float) -> bool:
@@ -313,6 +320,18 @@ def _vision_image_paths(attachments: list[dict] | None) -> list[str]:
 
 def _cleanup_options(options: Any) -> None:
     close_profile_settings_overlay(getattr(options, "_priva_overlay_manager", None))
+
+
+async def _resolve_effective_run_mode(
+    session_id: str | None,
+    requested: RunMode | None,
+) -> RunMode:
+    if session_id:
+        return await session_meta.ensure_existing_session_run_mode(
+            session_id,
+            requested=requested,
+        )
+    return requested or "agent"
 
 
 async def _record_last_response_model(
@@ -635,11 +654,14 @@ async def agent_run(
     auth_method: Literal["jwt", "api_key", "anonymous"] = "jwt",
     attachments: list[str] | None = None,
     images: list[dict] | None = None,
-    mcp_servers: str | list[str] | None = "auto",
+    mcp_servers: McpServersSelection = "auto",
     inject_scheduler_tools: bool = True,
     enable_file_checkpointing: bool = False,
     fork_session: bool = False,
+    extra_disallowed_tools: list[str] | None = None,
+    run_mode: RunMode | None = None,
 ) -> dict[str, Any]:
+    effective_run_mode = await _resolve_effective_run_mode(session_id, run_mode)
     model_override, selected_profile_id, vision_model = _model_ref_for_images(
         model_override, session_id, images,
     )
@@ -647,10 +669,14 @@ async def agent_run(
     options = await build_agent_options(
         session_id, permission_mode, cwd=cwd, add_dirs=add_dirs, username=username,
         auth_method=auth_method,
+        run_mode=effective_run_mode,
         model_override=model_override, mcp_servers=mcp_servers,
         inject_scheduler_tools=inject_scheduler_tools,
         enable_file_checkpointing=enable_file_checkpointing,
         fork_session=fork_session,
+        enable_permission_feedback=False,
+        enable_prompt_suggestions=False,
+        extra_disallowed_tools=extra_disallowed_tools,
         vision_image_paths=_vision_image_paths(attachments),
     )
     messages: list[dict[str, Any]] = []
@@ -702,6 +728,9 @@ async def agent_run(
                 if isinstance(message, SystemMessage) and message.subtype == "init":
                     sid = (message.data or {}).get("session_id")
                     if isinstance(sid, str) and sid:
+                        await session_meta.claim_new_session_run_mode(
+                            sid, effective_run_mode
+                        )
                         current_resume_id = sid
                         await session_meta.record_recent_activity(options.cwd, sid)
                     continue
@@ -732,6 +761,9 @@ async def agent_run(
                     result_data.update(serialize_result_message(message))
                     new_sid = result_data.get("session_id")
                     if isinstance(new_sid, str) and new_sid:
+                        await session_meta.claim_new_session_run_mode(
+                            new_sid, effective_run_mode
+                        )
                         current_resume_id = new_sid
 
             # Deliberately not in a finally: on the retry path we want to bail
@@ -831,7 +863,12 @@ async def agent_run(
         # nothing it depends on dies when this function returns.
         session_recap.spawn(new_sid or current_resume_id or session_id, username, options.cwd)
 
-    response = {"messages": messages, **result_data, "attempts": final_attempts}
+    response = {
+        "messages": messages,
+        **result_data,
+        "attempts": final_attempts,
+        "run_mode": effective_run_mode,
+    }
     if last_error:
         response["retried_due_to"] = last_error.get("code")
     _cleanup_options(options)
@@ -844,9 +881,20 @@ async def _pump_stream_messages(
     username: str | None = None,
     session_id: str | None = None,
     model_tracker: list[str | None] | None = None,
+    prompt_suggestions_enabled: bool = False,
 ) -> None:
     try:
-        async for message in client.receive_response():
+        async for message in _receive_response_items(
+            client,
+            prompt_suggestions_enabled=prompt_suggestions_enabled,
+        ):
+            if isinstance(message, dict):
+                await output_queue.put({
+                    "event": "prompt_suggestion",
+                    "data": message,
+                })
+                continue
+
             # Detect synthetic-error messages (CLI exhausted its own retries).
             # Push an internal retry sentinel so the outer loop can decide.
             if isinstance(message, AssistantMessage) and retry.should_retry(message):
@@ -893,6 +941,86 @@ async def _pump_stream_messages(
         await output_queue.put(None)
 
 
+def _prompt_suggestion_payload(raw: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the stable public payload for a raw CLI suggestion frame."""
+    if raw.get("type") != "prompt_suggestion":
+        return None
+    suggestion = raw.get("suggestion")
+    if not isinstance(suggestion, str) or not suggestion.strip():
+        return None
+    payload: dict[str, Any] = {"suggestion": suggestion}
+    for key in ("session_id", "uuid"):
+        value = raw.get(key)
+        if isinstance(value, str) and value:
+            payload[key] = value
+    return payload
+
+
+async def _receive_response_items(
+    client: ClaudeSDKClient,
+    *,
+    prompt_suggestions_enabled: bool,
+):
+    """Yield one SDK turn plus its optional post-result prompt suggestion.
+
+    ``ClaudeSDKClient.receive_response()`` deliberately returns immediately
+    after ``ResultMessage``.  Prompt suggestions are emitted later, and the
+    current Python SDK silently discards that unknown frame.  When enabled we
+    consume the Query's raw stream, parse normal SDK messages with the SDK's
+    own parser, then drain for at most ten seconds after the result.  The
+    compatibility seam can be removed once the public SDK exposes this event.
+    """
+    if not prompt_suggestions_enabled:
+        async for message in client.receive_response():
+            yield message
+        return
+
+    query = getattr(client, "_query", None)
+    if query is None or not hasattr(query, "receive_messages"):
+        logger.warning(
+            "Prompt suggestions enabled but the SDK raw message stream is unavailable"
+        )
+        async for message in client.receive_response():
+            yield message
+        return
+
+    raw_iter = query.receive_messages().__aiter__()
+    result_seen = False
+    drain_deadline: float | None = None
+
+    while True:
+        try:
+            if result_seen:
+                assert drain_deadline is not None
+                remaining = drain_deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                raw = await asyncio.wait_for(anext(raw_iter), timeout=remaining)
+            else:
+                raw = await anext(raw_iter)
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError:
+            return
+
+        if not isinstance(raw, dict):
+            continue
+        suggestion = _prompt_suggestion_payload(raw)
+        if suggestion is not None:
+            yield suggestion
+            if result_seen:
+                return
+            continue
+
+        message = parse_message(raw)
+        if message is None:
+            continue
+        yield message
+        if isinstance(message, ResultMessage) and not result_seen:
+            result_seen = True
+            drain_deadline = time.monotonic() + _PROMPT_SUGGESTION_DRAIN_SECONDS
+
+
 # --- lazy resume guard -------------------------------------------------------
 # The user may delete a session in the web UI while a channel binding (Feishu DM)
 # still points at it — `--resume <dead id>` then exits 1 and, without this guard,
@@ -933,6 +1061,7 @@ async def agent_run_events(
     model_override: str | None = None,
     auth_method: Literal["jwt", "api_key", "anonymous"] = "jwt",
     *,
+    run_mode: RunMode | None = None,
     add_dirs: list[str] | None = None,
     emit: Callable[[str, dict[str, Any]], Awaitable[None]],
     cancelled: asyncio.Event | None = None,
@@ -940,7 +1069,7 @@ async def agent_run_events(
     queue_out: list["asyncio.Queue[tuple[str, str, list, list]] | None"] | None = None,
     attachments: list[str] | None = None,
     images: list[dict] | None = None,
-    mcp_servers: str | list[str] | None = "auto",
+    mcp_servers: McpServersSelection = "auto",
     inject_scheduler_tools: bool = True,
     enable_file_checkpointing: bool = False,
     fork_session: bool = False,
@@ -965,6 +1094,7 @@ async def agent_run_events(
             next tool-result boundary (mid-turn via interrupt) or
             end-of-turn (no interrupt needed).
     """
+    effective_run_mode = await _resolve_effective_run_mode(session_id, run_mode)
     model_override, selected_profile_id, vision_model = _model_ref_for_images(
         model_override, session_id, images,
     )
@@ -1016,6 +1146,7 @@ async def agent_run_events(
         add_dirs=add_dirs,
         username=username,
         auth_method=auth_method,
+        run_mode=effective_run_mode,
         model_override=model_override,
         mcp_servers=mcp_servers,
         inject_scheduler_tools=inject_scheduler_tools,
@@ -1024,16 +1155,21 @@ async def agent_run_events(
         extra_allowed_tools=extra_allowed_tools,
         inject_openclaw_tools=inject_openclaw_tools,
         enable_permission_feedback=enable_permission_feedback,
+        enable_prompt_suggestions=True,
         max_turns=max_turns,
         extra_disallowed_tools=extra_disallowed_tools,
         include_partial_messages=include_partial_messages,
         vision_image_paths=_vision_image_paths(attachments),
+    )
+    prompt_suggestions_enabled = bool(
+        getattr(options, "_priva_prompt_suggestion_enabled", False)
     )
 
     if coordinator:
         await emit("stream_init", {
             "stream_id": stream_id,
             "include_partial_messages": include_partial_messages,
+            "run_mode": effective_run_mode,
         })
 
     effective_prompt = _build_prompt_with_images(prompt, images, attachments)
@@ -1084,7 +1220,14 @@ async def agent_run_events(
             title_pending = False
 
             pump_task = asyncio.create_task(
-                _pump_stream_messages(client, output_queue, username, stream_id, model_tracker)
+                _pump_stream_messages(
+                    client,
+                    output_queue,
+                    username,
+                    stream_id,
+                    model_tracker,
+                    prompt_suggestions_enabled,
+                )
             )
 
             outstanding_tool_uses: set[str] = set()
@@ -1114,7 +1257,14 @@ async def agent_run_events(
                     await client.query(queued_prompt)
                 await emit("queue_flush", {"id": popped_id, "text": popped_text})
                 pump_task = asyncio.create_task(
-                    _pump_stream_messages(client, output_queue, username, stream_id, model_tracker)
+                    _pump_stream_messages(
+                        client,
+                        output_queue,
+                        username,
+                        stream_id,
+                        model_tracker,
+                        prompt_suggestions_enabled,
+                    )
                 )
                 return True
 
@@ -1163,7 +1313,12 @@ async def agent_run_events(
                             draining_bg = True
                             pump_task = asyncio.create_task(
                                 _pump_stream_messages(
-                                    client, output_queue, username, stream_id, model_tracker
+                                    client,
+                                    output_queue,
+                                    username,
+                                    stream_id,
+                                    model_tracker,
+                                    prompt_suggestions_enabled,
                                 )
                             )
                             continue
@@ -1185,11 +1340,22 @@ async def agent_run_events(
                             inner = sdata.get("data") if isinstance(sdata.get("data"), dict) else None
                             new_sid = inner.get("session_id") if inner else None
                             if isinstance(new_sid, str) and new_sid and new_sid != current_resume_id:
+                                await session_meta.claim_new_session_run_mode(
+                                    new_sid, effective_run_mode
+                                )
                                 current_resume_id = new_sid
                                 if coordinator and new_sid != stream_id:
                                     coordinator.session_id = new_sid
                                     stream_id = new_sid
                                 await session_meta.record_recent_activity(options.cwd, new_sid)
+
+                    if item["event"] == "result":
+                        result_sid = (item.get("data") or {}).get("session_id")
+                        if result_sid:
+                            await session_meta.claim_new_session_run_mode(
+                                result_sid, effective_run_mode
+                            )
+                        item["data"]["run_mode"] = effective_run_mode
 
                     _record_agent_delivery_best_effort(
                         options.cwd,
@@ -1441,13 +1607,14 @@ async def agent_run_stream(
     auth_method: Literal["jwt", "api_key", "anonymous"] = "jwt",
     attachments: list[str] | None = None,
     images: list[dict] | None = None,
-    mcp_servers: str | list[str] | None = "auto",
+    mcp_servers: McpServersSelection = "auto",
     inject_scheduler_tools: bool = True,
     mask_output: bool = False,
     enable_file_checkpointing: bool = False,
     fork_session: bool = False,
     enable_permission_feedback: bool = False,
     extra_disallowed_tools: list[str] | None = None,
+    run_mode: RunMode | None = None,
 ):
     needs_permissions = True  # streaming runs always need a coordinator
     stream_id = session_id or str(uuid.uuid4())
@@ -1496,6 +1663,7 @@ async def agent_run_stream(
                 await agent_run_events(
                     prompt, session_id, permission_mode, cwd, username,
                     model_override, auth_method=auth_method,
+                    run_mode=run_mode,
                     add_dirs=add_dirs,
                     emit=emit_to_queue, coordinator_out=coordinator_out,
                     attachments=attachments, images=images, mcp_servers=mcp_servers,

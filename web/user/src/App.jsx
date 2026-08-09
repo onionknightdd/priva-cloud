@@ -5,7 +5,7 @@ import ErrorBoundary from './components/shared/ErrorBoundary'
 import SetupPage from './components/auth/SetupPage'
 import LoginPage from '@shared/components/auth/LoginPage'
 import useAuthStore from '@shared/stores/authStore'
-import useSettingsStore from './stores/settingsStore'
+import useSettingsStore, { RUN_MODE_CHANNEL } from './stores/settingsStore'
 import useUiStore, { THEME_CHANNEL } from '@shared/stores/uiStore'
 import SettingsOverlay from './components/settings/SettingsOverlay'
 import ToastStack from './components/ui/ToastStack'
@@ -33,7 +33,8 @@ export default function App() {
   const logout = useAuthStore((s) => s.logout)
   const hasEnv = useSettingsStore((s) => s.hasEnv)
   const fetchEnvStatus = useSettingsStore((s) => s.fetchEnvStatus)
-  const fetchEnv = useSettingsStore((s) => s.fetchEnv)
+  const fetchRuntimeSettings = useSettingsStore((s) => s.fetchRuntimeSettings)
+  const setDraftRunMode = useSettingsStore((s) => s.setDraftRunMode)
   const fetchVisionModel = useSettingsStore((s) => s.fetchVisionModel)
   const openIntro = useUiStore((s) => s.openIntro)
   const introOpen = useUiStore((s) => s.introOpen)
@@ -81,6 +82,40 @@ export default function App() {
     }
   }, [setTheme])
 
+  // Keep the new-session run-mode preference aligned across split-pane
+  // iframes and tabs. Per-session locked modes live in each runtime and are
+  // never changed by this preference broadcast.
+  useEffect(() => {
+    const apply = (value) => {
+      if (value === 'agent' || value === 'code') {
+        setDraftRunMode(value, { broadcast: false })
+      }
+    }
+    const onStorage = (event) => {
+      if (event.key === 'priva-run-mode') apply(event.newValue)
+    }
+    const onLocal = (event) => apply(event.detail)
+    window.addEventListener('storage', onStorage)
+    window.addEventListener('priva:run-mode', onLocal)
+
+    let channel = null
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        channel = new BroadcastChannel(RUN_MODE_CHANNEL)
+        channel.onmessage = (event) => {
+          if (event.data?.type === 'run-mode') apply(event.data.runMode)
+        }
+      } catch {
+        channel = null
+      }
+    }
+    return () => {
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener('priva:run-mode', onLocal)
+      channel?.close()
+    }
+  }, [setDraftRunMode])
+
   useEffect(() => {
     initialize()
   }, [initialize])
@@ -94,18 +129,14 @@ export default function App() {
   // Check env status after login
   useEffect(() => {
     if (user) {
-      fetchEnvStatus().then((has) => {
-        if (has) {
-          // Also fetch full env for model selector defaults
-          fetchEnv()
-        }
-      })
+      fetchEnvStatus()
+      fetchRuntimeSettings()
       fetchVisionModel()
       // Re-attach to runs that survived a refresh in the backend RunRegistry
       // (no-op on registry-less backends).
       restoreRunningSessions()
     }
-  }, [user, fetchEnvStatus, fetchEnv, fetchVisionModel])
+  }, [user, fetchEnvStatus, fetchRuntimeSettings, fetchVisionModel])
 
   // Keep the platform switch live: 0% removes the Agent UI affordance and closes
   // an open drawer without requiring the user to sign out and back in.

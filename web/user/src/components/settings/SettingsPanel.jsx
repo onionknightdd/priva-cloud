@@ -686,11 +686,10 @@ function ApiKeyTab() {
 
 function LegacyModelsTab() {
   const { t } = useTranslation()
-  const env = useSettingsStore((s) => s.env)
   const models = useSettingsStore((s) => s.models)
-  const fetchEnv = useSettingsStore((s) => s.fetchEnv)
+  const fetchEnv = useSettingsStore((s) => s.fetchDefaultProfileEnv)
   const fetchModels = useSettingsStore((s) => s.fetchModels)
-  const saveEnv = useSettingsStore((s) => s.saveEnv)
+  const saveEnv = useSettingsStore((s) => s.saveDefaultProfile)
   const fetchVisionModel = useSettingsStore((s) => s.fetchVisionModel)
   const saveVisionModel = useSettingsStore((s) => s.saveVisionModel)
 
@@ -1653,6 +1652,186 @@ function SettingRow({ label, desc, checked, onChange, disabled = false }) {
   )
 }
 
+let runtimeEnvRowCounter = 0
+
+function makeRuntimeEnvRow(key = '', value = '') {
+  runtimeEnvRowCounter += 1
+  return { id: `runtime-env-${runtimeEnvRowCounter}`, key, value }
+}
+
+function RuntimeEnvironmentEditor({ disabled }) {
+  const { t } = useTranslation()
+  const env = useSettingsStore((s) => s.env)
+  const extraEnvEnabled = useSettingsStore((s) => s.extraEnvEnabled)
+  const runtimeSettingsSaving = useSettingsStore((s) => s.runtimeSettingsSaving)
+  const runtimeSettingsError = useSettingsStore((s) => s.runtimeSettingsError)
+  const saveRuntimeEnv = useSettingsStore((s) => s.saveRuntimeEnv)
+  const setRuntimeEnvEnabled = useSettingsStore((s) => s.setRuntimeEnvEnabled)
+  const [rows, setRows] = useState([])
+  const [dirty, setDirty] = useState(false)
+  const [validationError, setValidationError] = useState(null)
+
+  useEffect(() => {
+    if (dirty) return
+    const next = Object.entries(env || {}).map(([key, value]) => makeRuntimeEnvRow(key, value))
+    setRows(next.length > 0 ? next : [makeRuntimeEnvRow()])
+  }, [dirty, env])
+
+  const updateRow = (index, field, value) => {
+    setRows((current) => current.map((row, i) => (
+      i === index ? { ...row, [field]: value } : row
+    )))
+    setDirty(true)
+    setValidationError(null)
+  }
+
+  const removeRow = (index) => {
+    setRows((current) => {
+      const next = current.filter((_, i) => i !== index)
+      return next.length > 0 ? next : [makeRuntimeEnvRow()]
+    })
+    setDirty(true)
+    setValidationError(null)
+  }
+
+  const handleSave = async () => {
+    const next = {}
+    for (const row of rows) {
+      const key = row.key.trim()
+      if (!key && !row.value) continue
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+        setValidationError(t('settings.runtimeEnvInvalidKey', { key: key || '∅' }))
+        return
+      }
+      if (Object.prototype.hasOwnProperty.call(next, key)) {
+        setValidationError(t('settings.runtimeEnvDuplicateKey', { key }))
+        return
+      }
+      next[key] = row.value
+    }
+    try {
+      await saveRuntimeEnv(next, extraEnvEnabled)
+      setDirty(false)
+      setValidationError(null)
+    } catch {
+      // The store exposes the server validation message below.
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3 min-w-0">
+      <SettingRow
+        label={t('settings.runtimeEnvInjection')}
+        desc={t('settings.runtimeEnvInjectionDesc')}
+        checked={extraEnvEnabled}
+        onChange={(next) => { setRuntimeEnvEnabled(next).catch(() => {}) }}
+        disabled={disabled}
+      />
+
+      <div className="flex flex-col gap-2 min-w-0">
+        <div className="grid gap-2" style={{ gridTemplateColumns: 'minmax(96px, 0.8fr) minmax(120px, 1.2fr) 28px' }}>
+          <span className="text-xs font-semibold uppercase" style={{ color: 'var(--text-dim)', letterSpacing: '0.06em' }}>
+            {t('settings.runtimeEnvKey')}
+          </span>
+          <span className="text-xs font-semibold uppercase" style={{ color: 'var(--text-dim)', letterSpacing: '0.06em' }}>
+            {t('settings.runtimeEnvValue')}
+          </span>
+          <span />
+        </div>
+        {rows.map((row, index) => (
+          <div
+            className="grid gap-2 min-w-0"
+            style={{ gridTemplateColumns: 'minmax(96px, 0.8fr) minmax(120px, 1.2fr) 28px' }}
+            key={row.id}
+          >
+            <input
+              value={row.key}
+              disabled={disabled}
+              spellCheck={false}
+              aria-label={t('settings.runtimeEnvKey')}
+              onChange={(event) => updateRow(index, 'key', event.target.value)}
+              placeholder="MY_VARIABLE"
+              style={{ ...inputStyle, minWidth: 0, fontFamily: 'var(--font-code)', fontSize: 12 }}
+            />
+            <input
+              value={row.value}
+              disabled={disabled}
+              spellCheck={false}
+              aria-label={t('settings.runtimeEnvValue')}
+              onChange={(event) => updateRow(index, 'value', event.target.value)}
+              placeholder={t('settings.runtimeEnvValuePlaceholder')}
+              style={{ ...inputStyle, minWidth: 0, fontFamily: 'var(--font-code)', fontSize: 12 }}
+            />
+            <button
+              type="button"
+              disabled={disabled}
+              aria-label={t('settings.runtimeEnvRemove')}
+              title={t('settings.runtimeEnvRemove')}
+              onClick={() => removeRow(index)}
+              className="inline-flex items-center justify-center"
+              style={{
+                width: 28,
+                height: 32,
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                color: disabled ? 'var(--text-dim)' : 'var(--text-secondary)',
+                cursor: disabled ? 'default' : 'pointer',
+                transition: 'color 150ms ease, border-color 150ms ease',
+              }}
+            >
+              <Trash2 size={14} strokeWidth={1.5} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          disabled={disabled || rows.length >= 64}
+          onClick={() => { setRows((current) => [...current, makeRuntimeEnvRow()]); setDirty(true) }}
+          className="inline-flex items-center gap-2 px-2 py-1 text-xs"
+          style={{
+            background: 'transparent',
+            border: '1px solid var(--border)',
+            borderRadius: 4,
+            color: disabled ? 'var(--text-dim)' : 'var(--text-secondary)',
+            cursor: disabled ? 'default' : 'pointer',
+          }}
+        >
+          <Plus size={14} strokeWidth={1.5} />
+          {t('settings.runtimeEnvAdd')}
+        </button>
+        <button
+          type="button"
+          disabled={disabled || !dirty || runtimeSettingsSaving}
+          onClick={handleSave}
+          className="px-3 py-1 text-xs font-semibold"
+          style={{
+            background: !disabled && dirty ? 'var(--blue)' : 'var(--bg-surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 4,
+            color: !disabled && dirty ? 'var(--text-inverse)' : 'var(--text-dim)',
+            cursor: !disabled && dirty ? 'pointer' : 'default',
+          }}
+        >
+          {runtimeSettingsSaving ? t('settings.saving') : t('settings.save')}
+        </button>
+      </div>
+
+      {(validationError || runtimeSettingsError) && (
+        <p className="text-xs" style={{ color: 'var(--red)', lineHeight: 1.5, margin: 0 }}>
+          {validationError || runtimeSettingsError}
+        </p>
+      )}
+      <p className="text-xs" style={{ color: 'var(--text-dim)', lineHeight: 1.5, margin: 0 }}>
+        {t('settings.runtimeEnvProtectedNote')}
+      </p>
+    </div>
+  )
+}
+
 function AdvancedTab() {
   const { t } = useTranslation()
   const transport = useSettingsStore((s) => s.transport)
@@ -1664,9 +1843,15 @@ function AdvancedTab() {
   const recapEnabled = useSettingsStore((s) => s.recapEnabled)
   const saveRecapEnabled = useSettingsStore((s) => s.saveRecapEnabled)
   const fetchRecapEnabled = useSettingsStore((s) => s.fetchRecapEnabled)
+  const promptSuggestionEnabled = useSettingsStore((s) => s.promptSuggestionEnabled)
+  const setPromptSuggestionEnabled = useSettingsStore((s) => s.setPromptSuggestionEnabled)
+  const fetchRuntimeSettings = useSettingsStore((s) => s.fetchRuntimeSettings)
 
   // Unlike the localStorage switches above, this one's truth lives on the pod.
-  useEffect(() => { fetchRecapEnabled() }, [fetchRecapEnabled])
+  useEffect(() => {
+    fetchRecapEnabled()
+    fetchRuntimeSettings()
+  }, [fetchRecapEnabled, fetchRuntimeSettings])
 
   const options = [
     { value: 'ws', label: t('settings.transportWs') },
@@ -1721,6 +1906,15 @@ function AdvancedTab() {
       {/* Divider */}
       <div style={{ borderBottom: '1px solid var(--border)' }} />
 
+      <SettingRow
+        label={t('settings.promptSuggestion')}
+        desc={t('settings.promptSuggestionDesc')}
+        checked={promptSuggestionEnabled}
+        onChange={(next) => { setPromptSuggestionEnabled(next).catch(() => {}) }}
+      />
+
+      <div style={{ borderBottom: '1px solid var(--border)' }} />
+
       {/* Developer Mode — master gate for the dev switches below */}
       <SettingRow
         label={t('settings.developerMode')}
@@ -1741,6 +1935,8 @@ function AdvancedTab() {
           onChange={setDebugMode}
           disabled={!developerMode}
         />
+        <div style={{ borderBottom: '1px solid var(--border-subtle)' }} />
+        <RuntimeEnvironmentEditor disabled={!developerMode} />
       </div>
     </div>
   )
