@@ -17,7 +17,8 @@ function isVisibleText(block) {
  * Assemble Claude Agent SDK StreamEvent payloads into stable UI blocks.
  *
  * Provider differences are deliberately absorbed here:
- * - visible text/thinking deltas are batched before touching Zustand;
+ * - visible text/thinking deltas can update Zustand immediately while their
+ *   console output remains aggregated;
  * - signature deltas are never exposed;
  * - fragmented tool JSON stays private until content_block_stop, and is
  *   normally superseded by the authoritative AssistantMessage first;
@@ -26,6 +27,7 @@ function isVisibleText(block) {
 export function createStreamingBlockAssembler({
   onFlush,
   batchMs = DEFAULT_BATCH_MS,
+  immediatePatches = false,
   now = () => Date.now(),
   schedule = (callback, delay) => setTimeout(callback, delay),
   cancel = (timer) => clearTimeout(timer),
@@ -47,14 +49,38 @@ export function createStreamingBlockAssembler({
 
   const markDirty = (state, deltaType = null, deltaText = '') => {
     if (state.authoritative || !state.materialized) return
-    dirty.set(state.key, state)
+    let hasLogDelta = false
     if (deltaType === 'text_delta' && deltaText) {
       state.logText += deltaText
       state.logTextEvents += 1
+      hasLogDelta = true
     } else if (deltaType === 'thinking_delta' && deltaText) {
       state.logThinking += deltaText
       state.logThinkingEvents += 1
+      hasLogDelta = true
     }
+
+    if (immediatePatches) {
+      onFlush?.({
+        patches: [{
+          parentToolUseId: state.parentToolUseId,
+          messageId: state.messageId,
+          index: state.index,
+          streamKey: state.key,
+          block: { ...state.block, _streamKey: state.key },
+        }],
+        logs: [],
+      })
+      // UI state has already been patched. Retain only visible log deltas for
+      // the existing console aggregation window.
+      if (hasLogDelta) {
+        dirty.set(state.key, state)
+        scheduleFlush()
+      }
+      return
+    }
+
+    dirty.set(state.key, state)
     scheduleFlush()
   }
 
@@ -68,7 +94,7 @@ export function createStreamingBlockAssembler({
     const patches = []
     const logs = []
     for (const state of dirty.values()) {
-      if (!state.authoritative && state.materialized) {
+      if (!immediatePatches && !state.authoritative && state.materialized) {
         patches.push({
           parentToolUseId: state.parentToolUseId,
           messageId: state.messageId,

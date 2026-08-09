@@ -336,6 +336,9 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   const finalizedToolUseIds = new Set()
 
   const streamAssembler = createStreamingBlockAssembler({
+    // Render every visible provider delta immediately. The 40ms window below
+    // now applies only to aggregated console output, never to Zustand/UI.
+    immediatePatches: true,
     batchMs: 40,
     onFlush: ({ patches, logs }) => {
       if (S.chat().streamGeneration !== streamGen) return
