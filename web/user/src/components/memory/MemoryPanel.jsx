@@ -82,7 +82,7 @@ function ClaudeMdRow({ scopeInfo, isActive, onSelect, t }) {
     <button
       onClick={onSelect}
       className="flex items-center gap-2 text-left"
-      style={{ ...activeRow(isActive), padding: '4px 8px 4px 24px' }}
+      style={{ ...activeRow(isActive), padding: '7px 8px 7px 24px' }}
       onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--bg-elevated)' }}
       onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
     >
@@ -96,9 +96,11 @@ function ClaudeMdRow({ scopeInfo, isActive, onSelect, t }) {
       />
       <div className="flex flex-col min-w-0 flex-1">
         <span className="truncate" style={{ color: 'var(--text-primary)', fontSize: 10 }}>CLAUDE.md</span>
-        <span className="truncate" style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>
-          {scopeInfo?.exists ? t('memory.existsBytes', { n: scopeInfo.size }) : t('memory.notCreated')}
-        </span>
+        {!scopeInfo?.exists && (
+          <span className="truncate" style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>
+            {t('memory.notCreated')}
+          </span>
+        )}
       </div>
     </button>
   )
@@ -117,10 +119,10 @@ function FileRow({ file, isActive, onSelect, onDelete, t }) {
       <button
         onClick={onSelect}
         className="flex items-center gap-2 text-left flex-1 min-w-0"
-        style={{ background: 'transparent', border: 'none', padding: '6px 4px 6px 6px', cursor: 'pointer' }}
+        style={{ background: 'transparent', border: 'none', padding: '7px 4px 7px 6px', cursor: 'pointer' }}
       >
         <FileText size={14} strokeWidth={1.5} style={{ flexShrink: 0, color: file.is_index ? 'var(--cyan)' : 'var(--text-dim)' }} />
-        <div className="flex flex-col min-w-0 flex-1">
+        <div className="min-w-0 flex-1">
           <span className="truncate flex items-center gap-1" style={{ color: 'var(--text-primary)', fontSize: 12 }}>
             {file.name}
             {file.is_index && (
@@ -128,9 +130,6 @@ function FileRow({ file, isActive, onSelect, onDelete, t }) {
                 {t('memory.autoIndex')}
               </span>
             )}
-          </span>
-          <span className="truncate" style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
-            {t('memory.existsBytes', { n: file.size })}
           </span>
         </div>
       </button>

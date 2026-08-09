@@ -1370,10 +1370,29 @@ export default function Sidebar() {
         </SlidingTabGroup>
       ) : (
         <>
-          {/* Primary navigation — full-width rows aligned to the shared sidebar gutter. */}
+          {/* New chat stays pinned below the run-mode switcher. Reducing the
+              top inset from 6px to 4px tightens their spacing by 2px. */}
           <SlidingTabGroup id="sidebar-primary-expanded">
-          <div style={{ padding: '6px 16px 4px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ padding: '4px 16px', flexShrink: 0 }}>
             <NavItem scale="lg" icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
+          </div>
+
+          {/* Only wheel gestures originating in the session-list hit area may
+              scroll this shared viewport. Everything below New chat belongs
+              to the moving content; New chat and the footer stay pinned. */}
+          <div
+            className="overflow-y-auto flex flex-col"
+            ref={listRef}
+            onWheelCapture={(event) => {
+              if (!event.target.closest?.('[data-sidebar-session-scroll-trigger]')) {
+                event.preventDefault()
+              }
+            }}
+            style={{ flex: '1 1 0', minHeight: 0, '--sidebar-project-sticky-height': '32px' }}
+          >
+          <div className="flex flex-col" style={{ minHeight: '100%' }}>
+          {/* Primary navigation — full-width rows aligned to the shared sidebar gutter. */}
+          <div style={{ padding: '0 16px 4px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <NavItem scale="lg" icon={CalendarClock} label={t('sidebar.scheduler')} active={activeNavTab === 'scheduler'} selectionLayoutId="sidebar-primary-selection" onClick={() => setActiveNavTab('scheduler')} />
             {/* Keep each trigger and its animated submenu inside one stable
                 flex item. Otherwise removing the zero-height collapse shell
@@ -1439,7 +1458,6 @@ export default function Sidebar() {
               </AnimatedCollapse>
             </div>
           </div>
-          </SlidingTabGroup>
 
           {/* When a nav menu is expanded, push Search + PROJECT to the sidebar bottom */}
           {projectAtBottom && <div style={{ flex: '1 1 0', minHeight: 0 }} />}
@@ -1509,7 +1527,15 @@ export default function Sidebar() {
           </div>
 
           {/* PROJECT header — collapse-all + refresh + expand/collapse-all + new-workdir */}
-          <div style={{ flexShrink: 0 }}>
+          <div
+            style={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 4,
+              flexShrink: 0,
+              background: 'var(--bg-surface)',
+            }}
+          >
           <PanelHeader
             label={t('sidebar.project')}
             labelClassName="sidebar-menu-project-label"
@@ -1685,15 +1711,14 @@ export default function Sidebar() {
             </div>
           )}
 
-          {/* Session List — grouped by cwd (accordion). Fills remaining height in chat
-              mode; sits compact at the bottom (scrolls) when a nav menu is expanded. */}
+          {/* Session List — the wheel/trackpad trigger for the shared viewport. */}
           <div
-            className="overflow-y-auto py-1"
-            ref={listRef}
-            style={{ flex: projectAtBottom ? '0 1 auto' : '1 1 auto', minHeight: 0 }}
+            className="py-1"
+            data-sidebar-session-scroll-trigger
+            style={{ flexShrink: 0 }}
           >
             <SlidingTabGroup id="sidebar-session-list">
-            <div style={{ position: 'relative', minHeight: '100%' }}>
+            <div style={{ position: 'relative' }}>
               {sessions.length === 0 && !sessionsLoading && (
                 <div className="px-3 py-4" style={{ color: 'var(--text-dim)', fontSize: 14 }}>
                   {t('sidebar.noSessions')}
@@ -1735,6 +1760,14 @@ export default function Sidebar() {
                 return (
                   <div key={group.cwd} style={{ marginBottom: 2 }}>
                     {/* Group header — toggle + (hover) workdir menu & new-chat */}
+                    <div
+                      style={{
+                        position: 'sticky',
+                        top: 'var(--sidebar-project-sticky-height)',
+                        zIndex: 3,
+                        background: 'var(--bg-surface)',
+                      }}
+                    >
                     <div
                       className="project-group-row flex items-center gap-2 py-1 min-w-0 group"
                       style={{
@@ -1811,6 +1844,7 @@ export default function Sidebar() {
                       >
                         <SquarePen size={13} strokeWidth={1.5} />
                       </button>
+                    </div>
                     </div>
 
                     {/* A collapsed project keeps its selected session in view. */}
@@ -1924,7 +1958,15 @@ export default function Sidebar() {
               down). */}
           {!projectOpen && activeSession && activeProject && (
             <SlidingTabGroup id="sidebar-session-collapsed-project">
-            <div className="py-1" style={{ flexShrink: 0 }}>
+            <div className="py-1" data-sidebar-session-scroll-trigger style={{ flexShrink: 0 }}>
+              <div
+                style={{
+                  position: 'sticky',
+                  top: 'var(--sidebar-project-sticky-height)',
+                  zIndex: 3,
+                  background: 'var(--bg-surface)',
+                }}
+              >
               <div
                 className="project-group-row flex items-center gap-2 py-1 min-w-0"
                 style={{
@@ -1959,6 +2001,7 @@ export default function Sidebar() {
                   <Pin size={11} strokeWidth={1.5} style={{ flexShrink: 0, color: 'var(--sidebar-icon-color)' }} />
                 )}
               </div>
+              </div>
               {renderSessionItem(
                 activeSession,
                 activeSession.origin === 'scheduler' ? SCHEDULED_SESSION_INDENT : PROJECT_SESSION_INDENT
@@ -1969,6 +2012,9 @@ export default function Sidebar() {
 
           {/* Chat mode with PROJECT manually collapsed: filler keeps the footer pinned to the bottom */}
           {!projectAtBottom && !projectOpen && <div style={{ flex: '1 1 0', minHeight: 0 }} />}
+          </div>
+          </div>
+          </SlidingTabGroup>
         </>
       )}
 
