@@ -145,6 +145,7 @@ export function buildAgentCommunicationIndex(messages, subagentContent) {
         target: getSendMessageTarget(block),
         source: null,
         fromMain: true,
+        timestamp: block.endTime || block.startTime || message.timestamp || null,
       })
     })
   }
@@ -157,6 +158,7 @@ export function buildAgentCommunicationIndex(messages, subagentContent) {
         target: getSendMessageTarget(block),
         source: index.byToolUseId.get(ownerToolUseId) || null,
         fromMain: false,
+        timestamp: block.endTime || block.startTime || null,
       })
     })
   }
@@ -186,7 +188,7 @@ export function buildReceivedFromMainEvents(index, ownerToolUseId) {
       senderAgentId: 'main',
       senderName: 'main',
       sourceToolUseId: entry.block.id,
-      timestamp: entry.block.endTime || entry.block.startTime || null,
+      timestamp: entry.timestamp,
     }))
 }
 

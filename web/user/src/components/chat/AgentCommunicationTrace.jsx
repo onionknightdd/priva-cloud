@@ -1,8 +1,10 @@
-import { memo, useMemo } from 'react'
-import { MessagesSquare } from 'lucide-react'
+import { memo, useId, useMemo, useState } from 'react'
+import { ChevronRight, MessagesSquare } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { AnimatedCollapse } from '@shared/components/shared/Accordion'
 import useChatStore from '../../stores/chatStore'
 import { ToolIcon } from './ToolLine'
+import { formatDateTime, formatTimeOfDay } from '../../utils/formatTime'
 import {
   buildAgentCommunicationIndex,
   buildReceivedFromMainEvents,
@@ -25,6 +27,8 @@ function communicationPartyLabel(party) {
 
 function CommunicationEvent({ block, ownerToolUseId, communicationIndex, isLast }) {
   const { t } = useTranslation()
+  const bodyId = useId()
+  const [expanded, setExpanded] = useState(false)
   const isReceived = block.type === 'agent_message'
   const state = isReceived ? 'success' : parseSendMessageResult(block)
   const body = isReceived ? String(block.body || '').trim() : getSendMessageBody(block)
@@ -39,24 +43,53 @@ function CommunicationEvent({ block, ownerToolUseId, communicationIndex, isLast 
       : state === 'error'
         ? t('toolCall.agent.messageSendFailed', { target: counterparty })
         : t('toolCall.agent.messageSent', { target: counterparty })
+  const timestamp = block.timestamp || block.endTime || block.startTime || null
+  const timestampMs = timestamp == null ? null : new Date(timestamp).getTime()
+  const hasTimestamp = Number.isFinite(timestampMs)
+  const timestampText = hasTimestamp ? formatTimeOfDay(timestampMs) : ''
 
   return (
     <div className={`tool-tree-child agent-communication-event is-${state}${isLast ? ' is-last' : ''}`}>
       <span className="chat-branch-connector" aria-hidden="true" />
       <div className="tool-tree-child-content agent-communication-branch">
-        <div className={`agent-communication-label${state === 'running' ? ' is-running' : ''}`}>
+        <button
+          type="button"
+          className={`agent-communication-label${state === 'running' ? ' is-running' : ''}`}
+          aria-expanded={expanded}
+          aria-controls={body ? bodyId : undefined}
+          onClick={() => { if (body) setExpanded((open) => !open) }}
+          style={{ cursor: body ? 'pointer' : 'default' }}
+        >
           <ToolIcon icon={MessagesSquare} running={state === 'running'} size="1em" />
           <span className="agent-communication-label-text">{label}</span>
-        </div>
+          {timestampText && (
+            <time
+              className="agent-communication-timestamp"
+              dateTime={new Date(timestampMs).toISOString()}
+              title={formatDateTime(timestampMs)}
+            >
+              {timestampText}
+            </time>
+          )}
+          {body && (
+            <ChevronRight
+              className="agent-communication-chevron"
+              size="1em"
+              strokeWidth={1.5}
+              aria-hidden="true"
+              style={{ transform: expanded ? 'rotate(90deg)' : 'none' }}
+            />
+          )}
+        </button>
         {body && (
-          <div className="tool-line-details-tree agent-communication-body-tree">
-            <span className="chat-branch-connector" aria-hidden="true" />
-            <div className="tool-detail-block agent-communication-body">
-              <div className="tool-detail-section">
-                <pre className="tool-detail-code">{body}</pre>
+          <AnimatedCollapse open={expanded} id={bodyId}>
+            <div className="tool-line-details-tree agent-communication-body-tree">
+              <span className="chat-branch-connector" aria-hidden="true" />
+              <div className="agent-communication-body">
+                {body}
               </div>
             </div>
-          </div>
+          </AnimatedCollapse>
         )}
       </div>
     </div>
@@ -92,6 +125,18 @@ function AgentCommunicationTrace({ ownerToolUseId }) {
     ...directEvents,
     ...receivedFromMain.filter((block) => !actualMainBodies.has(block.body)),
   ]
+    .map((block, order) => {
+      const rawTimestamp = block.timestamp || block.endTime || block.startTime
+      const timestamp = rawTimestamp == null ? null : new Date(rawTimestamp).getTime()
+      return { block, order, timestamp: Number.isFinite(timestamp) ? timestamp : null }
+    })
+    .sort((left, right) => {
+      if (left.timestamp != null && right.timestamp != null && left.timestamp !== right.timestamp) {
+        return left.timestamp - right.timestamp
+      }
+      return left.order - right.order
+    })
+    .map((entry) => entry.block)
 
   if (events.length === 0) return null
 

@@ -326,6 +326,7 @@ export function transformSessionMessages(sdkMessages) {
       const parentId = msg.parent_tool_use_id
       const rawBlocks = getContentBlocks(msg)
       const out = subagentContent[parentId] || (subagentContent[parentId] = [])
+      const sidechainTimestamp = timestampToMillis(msg?.metadata?.timestamp ?? msg?.timestamp)
       for (const block of rawBlocks) {
         if (block.type === 'text' || block.type === 'thinking') {
           out.push(block)
@@ -357,6 +358,7 @@ export function transformSessionMessages(sdkMessages) {
             ...block,
             status: isError ? 'error' : 'success',
             result: result || undefined,
+            ...(sidechainTimestamp != null ? { startTime: sidechainTimestamp } : {}),
           })
         }
       }
