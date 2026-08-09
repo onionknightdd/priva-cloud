@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Text Stream Animation Demo</title>
+    <style>
+      :root {
+        --bg-base: #0d1117;
+        --bg-surface: #161b22;
+        --bg-elevated: #21262d;
+        --border: #30363d;
+        --border-strong: #484f58;
+        --text-primary: #e6edf3;
+        --text-secondary: #8b949e;
+        --blue: #58a6ff;
+        --font-ui: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI",
+          system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+        --font-code: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+        --demo-duration: 2s;
+        --demo-start-opacity: 0.5;
+        --demo-easing: ease-out;
+        --demo-opaque-stop: 40%;
+        --demo-transparent-stop: 60%;
+      }
+
+      * {
+        box-sizing: border-box;
+        min-width: 0;
+      }
+
+      html,
+      body {
+        width: 100%;
+        min-height: 100%;
+        margin: 0;
+        overflow-x: hidden;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        padding: 24px;
+        color: var(--text-primary);
+        background: var(--bg-base);
+        font-family: var(--font-ui);
+      }
+
+      main {
+        width: min(820px, 100%);
+        padding: 24px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+      }
+
+      .preview {
+        min-height: 118px;
+        display: flex;
+        align-items: center;
+        padding: 20px;
+        background: var(--bg-base);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      .demo-text {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 400;
+        line-height: 1.7;
+        word-break: break-word;
+        overflow-wrap: break-word;
+      }
+
+      .demo-text.is-animating {
+        animation: text-reveal-left-to-right var(--demo-duration)
+          var(--demo-easing) both;
+        -webkit-mask-image: linear-gradient(
+          90deg,
+          currentColor 0%,
+          currentColor var(--demo-opaque-stop),
+          transparent var(--demo-transparent-stop),
+          transparent 100%
+        );
+        mask-image: linear-gradient(
+          90deg,
+          currentColor 0%,
+          currentColor var(--demo-opaque-stop),
+          transparent var(--demo-transparent-stop),
+          transparent 100%
+        );
+        -webkit-mask-position: 0 0;
+        mask-position: 0 0;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-size: 250% 100%;
+        mask-size: 250% 100%;
+      }
+
+      @keyframes text-reveal-left-to-right {
+        from {
+          opacity: var(--demo-start-opacity);
+          -webkit-mask-position: 100% 0;
+          mask-position: 100% 0;
+        }
+        to {
+          opacity: 1;
+          -webkit-mask-position: 0 0;
+          mask-position: 0 0;
+        }
+      }
+
+      .controls {
+        display: grid;
+        gap: 12px;
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid var(--border);
+      }
+
+      .control-row {
+        display: grid;
+        grid-template-columns: 116px minmax(120px, 1fr) 76px;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .control-row label {
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .control-row output {
+        color: var(--text-primary);
+        font: 400 12px/18px var(--font-code);
+        text-align: right;
+      }
+
+      input[type="range"] {
+        width: 100%;
+        height: 16px;
+        margin: 0;
+        appearance: none;
+        -webkit-appearance: none;
+        background: transparent;
+        cursor: pointer;
+      }
+
+      input[type="range"]::-webkit-slider-runnable-track {
+        height: 2px;
+        background: var(--border-strong);
+      }
+
+      input[type="range"]::-webkit-slider-thumb {
+        width: 12px;
+        height: 12px;
+        margin-top: -5px;
+        appearance: none;
+        -webkit-appearance: none;
+        background: var(--blue);
+        border: 1px solid var(--bg-base);
+        border-radius: 2px;
+      }
+
+      input[type="range"]::-moz-range-track {
+        height: 2px;
+        background: var(--border-strong);
+      }
+
+      input[type="range"]::-moz-range-thumb {
+        width: 12px;
+        height: 12px;
+        background: var(--blue);
+        border: 1px solid var(--bg-base);
+        border-radius: 2px;
+      }
+
+      select {
+        width: 100%;
+        height: 32px;
+        padding: 0 8px;
+        color: var(--text-primary);
+        background: var(--bg-base);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font: 400 12px/18px var(--font-code);
+      }
+
+      input[type="range"]:focus-visible,
+      select:focus-visible,
+      button:focus-visible {
+        outline: 1px solid var(--blue);
+        outline-offset: 2px;
+      }
+
+      .demo-footer {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+      }
+
+      button {
+        padding: 7px 12px;
+        color: var(--text-secondary);
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font: 600 11px/16px var(--font-ui);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: color 150ms ease, border-color 150ms ease;
+      }
+
+      button:hover {
+        color: var(--blue);
+        border-color: var(--blue);
+      }
+
+      .parameter-summary {
+        min-width: 0;
+        color: var(--text-secondary);
+        font: 400 11px/16px var(--font-code);
+        word-break: break-word;
+        overflow-wrap: break-word;
+      }
+
+      @media (max-width: 560px) {
+        body {
+          padding: 12px;
+        }
+
+        main {
+          padding: 16px;
+        }
+
+        .preview {
+          padding: 16px;
+        }
+
+        .demo-text {
+          font-size: 20px;
+        }
+
+        .control-row {
+          grid-template-columns: 1fr 64px;
+        }
+
+        .control-row label {
+          grid-column: 1 / -1;
+        }
+
+        .control-row select {
+          grid-column: 1 / -1;
+        }
+
+        .control-row select + output {
+          display: none;
+        }
+
+        .demo-footer {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .demo-text.is-animating {
+          animation: none;
+          opacity: 1;
+          -webkit-mask-image: none;
+          mask-image: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="preview" aria-label="动画预览">
+        <p id="demo-text" class="demo-text is-animating">
+          这是一段从左到右平滑渐入的完整文本，不是逐字出现的打字机效果。
+        </p>
+      </section>
+
+      <section class="controls" aria-label="动画参数">
+        <div class="control-row">
+          <label for="duration">Duration</label>
+          <input id="duration" type="range" min="0.1" max="5" step="0.05" value="2" />
+          <output id="duration-value" for="duration">2.00s</output>
+        </div>
+
+        <div class="control-row">
+          <label for="opacity">Start opacity</label>
+          <input id="opacity" type="range" min="0" max="1" step="0.05" value="0.5" />
+          <output id="opacity-value" for="opacity">0.50</output>
+        </div>
+
+        <div class="control-row">
+          <label for="soft-edge">Soft edge</label>
+          <input id="soft-edge" type="range" min="0" max="20" step="1" value="20" />
+          <output id="soft-edge-value" for="soft-edge">20%</output>
+        </div>
+
+        <div class="control-row">
+          <label for="easing">Easing</label>
+          <select id="easing">
+            <option value="linear">linear</option>
+            <option value="ease">ease</option>
+            <option value="ease-in">ease-in</option>
+            <option value="ease-out" selected>ease-out</option>
+            <option value="ease-in-out">ease-in-out</option>
+            <option value="cubic-bezier(0.16, 1, 0.3, 1)">spring-out</option>
+          </select>
+          <output aria-hidden="true"></output>
+        </div>
+      </section>
+
+      <footer class="demo-footer">
+        <button id="replay" type="button">Replay</button>
+        <code id="parameter-summary" class="parameter-summary"></code>
+      </footer>
+    </main>
+
+    <script>
+      const text = document.getElementById('demo-text')
+      const replay = document.getElementById('replay')
+      const duration = document.getElementById('duration')
+      const opacity = document.getElementById('opacity')
+      const softEdge = document.getElementById('soft-edge')
+      const easing = document.getElementById('easing')
+      const durationValue = document.getElementById('duration-value')
+      const opacityValue = document.getElementById('opacity-value')
+      const softEdgeValue = document.getElementById('soft-edge-value')
+      const parameterSummary = document.getElementById('parameter-summary')
+      let replayTimer = null
+
+      function restartAnimation() {
+        text.classList.remove('is-animating')
+        void text.offsetWidth
+        text.classList.add('is-animating')
+      }
+
+      function applyParameters({ replayAfterChange = true } = {}) {
+        const durationSeconds = Number(duration.value)
+        const startOpacity = Number(opacity.value)
+        const softness = Number(softEdge.value)
+
+        text.style.setProperty('--demo-duration', `${durationSeconds}s`)
+        text.style.setProperty('--demo-start-opacity', startOpacity)
+        text.style.setProperty('--demo-easing', easing.value)
+        text.style.setProperty('--demo-transparent-stop', `${40 + softness}%`)
+
+        durationValue.value = `${durationSeconds.toFixed(2)}s`
+        opacityValue.value = startOpacity.toFixed(2)
+        softEdgeValue.value = `${softness}%`
+        parameterSummary.textContent = [
+          `duration=${durationSeconds.toFixed(2)}s`,
+          `opacity=${startOpacity.toFixed(2)}`,
+          `softEdge=${softness}%`,
+          `easing=${easing.value}`,
+        ].join(' · ')
+
+        if (!replayAfterChange) return
+        window.clearTimeout(replayTimer)
+        replayTimer = window.setTimeout(restartAnimation, 80)
+      }
+
+      for (const control of [duration, opacity, softEdge, easing]) {
+        control.addEventListener('input', () => applyParameters())
+        control.addEventListener('change', () => applyParameters())
+      }
+
+      replay.addEventListener('click', restartAnimation)
+      applyParameters({ replayAfterChange: false })
+    </script>
+  </body>
+</html>
