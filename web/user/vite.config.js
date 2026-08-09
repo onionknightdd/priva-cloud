@@ -57,6 +57,10 @@ export default defineConfig({
           const parts = id.split('node_modules/')[1]?.split('/') || []
           const pkg = parts[0]?.startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0]
 
+          // Excalidraw, Mermaid, and Markdown are dynamically imported and
+          // have cross-package imports. Let Rollup keep their dependency graph
+          // together; forcing separate manual chunks creates a circular ESM
+          // initialization path (for example, cA before initialization).
           if (
             pkg === 'mermaid' ||
             pkg === '@mermaid-js/parser' ||
@@ -89,7 +93,7 @@ export default defineConfig({
               'ts-dedent',
             ].includes(pkg)
           ) {
-            return 'vendor-mermaid'
+            return undefined
           }
 
           if (['react', 'react-dom', 'scheduler', 'react-is', 'prop-types', 'use-sync-external-store'].includes(pkg)) return 'vendor-react'
@@ -155,7 +159,7 @@ export default defineConfig({
               'trough',
             ].includes(pkg)
           ) {
-            return 'vendor-markdown'
+            return undefined
           }
           if (pkg?.startsWith('@xterm/')) return 'vendor-terminal'
           if (pkg === 'animejs') return 'vendor-motion'
@@ -186,7 +190,7 @@ export default defineConfig({
               'nanoid',
             ].includes(pkg)
           ) {
-            return 'vendor-excalidraw'
+            return undefined
           }
 
           return 'vendor-misc'
