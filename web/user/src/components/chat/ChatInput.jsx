@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
-import { Square, Shield, Cable, ChevronRight, X, AlertTriangle, Cpu, CornerDownLeft, FolderPlus } from 'lucide-react'
+import { Square, Shield, Cable, ChevronRight, X, AlertTriangle, Cpu, CornerDownLeft, FolderPlus, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
 import useUiStore from '@shared/stores/uiStore'
@@ -22,6 +22,8 @@ import CwdIndicator from './CwdIndicator'
 import CheckpointToggle from './CheckpointToggle'
 import DirectoryPicker from '../shared/DirectoryPicker'
 import { setSessionAddDirs } from '../../api/sessions'
+import { deleteUploadedFile, uploadFile } from '../../api/files'
+import { resolveImageRoute } from '../../api/vision'
 import QueuedMessagesStack from './QueuedMessagesStack'
 import { buildSelectedXlsxXml } from '../../utils/selectedXlsx'
 import { buildSelectedFileXml } from '../../utils/selectedFile'
@@ -42,7 +44,45 @@ function findNextVariable(text, fromPos) {
   return null
 }
 
-export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
+function resolveVisionModelForSelection(selectedModel, profiles, defaultProfileId, fallbackVisionModel) {
+  const fallbackProfileId = defaultProfileId || profiles[0]?.id || null
+  let profileId = fallbackProfileId
+  if (typeof selectedModel === 'string') {
+    const separator = selectedModel.indexOf(':')
+    if (separator > 0) {
+      const candidate = selectedModel.slice(0, separator)
+      if (profiles.some((profile) => profile.id === candidate)) profileId = candidate
+    }
+  }
+  const profile = profiles.find((item) => item.id === profileId)
+  if (profile?.vision_model) return profile.vision_model
+  return profileId === fallbackProfileId ? (fallbackVisionModel || null) : null
+}
+
+function imageAttachmentToFile(attachment) {
+  const binary = atob(attachment.base64Data || '')
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  const extension = {
+    'image/png': '.png',
+    'image/jpeg': '.jpg',
+    'image/gif': '.gif',
+    'image/webp': '.webp',
+  }[attachment.mediaType] || '.png'
+  const originalName = attachment.name || 'image'
+  const filename = /\.(png|jpe?g|gif|webp)$/i.test(originalName)
+    ? originalName.replace(/\.(png|jpe?g|gif|webp)$/i, extension)
+    : `${originalName.replace(/\.[^.]+$/, '') || 'image'}${extension}`
+  return new File(
+    [bytes],
+    filename,
+    { type: attachment.mediaType || 'image/png' },
+  )
+}
+
+export default function ChatInput({ cwd, cwdPlacement = 'top', summaryAware = false }) {
   const { t } = useTranslation()
   const inputText = useChatStore((s) => s.inputText)
   const setInputText = useChatStore((s) => s.setInputText)
@@ -71,7 +111,6 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
   const fetchMcpServers = useMcpStore((s) => s.fetchServers)
   const attachments = useChatStore((s) => s.attachments)
   const queuedUserMessages = useChatStore((s) => s.queuedUserMessages)
-  const clearAttachments = useChatStore((s) => s.clearAttachments)
   const clearTasks = useTaskStore((s) => s.clearTasks)
   const hasRunningTasks = useTaskStore((s) => Object.values(s.tasks).some((t) => t.status === 'running'))
   const clearFileOps = useFileOpsStore((s) => s.clearFileOps)
@@ -88,6 +127,10 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
   const clearSelectedFileReference = useChatStore((s) => s.clearSelectedFileReference)
   const { sendMessage, stopStream, sendAnswer, declineAskUser, respondPermission } = useSSE()
   const visionModel = useSettingsStore((s) => s.visionModel)
+  const profiles = useSettingsStore((s) => s.profiles)
+  const defaultProfileId = useSettingsStore((s) => s.defaultProfileId)
+  const selectedModel = useSettingsStore((s) => s.selectedModel)
+  const effectiveVisionModel = resolveVisionModelForSelection(selectedModel, profiles, defaultProfileId, visionModel)
   const textareaRef = useRef(null)
   const isBlocked = !!pendingAskUser || !!pendingPermission || !!pendingPlanApproval
 
@@ -97,6 +140,54 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
   const { mounted: permissionMenuMounted, popRef: permissionMenuPopRef } = usePopoverTransition({ open: showPermissionMenu, placement: 'top' })
   // Composer-warning callback registered by PromptComposer.
   const composerWarnRef = useRef(null)
+  const imageRouteRequestRef = useRef(null)
+  const imageSendPendingRef = useRef(false)
+  const [imageRouteState, setImageRouteState] = useState({ status: 'idle', route: null })
+  const [imageSendPending, setImageSendPending] = useState(false)
+  const hasAnyImages = attachments.some((attachment) => attachment.isImage)
+  const capabilityRevision = profiles
+    .map((profile) => JSON.stringify({
+      id: profile.id,
+      baseUrl: profile.base_url,
+      authToken: profile.auth_token,
+      visionModel: profile.vision_model,
+      capabilities: profile.model_capabilities || {},
+    }))
+    .join('|')
+  const imageRouteKey = `${selectedModel || '__default__'}\u0000${effectiveVisionModel || ''}\u0000${capabilityRevision}`
+
+  const ensureImageRoute = useCallback(() => {
+    const existing = imageRouteRequestRef.current
+    if (existing?.key === imageRouteKey && existing.promise) return existing.promise
+
+    setImageRouteState({ status: 'checking', route: null })
+    const request = { key: imageRouteKey, promise: null }
+    request.promise = resolveImageRoute(selectedModel)
+      .then((result) => {
+        if (imageRouteRequestRef.current === request) {
+          setImageRouteState({ status: 'resolved', ...result })
+        }
+        return result
+      })
+      .catch(() => {
+        const result = { route: 'probe_failed', reason: 'model_unavailable' }
+        if (imageRouteRequestRef.current === request) {
+          setImageRouteState({ status: 'resolved', ...result })
+        }
+        return result
+      })
+    imageRouteRequestRef.current = request
+    return request.promise
+  }, [imageRouteKey, selectedModel])
+
+  useEffect(() => {
+    if (!hasAnyImages) {
+      imageRouteRequestRef.current = null
+      setImageRouteState({ status: 'idle', route: null })
+      return
+    }
+    ensureImageRoute()
+  }, [hasAnyImages, ensureImageRoute])
 
   useEffect(() => {
     if (composerActive) return
@@ -214,115 +305,236 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
     return () => document.removeEventListener('mousedown', handler)
   }, [showPermissionMenu])
 
-  const hasUploading = attachments.some((a) => a.status === 'uploading' || a.status === 'processing')
+  const hasUploading = imageSendPending || attachments.some((a) => a.status === 'uploading' || a.status === 'processing')
   const doneAttachments = attachments.filter((a) => a.status === 'done')
-  const imageAttachments = doneAttachments.filter((a) => a.isImage)
-  const fileAttachments = doneAttachments.filter((a) => !a.isImage)
 
-  const handleSend = () => {
-    const text = inputText.trim()
-    const hasFileRef = !!useChatStore.getState().fileReference
-    const hasSelectedXlsxRef = !!useChatStore.getState().selectedXlsxReference
-    const hasSelectedFileRef = !!useChatStore.getState().selectedFileReference
-    const hasContent = !!text || !!selectedSkill || doneAttachments.length > 0 || hasFileRef || hasSelectedXlsxRef || hasSelectedFileRef
-    if (!hasContent || isBlocked || hasUploading) return
-    // Running tasks only block fresh sends; mid-stream queueing is still allowed
+  const handleSend = async () => {
+    if (imageSendPendingRef.current) return
+    const initialState = useChatStore.getState()
+    const initialAttachments = initialState.attachments
+    const initialDone = initialAttachments.filter((attachment) => attachment.status === 'done')
+    const initialHasUploading = initialAttachments.some((attachment) => attachment.status === 'uploading' || attachment.status === 'processing')
+    const hasFileRef = !!initialState.fileReference
+    const hasSelectedXlsxRef = !!initialState.selectedXlsxReference
+    const hasSelectedFileRef = !!initialState.selectedFileReference
+    const hasContent = !!initialState.inputText.trim() || !!selectedSkill || initialDone.length > 0 || hasFileRef || hasSelectedXlsxRef || hasSelectedFileRef
+    if (!hasContent || isBlocked || initialHasUploading) return
     if (!isStreaming && hasRunningTasks) return
-    const fullText = selectedSkill ? `/${selectedSkill.name} ${text}`.trim() : text
-    if (!fullText && doneAttachments.length === 0) return
-    setInputText('')
-    setSelectedSkill(null)
-    setQuickActionVariableMode(false)
 
-    // Handle file reference: prepend XML block and use stored template
-    const currentFileRef = useChatStore.getState().fileReference
-    const fileRefTemplate = useChatStore.getState().fileReferenceTemplate
-    let finalText = fullText
-    if (currentFileRef) {
-      const xmlBlock = `<file-reference path="${currentFileRef.filePath}" startLine="${currentFileRef.startLine}" endLine="${currentFileRef.endLine}" language="${currentFileRef.language || ''}">\n${currentFileRef.selectedText}\n</file-reference>`
-      // Use stored template if available, otherwise build from user text
-      if (fileRefTemplate) {
-        finalText = xmlBlock + '\n' + fileRefTemplate
-      } else {
-        finalText = xmlBlock + '\n' + fullText
+    const needsImageRoute = initialDone.some((attachment) => attachment.isImage)
+    let uploadedImageIds = []
+    if (needsImageRoute) {
+      imageSendPendingRef.current = true
+      setImageSendPending(true)
+    }
+
+    try {
+      let routeResult = needsImageRoute
+        ? await ensureImageRoute()
+        : { route: 'direct' }
+      if (needsImageRoute) {
+        const latestModel = useSettingsStore.getState().selectedModel
+        if (latestModel !== selectedModel) {
+          routeResult = await resolveImageRoute(latestModel).catch(() => ({
+            route: 'probe_failed',
+            reason: 'model_unavailable',
+          }))
+          if (useSettingsStore.getState().selectedModel !== latestModel) {
+            composerWarnRef.current?.(t('chat.modelUnavailable'))
+            return
+          }
+        }
       }
-      useChatStore.getState().clearFileReference()
-      useChatStore.getState().clearFileReferenceTemplate()
-    }
 
-    const currentSelectedXlsxRef = useChatStore.getState().selectedXlsxReference
-    if (currentSelectedXlsxRef) {
-      const xmlBlock = buildSelectedXlsxXml(currentSelectedXlsxRef)
-      finalText = finalText ? `${xmlBlock}\n${finalText}` : xmlBlock
-      useChatStore.getState().clearSelectedXlsxReference()
-    }
+      // Snapshot only after route/probe has completed. If the user edited the
+      // composer while waiting, the newer text and attachment set are sent.
+      const state = useChatStore.getState()
+      const attachmentSnapshot = state.attachments
+      const doneSnapshot = attachmentSnapshot.filter((attachment) => attachment.status === 'done')
+      const imageSnapshot = doneSnapshot.filter((attachment) => attachment.isImage)
+      const fileSnapshot = doneSnapshot.filter((attachment) => !attachment.isImage)
+      if (imageSnapshot.length > 0 && ['blocked', 'probe_failed'].includes(routeResult.route)) {
+        composerWarnRef.current?.(t('chat.modelUnavailable'))
+        return
+      }
+      if (imageSnapshot.length > 0 && routeResult.route === 'vision_mcp' && isStreaming) {
+        composerWarnRef.current?.(t('chat.visionMcpQueueUnavailable'))
+        return
+      }
 
-    const currentSelectedFileRef = useChatStore.getState().selectedFileReference
-    if (currentSelectedFileRef) {
-      const xmlBlock = buildSelectedFileXml(currentSelectedFileRef)
-      finalText = finalText ? `${xmlBlock}\n${finalText}` : xmlBlock
-      useChatStore.getState().clearSelectedFileReference()
-    }
+      const inputSnapshot = state.inputText
+      const text = inputSnapshot.trim()
+      const skillSnapshot = selectedSkill
+      const fullText = skillSnapshot ? `/${skillSnapshot.name} ${text}`.trim() : text
+      if (!fullText && doneSnapshot.length === 0) return
 
-    const currentQuote = useChatStore.getState().quotedText
-    if (currentQuote && finalText) {
-      finalText = t('quote.template', { content: currentQuote, feedback: finalText })
-      useChatStore.getState().clearQuotedText()
-    }
+      const currentFileRef = state.fileReference
+      const fileRefTemplate = state.fileReferenceTemplate
+      let finalText = fullText
+      if (currentFileRef) {
+        const xmlBlock = `<file-reference path="${currentFileRef.filePath}" startLine="${currentFileRef.startLine}" endLine="${currentFileRef.endLine}" language="${currentFileRef.language || ''}">\n${currentFileRef.selectedText}\n</file-reference>`
+        finalText = xmlBlock + '\n' + (fileRefTemplate || fullText)
+      }
 
-    const attItems = fileAttachments.map((a) => ({ path: a.path, name: a.originalName || a.name }))
-    const imageItems = imageAttachments.map((a) => ({
-      data: a.base64Data, media_type: a.mediaType, filename: a.name,
-    }))
-    // Display metadata only — no base64Data/previewUrl. The image bytes
-    // already live in the message content blocks; duplicating them here
-    // pins multi-MB strings in memory for the session's lifetime.
-    const attMeta = doneAttachments.map((a) => ({
-      name: a.name, size: a.size, path: a.path,
-      isImage: a.isImage || false, mediaType: a.mediaType,
-    }))
-    // Failed uploads stay visible as error chips (with a warning) so the user
-    // notices they were NOT sent; sending itself is not blocked.
-    const hasErrorAtts = attachments.some((a) => a.status === 'error')
-    if (hasErrorAtts) {
-      composerWarnRef.current?.(t('chat.failedAttachmentsKept'))
-      clearAttachments({ keepErrors: true })
-    } else {
-      clearAttachments()
-    }
+      const currentSelectedXlsxRef = state.selectedXlsxReference
+      if (currentSelectedXlsxRef) {
+        const xmlBlock = buildSelectedXlsxXml(currentSelectedXlsxRef)
+        finalText = finalText ? `${xmlBlock}\n${finalText}` : xmlBlock
+      }
 
-    const messageToSend = finalText || (imageItems.length > 0 ? 'Describe the uploaded image(s).' : 'Please read the uploaded files.')
+      const currentSelectedFileRef = state.selectedFileReference
+      if (currentSelectedFileRef) {
+        const xmlBlock = buildSelectedFileXml(currentSelectedFileRef)
+        finalText = finalText ? `${xmlBlock}\n${finalText}` : xmlBlock
+      }
 
-    if (isStreaming) {
-      // Mid-stream: queue for injection at next tool-result boundary
-      const queueSender = useChatStore.getState().queueSender
-      if (!queueSender?.sendQueue) return
-      const id = (typeof crypto !== 'undefined' && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-      queueSender.sendQueue({
-        id,
-        text: messageToSend,
-        attachments: attItems.length > 0 ? attItems : undefined,
-        images: imageItems.length > 0 ? imageItems : undefined,
+      const currentQuote = state.quotedText
+      if (currentQuote && finalText) {
+        finalText = t('quote.template', { content: currentQuote, feedback: finalText })
+      }
+
+      const displayImages = imageSnapshot.map((attachment) => ({
+        data: attachment.base64Data,
+        media_type: attachment.mediaType,
+        filename: attachment.name,
+      }))
+      const regularAttachmentItems = fileSnapshot.map((attachment) => ({
+        path: attachment.path,
+        name: attachment.originalName || attachment.name,
+        attachment_id: attachment.attachmentId || attachment.uuid || undefined,
+      }))
+
+      let imageAttachmentItems = []
+      let backendImages = displayImages
+      const uploadedByLocalId = new Map()
+      if (imageSnapshot.length > 0 && routeResult.route === 'vision_mcp') {
+        const uploadResults = await Promise.allSettled(imageSnapshot.map(async (attachment) => {
+          const result = await uploadFile(imageAttachmentToFile(attachment))
+          return { attachment, result }
+        }))
+        const successes = uploadResults
+          .filter((result) => result.status === 'fulfilled')
+          .map((result) => result.value)
+        uploadedImageIds = successes
+          .map(({ result }) => result.attachment_id ?? result.uuid)
+          .filter(Boolean)
+        if (uploadResults.some((result) => result.status === 'rejected')) {
+          await Promise.allSettled(uploadedImageIds.map((id) => deleteUploadedFile(id)))
+          uploadedImageIds = []
+          composerWarnRef.current?.(t('chat.imageUploadFailed'))
+          return
+        }
+        const latestAttachmentIds = new Set(
+          useChatStore.getState().attachments.map((attachment) => attachment.id)
+        )
+        if (doneSnapshot.some((attachment) => !latestAttachmentIds.has(attachment.id))) {
+          await Promise.allSettled(uploadedImageIds.map((id) => deleteUploadedFile(id)))
+          uploadedImageIds = []
+          composerWarnRef.current?.(t('chat.attachmentsChangedDuringSend'))
+          return
+        }
+        imageAttachmentItems = successes.map(({ attachment, result }) => {
+          const attachmentId = result.attachment_id ?? result.uuid
+          const item = {
+            path: result.path,
+            name: result.name ?? result.upload_name ?? attachment.name,
+            attachment_id: attachmentId,
+            media_type: attachment.mediaType,
+            is_image: true,
+          }
+          uploadedByLocalId.set(attachment.id, item)
+          return item
+        })
+        backendImages = []
+      }
+
+      const attachmentItems = [...regularAttachmentItems, ...imageAttachmentItems]
+      const attachmentMeta = doneSnapshot.map((attachment) => {
+        const uploaded = uploadedByLocalId.get(attachment.id)
+        return {
+          name: attachment.name,
+          size: attachment.size,
+          path: uploaded?.path || attachment.path,
+          isImage: attachment.isImage || false,
+          mediaType: attachment.mediaType,
+        }
       })
-      useChatStore.getState().enqueueUserMessage({
-        id,
-        text: messageToSend,
-        attachments: attItems,
-        images: imageItems,
-        attachmentsMeta: attMeta,
-      })
-      return
-    }
+      const messageToSend = finalText || (displayImages.length > 0
+        ? 'Describe the uploaded image(s).'
+        : 'Please read the uploaded files.')
 
-    sendMessage(
-      messageToSend,
-      permissionMode,
-      attItems.length > 0 ? attItems : undefined,
-      attMeta.length > 0 ? attMeta : undefined,
-      imageItems.length > 0 ? imageItems : undefined,
-    )
+      let accepted = false
+      if (isStreaming) {
+        const queueSender = useChatStore.getState().queueSender
+        if (!queueSender?.sendQueue) return
+        const id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        accepted = queueSender.sendQueue({
+          id,
+          text: messageToSend,
+          attachments: attachmentItems.length > 0 ? attachmentItems : undefined,
+          images: backendImages.length > 0 ? backendImages : undefined,
+        })
+        if (accepted) {
+          useChatStore.getState().enqueueUserMessage({
+            id,
+            text: messageToSend,
+            attachments: attachmentItems,
+            images: displayImages,
+            attachmentsMeta: attachmentMeta,
+          })
+        }
+      } else {
+        accepted = sendMessage(
+          messageToSend,
+          permissionMode,
+          attachmentItems.length > 0 ? attachmentItems : undefined,
+          attachmentMeta.length > 0 ? attachmentMeta : undefined,
+          backendImages.length > 0 ? backendImages : undefined,
+          displayImages.length > 0 ? displayImages : undefined,
+        )
+      }
+      if (!accepted) {
+        if (uploadedImageIds.length > 0) {
+          await Promise.allSettled(uploadedImageIds.map((id) => deleteUploadedFile(id)))
+          uploadedImageIds = []
+        }
+        return
+      }
+
+      // Commit composer changes only after the transport accepted the message.
+      // Conditional clears preserve anything the user typed while MCP images
+      // were uploading.
+      if (useChatStore.getState().inputText === inputSnapshot) {
+        setInputText('')
+        setQuickActionVariableMode(false)
+        setSelectedSkill((current) => current === skillSnapshot ? null : current)
+      }
+      const sentIds = new Set(doneSnapshot.map((attachment) => attachment.id))
+      setAttachments((current) => current.filter((attachment) => !sentIds.has(attachment.id)))
+      const latest = useChatStore.getState()
+      if (currentFileRef && latest.fileReference === currentFileRef) {
+        latest.clearFileReference()
+        latest.clearFileReferenceTemplate()
+      }
+      if (currentSelectedXlsxRef && latest.selectedXlsxReference === currentSelectedXlsxRef) latest.clearSelectedXlsxReference()
+      if (currentSelectedFileRef && latest.selectedFileReference === currentSelectedFileRef) latest.clearSelectedFileReference()
+      if (currentQuote && latest.quotedText === currentQuote) latest.clearQuotedText()
+      if (attachmentSnapshot.some((attachment) => attachment.status === 'error')) {
+        composerWarnRef.current?.(t('chat.failedAttachmentsKept'))
+      }
+    } catch {
+      if (uploadedImageIds.length > 0) {
+        await Promise.allSettled(uploadedImageIds.map((id) => deleteUploadedFile(id)))
+      }
+      composerWarnRef.current?.(t('chat.modelUnavailable'))
+    } finally {
+      if (needsImageRoute) {
+        imageSendPendingRef.current = false
+        setImageSendPending(false)
+      }
+    }
   }
   handleSendRef.current = handleSend
 
@@ -558,12 +770,20 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
 
   // Vision model hint banners rendered after image thumbnails
   const hasImages = attachments.some((a) => a.isImage)
-  const visionHintItems = hasImages ? [{ id: 'vision-hint', model: visionModel || null }] : []
+  const visionHintItems = hasImages ? [{ id: 'vision-hint', ...imageRouteState }] : []
   const [lifecycleVisionHints, removeExitedVisionHint] = useListLifecycle(visionHintItems, (item) => item.id)
   const visionHints = lifecycleVisionHints.length > 0 ? (
     <>
       {lifecycleVisionHints.map(({ key, item, present }) => {
-        const hasVisionModel = !!item.model
+        const unavailable = ['blocked', 'probe_failed'].includes(item.route)
+        const checking = item.status !== 'resolved'
+        const hintText = checking
+          ? t('chat.imageCapabilityChecking')
+          : item.route === 'direct'
+            ? t('chat.imageRouteDirect', { model: item.model_id })
+            : item.route === 'vision_mcp'
+              ? t('chat.imageRouteVisionMcp', { model: item.vision_model })
+              : t('chat.modelUnavailable')
         return (
           <LifecycleItem
             key={key}
@@ -575,11 +795,16 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
             style={{ pointerEvents: present ? 'auto' : 'none' }}
           >
             <div className="flex items-center gap-2 px-3 py-1 mx-3 mt-1"
-              style={{ background: 'var(--bg-elevated)', borderLeft: `2px solid ${hasVisionModel ? 'var(--cyan)' : 'var(--yellow)'}`, borderRadius: 2, fontSize: 11, color: 'var(--text-dim)', userSelect: 'none' }}>
-              {hasVisionModel
-                ? <Cpu size={12} strokeWidth={1.5} style={{ color: 'var(--cyan)', flexShrink: 0 }} />
-                : <AlertTriangle size={12} strokeWidth={1.5} style={{ color: 'var(--yellow)', flexShrink: 0 }} />}
-              {hasVisionModel ? t('chat.usingVisionModel', { model: item.model }) : t('chat.noVisionModel')}
+              style={{ background: 'var(--bg-elevated)', borderLeft: `2px solid ${unavailable ? 'var(--yellow)' : 'var(--cyan)'}`, borderRadius: 2, fontSize: 11, color: 'var(--text-dim)', userSelect: 'none' }}>
+              {unavailable
+                ? <AlertTriangle size={12} strokeWidth={1.5} style={{ color: 'var(--yellow)', flexShrink: 0 }} />
+                : <Cpu size={12} strokeWidth={1.5} style={{ color: 'var(--cyan)', flexShrink: 0 }} />}
+              <span className="flex-1 min-w-0">{hintText}</span>
+              {item.route === 'probe_failed' && (
+                <button type="button" className="flex items-center gap-1" onClick={() => { imageRouteRequestRef.current = null; ensureImageRoute() }} style={{ padding: 0, background: 'transparent', border: 'none', color: 'var(--blue)', cursor: 'pointer', fontSize: 11 }}>
+                  <RefreshCw size={12} strokeWidth={1.5} /> {t('chat.retryImageProbe')}
+                </button>
+              )}
             </div>
           </LifecycleItem>
         )
@@ -600,7 +825,7 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
 
   // Permission mode button (toolbar left, after + button)
   const toolbarLeftContent = (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center" style={{ gap: 3 }}>
       <div className="relative" ref={permMenuRef}>
       <button
         className="flex items-center gap-1 px-2"
@@ -849,7 +1074,13 @@ export default function ChatInput({ cwd, cwdPlacement = 'top' }) {
       style={{ background: 'var(--bg-base)', paddingTop: 14, paddingBottom: 10 }}
     >
       {directoryPickers}
-      <div style={{ maxWidth: 900, width: '80%', margin: '0 auto' }}>
+      <div style={summaryAware ? {
+        width: 'auto',
+        maxWidth: 'none',
+        marginLeft: 'var(--session-summary-track-inline-margin, max(10%, calc(50% - 450px)))',
+        marginRight: 'var(--session-summary-track-inline-margin, max(10%, calc(50% - 450px)))',
+        transition: 'margin-left var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1)), margin-right var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1))',
+      } : { maxWidth: 900, width: '80%', margin: '0 auto' }}>
         {cwdPlacement === 'top' && (
           <div className="min-w-0" style={{ marginBottom: 8 }}>
             {cwdRow}
@@ -947,11 +1178,14 @@ function McpSubMenu({ mcpServers, setMcpServers, serverList, loading, t }) {
   return (
     <div
       className="relative"
-      style={{ borderTop: '1px solid var(--border-subtle)' }}
       onMouseEnter={enter}
       onMouseLeave={leave}
       onMouseDown={(e) => e.stopPropagation()}
     >
+      <div
+        aria-hidden="true"
+        style={{ height: 1, margin: '0 12px', background: 'var(--border-subtle)' }}
+      />
       <button
         type="button"
         className="flex items-center gap-2 px-3 py-2 w-full text-sm"

@@ -20,9 +20,10 @@ import { DURATION, EASE_SPRING, EASE_TAB } from './tokens'
 //   )
 //
 // Variants (durations ms, enter/exit):
-//   scale  — center modals: panel opacity 0↔1 + scale .98↔1, 200/250
-//   drawer — right drawers: panel translateX +100%↔0, 220/280
-//   slide  — banners: panel opacity 0↔1 + translateY -8px↔0, 200/250
+//   scale       — center modals: panel opacity 0↔1 + scale .98↔1, 200/250
+//   cornerScale — anchored cards: panel opacity 0↔1 + scale .92↔1, 200/250
+//   drawer      — right drawers: panel translateX +100%↔0, 220/280
+//   slide       — banners: panel opacity 0↔1 + translateY -8px↔0, 200/250
 // Backdrop (optional ref): opacity 0↔1 over the same duration. Blur stays a
 // constant backdrop-filter on the layer — only its opacity animates.
 //
@@ -47,6 +48,16 @@ const VARIANTS = {
     },
     enter: { opacity: 1, scale: 1 },
     exit: { opacity: 0, scale: 0.98 },
+  },
+  cornerScale: {
+    duration: DURATION.panel,
+    exitDuration: 250,
+    preEnter: (el) => {
+      el.style.opacity = '0'
+      el.style.transform = 'scale(0.92)'
+    },
+    enter: { opacity: 1, scale: 1 },
+    exit: { opacity: 0, scale: 0.92 },
   },
   drawer: {
     duration: DURATION.canvas,

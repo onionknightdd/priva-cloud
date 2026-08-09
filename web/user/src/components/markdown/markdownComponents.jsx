@@ -3,6 +3,7 @@ import { useIsCodeFenceIncomplete } from 'streamdown'
 import CopyButton from '@shared/components/shared/CopyButton'
 import MermaidDiagram from './MermaidDiagram'
 import ExcalidrawDiagram from './ExcalidrawDiagram'
+import InlineFileReference from './InlineFileReference'
 
 /**
  * Recursively extract plain text from a React node tree.
@@ -74,7 +75,7 @@ function createMarkdownComponents({ mermaidCollapsible = false } = {}) {
   h1: ({ children }) => (
     <h1 style={{
       fontSize: 'var(--text-xl)', fontWeight: 700,
-      color: 'var(--text-primary)', margin: '24px 0 12px',
+      color: 'var(--text-primary)', margin: '22px 0 12px',
       letterSpacing: 'var(--tracking-tight)',
       borderBottom: '1px solid var(--border)', paddingBottom: '8px',
     }}>
@@ -119,23 +120,13 @@ function createMarkdownComponents({ mermaidCollapsible = false } = {}) {
       lineHeight: 1.8, margin: '0 0 4px', wordBreak: 'break-word', whiteSpace: 'pre-wrap',
     }}>{children}</p>
   ),
-  code: ({ className, children, node, ...props }) => {
-    // Check if this code is inside a <pre> (code block) or inline
-    const isInline = !className && (!node?.position || node?.properties?.inline !== false) && !/\n/.test(String(children))
-    if (isInline) {
-      return (
-        <code style={{
-          background: 'var(--bg-elevated)', color: 'var(--cyan)',
-          padding: '1px 5px', borderRadius: '3px', fontSize: '0.9em',
-          border: '1px solid var(--border)',
-          fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-        }}>{children}</code>
-      )
-    }
-    return (
-      <code className={className} {...props}>{children}</code>
-    )
-  },
+  // Streamdown routes code spans through `inlineCode` and marks fenced code
+  // with `data-block`, so even a one-line, language-less fence stays out of
+  // the passive file probe.
+  inlineCode: ({ children }) => <InlineFileReference>{children}</InlineFileReference>,
+  code: ({ className, children, node: _node, ...props }) => (
+    <code className={className} {...props}>{children}</code>
+  ),
   pre: function MarkdownPre({ children }) {
     const isCodeFenceIncomplete = useIsCodeFenceIncomplete()
     const rawChildren = children?.props?.children

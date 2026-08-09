@@ -37,12 +37,17 @@ function resolveIconName(entry) {
 
 export function getFileIcon(entry, size = 14) {
   const name = resolveIconName(entry)
+  const isNumericSize = typeof size === 'number'
   return (
     <img
       src={`${ICON_BASE}${name}.svg`}
-      width={size}
-      height={size}
-      style={{ flexShrink: 0, display: 'block' }}
+      width={isNumericSize ? size : undefined}
+      height={isNumericSize ? size : undefined}
+      style={{
+        flexShrink: 0,
+        display: 'block',
+        ...(!isNumericSize ? { width: size, height: size } : {}),
+      }}
       alt=""
       draggable={false}
     />

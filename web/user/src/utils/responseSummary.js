@@ -1,7 +1,6 @@
 const READ_TOOL_NAMES = new Set(['Read', 'NotebookRead'])
 const EDIT_TOOL_NAMES = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
 const COMMAND_TOOL_NAMES = new Set(['Bash'])
-const SUBAGENT_TOOL_NAMES = new Set(['Agent', 'Task'])
 
 function normalizedText(value) {
   return String(value || '')
@@ -116,7 +115,7 @@ export function visibleExecutionSummaryItems(summary = {}) {
     items.push({ key: 'duration', value: summary.duration })
   }
 
-  for (const key of ['readFiles', 'editedFiles', 'commands', 'questions']) {
+  for (const key of ['agents', 'workflows', 'tasks', 'readFiles', 'editedFiles', 'commands', 'questions']) {
     const value = Number(summary[key])
     if (Number.isFinite(value) && value > 0) items.push({ key, value })
   }
@@ -125,12 +124,11 @@ export function visibleExecutionSummaryItems(summary = {}) {
 }
 
 /**
- * Count successful file reads/edits by unique path and executions/questions by
- * occurrence. Subagent buckets are followed recursively from Agent/Task blocks.
+ * Count only operations directly owned by this content bucket. Agent/Task
+ * children are summarized separately in their Canvas inspector rows.
  */
 export function summarizeResponseExecution({
   contentBlocks,
-  subagentContent = {},
   fileOps = [],
   durationMs = 0,
   additionalQuestionCount = 0,
@@ -138,9 +136,11 @@ export function summarizeResponseExecution({
   const readFiles = new Set()
   const editedFiles = new Set()
   const visitedToolIds = new Set()
-  const visitedSubagents = new Set()
   const visitedQuestionIds = new Set()
   const fileOpsById = new Map((fileOps || []).map((op) => [op.id, op]))
+  let agents = 0
+  let workflows = 0
+  let tasks = 0
   let commands = 0
   let questions = Math.max(0, Number(additionalQuestionCount) || 0)
 
@@ -182,16 +182,14 @@ export function summarizeResponseExecution({
       if (EDIT_TOOL_NAMES.has(block.name) && isCompleted(block) && !isFailed(block)) {
         addPath(editedFiles, toolFilePath(block))
       }
+      if (block.name === 'Agent' && isCompleted(block)) agents += 1
+      if (block.name === 'Workflow' && isCompleted(block)) workflows += 1
+      if (block.name === 'Task' && isCompleted(block)) tasks += 1
       if (COMMAND_TOOL_NAMES.has(block.name) && isCompleted(block)) commands += 1
       if (block.name === 'AskUserQuestion' && !isFailed(block)) {
         if (block.id && visitedQuestionIds.has(block.id)) return
         if (block.id) visitedQuestionIds.add(block.id)
         questions += questionCount(block.input?.questions)
-      }
-
-      if (SUBAGENT_TOOL_NAMES.has(block.name) && block.id && !visitedSubagents.has(block.id)) {
-        visitedSubagents.add(block.id)
-        visit(subagentContent[block.id])
       }
     })
   }
@@ -200,6 +198,9 @@ export function summarizeResponseExecution({
 
   return {
     duration: formatExecutionDuration(durationMs),
+    agents,
+    workflows,
+    tasks,
     readFiles: readFiles.size,
     editedFiles: editedFiles.size,
     commands,

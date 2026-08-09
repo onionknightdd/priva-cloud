@@ -1547,7 +1547,7 @@ export default function Sidebar() {
           {tagCatalog.length > 0 && (
             <div
               className="flex flex-wrap gap-1 px-3"
-              style={{ borderBottom: '1px solid var(--border-subtle)', flexShrink: 0, paddingLeft: 28, paddingTop: 2, paddingBottom: 4 }}
+              style={{ flexShrink: 0, paddingLeft: 28, paddingTop: 2, paddingBottom: 4 }}
             >
               {tagFilterState.visible.map(({ tag, colorIndex }) => {
                 const selected = tagFilterState.selectedKeys.has(tag.toLowerCase())

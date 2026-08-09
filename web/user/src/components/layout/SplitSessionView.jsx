@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Columns2, Rows2, Grid2X2, PanelLeft, PanelRight } from 'lucide-react'
 import { animate } from 'animejs'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
-import { EASE_OUT, EASE_TAB } from '@shared/motion/tokens'
+import { EASE_OUT, EASE_SPRING, EASE_TAB } from '@shared/motion/tokens'
 import { glyphPop } from '@shared/motion/waapiMicro'
 import useSplitStore from '../../stores/splitStore'
 import useSidebarStore from '../../stores/sidebarStore'
@@ -40,7 +40,17 @@ function paneSrc(pane) {
 const MIN_SPLIT_RATIO = 20
 const MAX_SPLIT_RATIO = 80
 const SESSION_HEADER_HEIGHT = 27
+const LAYOUT_MOTION_DURATION = 500
 const DEFAULT_DROP_PREVIEW = { placement: 'right', choice: 'two-columns' }
+
+function resetPaneLayoutMotion(element) {
+  if (!element) return
+  element.style.transform = ''
+  element.style.transformOrigin = ''
+  element.style.willChange = ''
+  element.style.width = ''
+  element.style.height = ''
+}
 
 function clampSplitRatio(value) {
   return Math.max(MIN_SPLIT_RATIO, Math.min(MAX_SPLIT_RATIO, value))
@@ -427,7 +437,7 @@ function SplitLayoutSwitcher({ count, layout, onLayout, metrics }) {
   )
 }
 
-function SplitResizeHandles({ layout, ratios, resizingAxis, hoveredAxis, onHover, onStart }) {
+function SplitResizeHandles({ layout, ratios, resizingAxis, hoveredAxis, hidden, onHover, onStart }) {
   const hasColumnHandle = layout === 'two-columns' || layout === 'three-left' || layout === 'three-right' || layout === 'four'
   const hasRowHandle = layout === 'two-rows' || layout === 'three-left' || layout === 'three-right' || layout === 'four'
   const rowHandleStyle = layout === 'three-left'
@@ -443,7 +453,9 @@ function SplitResizeHandles({ layout, ratios, resizingAxis, hoveredAxis, onHover
     borderRadius: 0,
     padding: 0,
     background: 'transparent',
-    transition: 'background 150ms ease',
+    opacity: hidden ? 0 : 1,
+    pointerEvents: hidden ? 'none' : 'auto',
+    transition: 'background 150ms ease, opacity 100ms ease',
   }
   const activeBackground = (axis) => (
     resizingAxis === axis || hoveredAxis === axis ? 'var(--blue)' : 'transparent'
@@ -566,12 +578,16 @@ export default function SplitSessionView({ fallback }) {
   const currentSessionId = useChatStore((s) => s.sessionId)
   const sessions = useSidebarStore((s) => s.sessions)
   const splitRootRef = useRef(null)
+  const pendingLayoutMotionRef = useRef(null)
+  const paneLayoutMotionsRef = useRef(new Map())
   const [dragOverActive, setDragOverActive] = useState(false)
   const [splitRatios, setSplitRatios] = useState({ column: 50, row: 50 })
   const [splitSize, setSplitSize] = useState({ width: 0, height: 0 })
   const [resizeDrag, setResizeDrag] = useState(null)
   const [hoveredResizeAxis, setHoveredResizeAxis] = useState(null)
   const [dropPreview, setDropPreview] = useState(DEFAULT_DROP_PREVIEW)
+  const [layoutMotionActive, setLayoutMotionActive] = useState(false)
+  const reducedMotion = useReducedMotion()
 
   const names = useMemo(() => {
     const map = new Map()
@@ -582,6 +598,29 @@ export default function SplitSessionView({ fallback }) {
     return map
   }, [sessions])
 
+  const preparePaneLayoutMotion = useCallback((target) => {
+    const fromRects = new Map()
+    const paneElements = splitRootRef.current?.querySelectorAll('[data-split-pane-id]') || []
+    paneElements.forEach((element) => {
+      const paneId = element.dataset.splitPaneId
+      if (paneId) fromRects.set(paneId, element.getBoundingClientRect())
+      paneLayoutMotionsRef.current.get(paneId)?.cancel()
+      paneLayoutMotionsRef.current.delete(paneId)
+      resetPaneLayoutMotion(element)
+    })
+
+    pendingLayoutMotionRef.current = reducedMotion
+      ? null
+      : { ...target, fromRects }
+    setLayoutMotionActive(!reducedMotion && fromRects.size > 0)
+  }, [reducedMotion])
+
+  const closePaneWithMotion = useCallback((paneId) => {
+    if (!panes.some((pane) => pane.id === paneId)) return
+    preparePaneLayoutMotion({ targetPaneCount: Math.max(0, panes.length - 1) })
+    closePane(paneId)
+  }, [closePane, panes, preparePaneLayoutMotion])
+
   useEffect(() => {
     const handler = (event) => {
       if (event.origin !== window.location.origin) return
@@ -590,12 +629,12 @@ export default function SplitSessionView({ fallback }) {
         return
       }
       if (event.data?.type === 'priva:split-pane-close') {
-        closePane(event.data.paneId)
+        closePaneWithMotion(event.data.paneId)
       }
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [closePane, setActivePane])
+  }, [closePaneWithMotion, setActivePane])
 
   useEffect(() => {
     const node = splitRootRef.current
@@ -615,7 +654,76 @@ export default function SplitSessionView({ fallback }) {
     [layout, panes.length, splitRatios, splitSize],
   )
 
-  const reducedMotion = useReducedMotion()
+  const handleLayoutChange = (nextLayout) => {
+    if (nextLayout === layout) return
+    preparePaneLayoutMotion({ targetLayout: nextLayout })
+    setLayout(nextLayout)
+  }
+
+  // Layout tracks themselves change immediately; FLIP each persistent pane
+  // from its pre-switch visual bounds into the new grid bounds. Animate the
+  // pane's real dimensions instead of scaling it so iframe and local content
+  // translate and reflow naturally without any visual stretching.
+  useLayoutEffect(() => {
+    const pending = pendingLayoutMotionRef.current
+    if (!pending) return
+    if (pending.targetLayout && pending.targetLayout !== layout) return
+    if (pending.targetPaneCount != null && pending.targetPaneCount !== panes.length) return
+    pendingLayoutMotionRef.current = null
+
+    const paneElements = splitRootRef.current?.querySelectorAll('[data-split-pane-id]') || []
+    let remaining = 0
+
+    paneElements.forEach((element) => {
+      const paneId = element.dataset.splitPaneId
+      const from = pending.fromRects.get(paneId)
+      if (!from) return
+
+      const to = element.getBoundingClientRect()
+      if (!to.width || !to.height) return
+      const translateX = from.left - to.left
+      const translateY = from.top - to.top
+      const widthChanged = Math.abs(from.width - to.width) >= 0.5
+      const heightChanged = Math.abs(from.height - to.height) >= 0.5
+      const unchanged = Math.abs(translateX) < 0.5
+        && Math.abs(translateY) < 0.5
+        && !widthChanged
+        && !heightChanged
+      if (unchanged) return
+
+      remaining += 1
+      element.style.transformOrigin = '0 0'
+      element.style.willChange = 'transform, width, height'
+      element.style.width = `${from.width}px`
+      element.style.height = `${from.height}px`
+      element.style.transform = `translateX(${translateX}px) translateY(${translateY}px)`
+
+      let motion = null
+      motion = animate(element, {
+        translateX: 0,
+        translateY: 0,
+        width: `${to.width}px`,
+        height: `${to.height}px`,
+        duration: LAYOUT_MOTION_DURATION,
+        ease: EASE_SPRING,
+        onComplete: () => {
+          if (paneLayoutMotionsRef.current.get(paneId) !== motion) return
+          paneLayoutMotionsRef.current.delete(paneId)
+          resetPaneLayoutMotion(element)
+          remaining -= 1
+          if (remaining === 0) setLayoutMotionActive(false)
+        },
+      })
+      paneLayoutMotionsRef.current.set(paneId, motion)
+    })
+
+    if (remaining === 0) setLayoutMotionActive(false)
+  }, [layout, panes.length])
+
+  useEffect(() => () => {
+    paneLayoutMotionsRef.current.forEach((motion) => motion.cancel())
+    paneLayoutMotionsRef.current.clear()
+  }, [])
 
   const handleResizeStart = (event, axis) => {
     event.preventDefault()
@@ -749,14 +857,13 @@ export default function SplitSessionView({ fallback }) {
             <div
               key={pane.id}
               data-testid="split-pane"
+              data-split-pane-id={pane.id}
               className="relative overflow-hidden"
               style={{
                 ...getPaneStyle(layout, index),
                 minWidth: 0,
                 minHeight: 0,
                 background: 'var(--bg-base)',
-                outline: active ? '2px solid var(--blue)' : 'none',
-                outlineOffset: -2,
               }}
               onMouseDownCapture={() => setActivePane(pane.id)}
               title={paneTitle}
@@ -782,6 +889,18 @@ export default function SplitSessionView({ fallback }) {
                   }}
                 />
               )}
+              <div
+                aria-hidden="true"
+                className="absolute inset-0"
+                style={{
+                  zIndex: 5,
+                  boxSizing: 'border-box',
+                  border: '2px solid transparent',
+                  borderColor: active ? 'var(--blue)' : 'transparent',
+                  pointerEvents: 'none',
+                  transition: 'border-color 150ms ease',
+                }}
+              />
             </div>
           )
         })}
@@ -791,10 +910,11 @@ export default function SplitSessionView({ fallback }) {
         ratios={splitRatios}
         resizingAxis={resizeDrag?.axis || null}
         hoveredAxis={hoveredResizeAxis}
+        hidden={layoutMotionActive}
         onHover={setHoveredResizeAxis}
         onStart={handleResizeStart}
       />
-      <SplitLayoutSwitcher count={panes.length} layout={layout} onLayout={setLayout} metrics={controlMetrics} />
+      <SplitLayoutSwitcher count={panes.length} layout={layout} onLayout={handleLayoutChange} metrics={controlMetrics} />
       {!!(draggingSession || dragOverActive) && (
         <SplitDropOverlay
           paneCount={panes.length}

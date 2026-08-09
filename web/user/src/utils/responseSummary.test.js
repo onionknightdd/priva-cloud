@@ -28,7 +28,7 @@ test('locates the authoritative trailing result text', () => {
   assert.equal(resultTextFromBlocks(blocks, indexes), 'Done.')
 })
 
-test('summarizes unique files and nested subagent activity', () => {
+test('summarizes only direct activity and classifies orchestration tools separately', () => {
   const summary = summarizeResponseExecution({
     durationMs: 65000,
     additionalQuestionCount: 2,
@@ -39,6 +39,8 @@ test('summarizes unique files and nested subagent activity', () => {
       { type: 'tool_use', id: 'bash-1', name: 'Bash', input: { command: 'npm test' } },
       { type: 'ask_user', id: 'ask-1', questions: [{ question: 'Continue?' }] },
       { type: 'tool_use', id: 'agent-1', name: 'Agent', input: {} },
+      { type: 'tool_use', id: 'workflow-1', name: 'Workflow', status: 'success', input: {} },
+      { type: 'tool_use', id: 'task-1', name: 'Task', status: 'success', input: {} },
     ],
     subagentContent: {
       'agent-1': [
@@ -51,9 +53,12 @@ test('summarizes unique files and nested subagent activity', () => {
 
   assert.deepEqual(summary, {
     duration: '1m 5s',
-    readFiles: 2,
+    agents: 1,
+    workflows: 1,
+    tasks: 1,
+    readFiles: 1,
     editedFiles: 1,
-    commands: 2,
+    commands: 1,
     questions: 3,
   })
 })
@@ -133,18 +138,27 @@ test('does not count failed AskUserQuestion attempts', () => {
 test('only exposes non-zero summary metrics for display', () => {
   assert.deepEqual(visibleExecutionSummaryItems({
     duration: '12s',
+    agents: 2,
+    workflows: 1,
+    tasks: 3,
     readFiles: 3,
     editedFiles: 0,
     commands: 2,
     questions: 0,
   }), [
     { key: 'duration', value: '12s' },
+    { key: 'agents', value: 2 },
+    { key: 'workflows', value: 1 },
+    { key: 'tasks', value: 3 },
     { key: 'readFiles', value: 3 },
     { key: 'commands', value: 2 },
   ])
 
   assert.deepEqual(visibleExecutionSummaryItems({
     duration: '0s',
+    agents: 0,
+    workflows: 0,
+    tasks: 0,
     readFiles: 0,
     editedFiles: 0,
     commands: 0,

@@ -10,6 +10,8 @@ import {
   deleteLlmProfile,
   fetchProfileModels,
   testLlmProfile,
+  testLlmProfileDraft,
+  probeProfileImageCapability,
   getQuickActions,
   updateQuickActions as updateQuickActionsAPI,
   getRecapSetting as getRecapSettingAPI,
@@ -88,7 +90,8 @@ const useSettingsStore = create((set, get) => ({
       const data = await listLlmProfiles()
       const profiles = data.profiles || []
       const defaultProfileId = data.default_profile_id || null
-      set({ profiles, defaultProfileId, profilesLoaded: true, profilesLoading: false, hasEnv: profiles.length > 0 })
+      const defaultProfile = profiles.find((profile) => profile.id === defaultProfileId) || profiles[0]
+      set({ profiles, defaultProfileId, profilesLoaded: true, profilesLoading: false, hasEnv: profiles.length > 0, visionModel: defaultProfile?.vision_model || null })
       if (!get().activeSettingsProfileId && profiles[0]) set({ activeSettingsProfileId: defaultProfileId || profiles[0].id })
       return data
     } catch (err) {
@@ -185,6 +188,12 @@ const useSettingsStore = create((set, get) => ({
   setDefaultProfile: async (profileId) => { await setDefaultLlmProfile(profileId); set({ defaultProfileId: profileId }); await get().fetchProfiles() },
   deleteProfile: async (profileId) => { await deleteLlmProfile(profileId); set({ modelsByProfile: Object.fromEntries(Object.entries(get().modelsByProfile).filter(([id]) => id !== profileId)) }); await get().fetchProfiles() },
   testProfile: async (profileId) => { const data = await testLlmProfile(profileId); const models = data.models || []; set({ modelsByProfile: { ...get().modelsByProfile, [profileId]: { models, loading: false, loaded: true, error: null } } }); return models },
+  testProfileDraft: async (profile) => { const data = await testLlmProfileDraft(profile); const models = data.models || []; const profileId = profile?.id; if (profileId) set({ modelsByProfile: { ...get().modelsByProfile, [profileId]: { models, loading: false, loaded: true, error: null } } }); return models },
+  probeImageCapability: async (profileId, modelId) => {
+    const result = await probeProfileImageCapability(profileId, modelId)
+    await get().fetchProfiles()
+    return result
+  },
 
   fetchQuickActions: async () => {
     try {
@@ -205,7 +214,12 @@ const useSettingsStore = create((set, get) => ({
 
   fetchVisionModel: async () => {
     try {
-      const id = get().defaultProfileId || get().profiles[0]?.id
+      let profiles = get().profiles
+      if (!profiles.length) {
+        await get().fetchProfiles()
+        profiles = get().profiles
+      }
+      const id = get().defaultProfileId || profiles[0]?.id
       const profile = id ? await getLlmProfile(id) : null
       const value = profile?.vision_model || null
       set({ visionModel: value })
@@ -218,7 +232,10 @@ const useSettingsStore = create((set, get) => ({
   saveVisionModel: async (model) => {
     const id = get().defaultProfileId || get().profiles[0]?.id
     if (id) await updateLlmProfile(id, { vision_model: model || null })
-    set({ visionModel: model || null })
+    set({
+      visionModel: model || null,
+      profiles: get().profiles.map((profile) => profile.id === id ? { ...profile, vision_model: model || null } : profile),
+    })
   },
 
   fetchRecapEnabled: async () => {

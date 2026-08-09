@@ -114,7 +114,8 @@ function notifyReady() {
 // Retry with backoff so cold-start is seamless: show one transient "Agent sandbox
 // is waking…" notice while it boots, then an "Agent is ready" confirmation once it
 // answers. Only the final response reaches handleAPIResponse.
-export async function fetchWithWake(url, init) {
+export async function fetchWithWake(url, init, options = {}) {
+  const surfaceLifecycle = options.surfaceLifecycle !== false
   // Debug logging (Settings → Advanced → Developer Mode): every outgoing request
   // funnels through here, so one log call covers all REST helpers below.
   let _loggedBody
@@ -123,7 +124,10 @@ export async function fetchWithWake(url, init) {
 
   let res
   let waited = false
-  const markWaking = () => { waited = true; notifyWaking() }
+  const markWaking = () => {
+    waited = true
+    if (surfaceLifecycle) notifyWaking()
+  }
   // Pre-503 awareness: if the first attempt is still pending past WAKE_SLOW_MS the
   // edge is holding it for a cold sandbox — show "waking" now, not after the hold.
   const slowTimer = setTimeout(markWaking, WAKE_SLOW_MS)
@@ -137,7 +141,7 @@ export async function fetchWithWake(url, init) {
   } finally {
     clearTimeout(slowTimer)
   }
-  if (waited) {
+  if (waited && surfaceLifecycle) {
     clearWaking()
     if (res.status !== 503) notifyReady()  // sandbox woke and answered
   }
@@ -146,10 +150,11 @@ export async function fetchWithWake(url, init) {
 
 export async function handleAPIResponse(res, options = {}) {
   const silentStatuses = Array.isArray(options.silentStatuses) ? options.silentStatuses : []
+  const silent = options.silent === true
   if (res.status === 401) {
     window.dispatchEvent(new Event('auth:unauthorized'))
     const text = await res.text()
-    pushApiToast(res.status, text)
+    if (!silent) pushApiToast(res.status, text)
     throw new UnauthorizedError(`API error ${res.status}: ${text}`)
   }
   if (!res.ok) {
@@ -159,10 +164,10 @@ export async function handleAPIResponse(res, options = {}) {
       markAccessRevoked()
       throw new UnauthorizedError(`API error ${res.status}: ${text}`)
     }
-    // 503 is the edge EPP's transient "sandbox is waking" signal — never surface
-    // it as a hard error toast. The waking/ready toasts (fetchWithWake) cover it,
-    // and the request still throws so callers fall back / retry.
-    if (res.status !== 503 && !silentStatuses.includes(res.status)) pushApiToast(res.status, text)
+    // 400 responses are rendered by their callers as contextual validation/load errors.
+    // 503 is the edge EPP's transient "sandbox is waking" signal — never surface it as
+    // a hard error toast. Requests still throw so callers can render, fall back, or retry.
+    if (!silent && res.status !== 400 && res.status !== 503 && !silentStatuses.includes(res.status)) pushApiToast(res.status, text)
     throw new APIError(res.status, text)
   }
   const data = await res.json()

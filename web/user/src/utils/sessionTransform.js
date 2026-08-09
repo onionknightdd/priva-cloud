@@ -20,6 +20,13 @@ import {
   recordSdkTaskToolUse,
 } from './sdkTaskTracker'
 import { isAskUserInputValidationError } from './askUserQuestion'
+import {
+  agentLifecycleFromStatus,
+  agentLifecycleToBlockStatus,
+  getAgentResultInfo,
+  isAgentToolName,
+  normalizeAgentTaskNotification,
+} from './agentToolLifecycle'
 
 // Monotonic counter for `_cid` (stable React list keys). 's-' prefix keeps
 // load-path ids distinct from chatStore's live 'c-' ids.
@@ -86,14 +93,78 @@ function getAssistantReplayMetadata(msg) {
   if (duration != null) metadata.duration = duration
   if (agentLoops != null) metadata.agentLoops = agentLoops
   if (timestamp != null) metadata.timestamp = timestamp
+  if (source.agent_tool_results && typeof source.agent_tool_results === 'object') {
+    metadata.agentToolResults = source.agent_tool_results
+  }
+  if (source.agent_task_notifications && typeof source.agent_task_notifications === 'object') {
+    metadata.agentTaskNotifications = source.agent_task_notifications
+  }
 
   return metadata
+}
+
+function buildReplayedAgentBlock(block, result, replayMetadata, stoppedAgentIds) {
+  const structuredResult = replayMetadata.agentToolResults?.[block.id] || null
+  const enrichedResult = result && structuredResult && !result.tool_use_result
+    ? { ...result, tool_use_result: structuredResult }
+    : result
+  const resultInfo = getAgentResultInfo(enrichedResult, structuredResult)
+  const recordedNotification = normalizeAgentTaskNotification(
+    replayMetadata.agentTaskNotifications?.[block.id],
+  )
+  // Older agent-runner deployments omit queued task notifications from the
+  // history response. A successful TaskStop still survives in SDK history, so
+  // correlate its target id with this Agent launch as a replay-safe fallback.
+  const notification = recordedNotification || (
+    resultInfo.agentId && stoppedAgentIds.has(resultInfo.agentId)
+      ? { taskId: resultInfo.agentId, status: 'killed', summary: '', timestamp: null }
+      : null
+  )
+  const lifecycle = agentLifecycleFromStatus(notification?.status)
+    || (resultInfo.isError ? 'failed' : null)
+    || (resultInfo.isAsync ? 'running' : null)
+    || (enrichedResult ? 'completed' : 'running')
+  const notificationTime = timestampToMillis(notification?.timestamp)
+  const startTime = replayMetadata.timestamp || null
+
+  return {
+    ...block,
+    status: agentLifecycleToBlockStatus(lifecycle),
+    result: enrichedResult || undefined,
+    toolUseResult: structuredResult || undefined,
+    agentId: resultInfo.agentId || notification?.taskId || undefined,
+    agentTaskStatus: notification?.status || lifecycle,
+    agentTaskSummary: notification?.summary || undefined,
+    ...(startTime != null ? { startTime } : {}),
+    ...(notificationTime != null ? { endTime: notificationTime } : {}),
+    ...(notificationTime != null && startTime != null
+      ? { duration: Math.max(0, notificationTime - startTime) }
+      : {}),
+  }
 }
 
 function getUserReplayMetadata(msg) {
   const source = msg?.metadata || {}
   const timestamp = timestampToMillis(source.timestamp ?? msg.timestamp)
   return timestamp != null ? { timestamp } : {}
+}
+
+function getReplayedAgentMessage(msg) {
+  const raw = msg?.metadata?.agent_message || msg?.metadata?.agentMessage
+  if (!raw || typeof raw !== 'object' || typeof raw.body !== 'string' || !raw.body.trim()) {
+    return null
+  }
+  const timestamp = timestampToMillis(msg?.metadata?.timestamp ?? msg?.timestamp)
+  return {
+    type: 'agent_message',
+    id: `agent-message-${msg.uuid}`,
+    direction: 'received',
+    body: raw.body.trim(),
+    senderAgentId: raw.sender_agent_id || raw.senderAgentId || null,
+    senderName: raw.sender_name || raw.senderName || null,
+    recipientAgentId: raw.recipient_agent_id || raw.recipientAgentId || null,
+    ...(timestamp != null ? { timestamp } : {}),
+  }
 }
 
 const HIDDEN_TOOLS = new Set([
@@ -203,6 +274,7 @@ function getGeneratedTabs(block, result) {
 
 export function transformSessionMessages(sdkMessages) {
   const resultMap = {}
+  const taskStopBlocks = []
   // Workflow tool_use ids — used to tag a <task-notification> as a workflow (vs
   // a background Bash) so the replayed card shows the right glyph/label.
   const workflowToolIds = new Set()
@@ -213,9 +285,18 @@ export function transformSessionMessages(sdkMessages) {
         resultMap[b.tool_use_id] = b
       } else if (b.type === 'tool_use' && b.name === 'Workflow' && b.id) {
         workflowToolIds.add(b.id)
+      } else if (b.type === 'tool_use' && b.name === 'TaskStop' && b.id) {
+        taskStopBlocks.push(b)
       }
     }
   }
+  const stoppedAgentIds = new Set(
+    taskStopBlocks
+      .filter((block) => resultMap[block.id] && resultMap[block.id].is_error !== true)
+      .map((block) => block.input?.task_id || block.input?.taskId)
+      .filter(Boolean)
+      .map(String),
+  )
 
   const messages = []
   const fileOps = []
@@ -229,6 +310,16 @@ export function transformSessionMessages(sdkMessages) {
   const subagentContent = {}
 
   for (const msg of sdkMessages) {
+    if (msg.type === 'user' && msg.parent_tool_use_id) {
+      const agentMessage = getReplayedAgentMessage(msg)
+      if (agentMessage) {
+        const parentId = msg.parent_tool_use_id
+        const out = subagentContent[parentId] || (subagentContent[parentId] = [])
+        out.push(agentMessage)
+        continue
+      }
+    }
+
     // Subagent assistant messages: collect under parent_tool_use_id instead of
     // flattening into the main message thread.
     if (msg.type === 'assistant' && msg.parent_tool_use_id) {
@@ -306,6 +397,9 @@ export function transformSessionMessages(sdkMessages) {
       const rawBlocks = getContentBlocks(msg)
       const outputBlocks = []
       const replayMetadata = getAssistantReplayMetadata(msg)
+      const messageReplayMetadata = { ...replayMetadata }
+      delete messageReplayMetadata.agentToolResults
+      delete messageReplayMetadata.agentTaskNotifications
       let hasSdkTaskActivity = false
       let hiddenQuestionCount = 0
 
@@ -327,6 +421,16 @@ export function transformSessionMessages(sdkMessages) {
         const isError = result?.is_error || false
         const status = isError ? 'error' : 'success'
         toolRoundMap[block.id] = sdkTaskTracker.currentRoundId
+
+        if (isAgentToolName(block.name)) {
+          outputBlocks.push(buildReplayedAgentBlock(
+            block,
+            result,
+            replayMetadata,
+            stoppedAgentIds,
+          ))
+          continue
+        }
 
         if (isSdkTaskToolName(block.name)) {
           hasSdkTaskActivity = true
@@ -460,7 +564,7 @@ export function transformSessionMessages(sdkMessages) {
         if (hiddenQuestionCount > 0) {
           prev.summaryQuestionCount = (Number(prev.summaryQuestionCount) || 0) + hiddenQuestionCount
         }
-        const { timestamp, ...restMetadata } = replayMetadata
+        const { timestamp, ...restMetadata } = messageReplayMetadata
         Object.assign(prev, restMetadata)
         if (prev.timestamp == null && timestamp != null) prev.timestamp = timestamp
       } else {
@@ -469,7 +573,7 @@ export function transformSessionMessages(sdkMessages) {
           content: outputBlocks,
           ...(hasSdkTaskActivity ? { hasSdkTaskActivity: true } : {}),
           ...(hiddenQuestionCount > 0 ? { summaryQuestionCount: hiddenQuestionCount } : {}),
-          ...replayMetadata,
+          ...messageReplayMetadata,
         })
       }
     }

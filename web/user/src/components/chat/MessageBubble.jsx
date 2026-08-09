@@ -49,7 +49,7 @@ import { collectToolRun } from '../../utils/toolRunGrouping'
 // Keep block spacing independent from markdown line-height so the assistant
 // response breathes more without changing the rhythm inside text blocks.
 const ASSISTANT_MESSAGE_GAP = 10
-const ASSISTANT_PROCESS_BLOCK_GAP = 7
+const ASSISTANT_PROCESS_BLOCK_GAP = ASSISTANT_MESSAGE_GAP
 const ASSISTANT_META_MARGIN_TOP = -2
 
 /**
@@ -154,6 +154,7 @@ function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
                 background: 'var(--bg-elevated)',
                 borderRadius: '2px',
                 color: 'var(--text-dim)',
+                lineHeight: '17px',
                 padding: '8px 12px',
                 wordBreak: 'break-word',
               }}
@@ -273,7 +274,7 @@ function AnimatedProcessGroup({ group, visible }) {
     >
       <div
         ref={elementRef}
-        className="flex flex-col min-w-0"
+        className="assistant-process-blocks flex flex-col min-w-0"
         style={{ minWidth: 0, overflow: 'hidden', paddingTop: ASSISTANT_MESSAGE_GAP, gap: ASSISTANT_PROCESS_BLOCK_GAP }}
       >
         {displayGroupRef.current.nodes}
@@ -1229,6 +1230,7 @@ export default memo(function MessageBubble({
   responseStreaming = false,
   isLatestAssistantMessage = false,
   latestAssistantRefreshKey = 0,
+  filePreviewCwd = '',
   onSendAnswer,
   assistantIndex = null,
   onRewind = null,
@@ -1307,7 +1309,6 @@ export default memo(function MessageBubble({
     [personalSkills, skillGroups]
   )
   const fileOps = useFileOpsStore((s) => s.fileOps)
-  const subagentContent = useChatStore((s) => s.subagentContent)
   const latestTodoWriteId = useTaskStore((s) => s.todoWriteInfo?.tool_use_id || null)
 
   useEffect(() => {
@@ -1349,7 +1350,6 @@ export default memo(function MessageBubble({
     : (isStreaming && message.timestamp ? Math.max(0, liveNow - message.timestamp) : 0)
   const executionSummary = summarizeResponseExecution({
     contentBlocks,
-    subagentContent,
     fileOps,
     durationMs: executionDurationMs,
     additionalQuestionCount: message.summaryQuestionCount,
@@ -1682,7 +1682,19 @@ export default memo(function MessageBubble({
             {thinkSegments.map((seg, si) =>
               seg.type === 'thinking'
                 ? <ThinkingBlock key={si} content={seg.content} t={t} streaming={markdownStreaming} />
-                : <MarkdownRenderer key={si} content={seg.content} mermaidCollapsible streaming={markdownStreaming} streamed={wasStreamed} assistantBody={assistantBody} />
+                : (
+                  <MarkdownRenderer
+                    key={si}
+                    content={seg.content}
+                    mermaidCollapsible
+                    streaming={markdownStreaming}
+                    streamed={wasStreamed}
+                    assistantBody={assistantBody}
+                    resolveInlineFiles
+                    filePreviewCwd={filePreviewCwd}
+                    deferInlineFileProbe={isStreaming || responseStreaming}
+                  />
+                )
             )}
           </div>
         )
@@ -1695,6 +1707,9 @@ export default memo(function MessageBubble({
           streaming={markdownStreaming}
           streamed={wasStreamed}
           assistantBody={assistantBody}
+          resolveInlineFiles
+          filePreviewCwd={filePreviewCwd}
+          deferInlineFileProbe={isStreaming || responseStreaming}
         />
       )
     }
@@ -1984,7 +1999,7 @@ export default memo(function MessageBubble({
               />
               <AnimatedCollapse open={processExpanded}>
                 <div style={{ paddingTop: ASSISTANT_MESSAGE_GAP }}>
-                  <div className="flex flex-col min-w-0" style={{ gap: ASSISTANT_PROCESS_BLOCK_GAP }}>
+                  <div className="assistant-process-blocks flex flex-col min-w-0" style={{ gap: ASSISTANT_PROCESS_BLOCK_GAP }}>
                     {allRenderedProcessNodes}
                   </div>
                 </div>
@@ -1997,13 +2012,29 @@ export default memo(function MessageBubble({
               )}
             </div>
             {hasCompletedResult && finalResultText && (
-              <MarkdownRenderer content={finalResultText} mermaidCollapsible assistantBody />
+              <MarkdownRenderer
+                content={finalResultText}
+                mermaidCollapsible
+                assistantBody
+                resolveInlineFiles
+                filePreviewCwd={filePreviewCwd}
+                deferInlineFileProbe={isStreaming || responseStreaming}
+              />
             )}
           </>
         ) : (
           <>
             {renderedContent}
-            {hasStandaloneResult && <MarkdownRenderer content={finalResultText} mermaidCollapsible assistantBody />}
+            {hasStandaloneResult && (
+              <MarkdownRenderer
+                content={finalResultText}
+                mermaidCollapsible
+                assistantBody
+                resolveInlineFiles
+                filePreviewCwd={filePreviewCwd}
+                deferInlineFileProbe={isStreaming || responseStreaming}
+              />
+            )}
           </>
         ))}
         {/* Empty response fallback */}

@@ -39,6 +39,8 @@ from priva_common.models.agent import (
     ForkRequest,
     ForkResponse,
     GroupedSessionListResponse,
+    ImageRouteRequest,
+    ImageRouteResponse,
     ImageItem,
     PermissionRespondRequest,
     PinRequest,
@@ -71,12 +73,14 @@ from ..services.claude_sdk import session_meta
 
 _ws_frame_adapter = TypeAdapter(WsClientFrame)
 from priva_common.audit_log import AuditEntry, get_audit_logger
-from ..deps import account_from_ws, get_current_user, get_user_workspace, negotiated_subprotocol
+from ..deps import account_from_ws, get_current_user, get_user_workspace, negotiated_subprotocol, require_user
 from ..services.claude_sdk.client import agent_run, agent_run_events, agent_run_stream
 from ..services.claude_sdk.permission_coordinator import registry
 from ..services.claude_sdk.run_registry import RUN_END_EVENT, RunRecord, run_registry
 from priva_common.user_store import UserRecord
 from priva_common.metrics import AGENT_RUNS_FINISHED, AGENT_RUNS_STARTED
+from ..services.temp_files import get_file_by_id
+from ..services.vision import detect_image_media_type, resolve_image_route
 
 import os
 
@@ -214,8 +218,12 @@ def _validate_images(images: list[ImageItem] | None) -> list[dict] | None:
     return validated
 
 
-def _validate_attachments(attachments, cwd: str) -> list[dict] | None:
-    """Validate attachment paths and return list of {path, name} dicts."""
+def _validate_attachments(
+    attachments,
+    cwd: str,
+    username: str | None = None,
+) -> list[dict] | None:
+    """Validate workspace files or ID-bound uploads and preserve image metadata."""
     if not attachments:
         return None
     real_cwd = os.path.realpath(cwd)
@@ -223,13 +231,46 @@ def _validate_attachments(attachments, cwd: str) -> list[dict] | None:
     for att in attachments:
         path = att.path if hasattr(att, "path") else att
         name = getattr(att, "name", None)
+        attachment_id = getattr(att, "attachment_id", None)
+        media_type = getattr(att, "media_type", None)
+        is_image = bool(getattr(att, "is_image", False))
         # Resolve to canonical path to prevent traversal
         real_path = os.path.realpath(path)
-        if not _is_within_directory(real_path, real_cwd):
+        is_verified_upload = False
+        if attachment_id:
+            if not username:
+                raise HTTPException(400, "Authentication required for uploaded attachments")
+            uploaded_path, uploaded_name, uploaded_media_type = get_file_by_id(
+                username, attachment_id
+            )
+            if os.path.realpath(uploaded_path) != real_path:
+                raise HTTPException(400, "Attachment ID does not match path")
+            is_verified_upload = True
+            name = name or uploaded_name
+            media_type = media_type or uploaded_media_type
+        if not _is_within_directory(real_path, real_cwd) and not is_verified_upload:
             raise HTTPException(400, f"Attachment path outside workspace: {path}")
         if not os.path.isfile(real_path):
             raise HTTPException(400, f"Attachment file not found: {path}")
-        validated.append({"path": real_path, "name": name})
+        item = {"path": real_path, "name": name}
+        if attachment_id:
+            item["attachment_id"] = attachment_id
+        if is_image:
+            try:
+                if os.path.getsize(real_path) > _MAX_IMAGE_SIZE:
+                    raise HTTPException(
+                        413,
+                        f"Image exceeds {_MAX_IMAGE_SIZE // (1024*1024)}MB limit",
+                    )
+                image_data = Path(real_path).read_bytes()
+                detected_media_type = detect_image_media_type(image_data)
+            except (OSError, ValueError) as exc:
+                raise HTTPException(400, str(exc)) from exc
+            if media_type and media_type != detected_media_type:
+                raise HTTPException(400, "Image media type does not match file content")
+            item["is_image"] = True
+            item["media_type"] = detected_media_type
+        validated.append(item)
     return validated
 
 
@@ -496,27 +537,131 @@ def _read_workflow_state(run_id: str) -> dict | None:
     return {k: data.get(k) for k in _WORKFLOW_STATE_KEYS}
 
 
+_AGENT_RESULT_ID_RE = re.compile(
+    r"\b(?:agentId|agent_id)\s*:\s*([A-Za-z0-9_-]+)",
+    re.IGNORECASE,
+)
+_AGENT_MESSAGE_RE = re.compile(
+    r"<agent-message\b[^>]*>([\s\S]*?)</agent-message>",
+    re.IGNORECASE,
+)
+_AGENT_MESSAGE_FROM_RE = re.compile(
+    r"\bfrom\s*=\s*(?:\"([^\"]*)\"|'([^']*)')",
+    re.IGNORECASE,
+)
+
+
+def _subagent_transcript_paths(cwd: str, session_id: str) -> list[Path]:
+    session_path = _session_jsonl_path(cwd, session_id)
+    subagents_dir = session_path.with_suffix("") / "subagents"
+    return [session_path, *sorted(subagents_dir.glob("agent-*.jsonl"))]
+
+
+def _content_value_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, str):
+            parts.append(item)
+        elif isinstance(item, dict):
+            value = item.get("text") or item.get("content")
+            if isinstance(value, str):
+                parts.append(value)
+    return "\n".join(parts)
+
+
+def _agent_id_from_result_row(raw: dict, tool_use_id: str) -> str | None:
+    result = _tool_use_result(raw) or {}
+    agent_id = result.get("agentId") or result.get("agent_id")
+    if agent_id:
+        return str(agent_id)
+
+    for block in _message_content_blocks(raw):
+        if block.get("type") != "tool_result" or str(block.get("tool_use_id")) != tool_use_id:
+            continue
+        match = _AGENT_RESULT_ID_RE.search(_content_value_text(block.get("content")))
+        if match:
+            return match.group(1)
+    return None
+
+
 def _build_subagent_parent_map(cwd: str, session_id: str) -> dict[str, str]:
-    """Map sidechain agent ids back to the top-level Agent/Task tool_use id."""
+    """Map every sidechain agent id to its owning Agent/Task tool_use id.
+
+    Nested Agent calls live in another sidechain transcript, so both the main
+    transcript and every ``agent-*.jsonl`` file participate in the mapping.
+    """
+    paths = _subagent_transcript_paths(cwd, session_id)
+    agent_tool_use_ids: set[str] = set()
+    for path in paths:
+        for raw in _iter_jsonl_dicts(path):
+            if raw.get("type") != "assistant":
+                continue
+            for block in _message_content_blocks(raw):
+                if (
+                    block.get("type") == "tool_use"
+                    and block.get("name") in {"Agent", "Task"}
+                    and block.get("id")
+                ):
+                    agent_tool_use_ids.add(str(block["id"]))
+
     parent_by_agent_id: dict[str, str] = {}
-    for raw in _iter_jsonl_dicts(_session_jsonl_path(cwd, session_id)):
-        if raw.get("type") != "user":
-            continue
-
-        result = _tool_use_result(raw)
-        if not result:
-            continue
-
-        agent_id = result.get("agentId") or result.get("agent_id")
-        if not agent_id:
-            continue
-
-        for block in _message_content_blocks(raw):
-            if block.get("type") == "tool_result" and block.get("tool_use_id"):
-                parent_by_agent_id.setdefault(str(agent_id), str(block["tool_use_id"]))
-                break
+    for path in paths:
+        for raw in _iter_jsonl_dicts(path):
+            if raw.get("type") != "user":
+                continue
+            for block in _message_content_blocks(raw):
+                tool_use_id = str(block.get("tool_use_id") or "")
+                if block.get("type") != "tool_result" or tool_use_id not in agent_tool_use_ids:
+                    continue
+                agent_id = _agent_id_from_result_row(raw, tool_use_id)
+                if agent_id:
+                    parent_by_agent_id.setdefault(agent_id, tool_use_id)
 
     return parent_by_agent_id
+
+
+def _peer_agent_message(raw: dict, recipient_agent_id: str) -> dict | None:
+    """Normalize a persisted SDK peer delivery without its policy envelope."""
+    origin = raw.get("origin")
+    if not isinstance(origin, dict):
+        message = raw.get("message")
+        origin = message.get("origin") if isinstance(message, dict) else None
+    is_peer = isinstance(origin, dict) and origin.get("kind") == "peer"
+    if not is_peer and raw.get("isMeta") is not True:
+        return None
+
+    message = raw.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    text = _content_value_text(content)
+    envelope = _AGENT_MESSAGE_RE.search(text)
+    body = origin.get("body") if is_peer else None
+    if not isinstance(body, str) or not body.strip():
+        body = envelope.group(1) if envelope else None
+    if not isinstance(body, str) or not body.strip():
+        return None
+
+    sender_name = None
+    sender_agent_id = None
+    if is_peer:
+        sender_agent_id = origin.get("senderTaskId") or origin.get("sender_task_id")
+        sender_name = origin.get("name") or origin.get("from")
+    if not sender_name and envelope:
+        opening_tag = text[envelope.start():envelope.start(1)]
+        from_match = _AGENT_MESSAGE_FROM_RE.search(opening_tag)
+        if from_match:
+            sender_name = from_match.group(1) or from_match.group(2)
+
+    return {
+        "direction": "received",
+        "body": body.strip(),
+        "sender_agent_id": str(sender_agent_id) if sender_agent_id else None,
+        "sender_name": str(sender_name) if sender_name else None,
+        "recipient_agent_id": recipient_agent_id,
+    }
 
 
 def _has_tool_result(raw: dict) -> bool:
@@ -582,10 +727,16 @@ def _load_subagent_session_messages(cwd: str, session_id: str) -> list[SessionMe
             if not parent_tool_use_id:
                 continue
 
-            # Sidechain user prompt rows are internal scaffolding. Keep only
-            # user rows that contain tool_result blocks so replay can attach
-            # outputs to the corresponding subagent tool_use blocks.
-            if msg_type == "user" and not _has_tool_result(raw):
+            peer_message = (
+                _peer_agent_message(raw, filename_agent_id)
+                if msg_type == "user"
+                else None
+            )
+
+            # Sidechain user prompt rows are internal scaffolding. Keep tool
+            # results plus real peer deliveries; all other user rows stay out
+            # of the visible Agent transcript.
+            if msg_type == "user" and not _has_tool_result(raw) and not peer_message:
                 continue
 
             uuid = raw.get("uuid")
@@ -593,15 +744,19 @@ def _load_subagent_session_messages(cwd: str, session_id: str) -> list[SessionMe
             if not uuid or message is None:
                 continue
 
+            metadata: dict = {}
+            if isinstance(raw.get("timestamp"), str):
+                metadata["timestamp"] = raw["timestamp"]
+            if peer_message:
+                metadata["agent_message"] = peer_message
+
             hydrated.append(SessionMessageResponse(
                 type=msg_type,
                 uuid=str(uuid),
                 session_id=str(raw.get("sessionId") or raw.get("session_id") or session_id),
                 message=message,
                 parent_tool_use_id=parent_tool_use_id,
-                metadata={
-                    "timestamp": raw["timestamp"],
-                } if isinstance(raw.get("timestamp"), str) else None,
+                metadata=metadata or None,
             ))
 
     return hydrated
@@ -617,7 +772,62 @@ def _build_message_replay_metadata(cwd: str, session_id: str) -> dict[str, dict]
     loading a past session.
     """
     metadata_by_uuid: dict[str, dict] = {}
+    agent_owner_by_tool_use_id: dict[str, str] = {}
+    agent_result_by_tool_use_id: dict[str, dict] = {}
+    agent_notification_by_tool_use_id: dict[str, dict] = {}
+    agent_notification_by_task_id: dict[str, dict] = {}
     assistant_count_in_turn = 0
+
+    def task_notification_from_text(value: object, timestamp: object = None) -> dict | None:
+        if not isinstance(value, str):
+            return None
+        envelope = re.search(
+            r"<task-notification>([\s\S]*?)</task-notification>",
+            value,
+        )
+        if not envelope:
+            return None
+        body = envelope.group(1)
+
+        def pick(tag: str) -> str | None:
+            match = re.search(rf"<{tag}>([\s\S]*?)</{tag}>", body)
+            return match.group(1).strip() if match else None
+
+        notification = {
+            "taskId": pick("task-id"),
+            "toolUseId": pick("tool-use-id"),
+            "status": (pick("status") or "completed").lower(),
+            "summary": pick("summary") or "",
+            "outputFile": pick("output-file"),
+        }
+        if isinstance(timestamp, str):
+            notification["timestamp"] = timestamp
+        return notification
+
+    def notification_text_candidates(raw: dict) -> list[str]:
+        candidates: list[str] = []
+
+        def append(value: object) -> None:
+            if isinstance(value, str):
+                candidates.append(value)
+            elif isinstance(value, list):
+                for item in value:
+                    append(item)
+            elif isinstance(value, dict):
+                append(value.get("text"))
+                append(value.get("prompt"))
+                append(value.get("content"))
+
+        message = raw.get("message")
+        if isinstance(message, dict):
+            append(message.get("content"))
+        attachment = raw.get("attachment")
+        if isinstance(attachment, dict):
+            append(attachment.get("prompt"))
+            append(attachment.get("content"))
+        append(raw.get("content"))
+        append(raw.get("prompt"))
+        return candidates
 
     for raw in _iter_jsonl_dicts(_session_jsonl_path(cwd, session_id)):
         if raw.get("isSidechain") is True:
@@ -630,7 +840,6 @@ def _build_message_replay_metadata(cwd: str, session_id: str) -> dict[str, dict]
         msg_type = raw.get("type")
         if msg_type == "user" and not _has_tool_result(raw):
             assistant_count_in_turn = 0
-            continue
 
         if msg_type == "assistant":
             if not uuid:
@@ -641,7 +850,33 @@ def _build_message_replay_metadata(cwd: str, session_id: str) -> dict[str, dict]
                 usage = message.get("usage")
                 if isinstance(usage, dict):
                     metadata_by_uuid.setdefault(str(uuid), {})["usage"] = usage
+            for block in _message_content_blocks(raw):
+                if (
+                    block.get("type") == "tool_use"
+                    and block.get("name") in {"Agent", "Task"}
+                    and block.get("id")
+                ):
+                    agent_owner_by_tool_use_id[str(block["id"])] = str(uuid)
             continue
+
+        if msg_type == "user" and _has_tool_result(raw):
+            tool_use_result = _tool_use_result(raw)
+            if tool_use_result:
+                for block in _message_content_blocks(raw):
+                    tool_use_id = block.get("tool_use_id")
+                    if block.get("type") == "tool_result" and tool_use_id:
+                        agent_result_by_tool_use_id[str(tool_use_id)] = tool_use_result
+
+        for candidate in notification_text_candidates(raw):
+            notification = task_notification_from_text(candidate, raw.get("timestamp"))
+            if not notification:
+                continue
+            tool_use_id = notification.get("toolUseId")
+            task_id = notification.get("taskId")
+            if tool_use_id:
+                agent_notification_by_tool_use_id[str(tool_use_id)] = notification
+            if task_id:
+                agent_notification_by_task_id[str(task_id)] = notification
 
         if msg_type == "system" and raw.get("subtype") == "turn_duration":
             parent_uuid = raw.get("parentUuid")
@@ -658,12 +893,41 @@ def _build_message_replay_metadata(cwd: str, session_id: str) -> dict[str, dict]
             elif assistant_count_in_turn > 0:
                 meta["agent_loops"] = assistant_count_in_turn
 
+    for tool_use_id, owner_uuid in agent_owner_by_tool_use_id.items():
+        result = agent_result_by_tool_use_id.get(tool_use_id)
+        notification = agent_notification_by_tool_use_id.get(tool_use_id)
+        if notification is None and result:
+            task_id = (
+                result.get("agentId")
+                or result.get("agent_id")
+                or result.get("taskId")
+                or result.get("task_id")
+            )
+            if task_id:
+                notification = agent_notification_by_task_id.get(str(task_id))
+
+        owner_metadata = metadata_by_uuid.setdefault(owner_uuid, {})
+        if result:
+            owner_metadata.setdefault("agent_tool_results", {})[tool_use_id] = result
+        if notification:
+            owner_metadata.setdefault("agent_task_notifications", {})[tool_use_id] = notification
+
     return metadata_by_uuid
 
 
 logger = get_app_logger(__name__)
 
 router = APIRouter(prefix="/api/sandbox/agent", tags=["agent"])
+
+
+@router.post("/image-route", response_model=ImageRouteResponse)
+async def image_route(
+    request: ImageRouteRequest,
+    user: UserRecord = Depends(require_user),
+):
+    # Deliberately receives no image bytes: route/probe must finish before the
+    # client uploads an MCP-bound image.
+    return await resolve_image_route(request.model)
 
 
 @router.get("/workflow-agent/{agent_id}", response_model=None)
@@ -716,7 +980,7 @@ async def run_agent(
     cwd = _resolve_run_cwd(request.cwd, request.session_id, user)
     add_dirs = _resolve_run_add_dirs(request.add_dirs, cwd, request.session_id)
     username = user.username if user else None
-    attachments = _validate_attachments(request.attachments, cwd)
+    attachments = _validate_attachments(request.attachments, cwd, username)
     images = _validate_images(request.images)
     auth_method = getattr(http_request.state, "auth_method", "jwt")
     AGENT_RUNS_STARTED.inc()
@@ -750,7 +1014,7 @@ async def run_agent_stream(
     cwd = _resolve_run_cwd(request.cwd, request.session_id, user)
     add_dirs = _resolve_run_add_dirs(request.add_dirs, cwd, request.session_id)
     username = user.username if user else None
-    attachments = _validate_attachments(request.attachments, cwd)
+    attachments = _validate_attachments(request.attachments, cwd, username)
     images = _validate_images(request.images)
     auth_method = getattr(http_request.state, "auth_method", "jwt")
     return StreamingResponse(
@@ -1312,6 +1576,7 @@ async def ws_run(websocket: WebSocket):
             since_seq=max(0, frame.since_seq or 0),
             send_attach_ok=True,
             cwd_for_queue=queue_cwd,
+            username_for_queue=username,
             ws_id=ws_id,
         )
         return
@@ -1333,7 +1598,7 @@ async def ws_run(websocket: WebSocket):
     # Validate attachments and images if provided. This happens before the
     # agent stream starts, so errors must be sent explicitly over the socket.
     try:
-        attachments = _validate_attachments(frame.attachments, cwd) if frame.attachments else None
+        attachments = _validate_attachments(frame.attachments, cwd, username) if frame.attachments else None
         images = _validate_images(frame.images)
     except HTTPException as exc:
         await websocket.send_json({"event": "error", "data": {"message": f"Validation failed: {exc.detail}"}})
@@ -1367,6 +1632,7 @@ async def ws_run(websocket: WebSocket):
         since_seq=0,
         send_attach_ok=False,
         cwd_for_queue=cwd,
+        username_for_queue=username,
         ws_id=ws_id,
     )
 
@@ -1468,6 +1734,7 @@ async def _ws_follow(
     since_seq: int,
     send_attach_ok: bool,
     cwd_for_queue: str,
+    username_for_queue: str | None,
     ws_id: str,
 ) -> None:
     """Stream a record to one socket: optional replay, then live follow.
@@ -1483,7 +1750,9 @@ async def _ws_follow(
         await websocket.send_json(payload)
 
     sub_id, q = record.subscribe()
-    reader_task = asyncio.create_task(_ws_reader(websocket, record, cwd_for_queue))
+    reader_task = asyncio.create_task(
+        _ws_reader(websocket, record, cwd_for_queue, username_for_queue)
+    )
     sent_through = since_seq
     socket_alive = True
     run_ended = False
@@ -1546,7 +1815,12 @@ async def _ws_follow(
             pass
 
 
-async def _ws_reader(websocket: WebSocket, record: RunRecord, cwd: str) -> None:
+async def _ws_reader(
+    websocket: WebSocket,
+    record: RunRecord,
+    cwd: str,
+    username: str | None,
+) -> None:
     """Incoming frames from one attached socket → the record's run."""
     try:
         while True:
@@ -1580,10 +1854,20 @@ async def _ws_reader(websocket: WebSocket, record: RunRecord, cwd: str) -> None:
                     await websocket.send_json({"event": "error", "data": {"message": "No active stream to queue into"}})
                     continue
                 try:
-                    q_attachments = _validate_attachments(msg.attachments, cwd) if msg.attachments else []
+                    q_attachments = _validate_attachments(
+                        msg.attachments, cwd, username
+                    ) if msg.attachments else []
                     q_images = _validate_images(msg.images) if msg.images else []
                 except HTTPException as exc:
                     await websocket.send_json({"event": "error", "data": {"message": f"Queue validation failed: {exc.detail}"}})
+                    continue
+                if any(attachment.get("is_image") for attachment in q_attachments):
+                    await websocket.send_json({
+                        "event": "error",
+                        "data": {
+                            "message": "Vision image attachments require a new run",
+                        },
+                    })
                     continue
                 await q.put((msg.id, msg.text, q_attachments or [], q_images or []))
                 await websocket.send_json({"event": "queued", "data": {"id": msg.id}})

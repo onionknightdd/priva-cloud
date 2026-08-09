@@ -43,6 +43,7 @@ import {
   findMatchingAskUserBlockIndex,
   isAskUserInputValidationError,
 } from '../utils/askUserQuestion'
+import { parseAgentMessageEnvelope } from '../utils/agentCommunication'
 
 // Max characters of background-shell output kept in the task store; only the
 // tail is retained beyond this.
@@ -184,7 +185,7 @@ export function stopActiveStream(options = {}) {
  * sending a new user message: no local bubbles are created up front (the
  * server replays the run's events, including the prompt's user_message).
  */
-function startStream({ key, message, permissionMode, attachments, attachmentsMeta, images, attach = null }) {
+function startStream({ key, message, permissionMode, attachments, attachmentsMeta, images, displayImages, attach = null }) {
   const tabId = window.__PRIVA_TAB_ID || (window.__PRIVA_TAB_ID = Math.random().toString(36).slice(2, 8))
   const rt = ensureRuntime(key)
 
@@ -194,7 +195,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     const chat = getSlice(rt.key, 'chat').getState()
     if (!attach && chat.isStreaming && chat.streamAbort) {
       console.warn('[SSE] startStream ignored: runtime %s already streaming', rt.key)
-      return
+      return false
     }
   }
 
@@ -276,7 +277,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   const openFileBrowserTab = (file) => S.fileBrowser().openFile(file)
 
   if (!attach) {
-    setLastUserPrompt({ message, permissionMode, attachments, attachmentsMeta, images })
+    setLastUserPrompt({ message, permissionMode, attachments, attachmentsMeta, images, displayImages })
     clearRetryState()
     beginSdkTaskRound({ title: message, startedAt: Date.now() })
 
@@ -286,8 +287,9 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
       content: [],
       timestamp: Date.now(),
     }
-    if (images && images.length > 0) {
-      for (const img of images) {
+    const visibleImages = displayImages ?? images
+    if (visibleImages && visibleImages.length > 0) {
+      for (const img of visibleImages) {
         userMsg.content.push({
           type: 'image',
           source: { type: 'base64', media_type: img.media_type, data: img.data },
@@ -633,6 +635,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
             : (typeof data.content === 'string' ? data.content : '')
           const notif = parseTaskNotification(rawText)
           if (notif) {
+            S.chat().applyAgentTaskNotification(notif)
             const recent = S.chat().messages
             const dup = recent.slice(-4).some((m) => (
               m.role === 'system' && m.type === 'task_notification' && (
@@ -1166,6 +1169,31 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
       }
 
       case 'tool_result': {
+        // Peer deliveries arrive through the SDK as sidechain UserMessage
+        // frames and are labelled tool_result because they carry the owning
+        // Agent tool id. They are not tool outputs: retain only the actual
+        // <agent-message> body as a received communication event.
+        if (data.parent_tool_use_id) {
+          const peerMessage = parseAgentMessageEnvelope(data.content)
+          if (peerMessage) {
+            const eventId = data.uuid
+              ? `agent-message-${data.uuid}`
+              : `agent-message-${data.parent_tool_use_id}-${peerMessage.senderName}-${peerMessage.body}`
+            const existing = S.chat().subagentContent[data.parent_tool_use_id] || []
+            if (!existing.some((block) => block?.id === eventId)) {
+              S.chat().appendToSubagentContent(data.parent_tool_use_id, [{
+                type: 'agent_message',
+                id: eventId,
+                direction: 'received',
+                body: peerMessage.body,
+                senderName: peerMessage.senderName || null,
+                timestamp: Date.now(),
+              }])
+            }
+            break
+          }
+        }
+
         // Handle compact tool_result events (summary + completion marker)
         // During compacting, tool_results with no tool_use_id / parent_tool_use_id=null carry summary or completion
         if (S.chat().isCompacting) {
@@ -1259,7 +1287,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
 
           // Update message flow only for visible tools
           if (!hiddenToolIds.has(rb.tool_use_id)) {
-            updateToolResult(rb.tool_use_id, rb)
+            updateToolResult(rb.tool_use_id, rb, data.tool_use_result)
           }
 
           // Complete canvas task if tracked
@@ -1282,6 +1310,20 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
                 updateData.status = 'running'
                 delete updateData.endTime
               }
+            }
+            if (
+              taskEntry.name === 'TaskStop'
+              && !isToolResultError
+              && (data.tool_use_result?.task_type || data.tool_use_result?.taskType) === 'local_agent'
+            ) {
+              S.chat().applyAgentTaskNotification({
+                taskId: data.tool_use_result?.task_id
+                  || data.tool_use_result?.taskId
+                  || taskEntry.input?.task_id,
+                status: 'killed',
+                summary: data.tool_use_result?.message || '',
+                timestamp: Date.now(),
+              })
             }
             updateTask(rb.tool_use_id, updateData)
           }
@@ -1563,6 +1605,13 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
       }
 
       case 'task_notification': {
+        S.chat().applyAgentTaskNotification({
+          toolUseId: data.tool_use_id,
+          taskId: data.task_id,
+          status: data.status,
+          summary: data.summary,
+          timestamp: Date.now(),
+        })
         // Workflow completion (authoritative) → flip the workflow card.
         const wfId = S.workflow().resolveId(data.tool_use_id, data.task_id)
         if (wfId) {
@@ -1682,6 +1731,13 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
           }
         } else if (subtype === 'task_notification') {
           const nested = data.data || {}
+          S.chat().applyAgentTaskNotification({
+            toolUseId: nested.tool_use_id,
+            taskId: nested.task_id,
+            status: nested.status,
+            summary: nested.summary,
+            timestamp: Date.now(),
+          })
           // Workflow completion (authoritative) → flip the workflow card.
           const wfId = S.workflow().resolveId(nested.tool_use_id, nested.task_id)
           if (wfId) {
@@ -1711,6 +1767,13 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
           const nested = data.data || {}
           const patch = nested.patch || data.patch || {}
           const taskId = nested.task_id || data.task_id
+          if (isTerminalRawStatus(patch.status)) {
+            S.chat().applyAgentTaskNotification({
+              taskId,
+              status: patch.status,
+              timestamp: patch.end_time || Date.now(),
+            })
+          }
           const wfId = S.workflow().resolveId(null, taskId)
           if (wfId) {
             S.workflow().markCompletion(wfId, {
@@ -1826,7 +1889,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         clearRetryState()
         setStreaming(false)
         setStreamAbort(null)
-        S.chat().abortRunningTools()
+        S.chat().abortRunningTools('failed')
         S.tasks().abortRunningTasks()
         S.workflow().abortRunning()
         if (lastMsg && lastMsg.role === 'assistant') {
@@ -1862,7 +1925,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         clearRetryState()
         setStreaming(false)
         setStreamAbort(null)
-        S.chat().abortRunningTools()
+        S.chat().abortRunningTools('failed')
         S.tasks().abortRunningTasks()
         S.workflow().abortRunning()
         if (lastMsg && lastMsg.role === 'assistant') {
@@ -1909,7 +1972,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
       case 'error': {
         setStreaming(false)
         setStreamAbort(null)
-        S.chat().abortRunningTools()
+        S.chat().abortRunningTools('failed')
         S.tasks().abortRunningTasks()
         S.workflow().abortRunning()
         // Add error to last message
@@ -1989,7 +2052,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     setStreamAbort(bindAbort(abort))
     setWsSendPermission(sendPermission)
     S.chat().setQueueSender({ sendQueue, sendQueueCancel })
-    return
+    return true
   }
 
   const mcpServers = S.chat().mcpServers
@@ -2008,6 +2071,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     const { abort } = streamAgentRun(message, sessionIdAtSend, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, enableFileCheckpointing, cwdForRun, addDirs)
     setStreamAbort(bindAbort(abort))
   }
+  return true
 }
 
 /**
@@ -2024,10 +2088,10 @@ export function attachToRunningSession(sessionId, opts = {}) {
 }
 
 export function useSSE() {
-  const sendMessage = useCallback((message, permissionMode, attachments, attachmentsMeta, images) => {
+  const sendMessage = useCallback((message, permissionMode, attachments, attachmentsMeta, images, displayImages) => {
     // Compose always targets the session on screen; the stream stays bound to
     // it even after the user switches away.
-    startStream({ key: getActiveKey(), message, permissionMode, attachments, attachmentsMeta, images })
+    return startStream({ key: getActiveKey(), message, permissionMode, attachments, attachmentsMeta, images, displayImages })
   }, [])
 
   const sendAnswer = useCallback(async (answerText, toolUseId, answerData) => {

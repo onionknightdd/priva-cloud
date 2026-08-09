@@ -28,6 +28,7 @@ export default function ErrorBlock({ message }) {
       lastUserPrompt.attachments,
       lastUserPrompt.attachmentsMeta,
       lastUserPrompt.images,
+      lastUserPrompt.displayImages,
     )
   }
 

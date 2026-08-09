@@ -12,6 +12,7 @@ import ToolRunSection from '../chat/ToolRunSection'
 import WorkflowCard from '../chat/WorkflowCard'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 import { tweenScrollIntoView } from '@shared/motion/tweenScroll'
+import { summarizeResponseExecution } from '../../utils/responseSummary'
 
 const statusIconMap = {
   running: { icon: Loader, color: 'var(--purple)', spinning: true },
@@ -46,8 +47,9 @@ function isCollapsibleInspectorToolBlock(block) {
     && block.name !== 'AskUser'
 }
 
-function isEmptyTextBlock(block) {
-  return block?.type === 'text' && !block?.text?.trim()
+function isInvisibleInspectorBlock(block) {
+  return (block?.type === 'text' && !block?.text?.trim())
+    || block?.type === 'agent_message'
 }
 
 function getInspectorToolRunKey(parentId, run, startIndex) {
@@ -197,7 +199,12 @@ function SubagentRow({ item, expanded, active, onClick, rowRef }) {
   const status = block.status || 'running'
   const isError = status === 'error' || block.result?.is_error
   const { icon: StatusIcon, color, spinning } = getStatusMeta(status, isError)
-  const toolUseCount = children.filter((child) => child.type === 'tool_use').length
+  const directStats = summarizeResponseExecution({ contentBlocks: children, fileOps })
+  const directStatParts = [
+    directStats.readFiles > 0 ? t('canvas.agentStatRead', { count: directStats.readFiles }) : null,
+    directStats.editedFiles > 0 ? t('canvas.agentStatEdit', { count: directStats.editedFiles }) : null,
+    directStats.commands > 0 ? t('canvas.agentStatCommand', { count: directStats.commands }) : null,
+  ].filter(Boolean)
   const indent = 12 + depth * 14
   const childIndent = 24 + depth * 14
   const agentType = getSubagentType(block)
@@ -217,7 +224,7 @@ function SubagentRow({ item, expanded, active, onClick, rowRef }) {
           run.push(children[index])
           continue
         }
-        if (isEmptyTextBlock(nextChild)) {
+        if (isInvisibleInspectorBlock(nextChild)) {
           index += 1
           continue
         }
@@ -227,7 +234,7 @@ function SubagentRow({ item, expanded, active, onClick, rowRef }) {
       const sectionKey = getInspectorToolRunKey(block.id, run, runStartIndex)
       const hasVisibleBlockAfterRun = children
         .slice(index + 1)
-        .some((candidate) => !isEmptyTextBlock(candidate))
+        .some((candidate) => !isInvisibleInspectorBlock(candidate))
       const isLiveRun = status === 'running' && !hasVisibleBlockAfterRun
       const isCollapsed = Object.prototype.hasOwnProperty.call(collapsedToolSections, sectionKey)
         ? collapsedToolSections[sectionKey]
@@ -273,7 +280,7 @@ function SubagentRow({ item, expanded, active, onClick, rowRef }) {
       continue
     }
 
-    if (isEmptyTextBlock(child)) continue
+    if (isInvisibleInspectorBlock(child)) continue
     renderedChildren.push(
       <SubagentMessageBlock
         key={child.id || `${child.type}-${index}`}
@@ -326,15 +333,20 @@ function SubagentRow({ item, expanded, active, onClick, rowRef }) {
           <Bot size={12} strokeWidth={1.5} style={{ color: 'var(--purple)' }} />
         </IconSlot>
         <span className="truncate min-w-0 flex-1">
-          <span className="font-semibold">AGENT</span>
+          <span className="font-semibold">{block.name === 'Task' ? 'TASK' : 'AGENT'}</span>
           <span>: {agentType}</span>
           {description && (
             <span style={{ color: 'var(--text-dim)' }}> · {description}</span>
           )}
         </span>
-        <span className="flex-shrink-0 font-light" style={{ color: 'var(--text-dim)' }}>
-          {toolUseCount} tool{toolUseCount === 1 ? '' : 's'}
-        </span>
+        {directStatParts.length > 0 && (
+          <span
+            className="truncate font-light"
+            style={{ color: 'var(--text-dim)', maxWidth: '50%', minWidth: 0 }}
+          >
+            {directStatParts.join(' · ')}
+          </span>
+        )}
       </button>
 
       <AnimatedCollapse open={expanded} id={bodyId} animateHeight={false}>

@@ -1,5 +1,5 @@
-import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { FileDiff, FolderTree, PanelRight, SquareTerminal, X } from 'lucide-react'
+import { Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { FileDiff, FolderTree, ListTree, PanelRight, SquareTerminal, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
 import useSidebarStore from '../../stores/sidebarStore'
@@ -19,12 +19,30 @@ import RecentActivities from './RecentActivities'
 import QuickActionChips from './QuickActionChips'
 import RewindBanner from './RewindBanner'
 import SessionRecap from './SessionRecap'
+import SessionSummaryOverlay, {
+  SESSION_SUMMARY_ENTER_DURATION,
+  SESSION_SUMMARY_EXIT_DURATION,
+  SESSION_SUMMARY_LAYOUT_WIDTH,
+} from './SessionSummaryCard'
 import TaskProgressCapsule from './TaskProgressCapsule'
 import { getSplitParams, isSplitPane } from '../../utils/splitMode'
 import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
+import { EASE_SPRING_CSS, EASE_TAB_CSS } from '@shared/motion/tokens'
 
 const MessageList = lazyWithChunkReload(() => import('./MessageList'))
 const SESSION_HEADER_HEIGHT = 30
+const SUMMARY_AWARE_LAYOUT_STYLE = {
+  width: 'calc(100% - var(--session-summary-layout-width, 0px))',
+  minWidth: 0,
+  transition: 'width var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1))',
+}
+const SUMMARY_AWARE_TRACK_STYLE = {
+  width: 'auto',
+  maxWidth: 'none',
+  marginLeft: 'var(--session-summary-track-inline-margin, max(10%, calc(50% - 450px)))',
+  marginRight: 'var(--session-summary-track-inline-margin, max(10%, calc(50% - 450px)))',
+  transition: 'margin-left var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1)), margin-right var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1))',
+}
 const TRACKED_TASK_TOOL_NAMES = new Set([
   'TaskOutput',
   'TaskStop',
@@ -41,12 +59,13 @@ function toMotionRect(rect) {
   }
 }
 
-function CanvasShortcut({ icon: Icon, title, hidden, indicator, onClick }) {
+function CanvasShortcut({ icon: Icon, title, hidden, indicator, onClick, buttonRef }) {
   if (hidden) return null
   const hasIndicator = !!indicator
   return (
     <button
       type="button"
+      ref={buttonRef}
       title={title}
       onClick={onClick}
       className="inline-flex items-center justify-center"
@@ -94,6 +113,49 @@ function CanvasShortcut({ icon: Icon, title, hidden, indicator, onClick }) {
       )}
       <Icon size={16} strokeWidth={1.5} />
     </button>
+  )
+}
+
+function SessionSummaryToggle({ open, active = open, cardId, title, onToggle }) {
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-controls={cardId}
+      aria-label={title}
+      title={title}
+      onClick={onToggle}
+      className="inline-flex items-center justify-center flex-shrink-0"
+      style={{
+        width: 26,
+        height: 26,
+        padding: 0,
+        border: 'none',
+        borderRadius: 4,
+        background: active ? 'var(--bg-elevated)' : 'transparent',
+        color: active ? 'var(--text-primary)' : 'var(--text-dim)',
+        cursor: 'pointer',
+        transition: 'color 150ms ease, background 150ms ease',
+      }}
+      onMouseEnter={(event) => {
+        event.currentTarget.style.color = 'var(--text-primary)'
+        event.currentTarget.style.background = 'var(--bg-elevated)'
+      }}
+      onMouseLeave={(event) => {
+        event.currentTarget.style.color = active ? 'var(--text-primary)' : 'var(--text-dim)'
+        event.currentTarget.style.background = active ? 'var(--bg-elevated)' : 'transparent'
+      }}
+    >
+      <ListTree size={16} strokeWidth={1.5} />
+    </button>
+  )
+}
+
+function SummaryAwareLayout({ children, className = '', style }) {
+  return (
+    <div className={className} style={{ ...SUMMARY_AWARE_LAYOUT_STYLE, ...style }}>
+      {children}
+    </div>
   )
 }
 
@@ -287,6 +349,9 @@ function formatTrackingTitle(label, counts) {
 
 export default function ChatPanel() {
   const { t } = useTranslation()
+  const summaryCardId = useId()
+  const chatPanelRef = useRef(null)
+  const canvasExpandRef = useRef(null)
   const embeddedPane = isSplitPane()
   const { paneId } = getSplitParams()
   const sessionId = useChatStore((s) => s.sessionId)
@@ -320,12 +385,15 @@ export default function ChatPanel() {
   const fileBrowserCount = useFileBrowserStore((s) => s.tabs.length)
   const changeOpsCount = useFileOpsStore((s) => s.fileOps.filter((op) => op.type === 'write' || op.type === 'edit').length)
   const splitPaneCount = useSplitStore((s) => s.panes.length)
-  const closePane = useSplitStore((s) => s.closePane)
   const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
   const activeSidebarSession = sidebarSessions.find((s) => s.sessionId === sessionId || s.id === sessionId)
   const sessionTitle = activeSidebarSession?.name || (sessionId ? sessionId : '')
   const [renamingSessionTitle, setRenamingSessionTitle] = useState(false)
   const [sessionTitleDraft, setSessionTitleDraft] = useState('')
+  const [summaryOpen, setSummaryOpen] = useState(false)
+  const canvasOpen = canvasVisible && !canvasMinimized
+  const summaryVisible = summaryOpen && !canvasOpen
+  const [summaryCardRightInset, setSummaryCardRightInset] = useState(12)
   const sessionTitleInputMeasureRef = useRef(null)
   const [sessionTitleInputWidth, setSessionTitleInputWidth] = useState(0)
   const sessionTitleHandledRef = useRef(false)
@@ -337,12 +405,39 @@ export default function ChatPanel() {
     setRenamingSessionTitle(false)
     setSessionTitleDraft('')
     setSessionTitleInputWidth(0)
+    setSummaryOpen(false)
     sessionTitleHandledRef.current = false
   }, [sessionId])
   useLayoutEffect(() => {
     if (!renamingSessionTitle || !sessionTitleInputMeasureRef.current) return
     setSessionTitleInputWidth(Math.ceil(sessionTitleInputMeasureRef.current.getBoundingClientRect().width))
   }, [renamingSessionTitle, sessionTitleDraft])
+  useLayoutEffect(() => {
+    const updateSummaryCardAnchor = () => {
+      const panel = chatPanelRef.current
+      const canvasButton = canvasExpandRef.current
+      if (!panel || !canvasButton) {
+        setSummaryCardRightInset((value) => (value === 12 ? value : 12))
+        return
+      }
+      const panelRect = panel.getBoundingClientRect()
+      const canvasButtonRect = canvasButton.getBoundingClientRect()
+      const inset = Math.max(12, Math.round(panelRect.right - canvasButtonRect.right))
+      setSummaryCardRightInset((value) => (value === inset ? value : inset))
+    }
+
+    updateSummaryCardAnchor()
+    const panel = chatPanelRef.current
+    const observer = panel && typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(updateSummaryCardAnchor)
+      : null
+    if (panel && observer) observer.observe(panel)
+    window.addEventListener('resize', updateSummaryCardAnchor)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', updateSummaryCardAnchor)
+    }
+  }, [canvasVisible, canvasMinimized, embeddedPane, splitPaneCount])
   // cwd comes entirely from the agent-runner: the active session's cwd, else the
   // /api/health workspace. Empty until one resolves — CwdIndicator then shows '~'.
   const activeCwd = activeSidebarSession?.cwd || agentWorkspace || ''
@@ -399,7 +494,7 @@ export default function ChatPanel() {
     }
     const activePaneId = useSplitStore.getState().activePaneId
     if (activePaneId && useSplitStore.getState().panes.length > 1) {
-      closePane(activePaneId)
+      window.postMessage({ type: 'priva:split-pane-close', paneId: activePaneId }, window.location.origin)
     }
   }
   const startSessionTitleRename = () => {
@@ -565,6 +660,13 @@ export default function ChatPanel() {
         </div>
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
+        <SessionSummaryToggle
+          open={summaryVisible}
+          active={summaryOpen}
+          cardId={summaryCardId}
+          title={t('chat.sessionSummary.toggle')}
+          onToggle={() => setSummaryOpen((value) => !value)}
+        />
         {showTasksShortcut && (
           <HeaderBadgeShortcut
             icon={PanelRight}
@@ -601,6 +703,7 @@ export default function ChatPanel() {
           icon={PanelRight}
           title={canvasVisible && !canvasMinimized ? t('canvas.close') : t('canvas.expand')}
           hidden={canvasVisible && !canvasMinimized}
+          buttonRef={canvasExpandRef}
           onClick={toggleCanvasMenu}
         />
         <CanvasShortcut
@@ -618,16 +721,27 @@ export default function ChatPanel() {
 
     return (
       <div
-        className="flex flex-col flex-1 min-w-0"
-        style={{ background: 'var(--bg-base)' }}
+        ref={chatPanelRef}
+        className="flex flex-col flex-1 min-w-0 relative"
+        style={{
+          background: 'var(--bg-base)',
+          minHeight: 0,
+          '--session-summary-card-right-inset': `${summaryCardRightInset}px`,
+          '--session-summary-layout-width': summaryVisible ? SESSION_SUMMARY_LAYOUT_WIDTH : '0px',
+          '--session-summary-motion-duration': `${summaryVisible ? SESSION_SUMMARY_ENTER_DURATION : SESSION_SUMMARY_EXIT_DURATION}ms`,
+          '--session-summary-motion-ease': summaryVisible ? EASE_SPRING_CSS : EASE_TAB_CSS,
+          '--session-summary-track-inline-margin': summaryVisible
+            ? 'max(5%, calc(25% - 225px))'
+            : 'max(10%, calc(50% - 450px))',
+        }}
       >
         {headerBar}
-        {/* Top: scrollable recent activity + chips */}
+        {/* Top: the scroll viewport stays full width; only its content stage yields. */}
         <div
           className="flex-1 overflow-y-auto"
           style={{ background: 'var(--bg-base)' }}
         >
-          <div className="flex min-h-full flex-col">
+          <SummaryAwareLayout className="flex min-h-full flex-col">
             <div style={{ ...TRACK_STYLE, paddingTop: 24 }}>
               <UsageStatsOverviewTitle />
               <div style={{ marginTop: 32 }}>
@@ -640,39 +754,71 @@ export default function ChatPanel() {
             >
               <QuickActionChips />
             </div>
-          </div>
+          </SummaryAwareLayout>
         </div>
 
-        {/* Bottom: pinned input at 70% track, same left edge as card */}
-        <div
-          className="flex-shrink-0 chat-empty-input"
-          style={{ ...TRACK_STYLE, paddingBottom: 12 }}
-        >
-          <ChatInput cwd={activeCwd} cwdPlacement="below" />
-        </div>
+        {/* Bottom: pinned input follows the same left-side layout stage. */}
+        <SummaryAwareLayout className="flex-shrink-0">
+          <div
+            className="chat-empty-input"
+            style={{ ...TRACK_STYLE, paddingBottom: 12 }}
+          >
+            <ChatInput cwd={activeCwd} cwdPlacement="below" />
+          </div>
+        </SummaryAwareLayout>
+        <SessionSummaryOverlay
+          open={summaryVisible}
+          cardId={summaryCardId}
+          cwd={activeCwd}
+          topOffset={SESSION_HEADER_HEIGHT}
+        />
       </div>
     )
   }
 
   return (
     <div
-      className="flex flex-col flex-1 min-w-0"
-      style={{ background: 'var(--bg-base)', height: '100%', minHeight: 0 }}
+      ref={chatPanelRef}
+      className="flex flex-col flex-1 min-w-0 relative"
+      style={{
+        background: 'var(--bg-base)',
+        height: '100%',
+        minHeight: 0,
+        '--session-summary-card-right-inset': `${summaryCardRightInset}px`,
+        '--session-summary-layout-width': summaryVisible ? SESSION_SUMMARY_LAYOUT_WIDTH : '0px',
+        '--session-summary-motion-duration': `${summaryVisible ? SESSION_SUMMARY_ENTER_DURATION : SESSION_SUMMARY_EXIT_DURATION}ms`,
+        '--session-summary-motion-ease': summaryVisible ? EASE_SPRING_CSS : EASE_TAB_CSS,
+        '--session-summary-track-inline-margin': summaryVisible
+          ? 'max(5%, calc(25% - 225px))'
+          : 'max(10%, calc(50% - 450px))',
+      }}
     >
       {headerBar}
-      <RewindBanner />
+      <SummaryAwareLayout className="flex-shrink-0">
+        <RewindBanner />
+      </SummaryAwareLayout>
       <MessageListBoundary resetKey={sessionId ? `${sessionId}:${messages.length}` : `draft:${messages.length}`}>
         <Suspense fallback={<div className="flex-1" style={{ background: 'var(--bg-base)' }} />}>
           <MessageList />
         </Suspense>
       </MessageListBoundary>
-      <div className="flex-shrink-0" style={{ background: 'var(--bg-base)' }}>
-        <div style={{ maxWidth: 900, width: '80%', margin: '0 auto' }}>
+      <SummaryAwareLayout className="flex-shrink-0" style={{ background: 'var(--bg-base)' }}>
+        <div style={SUMMARY_AWARE_TRACK_STYLE}>
           <TaskProgressCapsule />
         </div>
-      </div>
-      <SessionRecap />
-      <ChatInput cwd={activeCwd} cwdPlacement="below" />
+      </SummaryAwareLayout>
+      <SummaryAwareLayout className="flex-shrink-0">
+        <SessionRecap />
+      </SummaryAwareLayout>
+      <SummaryAwareLayout className="flex-shrink-0">
+        <ChatInput cwd={activeCwd} cwdPlacement="below" summaryAware />
+      </SummaryAwareLayout>
+      <SessionSummaryOverlay
+        open={summaryVisible}
+        cardId={summaryCardId}
+        cwd={activeCwd}
+        topOffset={SESSION_HEADER_HEIGHT}
+      />
     </div>
   )
 }

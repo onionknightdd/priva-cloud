@@ -11,12 +11,28 @@ PermissionDecision = Literal["allow", "deny"]
 class AttachmentItem(BaseModel):
     path: str
     name: str | None = None
+    attachment_id: str | None = None
+    media_type: str | None = None
+    is_image: bool = False
 
 
 class ImageItem(BaseModel):
     data: str
     media_type: str
     filename: str | None = None
+
+
+class ImageRouteRequest(BaseModel):
+    model: str | None = Field(default=None, max_length=576)
+
+
+class ImageRouteResponse(BaseModel):
+    route: Literal["direct", "vision_mcp", "blocked", "probe_failed"]
+    profile_id: str | None = None
+    model_id: str | None = None
+    vision_model: str | None = None
+    probed: bool = False
+    reason: str | None = None
 
 
 class AgentRunRequest(BaseModel):

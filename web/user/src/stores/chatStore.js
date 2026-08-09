@@ -1,6 +1,14 @@
 import { createStore } from 'zustand/vanilla'
 import safeStorage from '@shared/utils/safeStorage'
 import { makeFacade, registerSliceFactory } from './runtime/registry'
+import {
+  agentLifecycleFromStatus,
+  agentLifecycleToBlockStatus,
+  getAgentDisplayId,
+  getAgentResultInfo,
+  isAgentToolName,
+  normalizeAgentTaskNotification,
+} from '../utils/agentToolLifecycle'
 
 const CKPT_STORAGE_PREFIX = 'priva-ckpt:'
 const REWIND_STORAGE_PREFIX = 'priva-rewind:'
@@ -46,6 +54,95 @@ function mapStreamBlocks(blocks, mapper) {
     return false
   })
   return changed ? next : blocks
+}
+
+function timestampToMillis(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value < 1_000_000_000_000 ? value * 1000 : value
+  }
+  const parsed = Date.parse(String(value || ''))
+  return Number.isFinite(parsed) ? parsed : Date.now()
+}
+
+function withAgentToolResult(block, result, toolUseResult = null) {
+  const enrichedResult = toolUseResult && !result?.tool_use_result
+    ? { ...result, tool_use_result: toolUseResult }
+    : result
+  const resultInfo = getAgentResultInfo(enrichedResult, toolUseResult)
+
+  // A terminal task notification is authoritative. Attach-replay can deliver
+  // the earlier async launch result again after that terminal event.
+  const existingLifecycle = agentLifecycleFromStatus(block.agentTaskStatus)
+  if (existingLifecycle && existingLifecycle !== 'running') {
+    return {
+      ...block,
+      result: enrichedResult,
+      toolUseResult: toolUseResult || block.toolUseResult,
+      agentId: resultInfo.agentId || block.agentId,
+    }
+  }
+
+  const lifecycle = resultInfo.isError
+    ? 'failed'
+    : resultInfo.isAsync
+      ? 'running'
+      : 'completed'
+  const isTerminal = lifecycle !== 'running'
+  const endTime = isTerminal ? Date.now() : null
+  return {
+    ...block,
+    result: enrichedResult,
+    toolUseResult: toolUseResult || undefined,
+    agentId: resultInfo.agentId || block.agentId,
+    agentTaskStatus: lifecycle,
+    status: agentLifecycleToBlockStatus(lifecycle),
+    ...(isTerminal ? {
+      endTime,
+      duration: block.startTime ? endTime - block.startTime : null,
+    } : {}),
+  }
+}
+
+function applyAgentNotificationToBlock(block, rawNotification) {
+  if (block?.type !== 'tool_use' || !isAgentToolName(block.name)) return block
+  const notification = normalizeAgentTaskNotification(rawNotification)
+  if (!notification) return block
+  const matchesToolUse = notification.toolUseId && notification.toolUseId === block.id
+  const agentId = getAgentDisplayId(block)
+  const matchesTask = notification.taskId && agentId && notification.taskId === agentId
+  if (!matchesToolUse && !matchesTask) return block
+
+  const lifecycle = agentLifecycleFromStatus(notification.status)
+  if (!lifecycle) return block
+  const terminal = lifecycle !== 'running'
+  const endTime = terminal ? timestampToMillis(notification.timestamp) : null
+  return {
+    ...block,
+    agentId: notification.taskId || agentId || block.agentId,
+    agentTaskStatus: notification.status,
+    agentTaskSummary: notification.summary || block.agentTaskSummary,
+    status: agentLifecycleToBlockStatus(lifecycle),
+    ...(terminal ? {
+      endTime,
+      duration: block.startTime ? Math.max(0, endTime - block.startTime) : block.duration,
+    } : {}),
+  }
+}
+
+function abortRunningBlock(block, agentTaskStatus) {
+  if (block.type !== 'tool_use' || (block.status && block.status !== 'running')) return block
+  const duration = block.startTime ? Date.now() - block.startTime : null
+  if (isAgentToolName(block.name)) {
+    const lifecycle = agentLifecycleFromStatus(agentTaskStatus) || 'terminated'
+    return {
+      ...block,
+      status: agentLifecycleToBlockStatus(lifecycle),
+      agentTaskStatus,
+      result: { is_error: true, content: agentTaskStatus === 'failed' ? 'Failed' : 'Aborted' },
+      duration,
+    }
+  }
+  return { ...block, status: 'error', result: { is_error: true, content: 'Aborted' }, duration }
 }
 
 // One chat slice per session runtime. `getSibling(name)` resolves another
@@ -450,7 +547,7 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
     return { messages: msgs }
   }),
 
-  updateToolResult: (toolUseId, result) => set((s) => {
+  updateToolResult: (toolUseId, result, toolUseResult = null) => set((s) => {
     // Keep identity for untouched messages so memo(MessageBubble) holds —
     // same bail pattern as updateSubagentToolResult above.
     let msgsChanged = false
@@ -463,6 +560,9 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
         ...msg,
         content: msg.content.map((block) => {
           if (block.type === 'tool_use' && block.id === toolUseId) {
+            if (isAgentToolName(block.name)) {
+              return withAgentToolResult(block, result, toolUseResult)
+            }
             const duration = block.startTime ? Date.now() - block.startTime : null
             return { ...block, result, status: result.is_error ? 'error' : 'success', duration }
           }
@@ -479,6 +579,9 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
       subChanged = true
       subNext[parentId] = blocks.map((b) => {
         if (b.type === 'tool_use' && b.id === toolUseId) {
+          if (isAgentToolName(b.name)) {
+            return withAgentToolResult(b, result, toolUseResult)
+          }
           const duration = b.startTime ? Date.now() - b.startTime : null
           return { ...b, result, status: result.is_error ? 'error' : 'success', duration }
         }
@@ -492,21 +595,49 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
     return next
   }),
 
+  applyAgentTaskNotification: (notification) => set((s) => {
+    let messagesChanged = false
+    const messages = s.messages.map((message) => {
+      if (message.role !== 'assistant' || !Array.isArray(message.content)) return message
+      let contentChanged = false
+      const content = message.content.map((block) => {
+        const next = applyAgentNotificationToBlock(block, notification)
+        if (next !== block) contentChanged = true
+        return next
+      })
+      if (!contentChanged) return message
+      messagesChanged = true
+      return { ...message, content }
+    })
+
+    let subagentChanged = false
+    const subagentContent = {}
+    for (const [parentId, blocks] of Object.entries(s.subagentContent)) {
+      let blocksChanged = false
+      subagentContent[parentId] = blocks.map((block) => {
+        const next = applyAgentNotificationToBlock(block, notification)
+        if (next !== block) blocksChanged = true
+        return next
+      })
+      if (blocksChanged) subagentChanged = true
+    }
+
+    if (!messagesChanged && !subagentChanged) return {}
+    return {
+      ...(messagesChanged ? { messages } : {}),
+      ...(subagentChanged ? { subagentContent } : {}),
+    }
+  }),
+
   // Mark all in-progress tool_use blocks as error (used when stream is aborted)
-  abortRunningTools: () => set((s) => {
+  abortRunningTools: (agentTaskStatus = 'aborted') => set((s) => {
     const msgs = s.messages.map((msg) => {
       if (msg.role !== 'assistant') return msg
       const hasRunning = msg.content.some((b) => b.type === 'tool_use' && (!b.status || b.status === 'running'))
       if (!hasRunning) return msg
       return {
         ...msg,
-        content: msg.content.map((block) => {
-          if (block.type === 'tool_use' && (!block.status || block.status === 'running')) {
-            const duration = block.startTime ? Date.now() - block.startTime : null
-            return { ...block, status: 'error', result: { is_error: true, content: 'Aborted' }, duration }
-          }
-          return block
-        }),
+        content: msg.content.map((block) => abortRunningBlock(block, agentTaskStatus)),
       }
     })
     // Also abort any running subagent tools.
@@ -514,13 +645,7 @@ export const createChatStore = (getSibling) => createStore((set, get) => ({
     for (const [parentId, blocks] of Object.entries(s.subagentContent)) {
       const hasRunning = blocks.some((b) => b.type === 'tool_use' && (!b.status || b.status === 'running'))
       if (!hasRunning) { subNext[parentId] = blocks; continue }
-      subNext[parentId] = blocks.map((b) => {
-        if (b.type === 'tool_use' && (!b.status || b.status === 'running')) {
-          const duration = b.startTime ? Date.now() - b.startTime : null
-          return { ...b, status: 'error', result: { is_error: true, content: 'Aborted' }, duration }
-        }
-        return b
-      })
+      subNext[parentId] = blocks.map((block) => abortRunningBlock(block, agentTaskStatus))
     }
     return { messages: msgs, subagentContent: subNext }
   }),

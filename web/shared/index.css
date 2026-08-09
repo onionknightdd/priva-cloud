@@ -1073,14 +1073,20 @@ html, body {
 .markdown-body > *:first-child { margin-top: 0; }
 .markdown-body > *:last-child { margin-bottom: 0; }
 
-/* Assistant final-answer prose is three pixels tighter than the shared markdown
+/* Assistant final-answer prose is one pixel tighter than the shared markdown
    rhythm. Scope this to paragraphs/list items so code, tool, thinking, summary,
    and inter-block spacing remain unchanged. */
 .assistant-message-body p {
-  line-height: calc(1.8em - 3px) !important;
+  line-height: calc(1.8em - 1px) !important;
 }
 .assistant-message-body li {
-  line-height: calc(1.7em - 3px) !important;
+  line-height: calc(1.7em - 1px) !important;
+}
+
+/* The flex gap owns spacing between assistant process blocks. Markdown's
+   inline last-paragraph margin must not add another four pixels. */
+.assistant-process-blocks > .markdown-body > *:last-child {
+  margin-bottom: 0 !important;
 }
 
 /* Compact markdown when mirrored inside the Canvas Inspector tree. */
@@ -1296,6 +1302,112 @@ html, body {
   font-family: var(--font-ui);
 }
 
+.agent-tool-frame {
+  min-width: 0;
+}
+
+.agent-tool-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 20px;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: 400;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity 150ms ease;
+}
+
+.agent-tool-line:hover,
+.agent-tool-line:focus-visible {
+  opacity: 0.78;
+}
+
+.agent-tool-line.is-reverted {
+  opacity: 0.55;
+}
+
+.agent-tool-chip {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 20px;
+  min-width: 0;
+  padding: 1px 8px;
+  overflow: hidden;
+  border: 0.5px solid var(--border);
+  border-radius: 999px;
+  color: var(--purple);
+  font-size: var(--text-base);
+  line-height: 16px;
+}
+
+.agent-tool-chip .tool-line-icon {
+  margin-right: 0;
+  color: var(--purple);
+}
+
+.agent-tool-chip .tool-line-icon-base {
+  color: var(--purple);
+  opacity: 0.45;
+}
+
+.agent-tool-chip .tool-line-icon-sweep {
+  color: var(--purple);
+}
+
+.agent-tool-chip-copy {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.agent-tool-chip-part {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-tool-chip-part.is-name {
+  flex: 1 1 auto;
+}
+
+.agent-tool-chip-part + .agent-tool-chip-part::before {
+  flex: 0 0 auto;
+  margin: 0 5px;
+  content: '·';
+}
+
+.agent-tool-status {
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-tool-line.is-failed .agent-tool-status {
+  color: var(--red);
+}
+
 .tool-line-row {
   display: flex;
   align-items: center;
@@ -1383,7 +1495,9 @@ html, body {
   to { background-position-x: -200%; }
 }
 
-.tool-line-label.is-shimmering {
+.tool-line-label.is-shimmering,
+.agent-tool-line.is-running,
+.agent-communication-label.is-running {
   background: linear-gradient(
     90deg,
     var(--text-dim) 0%,
@@ -1486,6 +1600,54 @@ html, body {
   margin-top: 2px;
 }
 
+.agent-communication-event {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.agent-communication-trace {
+  min-width: 0;
+}
+
+.agent-communication-branch {
+  min-width: 0;
+}
+
+.agent-communication-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 20px;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-communication-label-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-communication-event.is-error .agent-communication-label {
+  color: var(--red);
+}
+
+.agent-communication-body-tree {
+  margin-top: 0;
+}
+
+.agent-communication-body {
+  margin-bottom: 2px;
+}
+
 .tool-detail-block {
   min-width: 0;
   overflow: hidden;
@@ -1579,7 +1741,9 @@ html, body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tool-line-label.is-shimmering {
+  .tool-line-label.is-shimmering,
+  .agent-tool-line.is-running,
+  .agent-communication-label.is-running {
     background: none;
     color: var(--text-dim);
     -webkit-text-fill-color: currentColor;

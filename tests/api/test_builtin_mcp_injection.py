@@ -60,6 +60,35 @@ def test_injects_current_builtin_mcp_names(monkeypatch, tmp_path):
     assert options.allowed_tools == ["mcp__Scheduler__*", "mcp__FileCanvas__*"]
 
 
+def test_injects_vision_only_for_run_scoped_image_paths(monkeypatch, tmp_path):
+    from priva_agent_runner.services.llm_profiles import ResolvedProfile
+    from priva_common.models.llm_profiles import LlmProfile
+
+    profile = LlmProfile(
+        id="profile-a",
+        label="Profile A",
+        base_url="https://example.invalid",
+        auth_token="secret",
+        default_model="text-model",
+        vision_model="vision-model",
+    )
+    monkeypatch.setattr(
+        options_module,
+        "resolve_model",
+        lambda _reference: ResolvedProfile(profile=profile, model="text-model"),
+    )
+
+    options = _build_options(
+        monkeypatch,
+        tmp_path,
+        vision_image_paths=[str(tmp_path / "image.png")],
+    )
+
+    assert set(options.mcp_servers) == {"FileCanvas", "Vision"}
+    assert options.mcp_servers["Vision"]["name"] == "Vision"
+    assert "mcp__Vision__*" in options.allowed_tools
+
+
 @pytest.mark.parametrize(
     "blocked_name",
     ["mcp__FileCanvas__*", "mcp__FileCanvas__register_file"],
@@ -85,6 +114,7 @@ def test_current_file_canvas_denylist_prevents_injection(
     [
         "mcp__FileCanvas__register_file",
         "mcp__Scheduler__scheduler_list_jobs",
+        "mcp__Vision__image_read",
     ],
 )
 def test_current_builtin_names_pass_subagent_tool_validation(tool_name):

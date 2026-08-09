@@ -157,6 +157,7 @@ async def build_agent_options(
     max_turns: int | None = None,
     extra_disallowed_tools: list[str] | None = None,
     include_partial_messages: bool = False,
+    vision_image_paths: list[str] | None = None,
 ) -> ClaudeAgentOptions:
     settings = get_settings()
 
@@ -198,6 +199,13 @@ async def build_agent_options(
             model = model_override or legacy_profile.default_model
         resolved = ResolvedProfile(profile=legacy_profile, model=model)
     model = resolved.model
+    if vision_image_paths and not resolved.profile.vision_model:
+        raise HTTPException(409, "vision_model_missing")
+    if vision_image_paths and any(
+        tool in {"mcp__Vision__*", "mcp__Vision__image_read"}
+        for tool in (extra_disallowed_tools or [])
+    ):
+        raise HTTPException(409, "vision_tool_disabled")
 
     # options.env carries ONLY non-cred runtime keys — the cred keys are deliberately
     # absent (the CLI reads them from settings.json). Point the AGENT's python/pip at
@@ -397,6 +405,34 @@ async def build_agent_options(
             options.allowed_tools = allowed
         except Exception:
             _get_logger().warning("Failed to inject scheduler MCP tools", exc_info=True)
+
+    # --- Vision MCP: only for a route that already uploaded and validated
+    # image attachments. Unlike optional built-ins, failure here is fatal: the
+    # outer text model must never continue as though it had inspected images.
+    if vision_image_paths:
+        vision_model = resolved.profile.vision_model
+        assert vision_model is not None
+        from ..mcp.vision import (
+            VISION_MCP_SERVER_NAME,
+            VISION_MCP_TOOL_PATTERN,
+            build_vision_mcp_server,
+        )
+
+        generated_server = build_vision_mcp_server(
+            resolved.profile,
+            vision_model,
+            vision_image_paths,
+        )
+        existing = options.mcp_servers or {}
+        if not isinstance(existing, dict):
+            existing = {}
+        existing[VISION_MCP_SERVER_NAME] = generated_server
+        options.mcp_servers = existing
+
+        allowed = list(options.allowed_tools or [])
+        if VISION_MCP_TOOL_PATTERN not in allowed:
+            allowed.append(VISION_MCP_TOOL_PATTERN)
+        options.allowed_tools = allowed
 
     # --- Inject FileCanvas file-registration tool for JWT-backed login sessions only ---
     # Skipped entirely when the per-run denylist blocks FileCanvas (e.g. Feishu DM):

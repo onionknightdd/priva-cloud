@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from priva_common.models.auth import UserRecord
 from priva_common.models.llm_profiles import (
+    ImageCapabilityProbeRequest,
+    ImageCapabilityProbeResponse,
     LlmProfile,
     LlmProfileCreateRequest,
     LlmProfileDefaultResponse,
@@ -26,6 +30,7 @@ from ..services.llm_profiles import (
     validate_endpoint,
     validate_profile_id,
 )
+from ..services.vision import ImageProbeUnavailable, probe_image_capability
 
 router = APIRouter(prefix="/api/sandbox/credentials/profiles", tags=["llm-profiles"])
 
@@ -51,12 +56,43 @@ def _as_summary(profile: LlmProfile) -> LlmProfileSummary:
 
 
 async def _fetch_models(profile: LlmProfile, timeout: float = 15.0) -> list[ModelInfo]:
+    base_url = profile.base_url.rstrip("/")
+    parsed = urlparse(base_url)
+    path = parsed.path.rstrip("/")
+    urls: list[str] = []
+
+    def add_url(url: str) -> None:
+        if url not in urls:
+            urls.append(url)
+
+    # Keep the existing OpenAI-compatible endpoint first, then support
+    # providers whose base URL already includes /v1 or an Anthropic route.
+    if path.endswith("/v1"):
+        add_url(f"{base_url}/models")
+    else:
+        add_url(f"{base_url}/v1/models")
+        add_url(f"{base_url}/models")
+    if parsed.netloc:
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        add_url(f"{origin}/v1/models")
+        add_url(f"{origin}/models")
+
+    headers = {
+        "Authorization": f"Bearer {profile.auth_token}",
+        # Anthropic-compatible providers such as DeepSeek use x-api-key.
+        "x-api-key": profile.auth_token,
+        "anthropic-version": "2023-06-01",
+    }
+    last_response = None
     try:
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            response = await client.get(
-                f"{profile.base_url.rstrip('/')}/v1/models",
-                headers={"Authorization": f"Bearer {profile.auth_token}"},
-            )
+            for url in urls:
+                response = await client.get(url, headers=headers)
+                last_response = response
+                if response.status_code == 200:
+                    break
+                if response.status_code not in {401, 404, 405}:
+                    break
     except httpx.ConnectError as exc:
         raise HTTPException(502, f"Cannot connect to API: {exc}") from exc
     except httpx.TimeoutException as exc:
@@ -64,6 +100,9 @@ async def _fetch_models(profile: LlmProfile, timeout: float = 15.0) -> list[Mode
     except httpx.HTTPError as exc:
         raise HTTPException(502, f"API request failed: {exc}") from exc
 
+    response = last_response
+    if response is None:
+        raise HTTPException(502, "No model discovery endpoint configured")
     if response.status_code == 401:
         raise HTTPException(400, "Invalid auth token — upstream returned 401")
     if response.status_code != 200:
@@ -141,7 +180,11 @@ async def update_profile(
         values["base_url"] = validate_endpoint(values["base_url"])
     values["id"] = profile_id
     updated = LlmProfile.model_validate(values)
-    store.upsert(updated, replacing_id=profile_id, vision_model=_migrate_legacy_vision())
+    store.upsert(
+        updated,
+        replacing_id=profile_id,
+        vision_model=_migrate_legacy_vision(),
+    )
     get_audit_logger().append(AuditEntry(
         actor=user.username, action="llm_profile.updated", target=profile_id,
         details={"fields": sorted(request.model_dump(exclude_unset=True).keys())},
@@ -174,6 +217,67 @@ async def delete_profile(profile_id: str, user: UserRecord = Depends(require_use
 @router.get("/{profile_id}/models", response_model=ModelListResponse)
 async def list_profile_models(profile_id: str, user: UserRecord = Depends(require_user)):
     profile = store.get(validate_profile_id(profile_id), _migrate_legacy_vision())
+    return ModelListResponse(models=await _fetch_models(profile))
+
+
+@router.post(
+    "/{profile_id}/image-capability/probe",
+    response_model=ImageCapabilityProbeResponse,
+)
+async def probe_profile_image_capability(
+    profile_id: str,
+    request: ImageCapabilityProbeRequest,
+    user: UserRecord = Depends(require_user),
+):
+    """Force a fresh native-image probe and replace that model's cache fact."""
+    profile_id = validate_profile_id(profile_id)
+    profile = store.get(profile_id, _migrate_legacy_vision())
+    model_id = request.model_id.strip()
+    try:
+        supported, _ = await probe_image_capability(profile, model_id, force=True)
+    except ImageProbeUnavailable as exc:
+        raise HTTPException(502, "model_unavailable") from exc
+    # A manual force-probe is also the explicit recovery path for a previously
+    # cached Vision transport decision. The next image_read call rediscovers
+    # chat-completions -> images/edits without changing the native image fact.
+    store.update_model_capability(
+        profile_id,
+        model_id,
+        image_read_transport=None,
+    )
+    get_audit_logger().append(AuditEntry(
+        actor=user.username,
+        action="llm_profile.image_capability_probed",
+        target=profile_id,
+        details={"model_id": model_id, "image": supported},
+    ))
+    return ImageCapabilityProbeResponse(
+        profile_id=profile_id,
+        model_id=model_id,
+        image=supported,
+        cached=False,
+    )
+
+
+@router.post("/test", response_model=ModelListResponse)
+async def test_profile_draft(
+    request: LlmProfileCreateRequest,
+    user: UserRecord = Depends(require_user),
+):
+    """Test the values currently being edited without persisting them."""
+    profile = LlmProfile(
+        id=validate_profile_id(request.id),
+        label=request.label.strip(),
+        base_url=validate_endpoint(request.base_url),
+        auth_token=request.auth_token.strip(),
+        default_model=request.default_model or None,
+        opus_model=request.opus_model or None,
+        sonnet_model=request.sonnet_model or None,
+        haiku_model=request.haiku_model or None,
+        vision_model=request.vision_model or None,
+    )
+    if not profile.auth_token:
+        raise HTTPException(422, "auth_token is required")
     return ModelListResponse(models=await _fetch_models(profile))
 
 

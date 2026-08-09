@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { animate } from 'animejs'
-import { Plus, X, FileText, Upload, Loader, AlertTriangle, Maximize2, Ban, ScrollText, Terminal } from 'lucide-react'
+import { Plus, X, FileText, Upload, Paperclip, Loader, AlertTriangle, Maximize2, Ban, ScrollText, Terminal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useSkillsStore, { flattenSkillsForPicker } from '../../stores/skillsStore'
 import { NATIVE_COMMANDS } from '../../constants/nativeCommands'
@@ -160,7 +160,7 @@ function PlusDropdown({ open, onClose, onUpload, extra }) {
           onUpload()
         }}
       >
-        <Upload size={14} strokeWidth={1.5} />
+        <Paperclip size={14} strokeWidth={1.5} />
         {t('chat.uploadFile')}
       </button>
       {extra}

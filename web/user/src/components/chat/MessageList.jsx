@@ -15,12 +15,24 @@ import { openSession } from '../../session/openSession'
 
 // The centered reading column, replicated per virtual row so layout matches the
 // pre-virtualization single-column wrapper exactly.
-const ROW_COLUMN_STYLE = { maxWidth: 900, width: '80%', margin: '0 auto' }
+const ROW_COLUMN_STYLE = {
+  width: 'auto',
+  maxWidth: 'none',
+  marginLeft: 'var(--session-summary-track-inline-margin, max(10%, calc(50% - 450px)))',
+  marginRight: 'var(--session-summary-track-inline-margin, max(10%, calc(50% - 450px)))',
+  transition: 'margin-left var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1)), margin-right var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1))',
+}
+const SUMMARY_AWARE_STAGE_STYLE = {
+  width: 'calc(100% - var(--session-summary-layout-width, 0px))',
+  minWidth: 0,
+  transition: 'width var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1))',
+}
 
 export default function MessageList() {
   const { t } = useTranslation()
   const messages = useChatStore((s) => s.messages)
   const sessionId = useChatStore((s) => s.sessionId)
+  const cwdDraft = useChatStore((s) => s.cwdDraft)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const showRecapBoundaryFade = useChatStore((s) => Boolean(s.recap) && !s.recapDismissed && !s.isStreaming)
   const enableFileCheckpointing = useChatStore((s) => s.enableFileCheckpointing)
@@ -28,6 +40,8 @@ export default function MessageList() {
   const rewindMarker = useChatStore((s) => s.rewindMarker)
   const setRewindMarker = useChatStore((s) => s.setRewindMarker)
   const showConfirmDialog = useUiStore((s) => s.showConfirmDialog)
+  const sidebarSessions = useSidebarStore((s) => s.sessions)
+  const sidebarActiveCwd = useSidebarStore((s) => s.activeCwd)
   const refreshSessions = useSidebarStore((s) => s.fetchSessions)
   const { sendAnswer } = useSSE()
   const bottomRef = useRef(null)
@@ -39,6 +53,10 @@ export default function MessageList() {
   const initialPinFrameRef = useRef(null)
   const initialPinSessionRef = useRef(null)
   const initialPinningRef = useRef(false)
+  const activeSession = sidebarSessions.find((session) => (
+    session.sessionId === sessionId || session.id === sessionId
+  ))
+  const filePreviewCwd = activeSession?.cwd || cwdDraft || sidebarActiveCwd || ''
 
   // Reset mounted count when conversation changes
   if (sessionId !== lastSessionRef.current) {
@@ -412,6 +430,7 @@ export default function MessageList() {
                     responseStreaming={item.responseStreaming}
                     isLatestAssistantMessage={item.isLatestAssistantMessage}
                     latestAssistantRefreshKey={messages.length}
+                    filePreviewCwd={filePreviewCwd}
                     onSendAnswer={sendAnswer}
                     assistantIndex={item.originalIndex}
                     onRewind={handleRewind}
@@ -437,7 +456,9 @@ export default function MessageList() {
                   width: '100%',
                 }}
               >
-                {row}
+                <div style={SUMMARY_AWARE_STAGE_STYLE}>
+                  {row}
+                </div>
               </div>
             )
           })}
@@ -466,21 +487,34 @@ export default function MessageList() {
 
       {/* Jump to latest */}
       {showJump && (
-        <JumpToLatest
-          onClick={() => {
-            // An explicit jump means "follow the live edge again" — flag it so the
-            // re-pin effect finishes the landing once row measurements settle.
-            isNearBottomRef.current = true
-            scrollToBottom('smooth')
-          }}
+        <div
           style={{
             position: 'absolute',
+            left: 0,
+            right: 'var(--session-summary-layout-width, 0px)',
             bottom: 12,
-            left: '50%',
-            transform: 'translateX(-50%)',
+            height: 0,
+            pointerEvents: 'none',
+            transition: 'right var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1))',
             zIndex: 50,
           }}
-        />
+        >
+          <JumpToLatest
+            onClick={() => {
+              // An explicit jump means "follow the live edge again" — flag it so the
+              // re-pin effect finishes the landing once row measurements settle.
+              isNearBottomRef.current = true
+              scrollToBottom('smooth')
+            }}
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              pointerEvents: 'auto',
+            }}
+          />
+        </div>
       )}
 
     </div>

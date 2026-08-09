@@ -1,4 +1,4 @@
-import { GENERATED_TOOL_LABEL, getToolDisplayName } from './generatedTool'
+import { GENERATED_TOOL_LABEL, getToolDisplayName } from './generatedTool.js'
 
 const GROUP_ORDER = [
   'edited',
@@ -13,7 +13,7 @@ const GROUP_ORDER = [
   'other',
 ]
 
-function countPatchLines(patch) {
+export function countPatchLines(patch) {
   let added = 0
   let removed = 0
   if (!patch || !Array.isArray(patch.hunks)) return { added, removed }
@@ -30,7 +30,7 @@ function countPatchLines(patch) {
   return { added, removed }
 }
 
-function countContentLines(str) {
+export function countContentLines(str) {
   if (typeof str !== 'string' || str.length === 0) return 0
   const normalized = str.endsWith('\n') ? str.slice(0, -1) : str
   if (normalized.length === 0) return 0

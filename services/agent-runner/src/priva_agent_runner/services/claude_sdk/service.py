@@ -193,6 +193,18 @@ def _build_prompt_with_attachments(prompt: str, attachments: list[dict] | None) 
         else:
             lines.append(f"- {path}")
     file_lines = "\n".join(lines)
+    has_vision_images = any(bool(att.get("is_image")) for att in attachments)
+    vision_guidance = ""
+    if has_vision_images:
+        vision_guidance = (
+            "\nImage handling:\n"
+            "- These image paths are readable only through `mcp__Vision__image_read`.\n"
+            "- Before answering, call `mcp__Vision__image_read` once for every attached image "
+            "that is relevant to the user's request, using its EXACT path.\n"
+            "- Give the tool a self-contained prompt and synthesize its textual results.\n"
+            "- Do not use Read, Bash, Python, or another file tool to inspect these images.\n"
+            "- Do not register an input image with FileCanvas solely because Vision read it.\n"
+        )
     return (
         "<current-turn-attachments>\n"
         "The user attached the following file(s) to THIS message.\n"
@@ -209,6 +221,7 @@ def _build_prompt_with_attachments(prompt: str, attachments: list[dict] | None) 
         "- Do not answer from memory or assumptions when the attached file has not been inspected.\n"
         "- Choose an appropriate reading method for the file type. Never read binary formats "
         "such as PDF, DOCX, XLSX, PPTX, images, or archives as plain text.\n"
+        f"{vision_guidance}"
         "- If a non-plain-text file is created, converted, rendered, exported, modified, "
         "or inspected—even through a Python, Node.js, or shell command—call "
         "`mcp__FileCanvas__register_file` with the relevant final file path.\n\n"
@@ -258,25 +271,13 @@ async def _make_image_prompt(content_blocks: list[dict]):
     }
 
 
-# Vision session tracking: session_id -> (profile_id, vision_model_id)
-_vision_sessions: dict[str, tuple[str, str]] = {}
-_VISION_SESSIONS_MAX = 1000
-
-
 def _track_vision_session(session_id: str | None, profile_id: str | None, vision_model: str | None) -> None:
-    if not session_id or not profile_id or not vision_model:
-        return
-    if len(_vision_sessions) >= _VISION_SESSIONS_MAX:
-        # Evict oldest entry
-        oldest = next(iter(_vision_sessions))
-        del _vision_sessions[oldest]
-    _vision_sessions[session_id] = (profile_id, vision_model)
+    """Deprecated compatibility seam; image routing is per turn, never sticky."""
+    return None
 
 
 def _get_sticky_vision_model(session_id: str | None) -> tuple[str, str] | None:
-    if not session_id:
-        return None
-    return _vision_sessions.get(session_id)
+    return None
 
 
 def _resolve_vision_model(username: str | None, images: list[dict] | None) -> str | None:
@@ -290,20 +291,22 @@ def _resolve_vision_model(username: str | None, images: list[dict] | None) -> st
 
 
 def _model_ref_for_images(model_ref: str | None, session_id: str | None, images: list[dict] | None) -> tuple[str | None, str | None, str | None]:
-    """Return (model_ref, profile_id, vision_model) for an image run."""
+    """Resolve profile metadata without ever switching the outer run model."""
     if not images and not model_ref:
         # Let build_agent_options perform the normal default-profile gate.  This
         # also keeps non-SDK orchestration tests that stub the builder isolated
         # from the profile store.
         return model_ref, None, None
     resolved = resolve_model(model_ref)
-    if not images:
-        return model_ref, resolved.profile.id, None
-    sticky = _get_sticky_vision_model(session_id)
-    vision = sticky[1] if sticky and sticky[0] == resolved.profile.id else resolved.profile.vision_model
-    if vision:
-        return f"{resolved.profile.id}:{vision}", resolved.profile.id, vision
     return model_ref, resolved.profile.id, None
+
+
+def _vision_image_paths(attachments: list[dict] | None) -> list[str]:
+    return [
+        attachment["path"]
+        for attachment in (attachments or [])
+        if attachment.get("is_image") and attachment.get("path")
+    ]
 
 
 def _cleanup_options(options: Any) -> None:
@@ -630,6 +633,7 @@ async def agent_run(
         inject_scheduler_tools=inject_scheduler_tools,
         enable_file_checkpointing=enable_file_checkpointing,
         fork_session=fork_session,
+        vision_image_paths=_vision_image_paths(attachments),
     )
     messages: list[dict[str, Any]] = []
     result_data: dict[str, Any] = {}
@@ -997,6 +1001,7 @@ async def agent_run_events(
         max_turns=max_turns,
         extra_disallowed_tools=extra_disallowed_tools,
         include_partial_messages=include_partial_messages,
+        vision_image_paths=_vision_image_paths(attachments),
     )
 
     if coordinator:

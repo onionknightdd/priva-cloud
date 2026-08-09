@@ -3,6 +3,7 @@ import { Streamdown, defaultUrlTransform } from 'streamdown'
 import rehypeHighlight from 'rehype-highlight'
 import 'highlight.js/styles/github-dark.css'
 import { createMarkdownComponents } from './markdownComponents'
+import MarkdownRenderContext from './MarkdownRenderContext'
 
 const REHYPE_PLUGINS = [rehypeHighlight]
 const LINK_SAFETY = { enabled: false }
@@ -26,11 +27,19 @@ function MarkdownRenderer({
   streaming = false,
   streamed = false,
   assistantBody = false,
+  resolveInlineFiles = false,
+  filePreviewCwd = '',
+  deferInlineFileProbe = false,
 }) {
   const components = useMemo(
     () => createMarkdownComponents({ mermaidCollapsible }),
     [mermaidCollapsible]
   )
+  const renderContext = useMemo(() => ({
+    resolveInlineFiles,
+    inlineFileProbeDeferred: streaming || deferInlineFileProbe,
+    filePreviewCwd,
+  }), [deferInlineFileProbe, filePreviewCwd, resolveInlineFiles, streaming])
   if (!content) return null
 
   const normalizedContent = normalizeLeadingMetadataBreaks(content)
@@ -40,24 +49,26 @@ function MarkdownRenderer({
       className={`markdown-body overflow-hidden${assistantBody ? ' assistant-message-body' : ''}`}
       style={{ wordBreak: 'break-word' }}
     >
-      <Streamdown
-        // Keep a once-streamed block on Streamdown's block-based tree after
-        // completion so code/diagram nodes are not remounted at hand-off.
-        mode={streaming || streamed ? 'streaming' : 'static'}
-        parseIncompleteMarkdown
-        // Streamdown uses this flag to mark the trailing code fence incomplete;
-        // token animation itself remains disabled below.
-        isAnimating={streaming}
-        animated={false}
-        controls={false}
-        lineNumbers={false}
-        linkSafety={LINK_SAFETY}
-        urlTransform={defaultUrlTransform}
-        rehypePlugins={REHYPE_PLUGINS}
-        components={components}
-      >
-        {normalizedContent}
-      </Streamdown>
+      <MarkdownRenderContext.Provider value={renderContext}>
+        <Streamdown
+          // Keep a once-streamed block on Streamdown's block-based tree after
+          // completion so code/diagram nodes are not remounted at hand-off.
+          mode={streaming || streamed ? 'streaming' : 'static'}
+          parseIncompleteMarkdown
+          // Streamdown uses this flag to mark the trailing code fence incomplete;
+          // token animation itself remains disabled below.
+          isAnimating={streaming}
+          animated={false}
+          controls={false}
+          lineNumbers={false}
+          linkSafety={LINK_SAFETY}
+          urlTransform={defaultUrlTransform}
+          rehypePlugins={REHYPE_PLUGINS}
+          components={components}
+        >
+          {normalizedContent}
+        </Streamdown>
+      </MarkdownRenderContext.Provider>
     </div>
   )
 }

@@ -345,7 +345,9 @@ npm run dev:admin       # localhost:5174
 After building, **hotload** the fresh `dist/` directly into the running pod (StaticFiles serves the new hashed bundle + `index.html` immediately — no restart):
 
 ```bash
-POD=$(kubectl get pods -n priva-cloud -l app=control-panel -o jsonpath='{.items[0].metadata.name}')
+POD=$(kubectl get pods -n priva-cloud -l app=control-panel \
+  --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp \
+  -o jsonpath='{.items[-1].metadata.name}')
 tar -C web/user/dist -cf - . \
   | kubectl exec -i -n priva-cloud "$POD" -- \
       tar -C /app/web/user/dist --warning=no-unknown-keyword -xf -

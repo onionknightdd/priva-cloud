@@ -2,11 +2,13 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi import HTTPException
 
 from priva_agent_runner.routers.agent import _validate_attachments
 from priva_agent_runner.services.claude_sdk.service import _build_prompt_with_attachments
+from priva_agent_runner.services.temp_files import save_temp_file
 
 
 class AgentAttachmentValidationTests(unittest.TestCase):
@@ -51,6 +53,36 @@ class AgentAttachmentValidationTests(unittest.TestCase):
 
             self.assertEqual(ctx.exception.status_code, 400)
             self.assertIn("outside workspace", ctx.exception.detail)
+
+    def test_allows_id_bound_image_upload_outside_selected_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            uploads = root / "uploads"
+            cwd = root / "project"
+            cwd.mkdir()
+            png = b"\x89PNG\r\n\x1a\nrest"
+            with patch(
+                "priva_agent_runner.services.temp_files.get_temp_dir",
+                return_value=uploads,
+            ):
+                attachment_id, _, path, _ = save_temp_file(
+                    "alice", "image.png", png
+                )
+                result = _validate_attachments(
+                    [SimpleNamespace(
+                        path=path,
+                        name="image.png",
+                        attachment_id=attachment_id,
+                        media_type="image/png",
+                        is_image=True,
+                    )],
+                    str(cwd),
+                    "alice",
+                )
+
+            self.assertEqual(result[0]["path"], str(Path(path).resolve()))
+            self.assertEqual(result[0]["attachment_id"], attachment_id)
+            self.assertTrue(result[0]["is_image"])
 
 
 class AgentAttachmentPromptTests(unittest.TestCase):
@@ -102,6 +134,20 @@ class AgentAttachmentPromptTests(unittest.TestCase):
         self.assertIn("`mcp__FileCanvas__register_file`", result)
         self.assertIn("- report.pdf: /workspace/admin/report.pdf", result)
         self.assertIn("- /workspace/admin/notes.txt", result)
+
+    def test_image_attachments_require_the_run_scoped_vision_tool(self) -> None:
+        result = _build_prompt_with_attachments(
+            "What is in this image?",
+            [{
+                "path": "/workspace/admin/temp/image.png",
+                "name": "image.png",
+                "is_image": True,
+            }],
+        )
+
+        self.assertIn("`mcp__Vision__image_read`", result)
+        self.assertIn("using its EXACT path", result)
+        self.assertIn("Do not use Read, Bash, Python", result)
 
 
 if __name__ == "__main__":

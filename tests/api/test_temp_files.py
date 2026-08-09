@@ -40,6 +40,12 @@ class TempFileValidationTests(unittest.TestCase):
         validate_file(".env", 10)
         validate_file(".dockerfile", 10)
 
+    def test_accepts_valid_image_and_rejects_mismatched_signature(self) -> None:
+        validate_file("photo.png", 12)
+        validate_file_content("photo.png", b"\x89PNG\r\n\x1a\nrest")
+        with self.assertRaises(HTTPException):
+            validate_file_content("photo.png", b"GIF89a-not-a-png")
+
 
 class TempFileStorageTests(unittest.TestCase):
     def setUp(self) -> None:

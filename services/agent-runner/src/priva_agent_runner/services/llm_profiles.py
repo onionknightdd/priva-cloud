@@ -18,18 +18,23 @@ from urllib.parse import urlparse
 from fastapi import HTTPException
 
 from priva_common.logging import get_app_logger
-from priva_common.models.llm_profiles import LlmProfile
+from priva_common.models.llm_profiles import (
+    ImageReadTransport,
+    LlmProfile,
+    ModelCapabilities,
+)
 from priva_common.paths import priva_home
 from priva_common.user_env import read_settings_env
 
 logger = get_app_logger(__name__)
 
-PROFILE_STORE_VERSION = 1
+PROFILE_STORE_VERSION = 2
 PROFILE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 PROFILE_STORE_PATH = "llm-profiles.json"
 RUNTIME_OVERLAY_DIR = "runtime/llm-profile-overlays"
 
 _thread_lock = threading.RLock()
+_CAPABILITY_UNSET = object()
 
 
 def profile_store_path() -> Path:
@@ -242,6 +247,75 @@ class LlmProfileStore:
         if not any(p.id == profile_id for p in profiles):
             raise HTTPException(404, "profile_not_found")
         self.save(profiles, profile_id)
+
+    def update_model_capability(
+        self,
+        profile_id: str,
+        model_id: str,
+        *,
+        image: bool | None | object = _CAPABILITY_UNSET,
+        image_read_transport: ImageReadTransport | None | object = _CAPABILITY_UNSET,
+        vision_model: str | None = None,
+    ) -> LlmProfile:
+        """Atomically update capability facts for one exact model id.
+
+        The capability map is internal state: ordinary profile PATCH requests
+        preserve it but cannot set it.  This method holds the store's file lock
+        across read/modify/write so concurrent probes in different workers do
+        not overwrite one another.
+        """
+        model_id = (model_id or "").strip()
+        if not model_id:
+            raise HTTPException(422, "model_id is required")
+        if len(model_id) > 512:
+            raise HTTPException(422, "model_id is too long")
+
+        self.ensure_migrated(vision_model)
+        path = profile_store_path()
+        lock_path = path.with_name(f".{path.name}.lock")
+        _ensure_private_dir(lock_path.parent)
+        with _thread_lock, lock_path.open("a+", encoding="utf-8") as lock:
+            try:
+                os.chmod(lock_path, 0o600)
+            except OSError:
+                pass
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                try:
+                    with path.open("r", encoding="utf-8") as handle:
+                        data = json.load(handle)
+                except (OSError, ValueError, TypeError):
+                    data = {}
+                profiles, default_id = _raw_profiles(data)
+                updated_profile: LlmProfile | None = None
+                updated_profiles: list[LlmProfile] = []
+                for profile in profiles:
+                    if profile.id != profile_id:
+                        updated_profiles.append(profile)
+                        continue
+                    capabilities = dict(profile.model_capabilities)
+                    current = capabilities.get(model_id, ModelCapabilities())
+                    values = current.model_dump()
+                    if image is not _CAPABILITY_UNSET:
+                        values["image"] = image
+                    if image_read_transport is not _CAPABILITY_UNSET:
+                        values["image_read_transport"] = image_read_transport
+                    capabilities[model_id] = ModelCapabilities.model_validate(values)
+                    updated_profile = profile.model_copy(
+                        update={"model_capabilities": capabilities}
+                    )
+                    updated_profiles.append(updated_profile)
+
+                if updated_profile is None:
+                    raise HTTPException(404, "profile_not_found")
+                _atomic_write(path, {
+                    "version": PROFILE_STORE_VERSION,
+                    "default_profile_id": default_id,
+                    "profiles": [profile.model_dump() for profile in updated_profiles],
+                })
+                return updated_profile
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 store = LlmProfileStore()

@@ -26,7 +26,15 @@ export default function SessionRecap() {
     <div className="flex-shrink-0" style={{ background: 'var(--bg-base)' }}>
       {/* Same track as ChatInput's inner column so the quote bar lines up
           with the composer's left edge. */}
-      <div style={{ maxWidth: 900, width: '80%', margin: '0 auto' }}>
+      <div
+        style={{
+          width: 'auto',
+          maxWidth: 'none',
+          marginLeft: 'var(--session-summary-track-inline-margin, max(10%, calc(50% - 450px)))',
+          marginRight: 'var(--session-summary-track-inline-margin, max(10%, calc(50% - 450px)))',
+          transition: 'margin-left var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1)), margin-right var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1))',
+        }}
+      >
         <div
           className="flex items-start gap-2"
           style={{

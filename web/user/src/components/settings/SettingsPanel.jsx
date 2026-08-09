@@ -1011,8 +1011,9 @@ function ModelsTab() {
   const updateProfile = useSettingsStore((s) => s.updateProfile)
   const setDefaultProfile = useSettingsStore((s) => s.setDefaultProfile)
   const deleteProfile = useSettingsStore((s) => s.deleteProfile)
-  const testProfile = useSettingsStore((s) => s.testProfile)
+  const testProfileDraft = useSettingsStore((s) => s.testProfileDraft)
   const fetchModelsForProfile = useSettingsStore((s) => s.fetchModelsForProfile)
+  const probeImageCapability = useSettingsStore((s) => s.probeImageCapability)
 
   const [profile, setProfile] = useState(null)
   const [draft, setDraft] = useState(null)
@@ -1023,6 +1024,8 @@ function ModelsTab() {
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
+  const [imageProbeModel, setImageProbeModel] = useState('')
+  const [imageProbing, setImageProbing] = useState(false)
   const [status, setStatus] = useState(null)
   const [deleteText, setDeleteText] = useState('')
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -1047,6 +1050,7 @@ function ModelsTab() {
       if (!alive) return
       setProfile(value)
       setDraft(value)
+      setImageProbeModel(value.default_model || value.vision_model || '')
       setDirty(false)
       setStatus(null)
       fetchModelsForProfile(activeProfileId)
@@ -1069,6 +1073,7 @@ function ModelsTab() {
     setShowAuthToken(false)
     setProfile(null)
     setDraft(empty)
+    setImageProbeModel('')
     setDirty(true)
     useSettingsStore.setState({ activeSettingsProfileId: null })
     setOpenProfiles(false)
@@ -1090,10 +1095,10 @@ function ModelsTab() {
     } finally { setSaving(false) }
   }
   const handleTest = async () => {
-    if (!profile?.id) return
+    if (!draft?.label?.trim() || !draft?.base_url?.trim() || !draft?.auth_token?.trim()) return
     setTesting(true)
     try {
-      const models = await testProfile(profile.id)
+      const models = await testProfileDraft(draft)
       setStatus({ type: 'success', text: t('settings.profileConnected', { count: models.length }) })
     } catch (err) { setStatus({ type: 'error', text: err.message || t('settings.connectionFailed') }) }
     finally { setTesting(false) }
@@ -1106,10 +1111,33 @@ function ModelsTab() {
     setProfile(null)
     setDraft(null)
   }
+  const handleImageProbe = async () => {
+    if (!profile?.id || !imageProbeModel || dirty) return
+    setImageProbing(true)
+    try {
+      const result = await probeImageCapability(profile.id, imageProbeModel)
+      setStatus({
+        type: result.image ? 'success' : 'warning',
+        text: result.image
+          ? t('settings.imageCapabilitySupported', { model: imageProbeModel })
+          : t('settings.imageCapabilityUnsupported', { model: imageProbeModel }),
+      })
+      const refreshed = await getProfile(profile.id)
+      setProfile(refreshed)
+      setDraft(refreshed)
+    } catch (err) {
+      setStatus({ type: 'error', text: t('settings.imageCapabilityUnavailable') })
+    } finally {
+      setImageProbing(false)
+    }
+  }
 
   const activeSummary = profiles.find((item) => item.id === activeProfileId) || profile
   const visibleProfiles = profiles.filter((item) => `${item.label} ${item.id}`.toLowerCase().includes(profileSearch.toLowerCase()))
   const models = draft?.id ? (modelsByProfile[draft.id]?.models || []).map((item) => ({ id: item.id })) : []
+  const cachedImageCapability = imageProbeModel
+    ? draft?.model_capabilities?.[imageProbeModel]?.image
+    : undefined
   const modelFields = [
     ['default_model', t('settings.defaultModel') || 'Default'],
     ['opus_model', t('settings.opusModel') || 'Opus'],
@@ -1164,13 +1192,27 @@ function ModelsTab() {
             </div>
           </div>
         </div>
-        {status && <div className="flex items-center gap-2 px-3 py-2 text-xs" style={{ borderLeft: `2px solid ${status.type === 'success' ? 'var(--green)' : 'var(--red)'}`, background: 'var(--bg-elevated)', color: status.type === 'success' ? 'var(--green)' : 'var(--red)' }}>{status.type === 'success' ? <Check size={12} strokeWidth={1.5} /> : <AlertCircle size={12} strokeWidth={1.5} />}{status.text}</div>}
-        <div className="flex justify-end"><button type="button" onClick={handleTest} disabled={testing || !profile?.id} className="px-3 py-2 text-xs" style={{ background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 4, cursor: profile?.id ? 'pointer' : 'default' }}>{testing ? t('settings.testing') : t('settings.testConnection')}</button></div>
+        {status && <div className="flex items-center gap-2 px-3 py-2 text-xs" style={{ borderLeft: `2px solid ${status.type === 'success' ? 'var(--green)' : status.type === 'warning' ? 'var(--yellow)' : 'var(--red)'}`, background: 'var(--bg-elevated)', color: status.type === 'success' ? 'var(--green)' : status.type === 'warning' ? 'var(--yellow)' : 'var(--red)' }}>{status.type === 'success' ? <Check size={12} strokeWidth={1.5} /> : <AlertCircle size={12} strokeWidth={1.5} />}{status.text}</div>}
+        <div className="flex justify-end"><button type="button" onClick={handleTest} disabled={testing || !draft?.label?.trim() || !draft?.base_url?.trim() || !draft?.auth_token?.trim()} className="px-3 py-2 text-xs" style={{ background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 4, cursor: draft?.label?.trim() && draft?.base_url?.trim() && draft?.auth_token?.trim() ? 'pointer' : 'default' }}>{testing ? t('settings.testing') : t('settings.testConnection')}</button></div>
         <div style={{ borderBottom: '1px solid var(--border)' }} />
         <div className="flex flex-col gap-3">
           <span className="text-xs font-semibold uppercase" style={{ color: 'var(--text-secondary)', letterSpacing: '0.06em' }}>{t('settings.modelMapping')}</span>
           {modelFields.map(([key, label]) => <FilterableModelSelect key={key} label={label} models={models} value={draft[key] || ''} onChange={(value) => setField(key, value)} labelStyle={labelStyle} inputStyle={inputStyle} placeholder={t('settings.selectModel')} filterPlaceholder={t('settings.filterModels')} noMatchesText={t('settings.noMatches')} />)}
           <div className="text-xs" style={{ color: 'var(--text-dim)' }}>{modelsByProfile[draft.id]?.loaded ? t('settings.modelsCached', { count: models.length }) : t('settings.discoverModels')}</div>
+          <div style={{ borderBottom: '1px solid var(--border-subtle)' }} />
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-semibold uppercase" style={{ color: 'var(--text-secondary)', letterSpacing: '0.06em' }}>{t('settings.imageCapabilityProbe')}</span>
+            <span className="text-xs" style={{ color: 'var(--text-dim)' }}>{t('settings.imageCapabilityProbeDesc')}</span>
+            <FilterableModelSelect label={t('settings.imageCapabilityModel')} models={models} value={imageProbeModel} onChange={setImageProbeModel} labelStyle={labelStyle} inputStyle={inputStyle} placeholder={t('settings.selectModel')} filterPlaceholder={t('settings.filterModels')} noMatchesText={t('settings.noMatches')} />
+            {typeof cachedImageCapability === 'boolean' && (
+              <span className="text-xs" style={{ color: cachedImageCapability ? 'var(--green)' : 'var(--yellow)' }}>
+                {cachedImageCapability ? t('settings.imageCapabilityCachedSupported') : t('settings.imageCapabilityCachedUnsupported')}
+              </span>
+            )}
+            <div className="flex justify-end">
+              <button type="button" onClick={handleImageProbe} disabled={imageProbing || !profile?.id || !imageProbeModel || dirty} className="flex items-center gap-2 px-3 py-2 text-xs" style={{ background: 'transparent', color: imageProbeModel && !dirty ? 'var(--blue)' : 'var(--text-dim)', border: '1px solid var(--border)', borderRadius: 4, cursor: imageProbeModel && !dirty ? 'pointer' : 'default' }}><RefreshCw size={14} strokeWidth={1.5} /> {imageProbing ? t('settings.testing') : t('settings.probeAgain')}</button>
+            </div>
+          </div>
         </div>
         <div className="flex items-center justify-between gap-2">
           <button type="button" onClick={() => { setDeleteText(''); setDeleteConfirmOpen(true) }} className="flex items-center gap-2 px-3 py-2 text-xs" style={{ background: 'transparent', color: 'var(--red)', border: '1px solid var(--border)', borderRadius: 4, cursor: profile?.id ? 'pointer' : 'default' }} disabled={!profile?.id}><Trash2 size={14} strokeWidth={1.5} /> {t('settings.deleteProfile')}</button>

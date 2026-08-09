@@ -42,6 +42,7 @@ ALLOWED_EXTENSIONS = {
     ".go", ".rs", ".java", ".rb", ".php",
     ".c", ".cpp", ".h", ".hpp",
     ".env", ".dockerfile",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp",
 }
 
 ZIP_SIGNATURES = (
@@ -62,6 +63,8 @@ _TEXT_EXTENSIONS = frozenset({
     ".c", ".cpp", ".h", ".hpp",
     ".env", ".dockerfile",
 })
+
+_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
 
 _index_lock = threading.Lock()
 
@@ -205,6 +208,21 @@ def validate_file_content(filename: str, data: bytes) -> None:
 
     if ext == ".zip" and not _is_zip_container(data):
         raise HTTPException(400, "Invalid .zip file: expected ZIP signature")
+
+    if ext in _IMAGE_EXTENSIONS:
+        valid = (
+            (ext == ".png" and data.startswith(b"\x89PNG\r\n\x1a\n"))
+            or (ext in {".jpg", ".jpeg"} and data.startswith(b"\xff\xd8\xff"))
+            or (ext == ".gif" and data.startswith((b"GIF87a", b"GIF89a")))
+            or (
+                ext == ".webp"
+                and len(data) >= 12
+                and data.startswith(b"RIFF")
+                and data[8:12] == b"WEBP"
+            )
+        )
+        if not valid:
+            raise HTTPException(400, f"Invalid {ext} image: file signature does not match")
 
     if ext in _TEXT_EXTENSIONS and not _looks_like_text(data):
         raise HTTPException(400, "Invalid text file: contains binary data")

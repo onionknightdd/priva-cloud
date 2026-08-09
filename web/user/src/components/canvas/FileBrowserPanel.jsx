@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { animate } from 'animejs'
-import { X, RefreshCw, FileText, FolderTree, Copy, ChevronDown, CornerDownLeft } from 'lucide-react'
+import { X, RefreshCw, FileText, FolderTree, Copy, ChevronDown, ChevronRight, CornerDownLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useFileBrowserStore from '../../stores/fileBrowserStore'
 import useChatStore from '../../stores/chatStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { downloadFile, listDirectory, previewFile } from '../../api/userFiles'
+import { resolveFilePathAgainstCwd } from '../../utils/filePath'
 import { usePresence } from '@shared/motion/usePresence'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
-import { useSlidingUnderline, useSlidingVerticalIndicator } from '@shared/motion/useSlidingUnderline'
+import { useSlidingVerticalIndicator } from '@shared/motion/useSlidingUnderline'
 import { DUR_MIGRATION, EASE_ACCORDION } from '@shared/motion/tokens'
 import FilePreviewRenderer, { RawFilePreview, detectFileLanguage, isPlainTextFile } from '../shared/FilePreviewRenderer'
 import SelectedFilePopup from '../shared/SelectedFilePopup'
@@ -202,16 +203,6 @@ function dirname(filePath) {
 function joinPath(base, name) {
   if (!base || base === '/') return `/${name}`
   return `${normalizePath(base)}/${name}`
-}
-
-// A relative Write path (e.g. "read_jsonl.py") is anchored to the agent
-// session's cwd, not the file-server process cwd — resolve it here so the
-// backend's realpath() lands on the real file instead of 404ing.
-function resolveAgainstCwd(filePath, cwd) {
-  if (!filePath) return filePath
-  if (filePath[0] === '/' || filePath[0] === '~') return filePath
-  if (!cwd || cwd === '~') return filePath
-  return joinPath(cwd, filePath.replace(/^\.\/+/, ''))
 }
 
 function isWithinPath(filePath, rootPath) {
@@ -439,6 +430,54 @@ function CopyPathButton({ path }) {
     >
       {copied ? <DrawIcon name="check" size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
     </button>
+  )
+}
+
+function PathBreadcrumb({ path }) {
+  const normalized = normalizePath(path)
+  const segments = normalized === '/'
+    ? ['/']
+    : normalized.split('/').filter(Boolean)
+
+  if (segments.length === 0) return null
+
+  return (
+    <div
+      className="min-w-0 flex-1 overflow-hidden text-sm"
+      title={path}
+      aria-label={path}
+      style={{
+        color: 'var(--text-secondary)',
+        fontFamily: 'var(--font-code)',
+        lineHeight: '16px',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {segments.map((segment, index) => (
+        <span
+          key={`${segment}:${index}`}
+          style={{
+            color: index === segments.length - 1 ? 'var(--text-primary)' : 'var(--text-secondary)',
+          }}
+        >
+          {index > 0 && (
+            <ChevronRight
+              size={12}
+              strokeWidth={1.5}
+              aria-hidden="true"
+              style={{
+                color: 'var(--text-dim)',
+                display: 'inline',
+                margin: '0 2px',
+                verticalAlign: '-2px',
+              }}
+            />
+          )}
+          {segment}
+        </span>
+      ))}
+    </div>
   )
 }
 
@@ -769,7 +808,6 @@ export default function FileBrowserPanel() {
   const setFileMissing = useFileBrowserStore((s) => s.setFileMissing)
   const openFileTab = useFileBrowserStore((s) => s.openFile)
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null
-  const fileTabUnderline = useSlidingUnderline(activeTab?.id)
   const fileTabsRef = useRef(null)
   const fileTabsScrollbarRef = useRef(null)
   const [fileTabsScroll, setFileTabsScroll] = useState({
@@ -789,7 +827,7 @@ export default function FileBrowserPanel() {
   // consumer below (backend calls, tree, path bar) uses the cwd-anchored one.
   const resolvedActiveTab = useMemo(() => {
     if (!activeTab) return null
-    const resolved = resolveAgainstCwd(activeTab.filePath, activeCwd)
+    const resolved = resolveFilePathAgainstCwd(activeTab.filePath, activeCwd)
     return resolved === activeTab.filePath ? activeTab : { ...activeTab, filePath: resolved }
   }, [activeTab, activeCwd])
   const handlePreviewLoadSuccess = useCallback(() => {
@@ -1035,7 +1073,6 @@ export default function FileBrowserPanel() {
         className="flex items-stretch flex-shrink-0 min-w-0"
         style={{
           background: 'var(--bg-surface)',
-          borderBottom: '1px solid var(--border)',
         }}
       >
       <div
@@ -1056,48 +1093,41 @@ export default function FileBrowserPanel() {
             overflowY: 'hidden',
           }}
         >
-          <span
-            ref={fileTabUnderline.indicatorRef}
-            aria-hidden="true"
-            style={{
-              position: 'absolute',
-              left: 0,
-              bottom: fileTabsOverflow ? 6 : 0,
-              width: 0,
-              height: 2,
-              opacity: 0,
-              background: 'var(--blue)',
-              pointerEvents: 'none',
-              zIndex: 2,
-            }}
-          />
           {tabs.map((tab) => {
             const active = tab.id === activeTab.id
             return (
               <button
                 key={tab.id}
-                ref={fileTabUnderline.setItemRef(tab.id)}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
                 className="flex items-center gap-2 min-w-0"
                 style={{
                   position: 'relative',
-                  height: MAIN_AREA_HEADER_HEIGHT,
+                  height: fileTabsOverflow ? 22 : 24,
+                  margin: fileTabsOverflow ? '2px 2px 6px' : '3px 2px',
                   maxWidth: 180,
                   flexShrink: 0,
                   border: 'none',
-                  borderRight: '1px solid var(--border-subtle)',
-                  borderBottom: '2px solid transparent',
+                  borderRadius: 4,
                   background: active ? 'var(--bg-elevated)' : 'transparent',
                   color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
                   cursor: 'pointer',
                   padding: '0 8px',
+                  transition: 'color 150ms ease, background 150ms ease',
                 }}
                 title={tab.filePath}
+                onMouseEnter={(event) => {
+                  event.currentTarget.style.background = 'var(--bg-elevated)'
+                  event.currentTarget.style.color = 'var(--text-primary)'
+                }}
+                onMouseLeave={(event) => {
+                  event.currentTarget.style.background = active ? 'var(--bg-elevated)' : 'transparent'
+                  event.currentTarget.style.color = active ? 'var(--text-primary)' : 'var(--text-secondary)'
+                }}
               >
-                <FileText size={12} strokeWidth={1.5} style={{ color: active ? 'var(--blue)' : 'var(--text-dim)', flexShrink: 0, position: 'relative', zIndex: 1 }} />
+                <FileText size={13} strokeWidth={1.5} style={{ color: active ? 'var(--text-primary)' : 'var(--text-dim)', flexShrink: 0, position: 'relative', zIndex: 1 }} />
                 <span
-                  className="truncate text-xs"
+                  className="truncate text-sm"
                   style={{
                     fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
                     minWidth: 0,
@@ -1114,7 +1144,26 @@ export default function FileBrowserPanel() {
                     clickEvent.stopPropagation()
                     closeFile(tab.id)
                   }}
-                  style={{ display: 'inline-flex', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 16,
+                    height: 16,
+                    borderRadius: 4,
+                    color: 'var(--text-dim)',
+                    position: 'relative',
+                    zIndex: 1,
+                    transition: 'color 150ms ease, background 150ms ease',
+                  }}
+                  onMouseEnter={(event) => {
+                    event.currentTarget.style.color = 'var(--text-primary)'
+                    event.currentTarget.style.background = 'var(--border)'
+                  }}
+                  onMouseLeave={(event) => {
+                    event.currentTarget.style.color = 'var(--text-dim)'
+                    event.currentTarget.style.background = 'transparent'
+                  }}
                 >
                   <X size={12} strokeWidth={1.5} />
                 </span>
@@ -1163,7 +1212,7 @@ export default function FileBrowserPanel() {
             style={{
               alignSelf: 'center',
               height: 22,
-              border: '1px solid var(--border)',
+              border: 'none',
               borderRadius: 4,
               background: 'transparent',
               color: 'var(--text-dim)',
@@ -1171,16 +1220,14 @@ export default function FileBrowserPanel() {
               letterSpacing: '0.06em',
               padding: '0 8px',
               margin: '0 8px',
-              transition: 'color 150ms ease, border-color 150ms ease, background 150ms ease',
+              transition: 'color 150ms ease, background 150ms ease',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.color = 'var(--red)'
-              e.currentTarget.style.borderColor = 'var(--red)'
               e.currentTarget.style.background = 'var(--bg-elevated)'
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.color = 'var(--text-dim)'
-              e.currentTarget.style.borderColor = 'var(--border)'
               e.currentTarget.style.background = 'transparent'
             }}
           >
@@ -1192,7 +1239,7 @@ export default function FileBrowserPanel() {
 
       <div
         className="flex items-center gap-2 px-3 flex-shrink-0"
-        style={{ height: MAIN_AREA_HEADER_HEIGHT, borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-base)' }}
+        style={{ height: MAIN_AREA_HEADER_HEIGHT, borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}
       >
         <button
           type="button"
@@ -1206,36 +1253,25 @@ export default function FileBrowserPanel() {
             height: 22,
             padding: 0,
             boxSizing: 'border-box',
-            border: treeOpen ? '1px solid var(--border)' : '1px solid transparent',
+            border: 'none',
             borderRadius: 2,
             background: 'transparent',
-            color: 'var(--text-dim)',
+            color: treeOpen ? 'var(--text-primary)' : 'var(--text-dim)',
             cursor: 'pointer',
-            transition: 'color 150ms ease, background 150ms ease, border-color 150ms ease',
+            transition: 'color 150ms ease, background 150ms ease',
           }}
           onMouseEnter={(event) => {
-            event.currentTarget.style.color = 'var(--text-secondary)'
+            event.currentTarget.style.color = treeOpen ? 'var(--text-primary)' : 'var(--text-secondary)'
             event.currentTarget.style.background = 'var(--bg-elevated)'
           }}
           onMouseLeave={(event) => {
-            event.currentTarget.style.color = 'var(--text-dim)'
+            event.currentTarget.style.color = treeOpen ? 'var(--text-primary)' : 'var(--text-dim)'
             event.currentTarget.style.background = 'transparent'
           }}
         >
           <FolderTree size={16} strokeWidth={1.5} />
         </button>
-        <span
-          className="truncate text-xs"
-          title={resolvedActiveTab.filePath}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            color: 'var(--text-secondary)',
-            fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-          }}
-        >
-          {resolvedActiveTab.filePath}
-        </span>
+        <PathBreadcrumb path={resolvedActiveTab.filePath} />
         <CopyPathButton path={resolvedActiveTab.filePath} />
         <button
           type="button"

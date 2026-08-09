@@ -10,6 +10,7 @@ import {
   FileText,
   Globe,
   ListTodo,
+  MessagesSquare,
   Radio,
   ScrollText,
   Search,
@@ -46,12 +47,13 @@ const TOOL_ICONS = {
   Task: Bot,
   TODO: ListTodo,
   Monitor: Radio,
+  SendMessage: MessagesSquare,
   Skill: ScrollText,
 }
 
 const TOOL_ICON_SWEEP_WIDTH = 8
 
-function ToolIcon({ icon: Icon, running, size }) {
+export function ToolIcon({ icon: Icon, running, size }) {
   const sweepRef = useRef(null)
   const innerRef = useRef(null)
   const reduceMotion = useReducedMotion()

@@ -14,8 +14,12 @@ EXPOSE 8080 9000
 # Drop privileges. These images ran as root, so any RCE in an internet-facing
 # process started as uid 0 inside the pod. uid 10001 matches the runner's sandbox
 # uid and the fsGroup set on the PodSpec.
+# Development hotload extracts rebuilt Vite bundles into the dist directories via
+# `kubectl exec`. COPY creates them as root, so hand only those mutable outputs to
+# the runtime user.
 RUN groupadd --system --gid 10001 app \
- && useradd --system --uid 10001 --gid 10001 --create-home --home-dir /home/app app
+ && useradd --system --uid 10001 --gid 10001 --create-home --home-dir /home/app app \
+ && chown -R 10001:10001 /app/web/user/dist /app/web/admin/dist
 ENV HOME=/home/app
 USER 10001:10001
 
