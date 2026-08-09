@@ -208,11 +208,11 @@ bwrap \
 - `permission_mode != "bypassPermissions"`；
 - `setting_sources=[]`，不加载 B 的 project/user/local 可写设置；系统 managed settings 继续生效；
 - `cli_path=<trusted launcher>`，且运行请求不能覆盖；
-- `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`；当前镜像内 Claude Code `2.1.207` 已包含该能力；
+- `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`；当前镜像内 Claude Code `2.1.226` 已包含该能力；
 - `max_turns`、运行超时和每租户并发上限；
 - 沙箱不可用、环境清洗不可用或 policy 校验失败时直接拒绝运行，绝不回落到非沙箱执行。
 
-SDK `0.2.116` 已暴露 `ClaudeAgentOptions.sandbox`，可用于额外的 Bash 内层沙箱；但 v1 不以
+SDK `0.2.134` 已暴露 `ClaudeAgentOptions.sandbox`，可用于额外的 Bash 内层沙箱；但 v1 不以
 它替代 outer wrapper。若启用嵌套 sandbox，必须先验证正常模式，而不是直接打开
 `enableWeakerNestedSandbox`。后者会降低 Linux 隔离强度，不作为生产默认值。
 

@@ -23,7 +23,7 @@ deploy/uat/build-push.sh <registry> <tag>       # e.g. registry.example.com v0.2
 
 Builds `control-panel`, `agent-runner`, `data-spine`, `operator` for **linux/amd64** and
 pushes `<registry>/priva/<name>:<tag>`. The agent-runner image needs no Node stage — the
-`claude` CLI ships inside the claude-agent-sdk wheel (≥0.1.8; pinned 0.2.110) and the
+`claude` CLI ships inside the claude-agent-sdk wheel (pinned 0.2.134, bundling CLI 2.1.226) and the
 amd64 build pulls the manylinux x86_64 wheel automatically.
 
 ## 2. Edge prerequisites (once per cluster)

@@ -78,7 +78,7 @@ There are **no secrets to bake into images**. If you find one in an image, that'
   outside China — edit those ENV lines to `https://pypi.org/simple` if you prefer. Not a
   blocker either way.
 - **agent-runner no longer needs npm/Node at build time.** The `claude` CLI ships **inside
-  the `claude-agent-sdk` wheel** (`_bundled/claude`, since SDK 0.1.8; pinned 0.2.110), and
+  the `claude-agent-sdk` wheel** (`_bundled/claude`; SDK 0.2.134 bundles CLI 2.1.226), and
   the SDK prefers that bundled binary. `uv pip install` pulls the right per-arch wheel — so
   the amd64 image gets the amd64 CLI automatically, no cross-arch npm dance.
 - **Dev-machine VPN quirk (original network only):** github.com / npm registry resolve to

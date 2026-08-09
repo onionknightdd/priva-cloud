@@ -170,7 +170,7 @@ The **provisioner** creates/updates `AgentTenant` CRs, polls status, introspects
 
 ### agent-runner — the per-tenant runtime
 
-A single-account service (one pod per tenant, pinned by `entry.py` via `ACCOUNT_ID`/`USERNAME`) that wraps **claude-agent-sdk 0.1.81** and serves `/api/sandbox/*`:
+A single-account service (one pod per tenant, pinned by `entry.py` via `ACCOUNT_ID`/`USERNAME`) that wraps **claude-agent-sdk 0.2.134** and serves `/api/sandbox/*`:
 
 - **Endpoints:** `POST /api/sandbox/agent/run` (one-shot), `POST …/run/stream` (SSE), `WS …/agent/ws/run` (bidirectional, subprotocol `priva.ws.v1`), session CRUD (list/get/delete/pin/archive), fork/rewind, permission responses, and file-ops endpoints. The legacy Python PTY route has been removed.
 - **Claude SDK service:** builds `ClaudeAgentOptions` (model, cwd, `add_dirs`, permission mode, hooks, MCP servers, skills allowlist); `agent_run()` / `agent_run_events()`; session healing of orphan tool-use blocks on resume; retry with exponential backoff (`MAX_ATTEMPTS=10`).
@@ -182,7 +182,7 @@ A single-account service (one pod per tenant, pinned by `entry.py` via `ACCOUNT_
 - **Fork vs rewind:** *rewind* uses SDK file checkpointing (`enable_file_checkpointing=True` → `client.rewind_files(checkpoint_uuid)`); *fork* uses session forking (`fork_session=True` → `sdk_fork_session(session_id, up_to_message_uuid)`) to branch from a point. They are distinct mechanisms.
 - **Isolation:** per-account Python venv bootstrapped at `<workspace>/.venv`; sessions stored as JSON-Lines under `~/.claude/projects/`; pin/archive metadata in account-level `~/.claude/priva_meta.json`. Auth is the signed `X-Priva-Runner-Token` (HS256), whose `account_id` must match the pod's `ACCOUNT_ID`.
 - **Pod mounts:** the per-account workspace (`subPath <account_id>` of the shared RWX `priva-export` volume, where the venv and `~/.claude/projects` live), a per-account audit volume (`/audit/<account_id>`), a tmpfs secret mount (`/etc/secrets/priva`) holding BYOK + MCP credentials, and the SDK runtime mounted read-only.
-- **Native CLI:** the image bakes the native `claude` CLI (`@anthropic-ai/claude-code`, ≥ v2.0.0, installed via `npm install -g`) onto `PATH`; the Python `claude-agent-sdk` only *spawns* it. The pod runs non-root as uid `10001`.
+- **Native CLI:** `claude-agent-sdk 0.2.134` bundles Claude Code CLI `2.1.226`; the image exposes that wheel-bundled binary on `PATH`, and the SDK spawns the same binary. The pod runs non-root as uid `10001`.
 
 Model access uses the user's `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` (BYOK): users bring their own LLM key, injected by the operator at wake — no virtual keys, no metering proxy; token usage is pod-self-reported.
 

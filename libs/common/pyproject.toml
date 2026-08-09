@@ -18,7 +18,7 @@ dependencies = [
     # Service identity token signing / verification (service_identity.py)
     "python-jose[cryptography]",
     # Wire format (serialization.py) — shared pod↔connector
-    "claude-agent-sdk==0.2.116",
+    "claude-agent-sdk==0.2.134",
     # Redis catalog (redis_catalog.py)
     "redis>=5",
     # Data-plane gRPC contract (dataplane/) — generated stubs import grpc + protobuf.
