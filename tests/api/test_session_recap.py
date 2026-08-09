@@ -33,6 +33,11 @@ class _FakeClient:
 
 
 class SessionRecapModelTests(unittest.IsolatedAsyncioTestCase):
+    def test_prompt_uses_latest_user_input_language(self) -> None:
+        self.assertIn("Choose the recap language from user input only", session_recap._SYSTEM_PROMPT)
+        self.assertIn("latest substantive user message", session_recap._SYSTEM_PROMPT)
+        self.assertIn("Do not infer the language from assistant messages", session_recap._SYSTEM_PROMPT)
+
     async def test_uses_configured_haiku_model(self) -> None:
         profile = SimpleNamespace(
             base_url="https://example.test",
