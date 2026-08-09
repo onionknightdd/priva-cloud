@@ -3,7 +3,6 @@ import test from 'node:test'
 
 import {
   buildAgentCommunicationIndex,
-  buildReceivedFromMainEvents,
   parseAgentMessageEnvelope,
   parseSendMessageResult,
   resolveReceivedSource,
@@ -31,6 +30,16 @@ test('extracts only the peer message body from the SDK envelope', () => {
   ), {
     body: 'hello B',
     senderName: 'general-purpose',
+  })
+})
+
+test('extracts an actual coordinator delivery as a message received from main', () => {
+  assert.deepEqual(parseAgentMessageEnvelope(
+    'The coordinator sent a message while you were working:\nhello from main'
+      + '\n\nAddress this before completing your current task.',
+  ), {
+    body: 'hello from main',
+    senderName: 'main',
   })
 })
 
@@ -65,33 +74,4 @@ test('recognizes main as a communication endpoint', () => {
   const index = buildAgentCommunicationIndex([], {})
   assert.deepEqual(resolveSentTarget(index, 'main'), { isMain: true })
   assert.deepEqual(resolveReceivedSource(index, { senderAgentId: 'main', body: 'ready' }, 'agent'), { isMain: true })
-})
-
-test('projects a successful main SendMessage onto the target Agent as received', () => {
-  const mainSend = {
-    type: 'tool_use',
-    id: 'main-send-b',
-    name: 'SendMessage',
-    input: { to: 'agent-b', message: 'hello from main' },
-    status: 'success',
-    result: {
-      is_error: false,
-      content: '{"success":true,"message":"Message queued for delivery"}',
-    },
-  }
-  const index = buildAgentCommunicationIndex(
-    [{ role: 'assistant', content: [agentB, mainSend] }],
-    { 'call-agent-b': [] },
-  )
-
-  assert.deepEqual(buildReceivedFromMainEvents(index, 'call-agent-b'), [{
-    type: 'agent_message',
-    id: 'agent-message-main-main-send-b',
-    direction: 'received',
-    body: 'hello from main',
-    senderAgentId: 'main',
-    senderName: 'main',
-    sourceToolUseId: 'main-send-b',
-    timestamp: null,
-  }])
 })

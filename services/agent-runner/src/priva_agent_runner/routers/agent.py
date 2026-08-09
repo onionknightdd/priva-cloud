@@ -69,6 +69,11 @@ from ..services.claude_sdk.session_add_dirs import (
     read_add_dirs,
     write_add_dirs,
 )
+from ..services.claude_sdk.agent_communication_log import (
+    delete_stream_deliveries,
+    parse_delivery_content,
+    read_stream_deliveries,
+)
 from ..services.claude_sdk import session_meta
 
 _ws_frame_adapter = TypeAdapter(WsClientFrame)
@@ -541,16 +546,6 @@ _AGENT_RESULT_ID_RE = re.compile(
     r"\b(?:agentId|agent_id)\s*:\s*([A-Za-z0-9_-]+)",
     re.IGNORECASE,
 )
-_AGENT_MESSAGE_RE = re.compile(
-    r"<agent-message\b[^>]*>([\s\S]*?)</agent-message>",
-    re.IGNORECASE,
-)
-_AGENT_MESSAGE_FROM_RE = re.compile(
-    r"\bfrom\s*=\s*(?:\"([^\"]*)\"|'([^']*)')",
-    re.IGNORECASE,
-)
-
-
 def _subagent_transcript_paths(cwd: str, session_id: str) -> list[Path]:
     session_path = _session_jsonl_path(cwd, session_id)
     subagents_dir = session_path.with_suffix("") / "subagents"
@@ -630,30 +625,29 @@ def _peer_agent_message(raw: dict, recipient_agent_id: str) -> dict | None:
     if not isinstance(origin, dict):
         message = raw.get("message")
         origin = message.get("origin") if isinstance(message, dict) else None
-    is_peer = isinstance(origin, dict) and origin.get("kind") == "peer"
-    if not is_peer and raw.get("isMeta") is not True:
-        return None
-
     message = raw.get("message")
     content = message.get("content") if isinstance(message, dict) else None
-    text = _content_value_text(content)
-    envelope = _AGENT_MESSAGE_RE.search(text)
+    delivery = parse_delivery_content(content)
+    if not delivery:
+        return None
+
+    origin_kind = origin.get("kind") if isinstance(origin, dict) else None
+    is_peer = origin_kind == "peer"
+    is_coordinator = origin_kind == "coordinator"
+    if not is_peer and not is_coordinator and raw.get("isMeta") is not True:
+        return None
+
     body = origin.get("body") if is_peer else None
     if not isinstance(body, str) or not body.strip():
-        body = envelope.group(1) if envelope else None
+        body = delivery["body"]
     if not isinstance(body, str) or not body.strip():
         return None
 
-    sender_name = None
-    sender_agent_id = None
+    sender_name = delivery["sender_name"]
+    sender_agent_id = delivery["sender_agent_id"]
     if is_peer:
         sender_agent_id = origin.get("senderTaskId") or origin.get("sender_task_id")
-        sender_name = origin.get("name") or origin.get("from")
-    if not sender_name and envelope:
-        opening_tag = text[envelope.start():envelope.start(1)]
-        from_match = _AGENT_MESSAGE_FROM_RE.search(opening_tag)
-        if from_match:
-            sender_name = from_match.group(1) or from_match.group(2)
+        sender_name = origin.get("name") or origin.get("from") or sender_name
 
     return {
         "direction": "received",
@@ -703,15 +697,16 @@ def _load_subagent_session_messages(cwd: str, session_id: str) -> list[SessionMe
     these sidechains and pin them to the parent Agent/Task tool_use id.
     """
     parent_by_agent_id = _build_subagent_parent_map(cwd, session_id)
-    if not parent_by_agent_id:
-        return []
 
     session_dir = _session_jsonl_path(cwd, session_id).with_suffix("")
     subagents_dir = session_dir / "subagents"
-    if not subagents_dir.exists():
-        return []
 
     hydrated: list[SessionMessageResponse] = []
+    seen_delivery_ids: set[str] = set()
+    recipient_by_parent = {
+        parent_tool_use_id: agent_id
+        for agent_id, parent_tool_use_id in parent_by_agent_id.items()
+    }
     for path in sorted(subagents_dir.glob("agent-*.jsonl")):
         filename_agent_id = path.stem.removeprefix("agent-")
         parent_tool_use_id = parent_by_agent_id.get(filename_agent_id)
@@ -749,6 +744,7 @@ def _load_subagent_session_messages(cwd: str, session_id: str) -> list[SessionMe
                 metadata["timestamp"] = raw["timestamp"]
             if peer_message:
                 metadata["agent_message"] = peer_message
+                seen_delivery_ids.add(str(uuid))
 
             hydrated.append(SessionMessageResponse(
                 type=msg_type,
@@ -758,6 +754,35 @@ def _load_subagent_session_messages(cwd: str, session_id: str) -> list[SessionMe
                 parent_tool_use_id=parent_tool_use_id,
                 metadata=metadata or None,
             ))
+
+    # The SDK can deliver a peer message to a running sub-agent without
+    # persisting the corresponding user row. Merge the receipt sidecar after
+    # native rows and deduplicate by the SDK event UUID when both exist.
+    for delivery in read_stream_deliveries(cwd, session_id):
+        event_id = delivery["event_id"]
+        if event_id in seen_delivery_ids:
+            continue
+        parent_tool_use_id = delivery["parent_tool_use_id"]
+        sender_agent_id = delivery.get("sender_agent_id")
+        sender_name = delivery.get("sender_name")
+        hydrated.append(SessionMessageResponse(
+            type="user",
+            uuid=event_id,
+            session_id=session_id,
+            message={"role": "user", "content": delivery["body"]},
+            parent_tool_use_id=parent_tool_use_id,
+            metadata={
+                "timestamp": delivery["received_at"],
+                "agent_message": {
+                    "direction": "received",
+                    "body": delivery["body"],
+                    "sender_agent_id": sender_agent_id,
+                    "sender_name": sender_name,
+                    "recipient_agent_id": recipient_by_parent.get(parent_tool_use_id),
+                    "sequence": delivery["sequence"],
+                },
+            },
+        ))
 
     return hydrated
 
@@ -1233,6 +1258,7 @@ async def delete_agent_session(session_id: str, user: UserRecord | None = Depend
 
     session_file.unlink()
     delete_add_dirs(cwd, session_id)
+    delete_stream_deliveries(cwd, session_id)
     await session_meta.prune_session(session_id)
 
     actor = user.username if user else "anonymous"

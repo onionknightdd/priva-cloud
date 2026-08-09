@@ -5,6 +5,8 @@ import {
 } from './agentToolLifecycle.js'
 
 const SEND_MESSAGE_TOOL = 'SendMessage'
+const COORDINATOR_PREFIX = 'The coordinator sent a message while you were working:\n'
+const COORDINATOR_SUFFIX = '\n\nAddress this before completing your current task.'
 
 function contentText(content) {
   if (typeof content === 'string') return content
@@ -75,14 +77,23 @@ export function parseAgentMessageEnvelope(content) {
   const text = contentText(content)
   if (!text) return null
   const tag = text.match(/<agent-message\b([^>]*)>([\s\S]*?)<\/agent-message>/i)
-  if (!tag) return null
-  const from = tag[1].match(/\bfrom\s*=\s*(?:"([^"]*)"|'([^']*)')/i)
-  const body = normalizedMessageBody(tag[2])
-  if (!body) return null
-  return {
-    body,
-    senderName: normalizedTarget(from?.[1] || from?.[2]),
+  if (tag) {
+    const from = tag[1].match(/\bfrom\s*=\s*(?:"([^"]*)"|'([^']*)')/i)
+    const body = normalizedMessageBody(tag[2])
+    if (!body) return null
+    return {
+      body,
+      senderName: normalizedTarget(from?.[1] || from?.[2]),
+    }
   }
+
+  const prefixAt = text.indexOf(COORDINATOR_PREFIX)
+  if (prefixAt < 0) return null
+  let body = text.slice(prefixAt + COORDINATOR_PREFIX.length)
+  const suffixAt = body.lastIndexOf(COORDINATOR_SUFFIX)
+  if (suffixAt >= 0) body = body.slice(0, suffixAt)
+  body = normalizedMessageBody(body)
+  return body ? { body, senderName: 'main' } : null
 }
 
 export function parseSendMessageResult(block) {
@@ -164,32 +175,6 @@ export function buildAgentCommunicationIndex(messages, subagentContent) {
   }
 
   return index
-}
-
-export function buildReceivedFromMainEvents(index, ownerToolUseId) {
-  const receiver = index?.byToolUseId?.get(ownerToolUseId)
-  const receiverIds = new Set(
-    [receiver?.agentId, receiver?.toolUseId].filter(Boolean).map(String),
-  )
-  if (receiverIds.size === 0) return []
-
-  return (index?.sent || [])
-    .filter((entry) => (
-      entry.fromMain
-      && receiverIds.has(entry.target)
-      && entry.body
-      && parseSendMessageResult(entry.block) === 'success'
-    ))
-    .map((entry) => ({
-      type: 'agent_message',
-      id: `agent-message-main-${entry.block.id}`,
-      direction: 'received',
-      body: entry.body,
-      senderAgentId: 'main',
-      senderName: 'main',
-      sourceToolUseId: entry.block.id,
-      timestamp: entry.timestamp,
-    }))
 }
 
 export function resolveSentTarget(index, target) {

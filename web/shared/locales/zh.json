@@ -380,7 +380,9 @@
       "messageSending": "正在向 {{target}} 发送消息",
       "messageSent": "已向 {{target}} 发送消息",
       "messageSendFailed": "向 {{target}} 发送消息失败",
-      "messageReceived": "已收到来自 {{source}} 的消息"
+      "messageReceived": "已收到来自 {{source}} 的消息",
+      "expandMessages": "展开 Agent 消息",
+      "collapseMessages": "收起 Agent 消息"
     },
     "hideToolSteps": "收起工具步骤",
     "toolStepsFallback_other": "{{count}} 个工具步骤",

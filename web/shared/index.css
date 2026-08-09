@@ -1306,11 +1306,20 @@ html, body {
   min-width: 0;
 }
 
-.agent-tool-line {
+.agent-tool-line-row {
   display: flex;
   align-items: center;
-  gap: 8px;
   width: 100%;
+  height: 20px;
+  min-width: 0;
+}
+
+.agent-tool-line {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 8px;
+  width: auto;
   height: 20px;
   min-width: 0;
   padding: 0;
@@ -1406,6 +1415,31 @@ html, body {
 
 .agent-tool-line.is-failed .agent-tool-status {
   color: var(--red);
+}
+
+.agent-communication-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: opacity 150ms ease;
+}
+
+.agent-communication-toggle:hover,
+.agent-communication-toggle:focus-visible {
+  opacity: 0.78;
+}
+
+.agent-communication-toggle-chevron {
+  transition: transform 150ms ease;
 }
 
 .tool-line-row {

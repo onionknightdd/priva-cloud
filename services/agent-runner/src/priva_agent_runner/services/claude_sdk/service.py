@@ -14,6 +14,7 @@ from claude_agent_sdk import (
     SystemMessage,
     TextBlock,
     ToolUseBlock,
+    UserMessage,
     get_session_info,
 )
 from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
@@ -22,6 +23,7 @@ from priva_common.models.agent import PermissionMode
 from priva_common.audit_log import AuditEntry, get_audit_logger
 from ...services.skills import _get_skills_dir
 from . import retry, session_meta, session_recap, session_title
+from .agent_communication_log import record_stream_delivery
 from .options import build_agent_options
 from ..llm_profiles import close_profile_settings_overlay, resolve_model
 from priva_common.logging import get_app_logger
@@ -594,6 +596,22 @@ def _format_sse_event(event: str, payload: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
 
 
+def _record_agent_delivery_best_effort(
+    cwd: str,
+    session_id: str | None,
+    event_type: str,
+    data: dict[str, Any],
+) -> None:
+    """Persist a true receive event without making delivery depend on I/O."""
+    try:
+        record_stream_delivery(cwd, session_id, event_type, data)
+    except Exception:
+        logger.exception(
+            "Failed to persist agent communication delivery for session %s",
+            session_id,
+        )
+
+
 async def _resume_without_new_prompt():
     """Yield no input while a resumed CLI continues its pending turn.
 
@@ -701,6 +719,14 @@ async def agent_run(
                     if message.model:
                         last_model = message.model
                     messages.append(serialize_assistant_message(message))
+                elif isinstance(message, UserMessage):
+                    serialized = serialize_message(message)
+                    _record_agent_delivery_best_effort(
+                        options.cwd,
+                        current_resume_id or session_id,
+                        get_event_label(message) or "tool_result",
+                        serialized,
+                    )
                 elif isinstance(message, ResultMessage):
                     result_data.clear()
                     result_data.update(serialize_result_message(message))
@@ -1165,6 +1191,12 @@ async def agent_run_events(
                                     stream_id = new_sid
                                 await session_meta.record_recent_activity(options.cwd, new_sid)
 
+                    _record_agent_delivery_best_effort(
+                        options.cwd,
+                        current_resume_id or stream_id or session_id,
+                        item["event"],
+                        item["data"],
+                    )
                     await emit(item["event"], item["data"])
 
                     # Any real event = the run is alive; reset the idle window

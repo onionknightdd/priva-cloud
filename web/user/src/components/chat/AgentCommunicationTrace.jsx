@@ -7,7 +7,6 @@ import { ToolIcon } from './ToolLine'
 import { formatDateTime, formatTimeOfDay } from '../../utils/formatTime'
 import {
   buildAgentCommunicationIndex,
-  buildReceivedFromMainEvents,
   getSendMessageBody,
   getSendMessageTarget,
   isSendMessageTool,
@@ -112,27 +111,24 @@ function AgentCommunicationTrace({ ownerToolUseId }) {
     )),
     [ownerBlocks],
   )
-  const receivedFromMain = buildReceivedFromMainEvents(communicationIndex, ownerToolUseId)
-  const actualMainBodies = new Set(
-    directEvents
-      .filter((block) => (
-        block.type === 'agent_message'
-        && resolveReceivedSource(communicationIndex, block, ownerToolUseId).isMain
-      ))
-      .map((block) => String(block.body || '').trim()),
-  )
-  const events = [
-    ...directEvents,
-    ...receivedFromMain.filter((block) => !actualMainBodies.has(block.body)),
-  ]
+  const events = directEvents
     .map((block, order) => {
       const rawTimestamp = block.timestamp || block.endTime || block.startTime
       const timestamp = rawTimestamp == null ? null : new Date(rawTimestamp).getTime()
-      return { block, order, timestamp: Number.isFinite(timestamp) ? timestamp : null }
+      const sequence = Number(block.sequence)
+      return {
+        block,
+        order,
+        timestamp: Number.isFinite(timestamp) ? timestamp : null,
+        sequence: Number.isFinite(sequence) ? sequence : null,
+      }
     })
     .sort((left, right) => {
       if (left.timestamp != null && right.timestamp != null && left.timestamp !== right.timestamp) {
         return left.timestamp - right.timestamp
+      }
+      if (left.sequence != null && right.sequence != null && left.sequence !== right.sequence) {
+        return left.sequence - right.sequence
       }
       return left.order - right.order
     })

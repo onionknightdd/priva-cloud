@@ -155,6 +155,7 @@ function getReplayedAgentMessage(msg) {
     return null
   }
   const timestamp = timestampToMillis(msg?.metadata?.timestamp ?? msg?.timestamp)
+  const sequence = finiteNumber(raw.sequence ?? msg?.metadata?.sequence)
   return {
     type: 'agent_message',
     id: `agent-message-${msg.uuid}`,
@@ -164,6 +165,7 @@ function getReplayedAgentMessage(msg) {
     senderName: raw.sender_name || raw.senderName || null,
     recipientAgentId: raw.recipient_agent_id || raw.recipientAgentId || null,
     ...(timestamp != null ? { timestamp } : {}),
+    ...(sequence != null ? { sequence } : {}),
   }
 }
 
@@ -516,6 +518,9 @@ export function transformSessionMessages(sdkMessages) {
             ...block,
             status,
             result: result || undefined,
+            ...(replayMetadata.timestamp != null
+              ? { startTime: replayMetadata.timestamp }
+              : {}),
           })
           continue
         }
@@ -556,6 +561,9 @@ export function transformSessionMessages(sdkMessages) {
           ...block,
           status,
           result: result || undefined,
+          ...(replayMetadata.timestamp != null
+            ? { startTime: replayMetadata.timestamp }
+            : {}),
         })
       }
 

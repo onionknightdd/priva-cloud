@@ -389,7 +389,9 @@
       "messageSending": "Sending message to {{target}}",
       "messageSent": "Sent message to {{target}}",
       "messageSendFailed": "Failed to send message to {{target}}",
-      "messageReceived": "Received message from {{source}}"
+      "messageReceived": "Received message from {{source}}",
+      "expandMessages": "Expand agent messages",
+      "collapseMessages": "Collapse agent messages"
     },
     "hideToolSteps": "Hide tool steps",
     "toolStepsFallback_one": "{{count}} tool step",
