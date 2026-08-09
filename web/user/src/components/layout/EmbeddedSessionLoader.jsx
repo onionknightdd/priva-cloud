@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { fetchSessionMessages } from '../../api/sessions'
 import { hasCanvasInspectorItems, transformSessionMessages } from '../../utils/sessionTransform'
+import { hasSessionSummaryActivity } from '../../utils/sessionSummary'
 import useChatStore from '../../stores/chatStore'
 import useTaskStore from '../../stores/taskStore'
 import useFileOpsStore from '../../stores/fileOpsStore'
@@ -17,6 +18,7 @@ function hydrateCanvas(
   fileBrowserTabs,
   tasks,
   sdkTaskTracker,
+  subagentContent,
   { embedded = false } = {},
 ) {
   const fileOpsStore = useFileOpsStore.getState()
@@ -25,15 +27,22 @@ function hydrateCanvas(
   const taskStore = useTaskStore.getState()
   for (const task of tasks) taskStore.addTask(task)
   taskStore.hydrateSdkTaskTracker(sdkTaskTracker)
-  const canvasTab = fileBrowserTabs.length > 0
-    ? 'file-browser'
-    : fileOps.length > 0
-      ? 'changes'
-      : hasCanvasInspectorItems(parsed, sdkTaskTracker)
-        ? 'tasks'
-        : null
-  if (canvasTab) {
-    const ui = useUiStore.getState()
+  const ui = useUiStore.getState()
+  const preferSummary = hasSessionSummaryActivity({
+    fileBrowserTabs,
+    fileOps,
+    messages: parsed,
+    subagentContent,
+  })
+  const canvasTab = !preferSummary && hasCanvasInspectorItems(parsed, sdkTaskTracker)
+    ? 'tasks'
+    : null
+  if (preferSummary) {
+    ui.hideCanvas()
+    ui.setCanvasMinimized(false)
+    ui.showSessionSummary()
+  } else if (canvasTab) {
+    ui.hideSessionSummary()
     ui.setActiveCanvasTab(canvasTab)
     if (embedded) {
       ui.hideCanvas()
@@ -42,7 +51,8 @@ function hydrateCanvas(
       ui.showCanvas()
     }
   } else {
-    useUiStore.getState().hideCanvas()
+    ui.hideCanvas()
+    ui.hideSessionSummary()
   }
 }
 
@@ -91,7 +101,15 @@ export default function EmbeddedSessionLoader() {
           subagentContent,
         } = transformSessionMessages(data.messages || [])
         useChatStore.getState().loadSession(sessionId, messages, null, subagentContent, data.add_dirs || [])
-        hydrateCanvas(messages, fileOps, fileBrowserTabs, tasks, sdkTaskTracker, { embedded: true })
+        hydrateCanvas(
+          messages,
+          fileOps,
+          fileBrowserTabs,
+          tasks,
+          sdkTaskTracker,
+          subagentContent,
+          { embedded: true },
+        )
         window.setTimeout(() => { suppressPublishRef.current = false }, 250)
       })
       .catch((err) => {

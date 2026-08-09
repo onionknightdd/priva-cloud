@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   fileOpLineStats,
+  hasSessionSummaryActivity,
   summarizeCanvasChanges,
   uniqueCanvasFiles,
   uniqueConversationAgents,
@@ -68,6 +69,15 @@ test('counts unique Agent and Task runs recursively across the conversation', ()
   })
 
   assert.deepEqual(agents.map((agent) => agent.id), ['agent-root', 'agent-nested'])
+})
+
+test('prefers the session summary when files, changes, or Agents exist', () => {
+  assert.equal(hasSessionSummaryActivity({ fileBrowserTabs: [{ filePath: 'a.js' }] }), true)
+  assert.equal(hasSessionSummaryActivity({ fileOps: [{ id: 'edit-1' }] }), true)
+  assert.equal(hasSessionSummaryActivity({
+    messages: [{ content: [{ type: 'tool_use', id: 'agent-1', name: 'Agent' }] }],
+  }), true)
+  assert.equal(hasSessionSummaryActivity({ messages: [{ content: [{ type: 'tool_use', name: 'TodoWrite' }] }] }), false)
 })
 
 test('uses structured patches before Write and Edit input fallbacks', () => {

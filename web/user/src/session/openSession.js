@@ -1,5 +1,6 @@
 import { fetchSessionMessages } from '../api/sessions'
 import { hasCanvasInspectorItems, transformSessionMessages } from '../utils/sessionTransform'
+import { hasSessionSummaryActivity } from '../utils/sessionSummary'
 import { refreshSessionRecap } from '../utils/sessionRecap'
 import {
   ensureRuntime,
@@ -28,6 +29,7 @@ import i18n from '@shared/i18n'
 
 export const DEFAULT_UI_SNAPSHOT = {
   canvasVisible: false,
+  sessionSummaryOpen: false,
   canvasMinimized: false,
   activeCanvasTab: 'tasks',
   canvasOpenTabs: [],
@@ -39,6 +41,7 @@ export function pickUiSnapshot() {
   const s = useUiStore.getState()
   return {
     canvasVisible: s.canvasVisible,
+    sessionSummaryOpen: s.sessionSummaryOpen,
     canvasMinimized: s.canvasMinimized,
     activeCanvasTab: s.activeCanvasTab,
     canvasOpenTabs: s.canvasOpenTabs,
@@ -62,9 +65,14 @@ function applyUiSnapshot(ui) {
   }
 }
 
-function canvasTabFor({ fileBrowserTabs, fileOps, messages, sdkTaskTracker }) {
-  if (fileBrowserTabs.length > 0) return 'file-browser'
-  if (fileOps.length > 0) return 'changes'
+function initialUiFor({ fileBrowserTabs, fileOps, messages, sdkTaskTracker, subagentContent }) {
+  const hasSummaryContent = hasSessionSummaryActivity({
+    fileBrowserTabs,
+    fileOps,
+    messages,
+    subagentContent,
+  })
+  if (hasSummaryContent) return { sessionSummaryOpen: true }
   if (hasCanvasInspectorItems(messages, sdkTaskTracker)) return 'tasks'
   return null
 }
@@ -166,8 +174,16 @@ export async function openSession(sessionOrId, opts = {}) {
     snapshotActiveUi()
     setActiveKey(sessionId)
     useSettingsStore.getState().activateSessionModel(sessionId, rt.meta.lastResponseModel)
-    const tab = canvasTabFor({ fileBrowserTabs, fileOps, messages, sdkTaskTracker })
-    applyUiSnapshot(tab ? { canvasVisible: true, activeCanvasTab: tab, canvasOpenTabs: [tab] } : null)
+    const initialUi = initialUiFor({
+      fileBrowserTabs,
+      fileOps,
+      messages,
+      sdkTaskTracker,
+      subagentContent,
+    })
+    applyUiSnapshot(typeof initialUi === 'string'
+      ? { canvasVisible: true, activeCanvasTab: initialUi, canvasOpenTabs: [initialUi] }
+      : initialUi)
     useSidebarStore.getState().setActiveSessionId(rowId)
     statusStore.markSeen(sessionId)
     evictIfNeeded()

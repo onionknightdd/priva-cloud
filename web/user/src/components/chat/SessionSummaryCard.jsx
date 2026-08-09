@@ -20,6 +20,8 @@ import useOverlayTransition from '@shared/motion/useOverlayTransition'
 import useChatStore from '../../stores/chatStore'
 import useFileBrowserStore from '../../stores/fileBrowserStore'
 import useFileOpsStore from '../../stores/fileOpsStore'
+import useTaskStore from '../../stores/taskStore'
+import useUiStore from '@shared/stores/uiStore'
 import ImageLightbox from '../shared/ImageLightbox'
 import { toProjectRelativePath } from '../../utils/toolPresentation'
 import {
@@ -62,41 +64,65 @@ function CountSummary({ count, label, added = 0, removed = 0, showFileCount = tr
   )
 }
 
-function SummarySection({ icon: Icon, title, open, onToggle, summary, children }) {
+function SummarySection({ icon: Icon, title, open, onOpen, onToggle, summary, children }) {
   const bodyId = useId()
   const [hovered, setHovered] = useState(false)
 
   return (
     <section style={{ minWidth: 0 }}>
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={bodyId}
-        onClick={onToggle}
+      <div
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        className="flex items-center gap-2 w-full min-w-0"
+        className="flex items-center w-full min-w-0"
         style={{
           height: 38,
-          padding: '0 12px',
           background: hovered ? 'var(--bg-elevated)' : 'transparent',
-          border: 'none',
           color: 'var(--text-primary)',
-          cursor: 'pointer',
-          textAlign: 'left',
           transition: 'background 150ms ease, color 150ms ease',
         }}
       >
-        <Icon size={13} strokeWidth={1.5} style={{ color: 'var(--text-primary)', flexShrink: 0 }} />
-        <span className="flex-1 truncate font-normal" style={{ fontSize: 13 }}>{title}</span>
-        {summary}
-        <AnimatedChevron
-          open={open}
-          style={{ color: 'var(--text-primary)', transform: `rotate(${open ? 90 : 0}deg)` }}
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex items-center gap-2 flex-1 min-w-0"
+          style={{
+            alignSelf: 'stretch',
+            padding: '0 4px 0 12px',
+            background: 'transparent',
+            border: 'none',
+            color: 'inherit',
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
         >
-          <ChevronRight size={13} strokeWidth={1.5} />
-        </AnimatedChevron>
-      </button>
+          <Icon size={13} strokeWidth={1.5} style={{ color: 'var(--text-primary)', flexShrink: 0 }} />
+          <span className="flex-1 truncate font-normal" style={{ fontSize: 13 }}>{title}</span>
+          {summary}
+        </button>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          onClick={onToggle}
+          className="inline-flex items-center justify-center flex-shrink-0"
+          style={{
+            alignSelf: 'stretch',
+            width: 32,
+            padding: 0,
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--text-primary)',
+            cursor: 'pointer',
+          }}
+        >
+          <AnimatedChevron
+            open={open}
+            style={{ color: 'var(--text-primary)', transform: `rotate(${open ? 90 : 0}deg)` }}
+          >
+            <ChevronRight size={13} strokeWidth={1.5} />
+          </AnimatedChevron>
+        </button>
+      </div>
       <AnimatedCollapse open={open} id={bodyId}>
         {children}
       </AnimatedCollapse>
@@ -144,7 +170,7 @@ function EmptySection({ children }) {
   )
 }
 
-function CanvasFileRow({ file, cwd, deletedLabel }) {
+function CanvasFileRow({ file, cwd, deletedLabel, onOpen }) {
   const missing = file.missing === true
   const Icon = missing ? FileX2 : FileText
   const path = toProjectRelativePath(file.filePath, cwd, file.relativePath || file.relative_path)
@@ -152,7 +178,9 @@ function CanvasFileRow({ file, cwd, deletedLabel }) {
     || file.filePath
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={() => onOpen(file)}
       className="flex items-center gap-2 min-w-0"
       title={file.filePath}
       style={{
@@ -160,8 +188,17 @@ function CanvasFileRow({ file, cwd, deletedLabel }) {
         padding: '5px 10px',
         borderLeft: `2px solid ${missing ? 'var(--red)' : 'var(--status-idle)'}`,
         borderTop: '1px solid var(--border-subtle)',
+        borderRight: 'none',
+        borderBottom: 'none',
         color: missing ? 'var(--red)' : 'var(--text-secondary)',
+        background: 'transparent',
+        cursor: 'pointer',
+        textAlign: 'left',
+        width: '100%',
+        transition: 'background 150ms ease',
       }}
+      onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--bg-elevated)' }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent' }}
     >
       <Icon size={14} strokeWidth={1.5} style={{ flexShrink: 0 }} />
       <div
@@ -185,13 +222,13 @@ function CanvasFileRow({ file, cwd, deletedLabel }) {
           {deletedLabel}
         </span>
       )}
-    </div>
+    </button>
   )
 }
 
 function SourceRow({ source, onOpen }) {
   const Icon = source.kind === 'image' ? ImageIcon : Paperclip
-  const clickable = source.kind === 'image' && !!source.src
+  const clickable = !!source.path || (source.kind === 'image' && !!source.src)
   const content = (
     <>
       <Icon size={14} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
@@ -246,45 +283,86 @@ function SourceRow({ source, onOpen }) {
   )
 }
 
-function AgentSummaryRow({ count }) {
+function AgentSummaryRow({ agents, onOpen, onOpenAgent }) {
   const { t } = useTranslation()
+  const [hovered, setHovered] = useState(false)
+  const count = agents.length
   const visibleCount = Math.min(count, 5)
   const overflowCount = Math.max(0, count - visibleCount)
 
   return (
     <div
       className="flex items-center gap-2 min-w-0"
-      style={{ minHeight: 38, padding: '4px 12px', color: 'var(--text-primary)' }}
+      style={{
+        minHeight: 38,
+        padding: '4px 12px',
+        color: 'var(--text-primary)',
+        background: hovered ? 'var(--bg-elevated)' : 'transparent',
+        transition: 'background 150ms ease',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       {visibleCount > 0 && (
-        <span className="inline-flex items-center flex-shrink-0" aria-hidden="true">
-          {Array.from({ length: visibleCount }, (_, index) => (
-            <span
-              key={index}
+        <span className="inline-flex items-center flex-shrink-0">
+          {agents.slice(0, visibleCount).map((agent, index) => (
+            <button
+              key={agent.id || index}
+              type="button"
+              onClick={() => onOpenAgent(agent)}
               className="inline-flex items-center justify-center flex-shrink-0"
               style={{
                 width: 17,
                 height: 17,
                 marginLeft: index === 0 ? 0 : -5,
                 background: 'var(--bg-surface)',
+                border: 'none',
+                padding: 0,
                 outline: '1px solid var(--bg-surface)',
                 position: 'relative',
                 zIndex: index + 1,
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
               }}
             >
               <Bot size={17} strokeWidth={1.5} />
-            </span>
+            </button>
           ))}
           {overflowCount > 0 && (
-            <span style={{ marginLeft: 4, fontSize: 13, color: 'var(--text-secondary)' }}>
+            <button
+              type="button"
+              onClick={onOpen}
+              style={{
+                marginLeft: 4,
+                padding: 0,
+                background: 'transparent',
+                border: 'none',
+                fontSize: 13,
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
               ... +{overflowCount}
-            </span>
+            </button>
           )}
         </span>
       )}
-      <span className="min-w-0 truncate font-normal" style={{ fontSize: 13 }}>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex-1 min-w-0 truncate font-normal"
+        style={{
+          padding: 0,
+          background: 'transparent',
+          border: 'none',
+          color: 'inherit',
+          cursor: 'pointer',
+          fontSize: 13,
+          textAlign: 'left',
+        }}
+      >
         {t('chat.sessionSummary.agentsRun', { count })}
-      </span>
+      </button>
     </div>
   )
 }
@@ -305,7 +383,7 @@ function operationAccent(status, reverted) {
   return 'var(--green)'
 }
 
-function ChangeOperationRow({ op, cwd, reverted, revertedLabel }) {
+function ChangeOperationRow({ op, cwd, reverted, revertedLabel, onOpen }) {
   const type = String(op.type || '').toLowerCase()
   const isWrite = type === 'write'
   const Icon = isWrite ? FileText : FilePen
@@ -314,7 +392,9 @@ function ChangeOperationRow({ op, cwd, reverted, revertedLabel }) {
   const path = toProjectRelativePath(op.filePath, cwd, op.relativePath) || op.filePath || '(untitled)'
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={() => onOpen(op)}
       className="flex items-center gap-2 min-w-0"
       title={op.filePath}
       style={{
@@ -322,33 +402,35 @@ function ChangeOperationRow({ op, cwd, reverted, revertedLabel }) {
         padding: '5px 10px',
         borderLeft: `2px solid ${accent}`,
         borderTop: '1px solid var(--border-subtle)',
+        borderRight: 'none',
+        borderBottom: 'none',
+        background: 'transparent',
+        color: 'var(--text-primary)',
+        cursor: 'pointer',
         opacity: reverted ? 0.6 : 1,
+        textAlign: 'left',
+        width: '100%',
+        transition: 'background 150ms ease',
       }}
+      onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--bg-elevated)' }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent' }}
     >
       <Icon size={14} strokeWidth={1.5} style={{ color: isWrite ? 'var(--cyan)' : 'var(--orange)', flexShrink: 0 }} />
-      <div className="flex-1 min-w-0 overflow-hidden">
-        <div className="flex items-center gap-1 min-w-0">
-          <span
-            className="uppercase flex-shrink-0"
-            style={{ color: isWrite ? 'var(--cyan)' : 'var(--orange)', fontSize: 10, fontWeight: 600, letterSpacing: '0.06em' }}
-          >
-            {isWrite ? 'WRITE' : 'EDIT'}
-          </span>
-          {reverted && (
-            <span
-              className="uppercase truncate"
-              style={{ color: 'var(--purple)', fontSize: 10, fontWeight: 600, letterSpacing: '0.06em' }}
-            >
-              {revertedLabel}
-            </span>
-          )}
-        </div>
+      <div className="flex items-center gap-1 flex-1 min-w-0 overflow-hidden">
         <div
           className="truncate"
           style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-code)', fontSize: 11, lineHeight: '15px' }}
         >
           {path}
         </div>
+        {reverted && (
+          <span
+            className="uppercase truncate flex-shrink-0"
+            style={{ color: 'var(--purple)', fontSize: 10, fontWeight: 600, letterSpacing: '0.06em' }}
+          >
+            {revertedLabel}
+          </span>
+        )}
       </div>
       <div
         className="inline-flex items-center gap-1 flex-shrink-0"
@@ -358,7 +440,7 @@ function ChangeOperationRow({ op, cwd, reverted, revertedLabel }) {
         {stats.removed > 0 && <span style={{ color: 'var(--red)' }}>-{stats.removed}</span>}
         <OperationStatusIcon status={op.status} reverted={reverted} />
       </div>
-    </div>
+    </button>
   )
 }
 
@@ -369,7 +451,11 @@ function SessionSummaryCard({ open, cardId, cwd, topOffset = 0, onSourceOpen }) 
   const messages = useChatStore((state) => state.messages)
   const subagentContent = useChatStore((state) => state.subagentContent)
   const tabs = useFileBrowserStore((state) => state.tabs)
+  const openFile = useFileBrowserStore((state) => state.openFile)
   const fileOps = useFileOpsStore((state) => state.fileOps)
+  const setSelectedFileOpId = useFileOpsStore((state) => state.setSelectedFileOpId)
+  const focusSubagent = useTaskStore((state) => state.focusSubagent)
+  const openCanvasTab = useUiStore((state) => state.openCanvasTab)
   const [filesOpen, setFilesOpen] = useState(false)
   const [changesOpen, setChangesOpen] = useState(false)
   const { mounted, panelRef } = useOverlayTransition({
@@ -391,6 +477,34 @@ function SessionSummaryCard({ open, cardId, cwd, topOffset = 0, onSourceOpen }) 
     () => summarizeCanvasChanges(fileOps, revertedIds),
     [fileOps, revertedIds],
   )
+
+  const openFilesCanvas = () => openCanvasTab('file-browser')
+  const openChangesCanvas = () => openCanvasTab('changes')
+  const openTasksCanvas = () => openCanvasTab('tasks')
+  const openCanvasFile = (file) => {
+    openFile(file)
+    openFilesCanvas()
+  }
+  const openChange = (op) => {
+    setSelectedFileOpId(op.id)
+    openChangesCanvas()
+  }
+  const openAgent = (agent) => {
+    if (agent?.id) focusSubagent(agent.id)
+    openTasksCanvas()
+  }
+  const openSource = (source) => {
+    if (source.path) {
+      openFile({
+        filePath: source.path,
+        name: source.label,
+        source: 'conversation-source',
+      })
+      openFilesCanvas()
+      return
+    }
+    onSourceOpen(source)
+  }
 
   useEffect(() => {
     setFilesOpen(false)
@@ -430,6 +544,7 @@ function SessionSummaryCard({ open, cardId, cwd, topOffset = 0, onSourceOpen }) 
           icon={FolderTree}
           title={t('chat.sessionSummary.files')}
           open={filesOpen}
+          onOpen={openFilesCanvas}
           onToggle={() => setFilesOpen((value) => !value)}
           summary={(
             <CountSummary
@@ -444,6 +559,7 @@ function SessionSummaryCard({ open, cardId, cwd, topOffset = 0, onSourceOpen }) 
               file={file}
               cwd={cwd}
               deletedLabel={t('chat.sessionSummary.deleted')}
+              onOpen={openCanvasFile}
             />
           )) : (
             <EmptySection>{t('chat.sessionSummary.noFiles')}</EmptySection>
@@ -454,6 +570,7 @@ function SessionSummaryCard({ open, cardId, cwd, topOffset = 0, onSourceOpen }) 
           icon={FileDiff}
           title={t('chat.sessionSummary.changes')}
           open={changesOpen}
+          onOpen={openChangesCanvas}
           onToggle={() => setChangesOpen((value) => !value)}
           summary={(
             <CountSummary
@@ -473,20 +590,25 @@ function SessionSummaryCard({ open, cardId, cwd, topOffset = 0, onSourceOpen }) 
               cwd={cwd}
               reverted={revertedSet.has(op.id)}
               revertedLabel={t('chat.sessionSummary.reverted')}
+              onOpen={openChange}
             />
           )) : (
             <EmptySection>{t('chat.sessionSummary.noChanges')}</EmptySection>
           )}
         </SummarySection>
 
-        <GroupDivider />
-        <GroupLabel>{t('chat.sessionSummary.subagents')}</GroupLabel>
-        <AgentSummaryRow count={agents.length} />
+        {agents.length > 0 && (
+          <>
+            <GroupDivider />
+            <GroupLabel>{t('chat.sessionSummary.subagents')}</GroupLabel>
+            <AgentSummaryRow agents={agents} onOpen={openTasksCanvas} onOpenAgent={openAgent} />
+          </>
+        )}
 
         <GroupDivider />
         <GroupLabel>{t('chat.sessionSummary.sources')}</GroupLabel>
         {sources.length > 0 ? sources.map((source) => (
-          <SourceRow key={source.key} source={source} onOpen={onSourceOpen} />
+          <SourceRow key={source.key} source={source} onOpen={openSource} />
         )) : (
           <EmptySection>{t('chat.sessionSummary.noSources')}</EmptySection>
         )}

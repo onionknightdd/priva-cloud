@@ -361,11 +361,13 @@ export default function ChatPanel() {
   const agentWorkspace = useSandboxStore((s) => s.workspace)
   const fetchHealth = useSandboxStore((s) => s.fetchHealth)
   const canvasVisible = useUiStore((s) => s.canvasVisible)
+  const summaryOpen = useUiStore((s) => s.sessionSummaryOpen)
   const canvasMinimized = useUiStore((s) => s.canvasMinimized)
   const activeCanvasTab = useUiStore((s) => s.activeCanvasTab)
   const showCanvas = useUiStore((s) => s.showCanvas)
   const hideCanvas = useUiStore((s) => s.hideCanvas)
   const showCanvasMenu = useUiStore((s) => s.showCanvasMenu)
+  const toggleSessionSummary = useUiStore((s) => s.toggleSessionSummary)
   const setCanvasMinimized = useUiStore((s) => s.setCanvasMinimized)
   const setActiveCanvasTab = useUiStore((s) => s.setActiveCanvasTab)
   // Terminal toggle — relocated from the (removed) NavBar into the session header.
@@ -390,7 +392,6 @@ export default function ChatPanel() {
   const sessionTitle = activeSidebarSession?.name || (sessionId ? sessionId : '')
   const [renamingSessionTitle, setRenamingSessionTitle] = useState(false)
   const [sessionTitleDraft, setSessionTitleDraft] = useState('')
-  const [summaryOpen, setSummaryOpen] = useState(false)
   const canvasOpen = canvasVisible && !canvasMinimized
   const summaryVisible = summaryOpen && !canvasOpen
   const [summaryCardRightInset, setSummaryCardRightInset] = useState(12)
@@ -405,7 +406,6 @@ export default function ChatPanel() {
     setRenamingSessionTitle(false)
     setSessionTitleDraft('')
     setSessionTitleInputWidth(0)
-    setSummaryOpen(false)
     sessionTitleHandledRef.current = false
   }, [sessionId])
   useLayoutEffect(() => {
@@ -665,7 +665,7 @@ export default function ChatPanel() {
           active={summaryOpen}
           cardId={summaryCardId}
           title={t('chat.sessionSummary.toggle')}
-          onToggle={() => setSummaryOpen((value) => !value)}
+          onToggle={toggleSessionSummary}
         />
         {showTasksShortcut && (
           <HeaderBadgeShortcut

@@ -94,6 +94,17 @@ export function uniqueConversationAgents(messages = [], subagentContent = {}) {
   return agents
 }
 
+export function hasSessionSummaryActivity({
+  fileBrowserTabs = [],
+  fileOps = [],
+  messages = [],
+  subagentContent = {},
+} = {}) {
+  return fileBrowserTabs.length > 0
+    || fileOps.length > 0
+    || uniqueConversationAgents(messages, subagentContent).length > 0
+}
+
 export function isCanvasChangeOp(op) {
   return CHANGE_TYPES.has(String(op?.type || '').toLowerCase())
 }

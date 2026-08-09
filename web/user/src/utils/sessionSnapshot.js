@@ -58,6 +58,7 @@ function pickTaskState(s) {
 function pickUiState(s) {
   return {
     canvasVisible: s.canvasVisible,
+    sessionSummaryOpen: s.sessionSummaryOpen,
     canvasMinimized: s.canvasMinimized,
     activeCanvasTab: s.activeCanvasTab,
     canvasOpenTabs: s.canvasOpenTabs,

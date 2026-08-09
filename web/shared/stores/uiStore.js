@@ -120,6 +120,7 @@ const useUiStore = create((set, get) => ({
   activeNavTab: 'priva',
   activePluginSection: 'skills', // 'skills' | 'mcp' | 'hooks' | 'subagents' | 'commands' | 'memory'
   canvasVisible: false,
+  sessionSummaryOpen: false,
   canvasWidth: getStoredCanvasWidth(),
   canvasMinimized: false,
   activeCanvasTab: 'tasks',
@@ -148,7 +149,7 @@ const useUiStore = create((set, get) => ({
   terminalMotionActive: false,
 
   reset: () => set({
-    activeNavTab: 'priva', activePluginSection: 'skills', canvasVisible: false, canvasMinimized: false,
+    activeNavTab: 'priva', activePluginSection: 'skills', canvasVisible: false, sessionSummaryOpen: false, canvasMinimized: false,
     activeCanvasTab: 'tasks', canvasOpenTabs: [], confirmDialog: null, lastResult: null,
     planContent: null, planFilePath: null,
     settingsOpen: false, settingsActiveTab: 'api', settingsPopoverOpen: false,
@@ -175,6 +176,9 @@ const useUiStore = create((set, get) => ({
   showCanvas: () => set({ canvasVisible: true }),
   hideCanvas: () => set({ canvasVisible: false }),
   toggleCanvas: () => set((s) => ({ canvasVisible: !s.canvasVisible })),
+  showSessionSummary: () => set({ sessionSummaryOpen: true }),
+  hideSessionSummary: () => set({ sessionSummaryOpen: false }),
+  toggleSessionSummary: () => set((s) => ({ sessionSummaryOpen: !s.sessionSummaryOpen })),
   showCanvasMenu: () => set({ canvasVisible: true, canvasMinimized: false, activeCanvasTab: 'menu' }),
   openCanvasTab: (tab) => set((s) => {
     const nextTab = normalizeCanvasTab(tab)

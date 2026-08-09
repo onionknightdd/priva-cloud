@@ -226,6 +226,10 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     (ui) => { ui.showCanvas(); if (tab) ui.setActiveCanvasTab(tab) },
     { canvasVisible: true, ...(tab ? { activeCanvasTab: tab } : {}) },
   )
+  const fxShowSummary = () => uiFx(
+    (ui) => ui.showSessionSummary(),
+    { sessionSummaryOpen: true },
+  )
 
   const statusStore = () => useSessionStatusStore.getState()
   const setRunStatus = (status) => statusStore().setStatus(rt.key, status)
@@ -891,6 +895,9 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
           recordSdkTaskToolUse(block)
         }
         if (sdkTaskBlocks.length > 0) fxShowCanvas('tasks')
+        if (toolBlocks.some((block) => block.name === 'Agent' || block.name === 'Task')) {
+          fxShowSummary()
+        }
 
         for (const block of toolBlocks) {
           if (isGeneratedToolName(block.name)) generatedToolIds.add(block.id)
@@ -965,6 +972,11 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
                 status: 'pending',
               })
               fxShowCanvas('tasks')
+              messageBlocks.push(block)
+              continue
+            }
+
+            if (block.name === 'Agent' || block.name === 'Task') {
               messageBlocks.push(block)
               continue
             }
@@ -1078,7 +1090,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
                 structuredPatch: null,
                 toolUseResult: null,
               })
-              fxShowCanvas('changes')
+              fxShowSummary()
               // Emit a per-file clickable indicator in the message flow.
               // Clicking selects this specific fileOp in the canvas.
               messageBlocks.push({
@@ -1112,7 +1124,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
                 })
               })
 
-              fxShowCanvas('file-browser')
+              fxShowSummary()
               continue
             }
 
@@ -1281,7 +1293,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
           const handledPendingFile = Boolean(pendingFileTab)
           if (pendingFileTab) {
             openFileBrowserTab(pendingFileTab)
-            if (pendingFileTab.sourceTool === 'Read') fxShowCanvas('file-browser')
+            if (FILE_TOOL_NAMES.has(pendingFileTab.sourceTool)) fxShowSummary()
             pendingToolFileTabs.delete(rb.tool_use_id)
           }
 
@@ -1437,7 +1449,7 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
             fileTabsFromGeneratedFiles(files, FILE_SOURCE_CURRENT, rb.tool_use_id)
               .forEach((file) => openFileBrowserTab(file))
             if (files.length > 0) {
-              fxShowCanvas('file-browser')
+              fxShowSummary()
             }
           }
 
@@ -1567,7 +1579,8 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
               task_id: data.task_id,
               task_type: data.task_type,
             })
-            fxShowCanvas(null)
+            if (data.task_type === 'local_agent') fxShowSummary()
+            else fxShowCanvas(null)
           }
         }
         break
@@ -1697,7 +1710,8 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
                 task_id: nested.task_id,
                 task_type: nested.task_type,
               })
-              fxShowCanvas(null)
+              if (nested.task_type === 'local_agent') fxShowSummary()
+              else fxShowCanvas(null)
             }
           }
         } else if (subtype === 'task_progress') {

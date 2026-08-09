@@ -1,5 +1,6 @@
 import { fetchRunningSessions, fetchSessionMessages } from '../api/sessions'
 import { hasCanvasInspectorItems, transformSessionMessages } from '../utils/sessionTransform'
+import { hasSessionSummaryActivity } from '../utils/sessionSummary'
 import { ensureRuntime, getSlice, hasRuntime } from '../stores/runtime/registry'
 import { attachToRunningSession } from '../hooks/useSSE'
 import { getSplitParams } from '../utils/splitMode'
@@ -67,14 +68,22 @@ export async function restoreRunningSessions() {
       getSlice(sessionId, 'fileBrowser').getState().setTabs(fileBrowserTabs)
       for (const task of tasks) taskSlice.getState().addTask(task)
       taskSlice.getState().hydrateSdkTaskTracker(sdkTaskTracker)
-      const canvasTab = fileBrowserTabs.length > 0
-        ? 'file-browser'
-        : fileOps.length > 0
-          ? 'changes'
-          : hasCanvasInspectorItems(messages, sdkTaskTracker)
-            ? 'tasks'
-            : null
-      if (canvasTab) {
+      const preferSummary = hasSessionSummaryActivity({
+        fileBrowserTabs,
+        fileOps,
+        messages,
+        subagentContent,
+      })
+      const canvasTab = !preferSummary && hasCanvasInspectorItems(messages, sdkTaskTracker)
+        ? 'tasks'
+        : null
+      if (preferSummary) {
+        rt.meta.ui = {
+          ...(rt.meta.ui || {}),
+          canvasVisible: false,
+          sessionSummaryOpen: true,
+        }
+      } else if (canvasTab) {
         rt.meta.ui = {
           ...(rt.meta.ui || {}),
           canvasVisible: true,
