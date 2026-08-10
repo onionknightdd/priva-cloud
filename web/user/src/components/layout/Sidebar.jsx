@@ -1,5 +1,6 @@
-import { Fragment, useEffect, useRef, useState, useMemo } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react'
 import { createPortal, flushSync } from 'react-dom'
+import { animate } from 'animejs'
 import {
   Trash2, ChevronDown, ChevronRight, FolderBookmark, MoreHorizontal,
   RefreshCw, Settings, Search, X, Pencil, Flag, GitBranch, Pin, Archive, SlidersVertical, SquarePen,
@@ -32,6 +33,7 @@ import Chip from '@shared/components/shared/Chip'
 import { AnimatedCollapse } from '@shared/components/shared/Accordion'
 import { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
 import { DURATION, EASE_SPRING } from '@shared/motion/tokens'
+import { useReducedMotion } from '@shared/motion/useReducedMotion'
 import DirectoryPicker from '../shared/DirectoryPicker'
 import TagFilterChip from '../shared/TagFilterChip'
 import TagBadge from '../shared/TagBadge'
@@ -133,12 +135,20 @@ function SessionItem({
         : ''
   const [renameValue, setRenameValue] = useState(session.name || '')
   const [hovered, setHovered] = useState(false)
+  const [pinHovered, setPinHovered] = useState(false)
+  const pinRef = useRef(null)
+  const titleRef = useRef(null)
+  const pinAnimationRef = useRef(null)
+  const titleAnimationRef = useRef(null)
+  const pinMotionReadyRef = useRef(false)
+  const reducedMotion = useReducedMotion()
   useEffect(() => {
     if (renameEditingId === session.id) setRenameValue(session.name || '')
   }, [renameEditingId, session.id, session.name])
   const editing = renameEditingId === session.id
   const isProject = session.sessionSource === 'project'
   const menuOpen = openMenuId === session.id
+  const pinVisible = !editing && (hovered || session.pinned)
   const tags = sessionTags(session)
   const menuItemStyle = {
     background: 'transparent',
@@ -149,6 +159,52 @@ function SessionItem({
     paddingBottom: 6,
     transition: 'background 150ms ease',
   }
+
+  useLayoutEffect(() => {
+    const pin = pinRef.current
+    const title = titleRef.current
+    if (!pin || !title) return undefined
+
+    pinAnimationRef.current?.cancel()
+    titleAnimationRef.current?.cancel()
+    pinAnimationRef.current = null
+    titleAnimationRef.current = null
+
+    const pinX = pinVisible ? '0px' : '-6px'
+    const titleX = pinVisible ? '17px' : '0px'
+    const settle = () => {
+      pin.style.opacity = pinVisible ? '1' : '0'
+      pin.style.transform = `translateX(${pinX})`
+      title.style.transform = `translateX(${titleX})`
+    }
+
+    if (!pinMotionReadyRef.current || reducedMotion) {
+      pinMotionReadyRef.current = true
+      settle()
+      return undefined
+    }
+
+    pinAnimationRef.current = animate(pin, {
+      opacity: pinVisible ? 1 : 0,
+      translateX: pinX,
+      duration: DURATION.hover,
+      ease: EASE_SPRING,
+      onComplete: () => { pinAnimationRef.current = null },
+    })
+    titleAnimationRef.current = animate(title, {
+      translateX: titleX,
+      duration: DURATION.hover,
+      ease: EASE_SPRING,
+      onComplete: () => { titleAnimationRef.current = null },
+    })
+
+    return () => {
+      pinAnimationRef.current?.cancel()
+      titleAnimationRef.current?.cancel()
+      pinAnimationRef.current = null
+      titleAnimationRef.current = null
+    }
+  }, [pinVisible, reducedMotion])
 
   return (
     <div
@@ -207,7 +263,7 @@ function SessionItem({
       }}
       onClick={() => { if (!editing) onSelect(session) }}
       onMouseEnter={() => { if (!editing) setHovered(true) }}
-      onMouseLeave={() => setHovered(false)}
+      onMouseLeave={() => { setHovered(false); setPinHovered(false) }}
     >
       {isActive && (
         <SlidingTabIndicator
@@ -259,12 +315,46 @@ function SessionItem({
                 title={session.schedulerJobName ? `${t('sidebar.scheduled', { defaultValue: 'scheduled' })} · ${session.schedulerJobName}` : t('sidebar.scheduled', { defaultValue: 'scheduled' })}
               />
             )}
-            <span
-              className={`sidebar-session-title flex-1 truncate${titleStatusClass}`}
-              style={{ minWidth: 0, fontSize: 13, lineHeight: 1.2 }}
-            >
-              {session.name}
-            </span>
+            <div className="flex-1 min-w-0 overflow-hidden" style={{ position: 'relative' }}>
+              <button
+                ref={pinRef}
+                type="button"
+                title={session.pinned ? t('sidebar.unpin') : t('sidebar.pin')}
+                aria-label={session.pinned ? t('sidebar.unpin') : t('sidebar.pin')}
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: 0,
+                  width: 17,
+                  height: 17,
+                  marginTop: -8.5,
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: pinHovered ? 'var(--sidebar-menu-hover-bg)' : 'transparent',
+                  border: 'none',
+                  borderRadius: 4,
+                  color: session.pinned ? 'var(--cyan)' : pinHovered ? 'var(--text-primary)' : 'var(--text-dim)',
+                  cursor: 'pointer',
+                  pointerEvents: pinVisible ? 'auto' : 'none',
+                  zIndex: 1,
+                  transition: 'background 150ms ease, color 150ms ease',
+                }}
+                onClick={(e) => { e.stopPropagation(); onPinToggle(session) }}
+                onMouseEnter={() => setPinHovered(true)}
+                onMouseLeave={() => setPinHovered(false)}
+              >
+                <Pin size={13} strokeWidth={1.5} style={{ color: 'currentColor' }} />
+              </button>
+              <span
+                ref={titleRef}
+                className={`sidebar-session-title block truncate${titleStatusClass}`}
+                style={{ minWidth: 0, width: '100%', fontSize: 13, lineHeight: 1.2 }}
+              >
+                {session.name}
+              </span>
+            </div>
           </>
         )}
         {session.forkCount > 0 && !editing && (
@@ -281,28 +371,6 @@ function SessionItem({
             <GitBranch size={12} strokeWidth={1.5} />
             {session.forkCount}
           </span>
-        )}
-        {session.pinned && !editing && (
-          <button
-            type="button"
-            title={t('sidebar.unpin')}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--cyan)',
-              padding: 2,
-              display: 'flex',
-              alignItems: 'center',
-              flexShrink: 0,
-              transition: 'color 150ms ease',
-            }}
-            onClick={(e) => { e.stopPropagation(); onPinToggle(session) }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-secondary)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--cyan)' }}
-          >
-            <Pin size={12} strokeWidth={1.5} />
-          </button>
         )}
         {isProject && !editing && (
           <div className="relative" ref={menuOpen ? menuRef : undefined}>
@@ -347,20 +415,6 @@ function SessionItem({
                   isolation: 'isolate',
                 }}
               >
-                <button
-                  className="flex items-center gap-2 px-3 w-full"
-                  style={{ ...menuItemStyle, color: 'var(--text-primary)' }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onMenuToggle(null)
-                    onPinToggle(session)
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                >
-                  <Pin size={13} strokeWidth={1.5} />
-                  {session.pinned ? t('sidebar.unpin') : t('sidebar.pin')}
-                </button>
                 <button
                   className="flex items-center gap-2 px-3 w-full"
                   style={{ ...menuItemStyle, color: 'var(--text-primary)' }}
