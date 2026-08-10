@@ -64,65 +64,41 @@ function CountSummary({ count, label, added = 0, removed = 0, showFileCount = tr
   )
 }
 
-function SummarySection({ icon: Icon, title, open, onOpen, onToggle, summary, children }) {
+function SummarySection({ icon: Icon, title, open, onToggle, summary, children }) {
   const bodyId = useId()
   const [hovered, setHovered] = useState(false)
 
   return (
     <section style={{ minWidth: 0 }}>
-      <div
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={onToggle}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        className="flex items-center w-full min-w-0"
+        className="flex items-center gap-2 w-full min-w-0"
         style={{
           height: 38,
+          padding: '0 12px',
           background: hovered ? 'var(--bg-elevated)' : 'transparent',
+          border: 'none',
           color: 'var(--text-primary)',
+          cursor: 'pointer',
+          textAlign: 'left',
           transition: 'background 150ms ease, color 150ms ease',
         }}
       >
-        <button
-          type="button"
-          onClick={onOpen}
-          className="flex items-center gap-2 flex-1 min-w-0"
-          style={{
-            alignSelf: 'stretch',
-            padding: '0 4px 0 12px',
-            background: 'transparent',
-            border: 'none',
-            color: 'inherit',
-            cursor: 'pointer',
-            textAlign: 'left',
-          }}
+        <Icon size={13} strokeWidth={1.5} style={{ color: 'var(--text-primary)', flexShrink: 0 }} />
+        <span className="flex-1 truncate font-normal" style={{ fontSize: 13 }}>{title}</span>
+        {summary}
+        <AnimatedChevron
+          open={open}
+          style={{ color: 'var(--text-primary)', transform: `rotate(${open ? 90 : 0}deg)` }}
         >
-          <Icon size={13} strokeWidth={1.5} style={{ color: 'var(--text-primary)', flexShrink: 0 }} />
-          <span className="flex-1 truncate font-normal" style={{ fontSize: 13 }}>{title}</span>
-          {summary}
-        </button>
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={bodyId}
-          onClick={onToggle}
-          className="inline-flex items-center justify-center flex-shrink-0"
-          style={{
-            alignSelf: 'stretch',
-            width: 32,
-            padding: 0,
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--text-primary)',
-            cursor: 'pointer',
-          }}
-        >
-          <AnimatedChevron
-            open={open}
-            style={{ color: 'var(--text-primary)', transform: `rotate(${open ? 90 : 0}deg)` }}
-          >
-            <ChevronRight size={13} strokeWidth={1.5} />
-          </AnimatedChevron>
-        </button>
-      </div>
+          <ChevronRight size={13} strokeWidth={1.5} />
+        </AnimatedChevron>
+      </button>
       <AnimatedCollapse open={open} id={bodyId}>
         {children}
       </AnimatedCollapse>
@@ -544,7 +520,6 @@ function SessionSummaryCard({ open, cardId, cwd, topOffset = 0, onSourceOpen }) 
           icon={FolderTree}
           title={t('chat.sessionSummary.files')}
           open={filesOpen}
-          onOpen={openFilesCanvas}
           onToggle={() => setFilesOpen((value) => !value)}
           summary={(
             <CountSummary
@@ -570,7 +545,6 @@ function SessionSummaryCard({ open, cardId, cwd, topOffset = 0, onSourceOpen }) 
           icon={FileDiff}
           title={t('chat.sessionSummary.changes')}
           open={changesOpen}
-          onOpen={openChangesCanvas}
           onToggle={() => setChangesOpen((value) => !value)}
           summary={(
             <CountSummary
