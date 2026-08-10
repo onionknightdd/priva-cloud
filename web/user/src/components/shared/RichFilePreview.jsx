@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import SelectedXlsxPopup from './SelectedXlsxPopup'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import markdownComponents from '../markdown/markdownComponents'
 import MermaidDiagram from '../markdown/MermaidDiagram'
 
@@ -1265,7 +1266,10 @@ function SpreadsheetGrid({
                   }}
                 >
 	                  {getColumnLabel(index)}
-	                  <div
+	                  <ResizeHandle
+	                    orientation="vertical"
+	                    dragging={dragState?.type === 'column' && dragState.index === index}
+	                    showIdle={false}
 	                    onDoubleClick={(event) => {
 	                      event.preventDefault()
 	                      event.stopPropagation()
@@ -1285,16 +1289,14 @@ function SpreadsheetGrid({
                         startSize: width,
                       })
                     }}
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      right: -3,
-                      width: 6,
-                      height: '100%',
-                      cursor: 'col-resize',
-                      zIndex: 6,
-                    }}
-                  />
+	                    style={{
+	                      top: 0,
+	                      right: -3,
+	                      width: 6,
+	                      height: '100%',
+	                      zIndex: 6,
+	                    }}
+	                  />
                 </div>
               </th>
             ))}
@@ -1341,7 +1343,10 @@ function SpreadsheetGrid({
 	                  }}
                 >
 	                  {rowIndex + 1}
-	                  <div
+	                  <ResizeHandle
+	                    orientation="horizontal"
+	                    dragging={dragState?.type === 'row' && dragState.index === rowIndex}
+	                    showIdle={false}
 	                    onDoubleClick={(event) => {
 	                      event.preventDefault()
 	                      event.stopPropagation()
@@ -1361,16 +1366,14 @@ function SpreadsheetGrid({
                         startSize: resolvedRowHeights[rowIndex],
                       })
                     }}
-                    style={{
-                      position: 'absolute',
-                      left: 0,
-                      right: 0,
-                      bottom: -3,
-                      height: 6,
-                      cursor: 'row-resize',
-                      zIndex: 6,
-                    }}
-                  />
+	                    style={{
+	                      left: 0,
+	                      right: 0,
+	                      bottom: -3,
+	                      height: 6,
+	                      zIndex: 6,
+	                    }}
+	                  />
                 </div>
               </th>
               {resolvedColumnWidths.map((width, columnIndex) => {

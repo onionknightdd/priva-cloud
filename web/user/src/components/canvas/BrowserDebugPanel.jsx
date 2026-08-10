@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import useBrowserDebugStore from '../../stores/browserDebugStore'
 import { useResizable } from '@shared/hooks/useResizable'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import { FILE_SOURCE_UPLOAD } from '../../utils/fileArtifacts'
 import BrowserSourceBar from './BrowserSourceBar'
 import BrowserViewport from './BrowserViewport'
@@ -82,19 +83,17 @@ export default function BrowserDebugPanel() {
     >
       <BrowserSourceBar />
       <BrowserViewport />
-      <div
+      <ResizeHandle
         onMouseDown={onInspectorResizeDown}
+        orientation="horizontal"
+        dragging={resizingInspector}
         style={{
+          position: 'relative',
+          width: '100%',
           height: 4,
-          cursor: 'row-resize',
-          background: resizingInspector ? 'var(--blue)' : 'transparent',
-          borderTop: '1px solid var(--border)',
           flexShrink: 0,
-          transition: 'background 100ms ease',
           zIndex: 10,
         }}
-        onMouseEnter={(e) => { if (!resizingInspector) e.currentTarget.style.background = 'var(--blue)' }}
-        onMouseLeave={(e) => { if (!resizingInspector) e.currentTarget.style.background = 'transparent' }}
       />
       <InspectorDetail height={inspectorHeight} topBorder={false} />
       {dragOver && (

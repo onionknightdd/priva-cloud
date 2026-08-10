@@ -1,6 +1,7 @@
 import { Pencil, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useResizable } from '@shared/hooks/useResizable'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import useMcpStore from '../../stores/mcpStore'
 import useAuthStore from '@shared/stores/authStore'
 import useUiStore from '@shared/stores/uiStore'
@@ -56,7 +57,6 @@ export default function MCPServerMeta() {
       style={{
         width: metaPanelWidth,
         background: 'var(--bg-surface)',
-        borderRight: '1px solid var(--border)',
       }}
     >
       {/* Header */}
@@ -193,16 +193,11 @@ export default function MCPServerMeta() {
       )}
 
       {/* Resize handle */}
-      <div
+      <ResizeHandle
         onMouseDown={onMouseDown}
-        style={{
-          position: 'absolute', right: 0, top: 0, bottom: 0, width: 4,
-          cursor: 'col-resize',
-          background: dragging ? 'var(--blue)' : 'transparent',
-          transition: 'background 100ms ease', zIndex: 10,
-        }}
-        onMouseEnter={(e) => { if (!dragging) e.currentTarget.style.background = 'var(--blue)' }}
-        onMouseLeave={(e) => { if (!dragging) e.currentTarget.style.background = 'transparent' }}
+        dragging={dragging}
+        edge="end"
+        style={{ right: 0, top: 0, bottom: 0, zIndex: 10 }}
       />
     </div>
   )

@@ -1,4 +1,5 @@
 import { useResizable } from '@shared/hooks/useResizable'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import useSidebarStore from '../../stores/sidebarStore'
 
 // I2 detent: dragging the handle well under the 180px minimum (cursor intent
@@ -24,25 +25,16 @@ export default function SidebarResizer() {
   })
 
   return (
-    <div
+    <ResizeHandle
       onMouseDown={onMouseDown}
       onDoubleClick={toggleCollapsed}
+      dragging={dragging}
+      edge="end"
       style={{
-        position: 'absolute',
         right: 0,
         top: 0,
         bottom: 0,
-        width: 4,
-        cursor: 'col-resize',
-        background: dragging ? 'var(--blue)' : 'transparent',
-        transition: 'background 100ms ease',
         zIndex: 10,
-      }}
-      onMouseEnter={(e) => {
-        if (!dragging) e.currentTarget.style.background = 'var(--blue)'
-      }}
-      onMouseLeave={(e) => {
-        if (!dragging) e.currentTarget.style.background = 'transparent'
       }}
     />
   )

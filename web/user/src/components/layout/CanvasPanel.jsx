@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import useUiStore from '@shared/stores/uiStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import { useResizable } from '@shared/hooks/useResizable'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import useCollapseWidth from '@shared/motion/useCollapseWidth'
 import ErrorBoundary from '../shared/ErrorBoundary'
 import CanvasHeader from '../canvas/CanvasHeader'
@@ -99,7 +100,6 @@ export default function CanvasPanel() {
         height: '100%',
         minHeight: 0,
         background: 'var(--bg-surface)',
-        borderLeft: '1px solid var(--border)',
         overflow: 'hidden',
         pointerEvents: open ? 'auto' : 'none',
       }}
@@ -107,21 +107,16 @@ export default function CanvasPanel() {
       {/* Fixed-width inner shell so content never reflows while the pane
           width animates — it is revealed, not squished. */}
       <div className="flex flex-col" style={{ width: effectiveCanvasWidth, height: '100%', minHeight: 0 }}>
-      <div
+      <ResizeHandle
         onMouseDown={onMouseDown}
+        dragging={dragging}
+        edge="start"
         style={{
-          position: 'absolute',
           left: 0,
           top: 0,
           bottom: 0,
-          width: 4,
-          cursor: 'col-resize',
-          background: dragging ? 'var(--blue)' : 'transparent',
-          transition: 'background 100ms ease',
           zIndex: 10,
         }}
-        onMouseEnter={(e) => { if (!dragging) e.currentTarget.style.background = 'var(--blue)' }}
-        onMouseLeave={(e) => { if (!dragging) e.currentTarget.style.background = 'transparent' }}
       />
 
       <CanvasHeader />

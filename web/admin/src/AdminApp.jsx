@@ -3,6 +3,7 @@ import { CalendarClock, LogOut, MessageSquare, Users, ScrollText, LayoutDashboar
 import { useTranslation } from 'react-i18next'
 import useAuthStore from '@shared/stores/authStore'
 import { useResizable } from '@shared/hooks/useResizable'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import Tabs from '@shared/components/shared/Tabs'
 import LanguageToggleButton from '@shared/components/shared/LanguageToggleButton'
 import ConfirmDialog from '@shared/components/shared/ConfirmDialog'
@@ -89,7 +90,6 @@ export default function AdminApp() {
     return Number.isFinite(saved) ? Math.min(Math.max(saved, SIDEBAR_MIN), SIDEBAR_MAX) : SIDEBAR_DEFAULT
   })
   const [collapsed, setCollapsed] = useState(() => safeStorage.getItem('sidebar-collapsed') === '1')
-  const [hoverHandle, setHoverHandle] = useState(false)
   const lastDownRef = useRef(0)
 
   const onSidebarResize = useCallback((w) => {
@@ -159,7 +159,6 @@ export default function AdminApp() {
         style={{
           width: collapsed ? SIDEBAR_COLLAPSED : sidebarWidth,
           background: 'var(--bg-surface)',
-          borderRight: '1px solid var(--border)',
           overflow: 'hidden',
           transition: dragging ? 'none' : 'width 220ms cubic-bezier(0.16, 1, 0.3, 1)',
         }}
@@ -297,19 +296,17 @@ export default function AdminApp() {
       </nav>
 
       {/* Sidebar resize handle — drag to resize, double-click to collapse */}
-      <div
+      <ResizeHandle
         onMouseDown={handleDown}
-        onMouseEnter={() => setHoverHandle(true)}
-        onMouseLeave={() => setHoverHandle(false)}
+        dragging={dragging}
         className="flex-shrink-0"
         style={{
+          position: 'relative',
           width: 4,
           marginLeft: -2,
           marginRight: -2,
           zIndex: 20,
           cursor: collapsed ? 'pointer' : 'col-resize',
-          background: (hoverHandle || dragging) ? 'var(--blue)' : 'transparent',
-          transition: 'background 150ms ease',
         }}
         title={collapsed ? t('admin.doubleClickExpand') : t('admin.resizeSidebarHint')}
       />

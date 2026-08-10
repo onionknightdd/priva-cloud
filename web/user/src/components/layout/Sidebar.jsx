@@ -1392,7 +1392,7 @@ export default function Sidebar() {
         left: 0,
         bottom: 0,
         background: 'var(--sidebar-bg)',
-        borderRight: '1px solid var(--border)',
+        borderRight: collapsed ? '1px solid var(--border)' : 'none',
         transition: 'width 220ms cubic-bezier(0.16, 1, 0.3, 1)',
       }}
     >
@@ -1405,7 +1405,6 @@ export default function Sidebar() {
           // giving the logo the full left-side space to center within.
           padding: collapsed ? 0 : '0 8px 0 0',
           justifyContent: collapsed ? 'center' : 'space-between',
-          borderBottom: '1px solid var(--border-subtle)',
         }}
       >
         {collapsed ? (
@@ -1552,28 +1551,47 @@ export default function Sidebar() {
           {/* Divider — separates the nav menu from Search + PROJECT */}
           <div style={{ height: 1, background: 'var(--border-subtle)', margin: '4px 12px', flexShrink: 0 }} />
 
-          {/* Search — the nav row and the input box cross-animate (height) for a smooth morph.
-              Both stay mounted so AnimatedCollapse can run enter/exit transitions. */}
+          {/* Search stays in one fixed slot: the nav row and input cross-fade
+              in place so opening it never shifts the PROJECT section. */}
           <div style={{ flexShrink: 0, padding: '0 16px' }}>
-            <AnimatedCollapse open={!searchOpen}>
-              <NavItem icon={Search} label={t('sidebar.search')} onClick={() => setSearchOpen(true)} />
-            </AnimatedCollapse>
-            <AnimatedCollapse open={searchOpen}>
+            <div className="relative" style={{ height: 32, minWidth: 0 }}>
               <div
-                className="flex items-center gap-2"
+                className="absolute inset-0"
+                aria-hidden={searchOpen}
                 style={{
-                  background: 'var(--bg-elevated)',
-                  border: '1px solid var(--border)',
+                  opacity: searchOpen ? 0 : 1,
+                  visibility: searchOpen ? 'hidden' : 'visible',
+                  pointerEvents: searchOpen ? 'none' : 'auto',
+                  transition: searchOpen
+                    ? 'opacity 200ms ease, visibility 0s linear 200ms'
+                    : 'opacity 200ms ease, visibility 0s linear 0s',
+                }}
+              >
+                <NavItem icon={Search} label={t('sidebar.search')} onClick={() => setSearchOpen(true)} />
+              </div>
+              <div
+                className="absolute inset-0 flex items-center gap-2"
+                aria-hidden={!searchOpen}
+                style={{
+                  background: 'var(--bg-surface)',
+                  border: 'none',
                   borderRadius: 8,
-                  padding: '4px 8px',
+                  padding: '6px 8px 6px 10px',
                   minWidth: 0,
                   width: '100%',
                   height: 32,
                   margin: 0,
+                  opacity: searchOpen ? 1 : 0,
+                  visibility: searchOpen ? 'visible' : 'hidden',
+                  pointerEvents: searchOpen ? 'auto' : 'none',
+                  transition: searchOpen
+                    ? 'opacity 200ms ease, visibility 0s linear 0s'
+                    : 'opacity 200ms ease, visibility 0s linear 200ms',
                 }}
               >
-                <Search size={13} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color)', flexShrink: 0 }} />
+                <Search size={17} strokeWidth={1.5} style={{ color: 'var(--sidebar-icon-color)', flexShrink: 0 }} />
                 <input
+                  className="sidebar-search-input"
                   ref={searchInputRef}
                   type="text"
                   value={searchQuery}
@@ -1586,7 +1604,7 @@ export default function Sidebar() {
                     border: 'none',
                     outline: 'none',
                     color: 'var(--text-primary)',
-                    fontSize: 13,
+                    fontSize: 14,
                     fontFamily: 'var(--font-ui)',
                     minWidth: 0,
                   }}
@@ -1610,7 +1628,7 @@ export default function Sidebar() {
                   </button>
                 )}
               </div>
-            </AnimatedCollapse>
+            </div>
           </div>
 
           {/* PROJECT header — collapse-all + refresh + expand/collapse-all + new-workdir */}

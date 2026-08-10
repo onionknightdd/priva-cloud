@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
 import useUiStore from '@shared/stores/uiStore'
 import { newDraftSession } from '../../session/openSession'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 
 function buildTemplate(lang, data, comments) {
   const { source, skillName, filePath, startLine, endLine, selectedText, language, noLineNumbers } = data
@@ -105,6 +106,7 @@ export default function OptimizePopup({ data, onClose }) {
 
   const [width, setWidth] = useState(POPUP_WIDTH)
   const [height, setHeight] = useState(null) // null = auto, number = user-resized
+  const [resizing, setResizing] = useState(false)
 
   // Focus textarea on mount
   useEffect(() => {
@@ -141,6 +143,7 @@ export default function OptimizePopup({ data, onClose }) {
   const onResizeStart = useCallback((e) => {
     e.preventDefault()
     e.stopPropagation()
+    setResizing(true)
     const startX = e.clientX
     const startY = e.clientY
     const startW = width
@@ -151,6 +154,7 @@ export default function OptimizePopup({ data, onClose }) {
       setHeight(Math.max(240, startH + (ev.clientY - startY)))
     }
     const onUp = () => {
+      setResizing(false)
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
     }
@@ -415,14 +419,16 @@ export default function OptimizePopup({ data, onClose }) {
       </div>
 
       {/* Resize handle — bottom-right corner (diagonal) */}
-      <div
+      <ResizeHandle
+        orientation="corner"
+        corner="se"
+        dragging={resizing}
+        showIdle={false}
         style={{
-          position: 'absolute',
           right: 0,
           bottom: 0,
           width: 18,
           height: 18,
-          cursor: 'nwse-resize',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -431,7 +437,7 @@ export default function OptimizePopup({ data, onClose }) {
         onMouseDown={onResizeStart}
       >
         <GripHorizontal size={12} strokeWidth={1.5} style={{ transform: 'rotate(-45deg)' }} />
-      </div>
+      </ResizeHandle>
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useResizable } from '@shared/hooks/useResizable'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import useMcpStore from '../../stores/mcpStore'
 import MCPListSidebar from './MCPListSidebar'
 import MCPServerMeta from './MCPServerMeta'
@@ -97,20 +98,15 @@ export default function MCPPanel({ backTitle, onBack }) {
       {/* Left column — server list */}
       <div
         className="flex flex-col flex-shrink-0 relative"
-        style={{ width: listWidth, background: 'var(--bg-surface)', borderRight: '1px solid var(--border)', minHeight: 0 }}
+        style={{ width: listWidth, background: 'var(--bg-surface)', minHeight: 0 }}
       >
         <MCPListSidebar headerStart={headerStart} />
         {/* Resize handle */}
-        <div
+        <ResizeHandle
           onMouseDown={onListResizeDown}
-          style={{
-            position: 'absolute', right: 0, top: 0, bottom: 0, width: 4,
-            cursor: 'col-resize', zIndex: 10,
-            background: listDragging ? 'var(--blue)' : 'transparent',
-            transition: 'background 100ms ease',
-          }}
-          onMouseEnter={(e) => { if (!listDragging) e.currentTarget.style.background = 'var(--blue)' }}
-          onMouseLeave={(e) => { if (!listDragging) e.currentTarget.style.background = 'transparent' }}
+          dragging={listDragging}
+          edge="end"
+          style={{ right: 0, top: 0, bottom: 0, zIndex: 10 }}
         />
       </div>
 
@@ -131,23 +127,17 @@ export default function MCPPanel({ backTitle, onBack }) {
               style={{
                 width: toolDrawerOpen ? toolDrawerWidth : 0,
                 maxWidth: '100vw',
-                borderLeft: toolDrawerOpen ? '1px solid var(--border)' : 'none',
                 transition: toolDragging ? 'none' : 'width 220ms cubic-bezier(0.16, 1, 0.3, 1)',
               }}
             >
               {toolDrawerOpen && (
                 <>
                   {/* Resize handle on left edge */}
-                  <div
+                  <ResizeHandle
                     onMouseDown={onToolResizeDown}
-                    style={{
-                      position: 'absolute', left: 0, top: 0, bottom: 0, width: 4,
-                      cursor: 'col-resize',
-                      background: toolDragging ? 'var(--blue)' : 'transparent',
-                      transition: 'background 100ms ease', zIndex: 10,
-                    }}
-                    onMouseEnter={(e) => { if (!toolDragging) e.currentTarget.style.background = 'var(--blue)' }}
-                    onMouseLeave={(e) => { if (!toolDragging) e.currentTarget.style.background = 'transparent' }}
+                    dragging={toolDragging}
+                    edge="start"
+                    style={{ left: 0, top: 0, bottom: 0, zIndex: 10 }}
                   />
                   <div style={{ width: toolDrawerWidth, height: '100%' }}>
                     <MCPToolDrawer />

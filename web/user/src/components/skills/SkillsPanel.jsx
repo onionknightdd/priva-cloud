@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useResizable } from '@shared/hooks/useResizable'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import useSkillsStore from '../../stores/skillsStore'
 import SkillList from './SkillList'
 import SkillFileViewer from './SkillFileViewer'
@@ -92,20 +93,15 @@ export default function SkillsPanel({ backTitle, onBack }) {
       {/* Left column — grouped skill list with inline file trees */}
       <div
         className="flex flex-col flex-shrink-0 relative"
-        style={{ width: listWidth, background: 'var(--bg-surface)', borderRight: '1px solid var(--border)', minHeight: 0 }}
+        style={{ width: listWidth, background: 'var(--bg-surface)', minHeight: 0 }}
       >
         <SkillList headerStart={headerStart} />
         {/* Resize handle */}
-        <div
+        <ResizeHandle
           onMouseDown={onMouseDown}
-          style={{
-            position: 'absolute', right: 0, top: 0, bottom: 0, width: 4,
-            cursor: 'col-resize', zIndex: 10,
-            background: dragging ? 'var(--blue)' : 'transparent',
-            transition: 'background 100ms ease',
-          }}
-          onMouseEnter={(e) => { if (!dragging) e.currentTarget.style.background = 'var(--blue)' }}
-          onMouseLeave={(e) => { if (!dragging) e.currentTarget.style.background = 'transparent' }}
+          dragging={dragging}
+          edge="end"
+          style={{ right: 0, top: 0, bottom: 0, zIndex: 10 }}
         />
       </div>
 

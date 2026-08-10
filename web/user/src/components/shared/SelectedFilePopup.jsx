@@ -3,6 +3,7 @@ import { GripHorizontal, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import useChatStore from '../../stores/chatStore'
 import useUiStore from '@shared/stores/uiStore'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 
 const POPUP_WIDTH = 460
 const MIN_WIDTH = 360
@@ -29,6 +30,7 @@ export default function SelectedFilePopup({ data, onClose }) {
   const [pos, setPos] = useState({ x: Math.max(0, initX), y: Math.max(0, initY) })
   const [width, setWidth] = useState(POPUP_WIDTH)
   const [height, setHeight] = useState(380)
+  const [resizing, setResizing] = useState(false)
 
   useEffect(() => {
     textareaRef.current?.focus()
@@ -70,6 +72,7 @@ export default function SelectedFilePopup({ data, onClose }) {
   const onResizeStart = useCallback((event) => {
     event.preventDefault()
     event.stopPropagation()
+    setResizing(true)
     const startX = event.clientX
     const startY = event.clientY
     const startWidth = width
@@ -81,6 +84,7 @@ export default function SelectedFilePopup({ data, onClose }) {
     }
 
     const onUp = () => {
+      setResizing(false)
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
     }
@@ -274,15 +278,17 @@ export default function SelectedFilePopup({ data, onClose }) {
         </button>
       </div>
 
-      <div
+      <ResizeHandle
         onMouseDown={onResizeStart}
+        orientation="corner"
+        corner="se"
+        dragging={resizing}
+        showIdle={false}
         style={{
-          position: 'absolute',
           right: 0,
           bottom: 0,
           width: 18,
           height: 18,
-          cursor: 'nwse-resize',
           color: 'var(--text-dim)',
           display: 'flex',
           alignItems: 'center',
@@ -290,7 +296,7 @@ export default function SelectedFilePopup({ data, onClose }) {
         }}
       >
         <GripHorizontal size={12} strokeWidth={1.5} style={{ transform: 'rotate(-45deg)' }} />
-      </div>
+      </ResizeHandle>
     </div>
   )
 }

@@ -8,6 +8,7 @@ import getLineFromNode from '../../utils/getLineFromNode'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
 import { listDirectory, previewFile, downloadFile, uploadUserFile } from '../../api/userFiles'
 import { useResizable } from '@shared/hooks/useResizable'
+import UnifiedResizeHandle from '@shared/components/shared/ResizeHandle'
 import safeStorage from '@shared/utils/safeStorage'
 import { formatDateTime } from '../../utils/formatTime'
 import DrawIcon from '@shared/components/shared/DrawIcon'
@@ -861,20 +862,13 @@ function ResizeHandle({ width, onResize }) {
   })
 
   return (
-    <div
+    <UnifiedResizeHandle
       onMouseDown={onMouseDown}
+      dragging={dragging}
       style={{
+        position: 'relative',
         width: 4,
         flexShrink: 0,
-        cursor: 'col-resize',
-        background: dragging ? 'var(--blue)' : 'transparent',
-        transition: 'background 100ms ease',
-      }}
-      onMouseEnter={(e) => {
-        if (!dragging) e.currentTarget.style.background = 'var(--blue)'
-      }}
-      onMouseLeave={(e) => {
-        if (!dragging) e.currentTarget.style.background = 'transparent'
       }}
     />
   )

@@ -289,6 +289,10 @@
 .sidebar-menu .lucide {
   color: var(--sidebar-icon-color);
 }
+.sidebar-menu .sidebar-search-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 1;
+}
 
 /* All expanded-sidebar rows share the same hover footprint as the primary
    menu: 16px gutters on both sides and an 8px radius. */

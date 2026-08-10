@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { X, Key, ShieldOff, Ban, Power, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useResizable } from '@shared/hooks/useResizable'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import useOverlayTransition from '@shared/motion/useOverlayTransition'
 import useAdminStore from '../../stores/adminStore'
 import useAuthStore from '@shared/stores/authStore'
@@ -361,29 +362,19 @@ export default function UserEditDrawer() {
         style={{
           width: drawerWidth,
           background: 'var(--bg-surface)',
-          borderLeft: '1px solid var(--border)',
           zIndex: 201,
         }}
       >
         {/* Resize handle — left edge */}
-        <div
+        <ResizeHandle
           onMouseDown={onMouseDown}
+          dragging={dragging}
+          edge="start"
           style={{
-            position: 'absolute',
             left: 0,
             top: 0,
             bottom: 0,
-            width: 4,
-            cursor: 'col-resize',
-            background: dragging ? 'var(--blue)' : 'transparent',
-            transition: 'background 100ms ease',
             zIndex: 10,
-          }}
-          onMouseEnter={(e) => {
-            if (!dragging) e.currentTarget.style.background = 'var(--blue)'
-          }}
-          onMouseLeave={(e) => {
-            if (!dragging) e.currentTarget.style.background = 'transparent'
           }}
         />
         {/* Header */}

@@ -4,6 +4,7 @@ import { animate } from 'animejs'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
 import { EASE_OUT, EASE_SPRING, EASE_TAB } from '@shared/motion/tokens'
 import { glyphPop } from '@shared/motion/waapiMicro'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import useSplitStore from '../../stores/splitStore'
 import useSidebarStore from '../../stores/sidebarStore'
 import useChatStore from '../../stores/chatStore'
@@ -437,7 +438,7 @@ function SplitLayoutSwitcher({ count, layout, onLayout, metrics }) {
   )
 }
 
-function SplitResizeHandles({ layout, ratios, resizingAxis, hoveredAxis, hidden, onHover, onStart }) {
+function SplitResizeHandles({ layout, ratios, resizingAxis, hidden, onStart }) {
   const hasColumnHandle = layout === 'two-columns' || layout === 'three-left' || layout === 'three-right' || layout === 'four'
   const hasRowHandle = layout === 'two-rows' || layout === 'three-left' || layout === 'three-right' || layout === 'four'
   const rowHandleStyle = layout === 'three-left'
@@ -455,48 +456,44 @@ function SplitResizeHandles({ layout, ratios, resizingAxis, hoveredAxis, hidden,
     background: 'transparent',
     opacity: hidden ? 0 : 1,
     pointerEvents: hidden ? 'none' : 'auto',
-    transition: 'background 150ms ease, opacity 100ms ease',
+    transition: 'opacity 100ms ease',
   }
-  const activeBackground = (axis) => (
-    resizingAxis === axis || hoveredAxis === axis ? 'var(--blue)' : 'transparent'
-  )
 
   return (
     <>
       {hasColumnHandle && (
-        <button
+        <ResizeHandle
+          as="button"
           type="button"
           aria-label="Resize split columns"
           data-testid="split-resize-column"
           onPointerDown={(event) => onStart(event, 'column')}
-          onMouseEnter={() => onHover('column')}
-          onMouseLeave={() => onHover(null)}
+          dragging={resizingAxis === 'column'}
+          showIdle={false}
           style={{
             ...handleBase,
             top: 0,
             bottom: 0,
             left: `calc(${ratios.column}% - 3px)`,
             width: 6,
-            cursor: 'col-resize',
-            background: activeBackground('column'),
           }}
         />
       )}
       {hasRowHandle && (
-        <button
+        <ResizeHandle
+          as="button"
           type="button"
           aria-label="Resize split rows"
           data-testid="split-resize-row"
           onPointerDown={(event) => onStart(event, 'row')}
-          onMouseEnter={() => onHover('row')}
-          onMouseLeave={() => onHover(null)}
+          orientation="horizontal"
+          dragging={resizingAxis === 'row'}
+          showIdle={false}
           style={{
             ...handleBase,
             ...rowHandleStyle,
             top: `calc(${ratios.row}% - 3px)`,
             height: 6,
-            cursor: 'row-resize',
-            background: activeBackground('row'),
           }}
         />
       )}
@@ -584,7 +581,6 @@ export default function SplitSessionView({ fallback }) {
   const [splitRatios, setSplitRatios] = useState({ column: 50, row: 50 })
   const [splitSize, setSplitSize] = useState({ width: 0, height: 0 })
   const [resizeDrag, setResizeDrag] = useState(null)
-  const [hoveredResizeAxis, setHoveredResizeAxis] = useState(null)
   const [dropPreview, setDropPreview] = useState(DEFAULT_DROP_PREVIEW)
   const [layoutMotionActive, setLayoutMotionActive] = useState(false)
   const reducedMotion = useReducedMotion()
@@ -909,9 +905,7 @@ export default function SplitSessionView({ fallback }) {
         layout={layout}
         ratios={splitRatios}
         resizingAxis={resizeDrag?.axis || null}
-        hoveredAxis={hoveredResizeAxis}
         hidden={layoutMotionActive}
-        onHover={setHoveredResizeAxis}
         onStart={handleResizeStart}
       />
       <SplitLayoutSwitcher count={panes.length} layout={layout} onLayout={handleLayoutChange} metrics={controlMetrics} />

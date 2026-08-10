@@ -10,6 +10,7 @@ import useOverlayTransition from '@shared/motion/useOverlayTransition'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
 import { EASE_OUT } from '@shared/motion/tokens'
 import { useResizable } from '@shared/hooks/useResizable'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import lazyWithChunkReload from '@shared/utils/lazyWithChunkReload'
 import {
   listHookPolicies, createHookPolicy, updateHookPolicy, deleteHookPolicy,
@@ -233,17 +234,13 @@ function HookDrawer({ open, mode, policy, presetEvent, supportedEvents, onClose,
         style={{ background: 'var(--bg-overlay)', backdropFilter: 'blur(4px)', zIndex: 200, pointerEvents: open ? 'auto' : 'none' }}
         onClick={onClose} />
       <div ref={panelRef} className="fixed top-0 right-0 bottom-0 flex flex-col"
-        style={{ width: drawerWidth, background: 'var(--bg-surface)', borderLeft: '1px solid var(--border)', zIndex: 201 }}>
+        style={{ width: drawerWidth, background: 'var(--bg-surface)', borderLeft: mode === 'edit' ? 'none' : '1px solid var(--border)', zIndex: 201 }}>
         {mode === 'edit' && (
-          <div
+          <ResizeHandle
             onMouseDown={onMouseDown}
-            style={{
-              position: 'absolute', left: 0, top: 0, bottom: 0, width: 4,
-              cursor: 'col-resize', background: dragging ? 'var(--blue)' : 'transparent',
-              transition: 'background 100ms ease', zIndex: 10,
-            }}
-            onMouseEnter={(e) => { if (!dragging) e.currentTarget.style.background = 'var(--blue)' }}
-            onMouseLeave={(e) => { if (!dragging) e.currentTarget.style.background = 'transparent' }}
+            dragging={dragging}
+            edge="start"
+            style={{ left: 0, top: 0, bottom: 0, zIndex: 10 }}
           />
         )}
         {/* Header */}

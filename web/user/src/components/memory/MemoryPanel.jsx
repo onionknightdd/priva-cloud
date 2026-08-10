@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useResizable } from '@shared/hooks/useResizable'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import useUiStore from '@shared/stores/uiStore'
 import Toggle from '@shared/components/shared/Toggle'
 import { AnimatedCollapse } from '@shared/components/shared/Accordion'
@@ -415,13 +416,13 @@ export default function MemoryPanel({ backTitle, onBack }) {
       {/* Right — resizable file viewer */}
       <div
         className="flex flex-col flex-shrink-0 relative overflow-hidden"
-        style={{ width: viewerWidth, minWidth: 0, minHeight: 0, background: 'var(--bg-base)', borderLeft: '1px solid var(--border)' }}
+        style={{ width: viewerWidth, minWidth: 0, minHeight: 0, background: 'var(--bg-base)' }}
       >
-        <div
+        <ResizeHandle
           onMouseDown={onViewerResizeDown}
-          style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, cursor: 'col-resize', zIndex: 10, background: viewerDragging ? 'var(--blue)' : 'transparent', transition: 'background 100ms ease' }}
-          onMouseEnter={(e) => { if (!viewerDragging) e.currentTarget.style.background = 'var(--blue)' }}
-          onMouseLeave={(e) => { if (!viewerDragging) e.currentTarget.style.background = 'transparent' }}
+          dragging={viewerDragging}
+          edge="start"
+          style={{ left: 0, top: 0, bottom: 0, zIndex: 10 }}
         />
         {selection == null ? (
           <div className="flex flex-1 items-center justify-center" style={{ color: 'var(--text-dim)', fontSize: 13 }}>

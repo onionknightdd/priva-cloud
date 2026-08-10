@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronLeft, ChevronRight, Search, X } from 'lucide-react'
 import useUiStore from '@shared/stores/uiStore'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import {
   WelcomeScene,
   ChatScene,
@@ -79,7 +80,7 @@ export default function IntroPanel() {
   const [sceneCycle, setSceneCycle] = useState(0)
   const [panelSize, setPanelSize] = useState({ width: DEFAULT_PANEL_WIDTH, height: null })
   const [collapsedGroups, setCollapsedGroups] = useState({ ...DEFAULT_COLLAPSED_GROUPS })
-  const [resizing, setResizing] = useState(false)
+  const [resizingDirection, setResizingDirection] = useState(null)
   const directionRef = useRef(1)
   const panelRef = useRef(null)
 
@@ -153,7 +154,7 @@ export default function IntroPanel() {
     const panel = panelRef.current
     if (!panel) return
 
-    setResizing(true)
+    setResizingDirection(direction)
     const startX = e.clientX
     const startY = e.clientY
     const startWidth = panel.offsetWidth
@@ -181,7 +182,7 @@ export default function IntroPanel() {
     }
 
     const onMouseUp = () => {
-      setResizing(false)
+      setResizingDirection(null)
       document.removeEventListener('mousemove', onMouseMove)
       document.removeEventListener('mouseup', onMouseUp)
       document.body.style.cursor = ''
@@ -290,10 +291,10 @@ export default function IntroPanel() {
           maxWidth: panelBounds.maxWidth,
           maxHeight: panelBounds.maxHeight,
           background: 'var(--bg-surface)',
-          border: '1px solid var(--border)',
+          border: 'none',
+          borderTop: '1px solid var(--border)',
           borderLeft: '2px solid var(--blue)',
           borderRadius: 4,
-          boxShadow: resizing ? '0 0 0 1px var(--blue)' : 'none',
           boxSizing: 'border-box',
           overflow: 'hidden',
         }}
@@ -680,42 +681,44 @@ export default function IntroPanel() {
             </button>
           </div>
         </div>
-        <div
+        <ResizeHandle
           onMouseDown={handleResizeStart('right')}
+          dragging={resizingDirection === 'right'}
+          edge="end"
           title={t('intro.resizeWidth')}
           style={{
-            position: 'absolute',
             top: 0,
             right: 0,
             bottom: 18,
             width: 10,
-            cursor: 'col-resize',
             zIndex: 2,
           }}
         />
-        <div
+        <ResizeHandle
           onMouseDown={handleResizeStart('bottom')}
+          orientation="horizontal"
+          edge="end"
+          dragging={resizingDirection === 'bottom'}
           title={t('intro.resizeHeight')}
           style={{
-            position: 'absolute',
             left: 0,
             right: 18,
             bottom: 0,
             height: 10,
-            cursor: 'row-resize',
             zIndex: 2,
           }}
         />
-        <div
+        <ResizeHandle
           onMouseDown={handleResizeStart('corner')}
+          orientation="corner"
+          corner="se"
+          dragging={resizingDirection === 'corner'}
           title={t('intro.resizeIntro')}
           style={{
-            position: 'absolute',
             right: 0,
             bottom: 0,
             width: 18,
             height: 18,
-            cursor: 'nwse-resize',
             zIndex: 3,
           }}
         />

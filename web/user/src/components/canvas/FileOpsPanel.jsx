@@ -9,6 +9,7 @@ import { downloadFile } from '../../api/userFiles'
 import RichFilePreview from '../shared/RichFilePreview'
 import { RollingInteger } from '../shared/Odometer'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import DrawIcon from '@shared/components/shared/DrawIcon'
 import safeStorage from '@shared/utils/safeStorage'
 import { useSlidingVerticalIndicator } from '@shared/motion/useSlidingUnderline'
@@ -721,21 +722,14 @@ export default function FileOpsPanel() {
       </div>
 
       {/* Resize handle */}
-      <div
+      <ResizeHandle
         onMouseDown={onMouseDown}
+        dragging={dragging}
         style={{
+          position: 'relative',
           width: 4,
-          cursor: 'col-resize',
-          background: dragging ? 'var(--blue)' : 'var(--border-subtle)',
-          transition: dragging ? 'none' : 'background 100ms ease',
           flexShrink: 0,
           zIndex: 5,
-        }}
-        onMouseEnter={(e) => {
-          if (!dragging) e.currentTarget.style.background = 'var(--blue)'
-        }}
-        onMouseLeave={(e) => {
-          if (!dragging) e.currentTarget.style.background = 'var(--border-subtle)'
         }}
       />
 

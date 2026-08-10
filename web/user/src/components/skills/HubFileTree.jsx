@@ -3,6 +3,7 @@ import { animate } from 'animejs'
 import { ChevronDown, Folder, FolderOpen, FileText, Search, BookOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useResizable } from '@shared/hooks/useResizable'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import { usePresence } from '@shared/motion/usePresence'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
 import { DUR_MIGRATION, EASE_ACCORDION } from '@shared/motion/tokens'
@@ -246,7 +247,6 @@ export default function HubFileTree() {
       style={{
         width: fileTreeWidth,
         background: 'var(--bg-surface)',
-        borderRight: '1px solid var(--border)',
       }}
     >
       {/* File search */}
@@ -317,24 +317,15 @@ export default function HubFileTree() {
       </div>
 
       {/* Resize handle */}
-      <div
+      <ResizeHandle
         onMouseDown={onMouseDown}
+        dragging={dragging}
+        edge="end"
         style={{
-          position: 'absolute',
           right: 0,
           top: 0,
           bottom: 0,
-          width: 4,
-          cursor: 'col-resize',
-          background: dragging ? 'var(--blue)' : 'transparent',
-          transition: 'background 100ms ease',
           zIndex: 10,
-        }}
-        onMouseEnter={(e) => {
-          if (!dragging) e.currentTarget.style.background = 'var(--blue)'
-        }}
-        onMouseLeave={(e) => {
-          if (!dragging) e.currentTarget.style.background = 'transparent'
         }}
       />
     </div>

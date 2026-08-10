@@ -2,6 +2,7 @@ import { useId, useRef, useState } from 'react'
 import { X, Download, Trash2, ChevronDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useResizable } from '@shared/hooks/useResizable'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import useCollapseWidth from '@shared/motion/useCollapseWidth'
 import FilePreview from './FilePreview'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
@@ -63,7 +64,6 @@ export default function FilePreviewDrawer({ file: liveFile, onClose, onDownload,
       className="flex-shrink-0 relative"
       style={{
         width,
-        borderLeft: '1px solid var(--border)',
         background: 'var(--bg-surface)',
         height: '100%',
         overflow: 'hidden',
@@ -74,24 +74,15 @@ export default function FilePreviewDrawer({ file: liveFile, onClose, onDownload,
           width animates — it is revealed, not squished. */}
       <div className="flex flex-col" style={{ width, height: '100%' }}>
       {/* Resize handle — left edge */}
-      <div
+      <ResizeHandle
         onMouseDown={onMouseDown}
+        dragging={dragging}
+        edge="start"
         style={{
-          position: 'absolute',
           left: 0,
           top: 0,
           bottom: 0,
-          width: 4,
-          cursor: 'col-resize',
-          background: dragging ? 'var(--blue)' : 'transparent',
-          transition: 'background 100ms ease',
           zIndex: 10,
-        }}
-        onMouseEnter={(e) => {
-          if (!dragging) e.currentTarget.style.background = 'var(--blue)'
-        }}
-        onMouseLeave={(e) => {
-          if (!dragging) e.currentTarget.style.background = 'transparent'
         }}
       />
 

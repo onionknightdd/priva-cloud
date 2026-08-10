@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Play, Square, Trash2, FlaskConical, Loader } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import useSubagentsStore from '../../stores/subagentsStore'
 import { useAutoScroll } from '../../hooks/useAutoScroll'
 
@@ -223,25 +224,11 @@ export default function SubAgentTestPanel({ onResize, dragging }) {
       )}
       {/* Resize handle */}
       {onResize && (
-        <div
+        <ResizeHandle
           onMouseDown={onResize}
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 4,
-            cursor: 'col-resize',
-            background: dragging ? 'var(--blue)' : 'transparent',
-            transition: 'background 100ms ease',
-            zIndex: 10,
-          }}
-          onMouseEnter={(e) => {
-            if (!dragging) e.currentTarget.style.background = 'var(--blue)'
-          }}
-          onMouseLeave={(e) => {
-            if (!dragging) e.currentTarget.style.background = 'transparent'
-          }}
+          dragging={dragging}
+          edge="start"
+          style={{ left: 0, top: 0, bottom: 0, zIndex: 10 }}
         />
       )}
 

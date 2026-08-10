@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next'
 import useUiStore from '@shared/stores/uiStore'
 import useAuthStore from '@shared/stores/authStore'
 import { useResizable } from '@shared/hooks/useResizable'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import useFloatPaneFrame from '../../hooks/useFloatPaneFrame'
 import TerminalSession from '@shared/components/terminal/TerminalSession'
 
@@ -590,26 +591,19 @@ export default function WebTerminalDrawer() {
         }}
       >
         {/* Dock-mode top edge resize handle */}
-        <div
+        <ResizeHandle
           key="dock-handle"
           onMouseDown={showDockHandle ? dockResize.onMouseDown : undefined}
+          orientation="horizontal"
+          dragging={dockResize.dragging}
+          showIdle={false}
           style={{
-            position: 'absolute',
             top: -2,
             left: 0,
             right: 0,
             height: 4,
-            cursor: 'row-resize',
-            background: dockResize.dragging ? 'var(--blue)' : 'transparent',
-            transition: 'background 220ms cubic-bezier(0.16, 1, 0.3, 1)',
             zIndex: 10,
             display: showDockHandle ? 'block' : 'none',
-          }}
-          onMouseEnter={(e) => {
-            if (!dockResize.dragging) e.currentTarget.style.background = 'var(--blue)'
-          }}
-          onMouseLeave={(e) => {
-            if (!dockResize.dragging) e.currentTarget.style.background = 'transparent'
           }}
         />
         {/* Float-mode edge / corner handles. Always rendered for stable order;
@@ -648,41 +642,41 @@ function renderEdgeHandles({ edges, active }) {
   const md = (h) => (active ? h.onMouseDown : undefined)
   return (
     <>
-      <div key="edge-n" onMouseDown={md(edgeN)} style={{
+      <ResizeHandle key="edge-n" onMouseDown={md(edgeN)} orientation="horizontal" edge="start" dragging={edgeN.dragging} showIdle={false} style={{
         position: 'absolute', top: 0, left: CORNER_SIZE, right: CORNER_SIZE,
-        height: EDGE_THICKNESS, cursor: 'ns-resize', zIndex: z, display,
+        height: EDGE_THICKNESS, zIndex: z, display,
       }} />
-      <div key="edge-s" onMouseDown={md(edgeS)} style={{
+      <ResizeHandle key="edge-s" onMouseDown={md(edgeS)} orientation="horizontal" edge="end" dragging={edgeS.dragging} showIdle={false} style={{
         position: 'absolute', bottom: 0, left: CORNER_SIZE, right: CORNER_SIZE,
-        height: EDGE_THICKNESS, cursor: 'ns-resize', zIndex: z, display,
+        height: EDGE_THICKNESS, zIndex: z, display,
       }} />
-      <div key="edge-e" onMouseDown={md(edgeE)} style={{
+      <ResizeHandle key="edge-e" onMouseDown={md(edgeE)} edge="end" dragging={edgeE.dragging} showIdle={false} style={{
         position: 'absolute', right: 0, top: CORNER_SIZE, bottom: CORNER_SIZE,
         width: EDGE_THICKNESS, cursor: 'ew-resize', zIndex: z, display,
       }} />
-      <div key="edge-w" onMouseDown={md(edgeW)} style={{
+      <ResizeHandle key="edge-w" onMouseDown={md(edgeW)} edge="start" dragging={edgeW.dragging} showIdle={false} style={{
         position: 'absolute', left: 0, top: CORNER_SIZE, bottom: CORNER_SIZE,
         width: EDGE_THICKNESS, cursor: 'ew-resize', zIndex: z, display,
       }} />
-      <div key="edge-nw" onMouseDown={md(edgeNW)} style={{
+      <ResizeHandle key="edge-nw" onMouseDown={md(edgeNW)} orientation="corner" corner="nw" dragging={edgeNW.dragging} showIdle={false} style={{
         position: 'absolute', top: 0, left: 0,
         width: CORNER_SIZE, height: CORNER_SIZE,
-        cursor: 'nwse-resize', zIndex: z + 1, display,
+        zIndex: z + 1, display,
       }} />
-      <div key="edge-ne" onMouseDown={md(edgeNE)} style={{
+      <ResizeHandle key="edge-ne" onMouseDown={md(edgeNE)} orientation="corner" corner="ne" dragging={edgeNE.dragging} showIdle={false} style={{
         position: 'absolute', top: 0, right: 0,
         width: CORNER_SIZE, height: CORNER_SIZE,
-        cursor: 'nesw-resize', zIndex: z + 1, display,
+        zIndex: z + 1, display,
       }} />
-      <div key="edge-sw" onMouseDown={md(edgeSW)} style={{
+      <ResizeHandle key="edge-sw" onMouseDown={md(edgeSW)} orientation="corner" corner="sw" dragging={edgeSW.dragging} showIdle={false} style={{
         position: 'absolute', bottom: 0, left: 0,
         width: CORNER_SIZE, height: CORNER_SIZE,
-        cursor: 'nesw-resize', zIndex: z + 1, display,
+        zIndex: z + 1, display,
       }} />
-      <div key="edge-se" onMouseDown={md(edgeSE)} style={{
+      <ResizeHandle key="edge-se" onMouseDown={md(edgeSE)} orientation="corner" corner="se" dragging={edgeSE.dragging} showIdle={false} style={{
         position: 'absolute', bottom: 0, right: 0,
         width: CORNER_SIZE, height: CORNER_SIZE,
-        cursor: 'nwse-resize', zIndex: z + 1, display,
+        zIndex: z + 1, display,
       }} />
     </>
   )

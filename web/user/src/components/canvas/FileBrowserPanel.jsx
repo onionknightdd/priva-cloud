@@ -18,6 +18,7 @@ import SelectedFilePopup from '../shared/SelectedFilePopup'
 import getLineFromNode from '../../utils/getLineFromNode'
 import { getFileIcon } from '../../utils/fileIcons'
 import DrawIcon from '@shared/components/shared/DrawIcon'
+import ResizeHandle from '@shared/components/shared/ResizeHandle'
 
 const MAIN_AREA_HEADER_HEIGHT = 30
 const PATH_MODE_BUTTON_HEIGHT = 22
@@ -1316,19 +1317,12 @@ export default function FileBrowserPanel() {
           />
         </div>
         {treeOpen && (
-          <div
+          <ResizeHandle
             onMouseDown={onTreeResizeMouseDown}
-            onMouseEnter={(e) => {
-              if (!draggingTree) e.currentTarget.style.background = 'var(--blue)'
-            }}
-            onMouseLeave={(e) => {
-              if (!draggingTree) e.currentTarget.style.background = 'var(--border-subtle)'
-            }}
+            dragging={draggingTree}
             style={{
+              position: 'relative',
               width: 4,
-              cursor: 'col-resize',
-              background: draggingTree ? 'var(--blue)' : 'var(--border-subtle)',
-              transition: draggingTree ? 'none' : 'background 100ms ease',
               flexShrink: 0,
               zIndex: 5,
             }}
