@@ -34,6 +34,7 @@ import { AnimatedCollapse } from '@shared/components/shared/Accordion'
 import { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
 import { DURATION, EASE_SPRING, EASE_TAB } from '@shared/motion/tokens'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
+import { pressTick } from '@shared/motion/waapiMicro'
 import DirectoryPicker from '../shared/DirectoryPicker'
 import TagFilterChip from '../shared/TagFilterChip'
 import TagBadge from '../shared/TagBadge'
@@ -136,11 +137,13 @@ function SessionItem({
   const [renameValue, setRenameValue] = useState(session.name || '')
   const [hovered, setHovered] = useState(false)
   const [pinHovered, setPinHovered] = useState(false)
+  const [pinDismissed, setPinDismissed] = useState(false)
   const pinRef = useRef(null)
   const titleRef = useRef(null)
   const pinAnimationRef = useRef(null)
   const titleAnimationRef = useRef(null)
   const pinMotionReadyRef = useRef(false)
+  const pinDismissTimerRef = useRef(null)
   const reducedMotion = useReducedMotion()
   useEffect(() => {
     if (renameEditingId === session.id) setRenameValue(session.name || '')
@@ -148,7 +151,7 @@ function SessionItem({
   const editing = renameEditingId === session.id
   const isProject = session.sessionSource === 'project'
   const menuOpen = openMenuId === session.id
-  const pinVisible = !editing && (hovered || session.pinned)
+  const pinVisible = !editing && !pinDismissed && (hovered || session.pinned)
   const tags = sessionTags(session)
   const menuItemStyle = {
     background: 'transparent',
@@ -206,6 +209,12 @@ function SessionItem({
     }
   }, [pinVisible, reducedMotion])
 
+  useEffect(() => () => {
+    if (pinDismissTimerRef.current != null) {
+      window.clearTimeout(pinDismissTimerRef.current)
+    }
+  }, [])
+
   return (
     <div
       className="sidebar-session-item flex flex-col gap-1 px-3 group"
@@ -262,7 +271,12 @@ function SessionItem({
         onDragEndSession?.()
       }}
       onClick={() => { if (!editing) onSelect(session) }}
-      onMouseEnter={() => { if (!editing) setHovered(true) }}
+      onMouseEnter={() => {
+        if (!editing) {
+          setPinDismissed(false)
+          setHovered(true)
+        }
+      }}
       onMouseLeave={() => { setHovered(false); setPinHovered(false) }}
     >
       {isActive && (
@@ -332,7 +346,7 @@ function SessionItem({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  background: pinHovered ? 'var(--sidebar-menu-hover-bg)' : 'transparent',
+                  background: pinHovered ? 'var(--sidebar-menu-selected-bg)' : 'transparent',
                   border: 'none',
                   borderRadius: 4,
                   color: 'var(--sidebar-menu-text, var(--text-primary))',
@@ -341,7 +355,23 @@ function SessionItem({
                   zIndex: 1,
                   transition: 'background 150ms ease',
                 }}
-                onClick={(e) => { e.stopPropagation(); onPinToggle(session) }}
+                onPointerDown={(e) => {
+                  pressTick(e.currentTarget, { to: 0.9, duration: 120 })
+                }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (session.pinned) {
+                    if (pinDismissTimerRef.current != null) {
+                      window.clearTimeout(pinDismissTimerRef.current)
+                    }
+                    pinDismissTimerRef.current = window.setTimeout(() => {
+                      setPinHovered(false)
+                      setPinDismissed(true)
+                      pinDismissTimerRef.current = null
+                    }, DURATION.fast)
+                  }
+                  onPinToggle(session)
+                }}
                 onMouseEnter={() => setPinHovered(true)}
                 onMouseLeave={() => setPinHovered(false)}
               >
