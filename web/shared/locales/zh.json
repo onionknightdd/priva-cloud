@@ -149,6 +149,7 @@
     "executionSummaryCommands_other": "运行了{{count}}条命令",
     "executionSummaryQuestions_other": "提出了{{count}}个问题",
     "executionSummarySeparator": "，",
+    "executionSummaryRunning": "执行中",
     "executionSummaryCompleted": "已完成",
     "session": "会话",
     "addDirs": "目录",

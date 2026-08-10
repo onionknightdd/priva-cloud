@@ -32,7 +32,7 @@ import PanelHeader from '@shared/components/shared/PanelHeader'
 import Chip from '@shared/components/shared/Chip'
 import { AnimatedCollapse } from '@shared/components/shared/Accordion'
 import { SlidingTabGroup, SlidingTabIndicator } from '@shared/components/shared/Tabs'
-import { DURATION, EASE_SPRING } from '@shared/motion/tokens'
+import { DURATION, EASE_SPRING, EASE_TAB } from '@shared/motion/tokens'
 import { useReducedMotion } from '@shared/motion/useReducedMotion'
 import DirectoryPicker from '../shared/DirectoryPicker'
 import TagFilterChip from '../shared/TagFilterChip'
@@ -171,7 +171,7 @@ function SessionItem({
     titleAnimationRef.current = null
 
     const pinX = pinVisible ? '0px' : '-6px'
-    const titleX = pinVisible ? '17px' : '0px'
+    const titleX = pinVisible ? '20px' : '0px'
     const settle = () => {
       pin.style.opacity = pinVisible ? '1' : '0'
       pin.style.transform = `translateX(${pinX})`
@@ -187,14 +187,14 @@ function SessionItem({
     pinAnimationRef.current = animate(pin, {
       opacity: pinVisible ? 1 : 0,
       translateX: pinX,
-      duration: DURATION.hover,
-      ease: EASE_SPRING,
+      duration: DURATION.canvas,
+      ease: EASE_TAB,
       onComplete: () => { pinAnimationRef.current = null },
     })
     titleAnimationRef.current = animate(title, {
       translateX: titleX,
-      duration: DURATION.hover,
-      ease: EASE_SPRING,
+      duration: DURATION.canvas,
+      ease: EASE_TAB,
       onComplete: () => { titleAnimationRef.current = null },
     })
 
@@ -230,7 +230,7 @@ function SessionItem({
         zIndex: menuOpen ? 60 : 'auto',
         color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
         cursor: editing ? 'default' : 'pointer',
-        fontSize: 14,
+        fontSize: 15,
         transition: 'background 150ms ease',
       }}
       onDragStart={(e) => {
@@ -301,7 +301,7 @@ function SessionItem({
               borderRadius: 2,
               color: 'var(--text-primary)',
               outline: 'none',
-              fontSize: 14,
+              fontSize: 15,
               padding: '2px 4px',
             }}
           />
@@ -325,9 +325,9 @@ function SessionItem({
                   position: 'absolute',
                   top: '50%',
                   left: 0,
-                  width: 17,
-                  height: 17,
-                  marginTop: -8.5,
+                  width: 18,
+                  height: 18,
+                  marginTop: -9,
                   padding: 0,
                   display: 'flex',
                   alignItems: 'center',
@@ -335,22 +335,22 @@ function SessionItem({
                   background: pinHovered ? 'var(--sidebar-menu-hover-bg)' : 'transparent',
                   border: 'none',
                   borderRadius: 4,
-                  color: session.pinned ? 'var(--cyan)' : pinHovered ? 'var(--text-primary)' : 'var(--text-dim)',
+                  color: 'var(--sidebar-menu-text, var(--text-primary))',
                   cursor: 'pointer',
                   pointerEvents: pinVisible ? 'auto' : 'none',
                   zIndex: 1,
-                  transition: 'background 150ms ease, color 150ms ease',
+                  transition: 'background 150ms ease',
                 }}
                 onClick={(e) => { e.stopPropagation(); onPinToggle(session) }}
                 onMouseEnter={() => setPinHovered(true)}
                 onMouseLeave={() => setPinHovered(false)}
               >
-                <Pin size={13} strokeWidth={1.5} style={{ color: 'currentColor' }} />
+                <Pin size={14} strokeWidth={1.5} style={{ color: 'currentColor' }} />
               </button>
               <span
                 ref={titleRef}
                 className={`sidebar-session-title block truncate${titleStatusClass}`}
-                style={{ minWidth: 0, width: '100%', fontSize: 13, lineHeight: 1.2 }}
+                style={{ minWidth: 0, width: '100%', fontSize: 14, lineHeight: 1.2 }}
               >
                 {session.name}
               </span>
@@ -362,7 +362,7 @@ function SessionItem({
             className="inline-flex items-center gap-1"
             style={{
               color: 'var(--cyan)',
-              fontSize: 12,
+              fontSize: 13,
               fontWeight: 600,
               flexShrink: 0,
             }}

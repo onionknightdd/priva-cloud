@@ -87,7 +87,17 @@ function contentHasThinking(contentBlocks) {
   })
 }
 
-function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
+function StreamingSummaryEllipsis() {
+  return (
+    <span className="streaming-summary-ellipsis" aria-hidden="true">
+      <span>.</span>
+      <span>.</span>
+      <span>.</span>
+    </span>
+  )
+}
+
+function ThinkingBlock({ content, t, durationMs = null }) {
   const durationStr = durationMs ? formatDuration(durationMs) : null
   const bodyId = useId()
   const [expanded, setExpanded] = useState(false)
@@ -116,25 +126,19 @@ function ThinkingBlock({ content, t, streaming = false, durationMs = null }) {
         onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.borderColor = 'var(--border)' }}
         onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)'; e.currentTarget.style.borderColor = 'var(--border-subtle)' }}
       >
-        {streaming ? (
-          <AnimatedShimmerText style={{ fontSize: 'var(--text-xs)' }}>{t('chat.thinking')}</AnimatedShimmerText>
-        ) : (
-          <>
-            <Check size={10} strokeWidth={1.5} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-            {durationStr ? t('chat.thoughtFor', { duration: durationStr }) : t('chat.thoughtComplete')}
-            <ChevronRight
-              size={10}
-              strokeWidth={1.5}
-              className="thinking-chevron"
-              style={{
-                color: 'var(--text-dim)',
-                flexShrink: 0,
-                transform: expanded ? 'rotate(90deg)' : 'none',
-                transition: 'transform 150ms ease',
-              }}
-            />
-          </>
-        )}
+        <Check size={10} strokeWidth={1.5} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+        {durationStr ? t('chat.thoughtFor', { duration: durationStr }) : t('chat.thoughtComplete')}
+        <ChevronRight
+          size={10}
+          strokeWidth={1.5}
+          className="thinking-chevron"
+          style={{
+            color: 'var(--text-dim)',
+            flexShrink: 0,
+            transform: expanded ? 'rotate(90deg)' : 'none',
+            transition: 'transform 150ms ease',
+          }}
+        />
       </button>
       <AnimatedCollapse open={expanded} id={bodyId}>
         <div style={{ paddingTop: 4 }}>
@@ -1354,9 +1358,9 @@ export default memo(function MessageBubble({
     durationMs: executionDurationMs,
     additionalQuestionCount: message.summaryQuestionCount,
   })
-  // The live header already owns the running timer. Keep it out of the
-  // process Summary while the turn is streaming; the final duration is still
-  // shown once the result settles.
+  // While the turn is streaming, the Summary owns the running state. Keep the
+  // elapsed duration out until the final result settles, while preserving live
+  // operation counts as events arrive.
   const executionSummaryParts = visibleExecutionSummaryItems(executionSummary)
     .filter(({ key }) => !isStreaming || key !== 'duration')
     .map(({ key, value }) => (
@@ -1364,9 +1368,12 @@ export default memo(function MessageBubble({
         ? t('chat.executionSummaryDuration', { duration: value })
         : t(`chat.executionSummary${key[0].toUpperCase()}${key.slice(1)}`, { count: value })
     ))
-  const executionSummaryText = executionSummaryParts.length > 0
-    ? executionSummaryParts.join(t('chat.executionSummarySeparator'))
-    : t('chat.executionSummaryCompleted')
+  const executionSummarySeparator = t('chat.executionSummarySeparator')
+  const executionSummaryStatsText = executionSummaryParts.join(executionSummarySeparator)
+  const executionSummaryRunningText = t('chat.executionSummaryRunning')
+  const executionSummaryText = isStreaming
+    ? `${executionSummaryRunningText}...${executionSummaryStatsText ? `${executionSummarySeparator}${executionSummaryStatsText}` : ''}`
+    : (executionSummaryStatsText || t('chat.executionSummaryCompleted'))
   const shouldHideBubble = !isUser && !hasContent && !hasTools && !hasThinkingContent
     && !isStreaming && (!hasMetadata || hadSdkTaskActivity)
 
@@ -1567,6 +1574,7 @@ export default memo(function MessageBubble({
       const finished = hasExplicitStreamState
         ? block._streamState !== 'streaming'
         : hasLater || !isStreaming
+      if (!finished) return null
       // Duration ≈ the gap before this block appeared (previous block's arrival
       // → this thinking block's arrival), i.e. the time spent thinking.
       let durationMs = null
@@ -1584,7 +1592,6 @@ export default memo(function MessageBubble({
           key={block._streamKey || block.id || i}
           content={block.thinking}
           t={t}
-          streaming={!finished}
           durationMs={durationMs}
         />
       )
@@ -1681,7 +1688,9 @@ export default memo(function MessageBubble({
           <div key={i} className="flex flex-col min-w-0" style={{ gap: 12 }}>
             {thinkSegments.map((seg, si) =>
               seg.type === 'thinking'
-                ? <ThinkingBlock key={si} content={seg.content} t={t} streaming={markdownStreaming} />
+                ? (markdownStreaming && isStreaming
+                  ? null
+                  : <ThinkingBlock key={si} content={seg.content} t={t} />)
                 : (
                   <MarkdownRenderer
                     key={si}
@@ -1835,6 +1844,13 @@ export default memo(function MessageBubble({
     && message.resultIsError !== true
     && hasFoldableProcessEvents
     && (canCollapseResponse || (isStreaming && hasProcessEvents))
+  const showProcessSummary = shouldFoldProcess || (
+    !isUser
+    && isStreaming
+    && !isErrorMessage
+    && !message.responseInterrupted
+    && message.resultIsError !== true
+  )
   const hasStandaloneResult = !shouldFoldProcess
     && !isUser
     && hasCompletedResult
@@ -1842,32 +1858,9 @@ export default memo(function MessageBubble({
     && finalResultIndexes.length === 0
   const allRenderedProcessNodes = renderedProcessGroups.flatMap((group) => group.nodes)
 
-  const hasMessageHeader = (!isUser && isStreaming && message.timestamp) || (isStreaming && !isUser) || message.error
+  const hasMessageHeader = Boolean(message.error)
   const messageHeader = hasMessageHeader ? (
     <div className="flex items-center gap-2" style={{ alignSelf: isUser ? 'flex-end' : undefined }}>
-      {/* Streaming indicator */}
-      {isStreaming && !isUser && (
-        <div
-          className="inline-flex items-center gap-1"
-          style={{
-            border: '1px solid var(--border)',
-            borderRadius: 3,
-            color: 'var(--text-secondary)',
-            fontSize: 'var(--text-sm)',
-            fontWeight: 600,
-            lineHeight: '18px',
-            padding: '2px 6px',
-          }}
-        >
-          <AnimatedShimmerText>{t('chat.thinking')}</AnimatedShimmerText>
-        </div>
-      )}
-
-      {/* Duration — live timer while streaming, final duration when done */}
-      {!isUser && isStreaming && message.timestamp && (
-        <LiveTimer startTime={message.timestamp} />
-      )}
-
       {/* Error indicator */}
       {message.error && (
         <Chip color="var(--red)">ERROR</Chip>
@@ -1931,7 +1924,7 @@ export default memo(function MessageBubble({
         {isErrorMessage && <ErrorBlock message={message} />}
 
         {/* Content blocks — render in order for continuity */}
-        {!isErrorMessage && (shouldFoldProcess ? (
+        {!isErrorMessage && (showProcessSummary ? (
           <>
             {/* The summary/process region is one stable flex item. Spacing is
                 owned inside it so presence unmounts cannot remove a parent
@@ -1980,17 +1973,40 @@ export default memo(function MessageBubble({
                     verticalAlign: 'middle',
                   }}
                 >
-                  <RollingText
-                    text={executionSummaryText}
-                    height={20}
-                    digitWidth={8.68}
-                    color="currentColor"
-                    fontFamily="var(--font-ui)"
-                    fontSize={14}
-                    fontWeight={400}
-                    verticalAlign="top"
-                    whiteSpace="nowrap"
-                  />
+                  {isStreaming ? (
+                    <>
+                      <span>{executionSummaryRunningText}</span>
+                      <StreamingSummaryEllipsis />
+                      {executionSummaryStatsText && (
+                        <>
+                          <span>{executionSummarySeparator}</span>
+                          <RollingText
+                            text={executionSummaryStatsText}
+                            height={20}
+                            digitWidth={8.68}
+                            color="currentColor"
+                            fontFamily="var(--font-ui)"
+                            fontSize={14}
+                            fontWeight={400}
+                            verticalAlign="top"
+                            whiteSpace="nowrap"
+                          />
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <RollingText
+                      text={executionSummaryText}
+                      height={20}
+                      digitWidth={8.68}
+                      color="currentColor"
+                      fontFamily="var(--font-ui)"
+                      fontSize={14}
+                      fontWeight={400}
+                      verticalAlign="top"
+                      whiteSpace="nowrap"
+                    />
+                  )}
                 </span>
               </button>
               <div
@@ -2201,20 +2217,6 @@ function StreamingSkeleton() {
       <div className="skeleton" style={{ width: '70%', height: 16, borderRadius: '4px' }} />
       <div className="skeleton" style={{ width: '45%', height: 16, borderRadius: '4px' }} />
     </div>
-  )
-}
-
-function LiveTimer({ startTime }) {
-  const [elapsed, setElapsed] = useState(Date.now() - startTime)
-  useEffect(() => {
-    const id = setInterval(() => setElapsed(Date.now() - startTime), 100)
-    return () => clearInterval(id)
-  }, [startTime])
-  return (
-    <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-dim)' }}>
-      <Timer size={12} strokeWidth={1.5} />
-      {formatDuration(elapsed)}
-    </span>
   )
 }
 

@@ -156,6 +156,7 @@
     "executionSummaryQuestions_one": "asked {{count}} question",
     "executionSummaryQuestions_other": "asked {{count}} questions",
     "executionSummarySeparator": ", ",
+    "executionSummaryRunning": "Running",
     "executionSummaryCompleted": "Completed",
     "session": "Session",
     "addDirs": "dirs",
