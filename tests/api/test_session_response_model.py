@@ -46,6 +46,19 @@ class SessionResponseModelMetadataTests(unittest.IsolatedAsyncioTestCase):
                 "observed_at": 123,
             },
         )
+        self.assertEqual(
+            session_meta.read_meta()["last_response_models"]["session-1"]["model_source"],
+            "profile",
+        )
+
+    async def test_response_model_without_profile_is_not_persisted(self) -> None:
+        await session_meta.set_last_response_model(
+            "session-1",
+            profile_id=None,
+            model_id="unqualified-model",
+        )
+
+        self.assertIsNone(session_meta.get_last_response_model("session-1"))
 
     async def test_prune_removes_response_model_metadata(self) -> None:
         await session_meta.set_last_response_model(
@@ -80,6 +93,7 @@ class SessionInfoResponseModelTests(unittest.TestCase):
                 "session-1": {
                     "profile_id": "default",
                     "model_id": "claude-sonnet-4-5",
+                    "model_source": "profile",
                     "observed_at": 123,
                 }
             },
@@ -146,6 +160,65 @@ class SessionInfoResponseModelTests(unittest.TestCase):
         self.assertEqual(response.last_response_model.model_id, "legacy-model")
         self.assertEqual(response.last_response_model.observed_at, 1784126306123)
 
+    def test_transcript_backfill_rejects_gateway_mapped_model(self) -> None:
+        rows = [
+            {
+                "type": "assistant",
+                "timestamp": "2026-07-15T14:38:26.123Z",
+                "message": {"model": "provider-backend-model"},
+            },
+        ]
+        meta = {
+            "sessions": {},
+            "scheduler_sessions": {},
+            "last_response_models": {},
+            "tag_colors": {},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "session-gateway.jsonl"
+            transcript.write_text(
+                "\n".join(json.dumps(row) for row in rows),
+                encoding="utf-8",
+            )
+            agent_router._cached_transcript_response_model.cache_clear()
+            with patch.object(
+                agent_router,
+                "_session_jsonl_path",
+                return_value=transcript,
+            ):
+                response = _session_info_to_response(
+                    self._source("session-gateway"),
+                    meta,
+                    {"profile-model-alias": "profile-a"},
+                )
+
+        self.assertIsNone(response.last_response_model)
+
+    def test_legacy_gateway_metadata_is_not_restored_as_profile_model(self) -> None:
+        meta = {
+            "sessions": {},
+            "scheduler_sessions": {},
+            "last_response_models": {
+                "session-1": {
+                    "profile_id": "profile-a",
+                    "model_id": "provider-backend-model",
+                    "observed_at": 123,
+                }
+            },
+            "tag_colors": {},
+        }
+
+        with patch.object(agent_router, "_last_response_model_from_transcript") as backfill:
+            response = _session_info_to_response(
+                self._source(),
+                meta,
+                {"profile-model-alias": "profile-a"},
+            )
+
+        self.assertIsNone(response.last_response_model)
+        backfill.assert_not_called()
+
     def test_session_info_infers_missing_profile_for_persisted_model(self) -> None:
         meta = {
             "sessions": {},
@@ -196,7 +269,7 @@ class SessionInfoResponseModelTests(unittest.TestCase):
 
 
 class AgentRunResponseModelTests(unittest.IsolatedAsyncioTestCase):
-    async def test_agent_run_persists_provider_model_not_request_reference(self) -> None:
+    async def test_agent_run_persists_profile_model_not_gateway_response_model(self) -> None:
         session_id = "11111111-2222-3333-4444-555555555555"
 
         class FakeClient:
@@ -231,6 +304,7 @@ class AgentRunResponseModelTests(unittest.IsolatedAsyncioTestCase):
                 cwd="/tmp",
                 resume=None,
                 _priva_profile_id="profile-a",
+                _priva_model_id="requested-model",
             )
 
         persist_model = AsyncMock()
@@ -256,11 +330,11 @@ class AgentRunResponseModelTests(unittest.IsolatedAsyncioTestCase):
 
         persist_model.assert_awaited_once_with(
             session_id,
-            model_id="provider:model-with-colon",
+            model_id="requested-model",
             profile_id="profile-a",
         )
 
-    async def test_agent_run_events_persists_observed_model_for_streaming_turn(self) -> None:
+    async def test_agent_run_events_persists_profile_model_for_streaming_turn(self) -> None:
         session_id = "22222222-3333-4444-5555-666666666666"
         emitted: list[str] = []
 
@@ -282,7 +356,7 @@ class AgentRunResponseModelTests(unittest.IsolatedAsyncioTestCase):
 
             async def receive_response(self):
                 yield SystemMessage("init", {"session_id": session_id})
-                yield AssistantMessage(content=[], model="streamed-model")
+                yield AssistantMessage(content=[], model="provider-streamed-model")
                 yield ResultMessage(
                     subtype="success",
                     duration_ms=1,
@@ -299,6 +373,7 @@ class AgentRunResponseModelTests(unittest.IsolatedAsyncioTestCase):
                 cwd="/tmp",
                 resume=None,
                 _priva_profile_id="profile-stream",
+                _priva_model_id="profile-stream-model",
             )
 
         async def emit(event: str, _data: dict) -> None:
@@ -327,7 +402,7 @@ class AgentRunResponseModelTests(unittest.IsolatedAsyncioTestCase):
 
         persist_model.assert_awaited_once_with(
             session_id,
-            model_id="streamed-model",
+            model_id="profile-stream-model",
             profile_id="profile-stream",
         )
         self.assertIn("result", emitted)

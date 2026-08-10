@@ -202,10 +202,10 @@ class HookEventPayload(BaseModel):
 
 
 class SessionResponseModel(BaseModel):
-    """Model/profile observed on the latest assistant response."""
+    """Profile-side model selection used for the latest assistant response."""
 
-    # Nullable for legacy sessions or transcript backfills that can recover a
-    # model id but cannot prove which historical profile supplied it.
+    # Nullable only for legacy wire compatibility. New metadata is persisted
+    # from the resolved Profile selection and always carries its profile id.
     profile_id: str | None = None
     model_id: str
     observed_at: int | None = None

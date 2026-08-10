@@ -198,19 +198,30 @@ def _session_info_to_response(
     )
     last_response_model = session_meta.get_last_response_model(s.session_id, meta)
     model_profiles = profile_by_model or {}
-    if last_response_model is None:
+    allow_transcript_backfill = last_response_model is None
+    if last_response_model is not None and not session_meta.is_profile_model_metadata(
+        s.session_id,
+        meta,
+    ):
+        # Older metadata stored AssistantMessage.model. Gateways may rewrite
+        # that value, so trust it only when it exactly matches one configured
+        # Profile model and agrees with any recorded profile id.
+        inferred_profile = model_profiles.get(last_response_model["model_id"])
+        recorded_profile = last_response_model.get("profile_id")
+        if inferred_profile and (recorded_profile is None or recorded_profile == inferred_profile):
+            last_response_model = {
+                **last_response_model,
+                "profile_id": inferred_profile,
+            }
+        else:
+            last_response_model = None
+            allow_transcript_backfill = False
+    if last_response_model is None and allow_transcript_backfill:
         last_response_model = _last_response_model_from_transcript(
             getattr(s, "cwd", None),
             s.session_id,
             model_profiles,
         )
-    elif last_response_model.get("profile_id") is None:
-        inferred_profile = model_profiles.get(last_response_model["model_id"])
-        if inferred_profile:
-            last_response_model = {
-                **last_response_model,
-                "profile_id": inferred_profile,
-            }
     return SessionInfoResponse(
         session_id=s.session_id,
         summary=s.summary,
@@ -427,8 +438,14 @@ def _last_response_model_from_transcript(
     if observed is None:
         return None
     model_id, observed_at = observed
+    profile_id = profile_by_model.get(model_id)
+    if not profile_id:
+        # A gateway-reported backend model cannot be translated back to the
+        # Profile alias reliably. Falling back to defaults is safer than
+        # restoring a model id the selected Profile never exposed.
+        return None
     return {
-        "profile_id": profile_by_model.get(model_id),
+        "profile_id": profile_id,
         "model_id": model_id,
         "observed_at": observed_at,
     }

@@ -309,6 +309,7 @@ async def build_agent_options(
     )
     options.settings = overlay_path
     options._priva_profile_id = resolved.profile.id
+    options._priva_model_id = model
     options._priva_overlay_manager = overlay_manager
     options._priva_overlay_path = overlay_path
     if max_turns and max_turns > 0:

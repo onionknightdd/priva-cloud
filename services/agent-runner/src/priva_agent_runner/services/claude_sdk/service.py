@@ -339,11 +339,11 @@ async def _record_last_response_model(
     model_id: str | None,
     profile_id: str | None,
 ) -> None:
-    """Best-effort persistence for UI/history metadata.
+    """Persist the Profile-side model selection used for the latest reply.
 
     A metadata-index write must never turn an otherwise completed model run
-    into a failed run.  The transcript and live response remain authoritative
-    if this auxiliary write cannot be completed.
+    into a failed run. The response remains valid if this auxiliary write
+    cannot be completed.
     """
     if not session_id or not model_id:
         return
@@ -681,11 +681,10 @@ async def agent_run(
     )
     messages: list[dict[str, Any]] = []
     result_data: dict[str, Any] = {}
-    # Keep the request reference separate from the authoritative model that
-    # the provider reports on AssistantMessage.  The request may be a
-    # qualified ``profile:model`` value and is not proof that a reply was
-    # produced by that model.
-    last_model: str | None = None
+    # The provider-reported value is diagnostic only: gateways may rewrite the
+    # Profile-side model alias before returning AssistantMessage.model.
+    last_provider_model: str | None = None
+    assistant_responded = False
     # Track the CLI-assigned session id across retries — same role as in
     # agent_run_events. See the explanation there.
     current_resume_id: str | None = session_id
@@ -704,8 +703,10 @@ async def agent_run(
     attempt_resumable = False
 
     async def _run_one_attempt(resume_pending_turn: bool) -> None:
-        nonlocal last_model, current_resume_id, title_pending, attempt_resumable
-        last_model = None
+        nonlocal last_provider_model, assistant_responded
+        nonlocal current_resume_id, title_pending, attempt_resumable
+        last_provider_model = None
+        assistant_responded = False
         # A transport failure while reconnecting does not make the already
         # persisted pending turn disappear; the next attempt must still resume
         # it rather than fall back to the original prompt.
@@ -745,8 +746,9 @@ async def agent_run(
                             "message": error_text,
                         })
                     _audit_tool_uses(message, username, session_id)
+                    assistant_responded = True
                     if message.model:
-                        last_model = message.model
+                        last_provider_model = message.model
                     messages.append(serialize_assistant_message(message))
                 elif isinstance(message, UserMessage):
                     serialized = serialize_message(message)
@@ -849,14 +851,15 @@ async def agent_run(
             "api_error_status": last_error.get("api_error_status"),
         }
     else:
-        if last_model:
+        profile_model_id = getattr(options, "_priva_model_id", None)
+        if assistant_responded and profile_model_id:
             await _record_last_response_model(
                 new_sid or current_resume_id or session_id,
-                last_model,
+                profile_model_id,
                 getattr(options, "_priva_profile_id", None),
             )
         _audit_run_completed(
-            username, new_sid or session_id, result_data.get("usage"), last_model,
+            username, new_sid or session_id, result_data.get("usage"), last_provider_model,
             getattr(options, "_priva_profile_id", None),
         )
         # Unlike the title, this needs no settle: it never touches the CLI, so
@@ -881,6 +884,7 @@ async def _pump_stream_messages(
     username: str | None = None,
     session_id: str | None = None,
     model_tracker: list[str | None] | None = None,
+    assistant_response_tracker: list[bool] | None = None,
     prompt_suggestions_enabled: bool = False,
 ) -> None:
     try:
@@ -916,6 +920,8 @@ async def _pump_stream_messages(
                 continue
             if isinstance(message, AssistantMessage):
                 _audit_tool_uses(message, username, session_id)
+                if assistant_response_tracker is not None:
+                    assistant_response_tracker[0] = True
                 if model_tracker is not None and message.model:
                     model_tracker[0] = message.model
             await output_queue.put(
@@ -1173,9 +1179,10 @@ async def agent_run_events(
         })
 
     effective_prompt = _build_prompt_with_images(prompt, images, attachments)
-    # Track only models observed in assistant events.  A qualified request
-    # reference is not evidence that a response was produced by that model.
+    # Provider model ids are diagnostic only. The separate boolean records
+    # whether a real assistant response was produced this turn.
     model_tracker: list[str | None] = [None]
+    assistant_response_tracker = [False]
 
     if session_id:
         healed = heal_orphan_tool_uses(session_id, options.cwd)
@@ -1197,6 +1204,7 @@ async def agent_run_events(
         """
         nonlocal stream_id, current_resume_id, title_pending, attempt_resumable
         model_tracker[0] = None
+        assistant_response_tracker[0] = False
         # Preserve native-resume mode across transient reconnect failures.  The
         # pending turn is already on disk even if this CLI process never starts.
         attempt_resumable = resume_pending_turn
@@ -1226,6 +1234,7 @@ async def agent_run_events(
                     username,
                     stream_id,
                     model_tracker,
+                    assistant_response_tracker,
                     prompt_suggestions_enabled,
                 )
             )
@@ -1263,6 +1272,7 @@ async def agent_run_events(
                         username,
                         stream_id,
                         model_tracker,
+                        assistant_response_tracker,
                         prompt_suggestions_enabled,
                     )
                 )
@@ -1318,6 +1328,7 @@ async def agent_run_events(
                                     username,
                                     stream_id,
                                     model_tracker,
+                                    assistant_response_tracker,
                                     prompt_suggestions_enabled,
                                 )
                             )
@@ -1403,10 +1414,11 @@ async def agent_run_events(
                             model_tracker[0],
                             getattr(options, "_priva_profile_id", None),
                         )
-                        if model_tracker[0]:
+                        profile_model_id = getattr(options, "_priva_model_id", None)
+                        if assistant_response_tracker[0] and profile_model_id:
                             await _record_last_response_model(
                                 new_sid or current_resume_id or session_id,
-                                model_tracker[0],
+                                profile_model_id,
                                 getattr(options, "_priva_profile_id", None),
                             )
                         await session_meta.record_recent_activity(
@@ -1417,6 +1429,7 @@ async def agent_run_events(
                         # previous turn's model leak into a later result that
                         # has not emitted an assistant message yet.
                         model_tracker[0] = None
+                        assistant_response_tracker[0] = False
 
                     elif (
                         item["event"] == "tool_result"

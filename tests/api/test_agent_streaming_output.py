@@ -72,6 +72,36 @@ def test_sdk_options_preserve_partial_message_flag(monkeypatch, tmp_path, enable
     assert options.include_partial_messages is enabled
 
 
+def test_sdk_options_preserve_profile_side_model_identity(monkeypatch, tmp_path):
+    from priva_agent_runner.services.llm_profiles import ResolvedProfile
+    from priva_common.models.llm_profiles import LlmProfile
+
+    profile = LlmProfile(
+        id="gateway",
+        label="Gateway",
+        base_url="https://example.invalid",
+        auth_token="secret",
+        default_model="profile-model-alias",
+    )
+    monkeypatch.setattr(
+        options_module,
+        "resolve_model",
+        lambda _reference: ResolvedProfile(
+            profile=profile,
+            model="profile-model-alias",
+        ),
+    )
+
+    options = _build_options(
+        monkeypatch,
+        tmp_path,
+        model_override="gateway:profile-model-alias",
+    )
+
+    assert options._priva_profile_id == "gateway"
+    assert options._priva_model_id == "profile-model-alias"
+
+
 def test_stream_event_uses_stable_whitelisted_wire_envelope():
     message = StreamEvent(
         uuid="transport-event-uuid",

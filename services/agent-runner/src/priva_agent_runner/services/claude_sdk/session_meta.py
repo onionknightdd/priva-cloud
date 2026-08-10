@@ -21,7 +21,8 @@ ourselves in a single **account-level** index next to the SDK's data:
       "recaps":   { "<session_id>": {"text": str, "turns": int} },
       "last_response_models": {
         "<session_id>": {
-          "profile_id": str | None, "model_id": str, "observed_at": int
+          "profile_id": str, "model_id": str,
+          "model_source": "profile", "observed_at": int
         }
       },
       "tag_colors": { "<tag>": 0..99 }
@@ -373,10 +374,11 @@ def get_recap(session_id: str, meta: dict | None = None) -> dict | None:
 
 
 def get_last_response_model(session_id: str, meta: dict | None = None) -> dict | None:
-    """Return the latest observed response model for a session, if known.
+    """Return the Profile-side model selection for the latest response.
 
-    This is historical metadata and must not be used as the next run's
-    profile/model selection: the profile may have been deleted or changed.
+    Callers restoring a selection must still verify that the referenced
+    profile exists. Older entries may predate ``model_source`` and contain a
+    provider-reported id; use ``is_profile_model_metadata`` before trusting it.
     """
     data = meta if meta is not None else _read_raw()
     entry = data.get("last_response_models", {}).get(session_id)
@@ -392,6 +394,13 @@ def get_last_response_model(session_id: str, meta: dict | None = None) -> dict |
         "model_id": model_id,
         "observed_at": observed_at if isinstance(observed_at, int) else None,
     }
+
+
+def is_profile_model_metadata(session_id: str, meta: dict | None = None) -> bool:
+    """Whether an entry was written from the resolved Profile selection."""
+    data = meta if meta is not None else _read_raw()
+    entry = data.get("last_response_models", {}).get(session_id)
+    return isinstance(entry, dict) and entry.get("model_source") == "profile"
 
 
 # --- Writes (serialized read-modify-write) ------------------------------------
@@ -632,19 +641,21 @@ async def set_last_response_model(
     profile_id: str | None = None,
     observed_at: int | None = None,
 ) -> None:
-    """Persist the provider-reported model of the latest assistant response."""
+    """Persist the resolved Profile model used for the latest response."""
     if not session_id or not isinstance(model_id, str) or not model_id.strip():
         return
     model_id = model_id.strip()
     if not isinstance(profile_id, str) or not profile_id.strip():
-        profile_id = None
+        return
+    profile_id = profile_id.strip()
     if not isinstance(observed_at, int):
         observed_at = int(time.time() * 1000)
     async with _lock:
         data = _read_raw()
         data["last_response_models"][session_id] = {
-            "profile_id": profile_id.strip() if profile_id else None,
+            "profile_id": profile_id,
             "model_id": model_id,
+            "model_source": "profile",
             "observed_at": observed_at,
         }
         _write_raw(data)
