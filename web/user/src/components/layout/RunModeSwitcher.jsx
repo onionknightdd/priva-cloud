@@ -199,7 +199,7 @@ export default function RunModeSwitcher() {
           style={{
             height: 34,
             padding: 3,
-            background: 'var(--sidebar-hover-bg, var(--bg-elevated))',
+            background: 'var(--sidebar-mode-bg, var(--bg-elevated))',
             border: 'none',
             borderRadius: 10,
             opacity: locked ? 0.55 : 1,
@@ -213,7 +213,7 @@ export default function RunModeSwitcher() {
               position: 'absolute',
               top: 3,
               bottom: 3,
-              background: 'var(--sidebar-active-bg, var(--bg-surface))',
+              background: 'var(--sidebar-mode-selected-bg, var(--bg-surface))',
               borderRadius: 8,
               pointerEvents: 'none',
               zIndex: 0,
@@ -237,14 +237,14 @@ export default function RunModeSwitcher() {
                   width: 80,
                   minWidth: 80,
                   fontSize: 14,
-                  background: 'transparent',
+                  background: 'var(--sidebar-mode-tab-bg, transparent)',
                   border: 'none',
                   color: locked ? 'var(--text-dim)' : active ? 'var(--text-primary)' : 'var(--text-secondary)',
                   WebkitTextFillColor: locked ? 'var(--text-dim)' : active ? 'var(--text-primary)' : 'var(--text-secondary)',
                   opacity: 1,
                   zIndex: 1,
                   cursor: locked ? 'default' : 'pointer',
-                  transition: 'color 150ms ease',
+                  transition: 'background 150ms ease, color 150ms ease',
                 }}
                 title={locked ? t('sidebar.runModeLocked') : undefined}
               >

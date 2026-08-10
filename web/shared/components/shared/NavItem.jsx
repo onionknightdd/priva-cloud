@@ -48,9 +48,9 @@ export default function NavItem({
   const rowBackground = active && animatedSelection
     ? 'transparent'
     : active
-      ? 'var(--sidebar-active-bg, var(--bg-elevated))'
+      ? 'var(--sidebar-menu-selected-bg, var(--bg-elevated))'
       : hovered
-        ? 'var(--sidebar-hover-bg, var(--bg-elevated))'
+        ? 'var(--sidebar-menu-hover-bg, var(--bg-elevated))'
         : 'transparent'
   const rowHighlighted = active || hovered
 
@@ -91,7 +91,7 @@ export default function NavItem({
           duration={DURATION.canvas}
           ease={EASE_SPRING}
           animateInitial
-          style={{ background: 'var(--sidebar-active-bg, var(--bg-elevated))', border: 'none', borderRadius: 8 }}
+          style={{ background: 'var(--sidebar-menu-selected-bg, var(--bg-elevated))', border: 'none', borderRadius: 8 }}
         />
       )}
       <span

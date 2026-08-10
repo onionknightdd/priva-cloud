@@ -266,11 +266,25 @@
    primary text token so icons remain visible against the dark surface. */
 .sidebar-menu {
   --sidebar-icon-color: var(--text-primary);
-  --sidebar-hover-bg: color-mix(in srgb, var(--bg-elevated) 75%, var(--border) 25%);
-  --sidebar-active-bg: color-mix(in srgb, var(--bg-elevated) 25%, var(--border) 75%);
+  --sidebar-bg: rgb(13 17 23);
+  --sidebar-mode-bg: rgb(33 38 45);
+  --sidebar-mode-hover-bg: rgb(40 46 53);
+  --sidebar-mode-selected-bg: rgb(48 54 61);
+  --sidebar-menu-hover-bg: rgb(33 38 45);
+  --sidebar-menu-selected-bg: rgb(40 46 53);
+  --sidebar-session-hover-bg: rgb(28 33 40);
+  --sidebar-session-selected-bg: rgb(33 38 45);
 }
 [data-theme="light"] .sidebar-menu {
   --sidebar-icon-color: var(--sidebar-menu-text);
+  --sidebar-bg: rgb(245 245 245);
+  --sidebar-mode-bg: rgb(229 229 229);
+  --sidebar-mode-hover-bg: rgb(220 220 220);
+  --sidebar-mode-selected-bg: rgb(255 255 255);
+  --sidebar-menu-hover-bg: rgb(229 229 229);
+  --sidebar-menu-selected-bg: rgb(224 224 224);
+  --sidebar-session-hover-bg: rgb(235 235 235);
+  --sidebar-session-selected-bg: rgb(229 229 229);
 }
 .sidebar-menu .lucide {
   color: var(--sidebar-icon-color);
@@ -287,6 +301,9 @@
 .sidebar-menu .run-mode-switcher .run-mode-tab {
   border-radius: 8px !important;
 }
+.sidebar-menu .run-mode-switcher .run-mode-tab:not([aria-selected="true"]):not(:disabled):hover {
+  --sidebar-mode-tab-bg: var(--sidebar-mode-hover-bg);
+}
 .sidebar-menu .run-mode-switcher .run-mode-help-button,
 .run-mode-help-close {
   border-radius: 4px !important;
@@ -297,9 +314,11 @@
   border-radius: 8px;
   transition: background 150ms ease, color 150ms ease;
 }
-.sidebar-menu .project-group-row:hover,
+.sidebar-menu .project-group-row:hover {
+  background: var(--sidebar-session-hover-bg);
+}
 .sidebar-menu .sidebar-panel-header:hover {
-  background: var(--sidebar-hover-bg);
+  background: var(--sidebar-menu-hover-bg);
 }
 
 @keyframes sidebar-session-title-shimmer {
