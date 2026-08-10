@@ -37,7 +37,10 @@ import { getSplitParams } from '../utils/splitMode'
 import { parseTaskNotification } from '../utils/taskNotification'
 import { refreshSessionRecap } from '../utils/sessionRecap'
 import { isSdkTaskToolName } from '../utils/sdkTaskTracker'
-import { createStreamingBlockAssembler } from '../utils/streamingBlocks'
+import {
+  areStreamBlocksCompatible,
+  createStreamingBlockAssembler,
+} from '../utils/streamingBlocks'
 import { debugLog } from '@shared/utils/debugLog'
 import {
   findMatchingAskUserBlockIndex,
@@ -420,24 +423,37 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     const finishBlock = (entry, existing) => {
       // Reasoning signatures are protocol metadata, not display state.
       const { signature: _signature, ...safeBlock } = entry.block
+      const resolvedStreamKey = existing?._streamKey || entry.streamKey || null
       return {
         ...(existing || {}),
         ...safeBlock,
-        ...(entry.streamKey ? { _streamKey: entry.streamKey } : {}),
+        ...(resolvedStreamKey ? { _streamKey: resolvedStreamKey } : {}),
         _streamState: 'complete',
         startTime: existing?.startTime || entry.startTime,
         endTime: entry.endTime,
         processGroupId: existing?.processGroupId
-          || streamProcessGroups.get(entry.streamKey)
+          || streamProcessGroups.get(resolvedStreamKey)
           || eventGroupId,
       }
+    }
+    const uniqueCompatibleUnfinishedIndex = (blocks, entry) => {
+      const matches = []
+      blocks.forEach((block, index) => {
+        if (!block?._streamKey || !block._streamState || block._streamState === 'complete') return
+        if (!areStreamBlocksCompatible(block, entry.block)) return
+        matches.push(index)
+      })
+      return matches.length === 1 ? matches[0] : -1
     }
     const merge = (content) => {
       let next = content
       for (const { entry } of narrative) {
-        const index = entry.streamKey
+        let index = entry.streamKey
           ? next.findIndex((block) => block?._streamKey === entry.streamKey)
           : -1
+        if (index < 0 && entry.allowCompatibleFallback) {
+          index = uniqueCompatibleUnfinishedIndex(next, entry)
+        }
         if (index >= 0) {
           if (next === content) next = [...content]
           next[index] = finishBlock(entry, next[index])

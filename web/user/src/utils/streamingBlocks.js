@@ -13,6 +13,53 @@ function isVisibleText(block) {
   return block?.type === 'tool_use'
 }
 
+function normalizedNarrativeValue(block) {
+  const value = block?.type === 'text'
+    ? block.text
+    : block?.type === 'thinking'
+      ? block.thinking
+      : ''
+  return String(value || '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim()
+}
+
+export function areStreamBlocksCompatible(candidate, authoritative) {
+  if (!candidate || !authoritative || candidate.type !== authoritative.type) return false
+  if (authoritative.type === 'tool_use') {
+    return Boolean(candidate.id && authoritative.id && candidate.id === authoritative.id)
+  }
+  if (authoritative.type !== 'text' && authoritative.type !== 'thinking') return false
+
+  const candidateValue = normalizedNarrativeValue(candidate)
+  const authoritativeValue = normalizedNarrativeValue(authoritative)
+  return candidateValue === authoritativeValue
+    || candidateValue.startsWith(authoritativeValue)
+    || authoritativeValue.startsWith(candidateValue)
+}
+
+function candidateMatchesType(candidate, authoritative) {
+  if (!candidate || !authoritative || candidate.block.type !== authoritative.type) return false
+  if (authoritative.type !== 'tool_use') return true
+  return Boolean(authoritative.id && candidate.block.id === authoritative.id)
+}
+
+function firstMatchingCandidate(candidates, authoritative) {
+  return candidates.find((candidate) => (
+    !candidate.authoritative && candidateMatchesType(candidate, authoritative)
+  )) || null
+}
+
+function uniqueCompatibleCandidate(candidates, authoritative) {
+  const compatible = candidates.filter((candidate) => (
+    !candidate.authoritative
+    && candidateMatchesType(candidate, authoritative)
+    && areStreamBlocksCompatible(candidate.block, authoritative)
+  ))
+  return compatible.length === 1 ? compatible[0] : null
+}
+
 /**
  * Assemble Claude Agent SDK StreamEvent payloads into stable UI blocks.
  *
@@ -154,7 +201,13 @@ export function createStreamingBlockAssembler({
     if (event.type === 'message_start') {
       const messageId = event.message?.id
       if (!messageId) return false
-      lanes.set(lane, { messageId, sessionId: payload.session_id || null })
+      lanes.set(lane, { messageId, sessionId: payload.session_id || null, open: true })
+      return true
+    }
+
+    if (event.type === 'message_stop') {
+      const active = lanes.get(lane)
+      if (active) lanes.set(lane, { ...active, open: false })
       return true
     }
 
@@ -268,28 +321,28 @@ export function createStreamingBlockAssembler({
     flush()
     const parentToolUseId = message?.parent_tool_use_id || null
     const active = lanes.get(laneKey(parentToolUseId))
-    const messageId = message?.message_id || active?.messageId || null
+    const authoritativeMessageId = message?.message_id || null
     const content = Array.isArray(message?.content) ? message.content : []
     const available = [...blocks.values()]
       .filter((state) => (
         !state.authoritative &&
-        state.parentToolUseId === parentToolUseId &&
-        (!messageId || state.messageId === messageId)
+        state.parentToolUseId === parentToolUseId
       ))
       .sort((a, b) => a.index - b.index)
+    const exactMessageCandidates = authoritativeMessageId
+      ? available.filter((state) => state.messageId === authoritativeMessageId)
+      : []
+    const activeLaneCandidates = active?.messageId
+      ? available.filter((state) => state.messageId === active.messageId)
+      : []
 
     return content.map((block) => {
-      let state = null
-      if (block?.type === 'tool_use' && block.id) {
-        state = available.find((candidate) => (
-          !candidate.authoritative &&
-          candidate.block.type === 'tool_use' &&
-          candidate.block.id === block.id
-        )) || null
-      } else if (block?.type === 'text' || block?.type === 'thinking') {
-        state = available.find((candidate) => (
-          !candidate.authoritative && candidate.block.type === block.type
-        )) || null
+      // Prefer the provider identity when it is usable. A rewritten or missing
+      // id may fall back only inside the currently open lane; never carry a
+      // content match across a message_stop boundary into a later response.
+      let state = firstMatchingCandidate(exactMessageCandidates, block)
+      if (!state && active?.open) {
+        state = uniqueCompatibleCandidate(activeLaneCandidates, block)
       }
       if (state) {
         state.authoritative = true
@@ -298,9 +351,10 @@ export function createStreamingBlockAssembler({
       return {
         block,
         parentToolUseId,
-        messageId,
+        messageId: state?.messageId || authoritativeMessageId || active?.messageId || null,
         index: state?.index ?? null,
         streamKey: state?.key || null,
+        allowCompatibleFallback: !authoritativeMessageId && Boolean(active?.open),
         startTime: state?.block?.startTime || now(),
         endTime: now(),
       }
