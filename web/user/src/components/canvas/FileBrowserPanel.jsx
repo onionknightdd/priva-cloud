@@ -1090,6 +1090,7 @@ export default function FileBrowserPanel() {
           style={{
             height: MAIN_AREA_HEADER_HEIGHT,
             position: 'relative',
+            paddingLeft: 10,
             overflowX: fileTabsOverflow ? 'scroll' : 'hidden',
             overflowY: 'hidden',
           }}
