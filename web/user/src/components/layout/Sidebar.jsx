@@ -1307,7 +1307,7 @@ export default function Sidebar() {
         top: 'var(--navbar-height)',
         left: 0,
         bottom: 0,
-        background: 'var(--bg-surface)',
+        background: 'var(--bg-base)',
         borderRight: '1px solid var(--border)',
         transition: 'width 220ms cubic-bezier(0.16, 1, 0.3, 1)',
       }}

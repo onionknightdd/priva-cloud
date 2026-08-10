@@ -420,6 +420,9 @@ html, body {
 
 /* Main content density: one type/icon step smaller than the persistent sidebar. */
 .user-main-scope {
+  /* The main workspace owns the surface layer; cards and overlays keep their
+     existing semantic background tokens. */
+  --bg-base: var(--bg-surface);
   --text-xs: 10px;
   --text-sm: 11px;
   --text-base: 12px;
