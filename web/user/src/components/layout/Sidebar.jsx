@@ -166,7 +166,7 @@ function SessionItem({
         paddingRight: 8,
         // The active surface is a single Anime.js FLIP frame that moves from
         // the previously selected session to this row.
-        background: !isActive && hovered ? 'var(--bg-elevated)' : 'transparent',
+        background: !isActive && hovered ? 'var(--sidebar-hover-bg)' : 'transparent',
         borderRadius: 8,
         // Lift the whole row while its menu is open. Each session's content
         // creates a z-index layer, so elevating only the popup lets later rows
@@ -216,7 +216,7 @@ function SessionItem({
           duration={DURATION.canvas}
           ease={EASE_SPRING}
           animateInitial
-          style={{ background: 'var(--bg-elevated)', border: 'none', borderRadius: 8 }}
+          style={{ background: 'var(--sidebar-active-bg)', border: 'none', borderRadius: 8 }}
         />
       )}
       <div className="flex items-center gap-2 min-w-0" style={{ position: 'relative', zIndex: 1 }}>
@@ -1296,7 +1296,7 @@ export default function Sidebar() {
     flexShrink: 0,
     transition: 'color 150ms ease, background 150ms ease',
   }
-  const iconBtnIn = (e) => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.background = 'var(--bg-elevated)' }
+  const iconBtnIn = (e) => { e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.background = 'var(--sidebar-hover-bg)' }
   const iconBtnOut = (e) => { e.currentTarget.style.color = 'var(--text-dim)'; e.currentTarget.style.background = 'transparent' }
 
   return (
@@ -1376,7 +1376,7 @@ export default function Sidebar() {
           {/* New chat stays pinned below the run-mode switcher. Reducing the
               top inset from 6px to 4px tightens their spacing by 2px. */}
           <SlidingTabGroup id="sidebar-primary-expanded">
-          <div style={{ padding: '4px 16px 0', flexShrink: 0, background: 'var(--bg-surface)' }}>
+          <div style={{ padding: '4px 16px 0', flexShrink: 0, background: 'var(--bg-base)' }}>
             <NavItem scale="lg" icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
           </div>
 
@@ -1537,7 +1537,7 @@ export default function Sidebar() {
               zIndex: 4,
               height: 'var(--sidebar-project-sticky-height)',
               flexShrink: 0,
-              background: 'var(--bg-surface)',
+              background: 'var(--bg-base)',
             }}
           >
           <PanelHeader
@@ -1769,7 +1769,7 @@ export default function Sidebar() {
                         position: 'sticky',
                         top: 'var(--sidebar-project-sticky-height)',
                         zIndex: 3,
-                        background: 'var(--bg-surface)',
+                        background: 'var(--bg-base)',
                       }}
                     >
                     <div
@@ -1969,7 +1969,7 @@ export default function Sidebar() {
                   position: 'sticky',
                   top: 'var(--sidebar-project-sticky-height)',
                   zIndex: 3,
-                  background: 'var(--bg-surface)',
+                  background: 'var(--bg-base)',
                 }}
               >
               <div

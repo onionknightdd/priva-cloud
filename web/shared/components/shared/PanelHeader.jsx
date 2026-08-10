@@ -74,7 +74,7 @@ export default function PanelHeader({ label, onClick, title, open, actions = [],
               onMouseEnter={(e) => {
                 if (action.disabled) return
                 e.currentTarget.style.color = 'var(--text-secondary)'
-                e.currentTarget.style.background = 'var(--bg-elevated)'
+                e.currentTarget.style.background = 'var(--sidebar-hover-bg, var(--bg-elevated))'
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.color = action.active ? 'var(--text-secondary)' : 'var(--sidebar-icon-color, var(--text-dim))'

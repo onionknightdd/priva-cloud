@@ -45,12 +45,14 @@ export default function NavItem({
   const baseColor = active ? 'var(--text-primary)' : 'var(--text-secondary)'
   const large = scale === 'lg'
   const animatedSelection = Boolean(selectionLayoutId)
-  const rowHighlighted = active || hovered
   const rowBackground = active && animatedSelection
     ? 'transparent'
-    : rowHighlighted
-      ? 'var(--bg-elevated)'
-      : 'transparent'
+    : active
+      ? 'var(--sidebar-active-bg, var(--bg-elevated))'
+      : hovered
+        ? 'var(--sidebar-hover-bg, var(--bg-elevated))'
+        : 'transparent'
+  const rowHighlighted = active || hovered
 
   return (
     <button
@@ -89,7 +91,7 @@ export default function NavItem({
           duration={DURATION.canvas}
           ease={EASE_SPRING}
           animateInitial
-          style={{ background: 'var(--bg-elevated)', border: 'none', borderRadius: 8 }}
+          style={{ background: 'var(--sidebar-active-bg, var(--bg-elevated))', border: 'none', borderRadius: 8 }}
         />
       )}
       <span

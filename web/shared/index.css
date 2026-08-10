@@ -266,6 +266,8 @@
    primary text token so icons remain visible against the dark surface. */
 .sidebar-menu {
   --sidebar-icon-color: var(--text-primary);
+  --sidebar-hover-bg: color-mix(in srgb, var(--bg-elevated) 75%, var(--border) 25%);
+  --sidebar-active-bg: color-mix(in srgb, var(--bg-elevated) 25%, var(--border) 75%);
 }
 [data-theme="light"] .sidebar-menu {
   --sidebar-icon-color: var(--sidebar-menu-text);
@@ -297,7 +299,7 @@
 }
 .sidebar-menu .project-group-row:hover,
 .sidebar-menu .sidebar-panel-header:hover {
-  background: var(--bg-elevated);
+  background: var(--sidebar-hover-bg);
 }
 
 @keyframes sidebar-session-title-shimmer {
