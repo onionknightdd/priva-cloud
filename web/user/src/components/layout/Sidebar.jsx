@@ -1384,7 +1384,7 @@ export default function Sidebar() {
               scroll this shared viewport. Everything below New chat belongs
               to the moving content; New chat and the footer stay pinned. */}
           <div
-            className="overflow-y-auto flex flex-col"
+            className="overflow-y-auto"
             ref={listRef}
             onWheelCapture={(event) => {
               if (!event.target.closest?.('[data-sidebar-session-scroll-trigger]')) {
