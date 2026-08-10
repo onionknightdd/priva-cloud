@@ -48,7 +48,10 @@ export default function CanvasTabMenu() {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-y-auto px-2 py-2" style={{ minHeight: 0 }}>
+    <div
+      className="flex flex-1 flex-col justify-center overflow-y-auto px-2 py-2"
+      style={{ minHeight: 0, gap: 9 }}
+    >
       {availableItems.map((item) => {
         const Icon = item.icon
         return (
@@ -70,20 +73,22 @@ export default function CanvasTabMenu() {
               borderRadius: 2,
               color: item.danger ? 'var(--red)' : 'var(--text-secondary)',
               cursor: 'pointer',
-              fontSize: 12,
+              fontSize: 13,
               textAlign: 'left',
-              transition: 'background 150ms ease, color 150ms ease',
+              transition: 'background 150ms ease, color 150ms ease, border-radius 150ms ease',
             }}
             onMouseEnter={(event) => {
               event.currentTarget.style.background = 'var(--bg-elevated)'
               event.currentTarget.style.color = item.danger ? 'var(--red)' : 'var(--text-primary)'
+              event.currentTarget.style.borderRadius = '8px'
             }}
             onMouseLeave={(event) => {
               event.currentTarget.style.background = 'transparent'
               event.currentTarget.style.color = item.danger ? 'var(--red)' : 'var(--text-secondary)'
+              event.currentTarget.style.borderRadius = '2px'
             }}
           >
-            <Icon size={14} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+            <Icon size={15} strokeWidth={1.5} style={{ flexShrink: 0 }} />
             <span className="truncate" style={{ minWidth: 0 }}>{item.label}</span>
           </button>
         )

@@ -4,6 +4,7 @@ import useSidebarStore from '../../stores/sidebarStore'
 import { useResizable } from '@shared/hooks/useResizable'
 import ResizeHandle from '@shared/components/shared/ResizeHandle'
 import useCollapseWidth from '@shared/motion/useCollapseWidth'
+import { EASE_IN_OUT } from '@shared/motion/tokens'
 import ErrorBoundary from '../shared/ErrorBoundary'
 import CanvasHeader from '../canvas/CanvasHeader'
 import CanvasTabMenu from '../canvas/CanvasTabMenu'
@@ -19,6 +20,7 @@ import { isSplitPane } from '../../utils/splitMode'
 const CANVAS_MIN_WIDTH = 280
 const EMBEDDED_CANVAS_MIN_WIDTH = 160
 const CANVAS_MAX_PANE_RATIO = 2 / 3
+const CANVAS_ENTER_DURATION = 280
 
 function getFallbackPaneWidth(sidebarWidth, collapsed, embedded = false) {
   if (typeof window === 'undefined') return 0
@@ -86,7 +88,12 @@ export default function CanvasPanel() {
   // replacing the old hard mount/unmount + CSS width transition (which would
   // double-smooth the animator's per-frame writes).
   const open = canvasVisible && !canvasMinimized
-  const { mounted, rootRef } = useCollapseWidth({ open, width: effectiveCanvasWidth })
+  const { mounted, rootRef } = useCollapseWidth({
+    open,
+    width: effectiveCanvasWidth,
+    duration: CANVAS_ENTER_DURATION,
+    ease: EASE_IN_OUT,
+  })
 
   if (!mounted) return null
 
