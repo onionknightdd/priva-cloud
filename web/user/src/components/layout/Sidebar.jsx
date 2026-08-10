@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { Fragment, useEffect, useRef, useState, useMemo } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import {
   Trash2, ChevronDown, ChevronRight, FolderBookmark, MoreHorizontal,
@@ -1376,7 +1376,7 @@ export default function Sidebar() {
           {/* New chat stays pinned below the run-mode switcher. Reducing the
               top inset from 6px to 4px tightens their spacing by 2px. */}
           <SlidingTabGroup id="sidebar-primary-expanded">
-          <div style={{ padding: '4px 16px', flexShrink: 0 }}>
+          <div style={{ padding: '4px 16px 0', flexShrink: 0, background: 'var(--bg-surface)' }}>
             <NavItem scale="lg" icon={Plus} label={t('sidebar.newSession')} onClick={handleNewSession} />
           </div>
 
@@ -1395,7 +1395,7 @@ export default function Sidebar() {
           >
           <div className="flex flex-col" style={{ minHeight: '100%' }}>
           {/* Primary navigation — full-width rows aligned to the shared sidebar gutter. */}
-          <div style={{ padding: '0 16px 4px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ padding: '4px 16px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <NavItem scale="lg" icon={CalendarClock} label={t('sidebar.scheduler')} active={activeNavTab === 'scheduler'} selectionLayoutId="sidebar-primary-selection" onClick={() => setActiveNavTab('scheduler')} />
             {/* Keep each trigger and its animated submenu inside one stable
                 flex item. Otherwise removing the zero-height collapse shell
@@ -1535,6 +1535,7 @@ export default function Sidebar() {
               position: 'sticky',
               top: 0,
               zIndex: 4,
+              height: 'var(--sidebar-project-sticky-height)',
               flexShrink: 0,
               background: 'var(--bg-surface)',
             }}
@@ -1761,7 +1762,7 @@ export default function Sidebar() {
                 // otherwise this nested group intentionally starts collapsed.
                 const scheduledExpanded = filtersActive || !!expandedScheduledCwds[group.cwd]
                 return (
-                  <div key={group.cwd} style={{ marginBottom: 2 }}>
+                  <Fragment key={group.cwd}>
                     {/* Group header — toggle + (hover) workdir menu & new-chat */}
                     <div
                       style={{
@@ -1947,7 +1948,8 @@ export default function Sidebar() {
                         )}
                       </>
                     )}
-                  </div>
+                    <div aria-hidden="true" style={{ height: 2, flexShrink: 0 }} />
+                  </Fragment>
                 )
               })}
             </div>
