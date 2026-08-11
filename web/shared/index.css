@@ -122,6 +122,7 @@
   --bg-surface: #161b22;
   --bg-elevated: #21262d;
   --bg-overlay: #0d1117e6;
+  --chat-input-bg: var(--bg-elevated);
 
   --border-subtle: #21262d;
   --border: #30363d;
@@ -202,6 +203,7 @@
   --bg-surface:    #ffffff;
   --bg-elevated:   #f0f2f5;
   --bg-overlay:    #ffffffd9;
+  --chat-input-bg: rgb(246 245 246);
 
   --border-subtle: #dfe3e8;
   --border:        #c9cfd6;

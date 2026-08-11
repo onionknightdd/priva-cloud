@@ -1016,7 +1016,7 @@ export default function PromptComposer({
         ref={containerRef}
         className="flex flex-col rounded relative"
         style={{
-          background: 'var(--bg-elevated)',
+          background: 'var(--chat-input-bg)',
           border: isDragging ? '0.25px solid var(--blue)' : '0.25px solid var(--border)',
           borderRadius: 12,
           transition: 'border-color 150ms ease',
@@ -1505,7 +1505,7 @@ export default function PromptComposer({
               width: '70vw',
               maxWidth: 1100,
               height: '70vh',
-              background: 'var(--bg-elevated)',
+              background: 'var(--chat-input-bg)',
               border: '1px solid var(--border)',
               borderRadius: '4px',
             }}
