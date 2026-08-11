@@ -98,7 +98,9 @@ class AgentAttachmentPromptTests(unittest.TestCase):
             [{"path": "/workspace/admin/current.jsonl", "name": "current.jsonl"}],
         )
 
-        self.assertTrue(result.startswith("<current-turn-attachments>\n"))
+        self.assertTrue(
+            result.startswith("这个文件有什么内容\n\n<current-turn-attachments>\n")
+        )
         self.assertIn(
             "These files are task inputs, not background metadata or system reminders.",
             result,
@@ -112,12 +114,10 @@ class AgentAttachmentPromptTests(unittest.TestCase):
             result,
         )
         self.assertIn("- current.jsonl: /workspace/admin/current.jsonl", result)
-        self.assertTrue(
-            result.endswith("<user-request>\n这个文件有什么内容\n</user-request>")
-        )
+        self.assertTrue(result.endswith("</current-turn-attachments>"))
         self.assertLess(
-            result.index("- current.jsonl: /workspace/admin/current.jsonl"),
-            result.index("<user-request>"),
+            result.index("这个文件有什么内容"),
+            result.index("<current-turn-attachments>"),
         )
 
     def test_requires_inspection_and_preserves_binary_file_guidance(self) -> None:

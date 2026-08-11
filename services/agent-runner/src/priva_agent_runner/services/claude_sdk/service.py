@@ -215,6 +215,7 @@ def _build_prompt_with_attachments(prompt: str, attachments: list[dict] | None) 
             "- Do not register an input image with FileCanvas solely because Vision read it.\n"
         )
     return (
+        f"{prompt}\n\n"
         "<current-turn-attachments>\n"
         "The user attached the following file(s) to THIS message.\n"
         "These files are task inputs, not background metadata or system reminders.\n\n"
@@ -236,10 +237,7 @@ def _build_prompt_with_attachments(prompt: str, attachments: list[dict] | None) 
         "`mcp__FileCanvas__register_file` with the relevant final file path.\n\n"
         "Attached files:\n"
         f"{file_lines}\n"
-        "</current-turn-attachments>\n\n"
-        "<user-request>\n"
-        f"{prompt}\n"
-        "</user-request>"
+        "</current-turn-attachments>"
     )
 
 
