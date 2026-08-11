@@ -41,7 +41,7 @@ curl -X POST /api/sandbox/agent/run \
 |------|------|------|------|
 | message | string | 是 | 发送给 Agent 的消息 |
 | session_id | string | 否 | 会话 ID（传入则继续已有会话，不传则新建） |
-| run_mode | string | 否 | `agent`（默认，空 system prompt）或 `code`（Claude Code 原生 preset）。会话首次运行后永久锁定；恢复会话时省略该字段会继承已存模式 |
+| run_mode | string | 否 | `agent`（默认，仅使用平台固定 system reminder）或 `code`（Claude Code 原生 preset + 相同的平台固定 reminder）。会话首次运行后永久锁定；恢复会话时省略该字段会继承已存模式 |
 | permission_mode | string | 否 | 权限模式：`default`/`acceptEdits`/`plan`/`bypassPermissions` |
 | model | string | 否 | 指定模型（不传则使用默认） |
 | attachments | array | 否 | 附件列表（已上传文件的路径） |

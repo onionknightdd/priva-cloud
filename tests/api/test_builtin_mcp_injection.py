@@ -136,24 +136,60 @@ def _cli_command(options):
     return transport._build_command()
 
 
-def test_agent_mode_passes_explicit_empty_system_prompt(monkeypatch, tmp_path):
+def test_agent_mode_uses_wrapped_platform_system_prompt(monkeypatch, tmp_path):
+    config_dir = tmp_path / "claude-config"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
     options = _build_options(monkeypatch, tmp_path, run_mode="agent")
 
     command = _cli_command(options)
 
+    assert isinstance(options.system_prompt, str)
+    assert options.system_prompt.startswith("<system-reminder>\n")
+    assert options.system_prompt.endswith("\n</system-reminder>")
+    assert options.system_prompt.count("<system-reminder>") == 1
+    assert options.system_prompt.count("</system-reminder>") == 1
+    assert "`$HOME`" in options.system_prompt
+    assert "`$CLAUDE_CONFIG_DIR`" in options.system_prompt
+    assert f"set to `{config_dir}`" in options.system_prompt
     index = command.index("--system-prompt")
-    assert command[index + 1] == ""
+    assert command[index + 1] == options.system_prompt
     assert "--append-system-prompt" not in command
 
 
-def test_code_mode_uses_unmodified_claude_code_preset(monkeypatch, tmp_path):
+def test_code_mode_appends_same_wrapped_platform_prompt(monkeypatch, tmp_path):
+    config_dir = tmp_path / "claude-config"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    agent_options = _build_options(monkeypatch, tmp_path, run_mode="agent")
     options = _build_options(monkeypatch, tmp_path, run_mode="code")
 
     command = _cli_command(options)
 
-    assert options.system_prompt == {"type": "preset", "preset": "claude_code"}
+    assert options.system_prompt == {
+        "type": "preset",
+        "preset": "claude_code",
+        "append": agent_options.system_prompt,
+    }
     assert "--system-prompt" not in command
-    assert "--append-system-prompt" not in command
+    index = command.index("--append-system-prompt")
+    assert command[index + 1] == agent_options.system_prompt
+
+
+def test_platform_prompt_reads_config_dir_at_build_time(monkeypatch, tmp_path):
+    from priva_agent_runner.services.claude_sdk.system_prompt import (
+        build_injected_system_prompt,
+    )
+
+    first = tmp_path / "first-config"
+    second = tmp_path / "second-config"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(first))
+    first_prompt = build_injected_system_prompt()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(second))
+    second_prompt = build_injected_system_prompt()
+
+    assert f"set to `{first}`" in first_prompt
+    assert str(second) not in first_prompt
+    assert f"set to `{second}`" in second_prompt
+    assert str(first) not in second_prompt
 
 
 def test_dead_tools_and_request_denylist_are_combined(monkeypatch, tmp_path):

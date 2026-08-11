@@ -252,7 +252,8 @@ SettingsPopover 快捷菜单显示前 5 个标签 + API Doc 链接。
 ## Runtime（管理员）
 
 自定义 system prompt 和 Enterprise User Info prompt 注入已移除；Agent / Code
-模式都不支持 append 自定义 system prompt。
+模式都会注入平台固定的 system reminder，但都不支持用户 append 自定义
+system prompt。
 
 ### 历史保留
 

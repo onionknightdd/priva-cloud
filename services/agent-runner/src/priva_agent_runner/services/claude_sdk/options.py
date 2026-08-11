@@ -20,6 +20,7 @@ from priva_common.user_env import read_settings_env
 from ..llm_profiles import open_profile_settings_overlay, resolve_model
 from priva_common.workspace import get_workspace_for_username
 from priva_common.runtime_settings import read_runtime_settings
+from .system_prompt import build_run_system_prompt
 
 _logger = None
 
@@ -292,13 +293,9 @@ async def build_agent_options(
         include_hook_events=True,
         include_partial_messages=include_partial_messages,
         skills=enabled_skill_names,
-        # SDK 0.2.x serializes None as --system-prompt "". A pure preset
-        # object is the only representation that preserves Claude Code's
-        # native preset without passing a system-prompt flag.
-        system_prompt=(
-            "" if run_mode == "agent"
-            else {"type": "preset", "preset": "claude_code"}
-        ),
+        # Agent replaces the native prompt with platform reminders; Code keeps
+        # the Claude Code preset and appends the exact same reminder payload.
+        system_prompt=build_run_system_prompt(run_mode),
     )
     options._priva_run_mode = run_mode
     # Claude Agent SDK maps ``settings`` to --settings (highest user-controlled
