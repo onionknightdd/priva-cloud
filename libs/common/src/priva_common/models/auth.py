@@ -10,6 +10,13 @@ from .llm_profiles import LlmProfileSummary
 from .resource import QuickAction
 from .user_env import UserEnvSettings
 
+MIN_RESOURCE_CPU_CORES = 0.512
+MAX_RESOURCE_CPU_CORES = 4
+MIN_RESOURCE_MEMORY_MB = 1024
+MAX_RESOURCE_MEMORY_MB = 8192
+MIN_RESOURCE_VOLUME_GB = 1
+MAX_RESOURCE_VOLUME_GB = 1024
+
 
 class UserRecord(BaseModel):
     username: str
@@ -141,9 +148,21 @@ class UserUpdate(BaseModel):
     env: UserEnvSettings | None = None
     # runtime edit (admin edit drawer) — change runner type / resource spec live
     agent_runner_type: str | None = None
-    cpu_cores: float | None = None
-    memory_mb: int | None = None
-    volume_gb: int | None = None
+    cpu_cores: float | None = Field(
+        default=None,
+        ge=MIN_RESOURCE_CPU_CORES,
+        le=MAX_RESOURCE_CPU_CORES,
+    )
+    memory_mb: int | None = Field(
+        default=None,
+        ge=MIN_RESOURCE_MEMORY_MB,
+        le=MAX_RESOURCE_MEMORY_MB,
+    )
+    volume_gb: int | None = Field(
+        default=None,
+        ge=MIN_RESOURCE_VOLUME_GB,
+        le=MAX_RESOURCE_VOLUME_GB,
+    )
 
 
 class LoginRequest(BaseModel):
@@ -174,9 +193,21 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=8)
     display_name: str | None = Field(default=None, max_length=128)
     runner_type: str = "auto_scale"
-    cpu_cores: float = Field(default=1.0, ge=0.512, le=4)
-    memory_mb: int = Field(default=2048, ge=1024, le=8192)
-    volume_gb: int = Field(default=1, ge=1, le=1024)
+    cpu_cores: float = Field(
+        default=1.0,
+        ge=MIN_RESOURCE_CPU_CORES,
+        le=MAX_RESOURCE_CPU_CORES,
+    )
+    memory_mb: int = Field(
+        default=2048,
+        ge=MIN_RESOURCE_MEMORY_MB,
+        le=MAX_RESOURCE_MEMORY_MB,
+    )
+    volume_gb: int = Field(
+        default=1,
+        ge=MIN_RESOURCE_VOLUME_GB,
+        le=MAX_RESOURCE_VOLUME_GB,
+    )
     note: str | None = Field(default=None, max_length=1000)
 
 
