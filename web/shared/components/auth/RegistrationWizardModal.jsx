@@ -1,17 +1,57 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { animate } from 'animejs'
 import { Bot, Check, X, ChevronRight, ChevronLeft, Info } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { submitRegistration } from '../../api/auth'
 import useOverlayTransition from '../../motion/useOverlayTransition'
+import useReducedMotion from '../../motion/useReducedMotion'
 import StepSlide from '../../motion/StepSlide'
+import { DURATION, EASE_TAB } from '../../motion/tokens'
+import { AnimatedCollapse } from '../shared/Accordion'
 
-const RUNNER_TYPES = ['auto_scale', 'persistent']
 const MIN_CPU_CORES = 0.512
 const MAX_CPU_CORES = 4
 const MIN_MEMORY_MB = 1024
-const MAX_MEMORY_MB = 4096
+const MAX_MEMORY_MB = 8192
 const MIN_VOLUME_GB = 1
 const MAX_VOLUME_GB = 1024
+const PROFILE_OPTION_HEIGHT = 36
+const PROFILE_OPTION_GAP = 4
+const PROFILE_DESCRIPTION_PADDING = 8
+const PROFILE_DESCRIPTION_FALLBACK_HEIGHT = 40
+
+const RESOURCE_PROFILES = [
+  {
+    id: 'available',
+    labelKey: 'auth.regResourceAvailable',
+    descriptionKey: 'auth.regResourceAvailableDesc',
+    cpuCores: '2',
+    memoryMb: '2048',
+    volumeGb: '10',
+  },
+  {
+    id: 'lightweight',
+    labelKey: 'auth.regResourceLightweight',
+    descriptionKey: 'auth.regResourceLightweightDesc',
+    cpuCores: '2',
+    memoryMb: '4096',
+    volumeGb: '50',
+  },
+  {
+    id: 'advanced',
+    labelKey: 'auth.regResourceAdvanced',
+    descriptionKey: 'auth.regResourceAdvancedDesc',
+    cpuCores: '4',
+    memoryMb: '8192',
+    volumeGb: '100',
+  },
+  {
+    id: 'custom',
+    labelKey: 'auth.regResourceCustom',
+    descriptionKey: 'auth.regResourceCustomDesc',
+    custom: true,
+  },
+]
 
 function validateNumberField(value, { min, max, integer = false }) {
   if (value == null || String(value).trim() === '') return 'number'
@@ -23,46 +63,76 @@ function validateNumberField(value, { min, max, integer = false }) {
   return null
 }
 
-function NumberField({ id, label, value, onChange, unit, min, max, step: stp, error, inputStyle, focusProps }) {
+function NumberField({
+  id,
+  label,
+  value,
+  onChange,
+  unit,
+  min,
+  nativeMin = min,
+  max,
+  step: stp,
+  error,
+  inputStyle,
+  focusProps,
+  disabled,
+}) {
   return (
-    <div className="flex items-center gap-3 min-w-0">
-      <label
-        htmlFor={id}
-        className="text-xs uppercase flex-shrink-0"
-        style={{ color: 'var(--text-secondary)', letterSpacing: '0.06em', fontWeight: 600, width: 64 }}
-      >
-        {label}
-      </label>
-      <input
-        id={id}
-        type="number"
-        value={value}
-        min={min}
-        max={max}
-        step={stp}
-        aria-label={label}
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? `${id}-error` : undefined}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={(e) => {
-          if (error) {
-            e.target.style.borderColor = 'var(--red)'
-            return
-          }
-          focusProps?.onFocus?.(e)
-        }}
-        onBlur={(e) => {
-          if (error) {
-            e.target.style.borderColor = 'var(--red)'
-            return
-          }
-          focusProps?.onBlur?.(e)
-        }}
-        style={{ ...inputStyle, borderColor: error ? 'var(--red)' : undefined }}
-      />
-      <span className="text-xs font-light flex-shrink-0" style={{ color: 'var(--text-dim)' }}>
-        {unit}
-      </span>
+    <div className="flex flex-col gap-1 min-w-0">
+      <div className="flex items-center gap-2 min-w-0">
+        <label
+          htmlFor={id}
+          className="text-xs uppercase flex-shrink-0"
+          style={{ color: 'var(--text-secondary)', letterSpacing: '0.06em', fontWeight: 600, width: 44 }}
+        >
+          {label}
+        </label>
+        <div className="flex items-center gap-2 min-w-0" style={{ marginLeft: 'auto' }}>
+          <input
+            id={id}
+            type="number"
+            value={value}
+            min={nativeMin}
+            max={max}
+            step={stp}
+            disabled={disabled}
+            aria-label={label}
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? `${id}-error` : undefined}
+            onChange={(e) => onChange(e.target.value)}
+            onFocus={(e) => {
+              if (error) {
+                e.target.style.borderColor = 'var(--red)'
+                return
+              }
+              focusProps?.onFocus?.(e)
+            }}
+            onBlur={(e) => {
+              if (error) {
+                e.target.style.borderColor = 'var(--red)'
+                return
+              }
+              focusProps?.onBlur?.(e)
+            }}
+            style={{
+              ...inputStyle,
+              background: disabled ? 'var(--bg-elevated)' : inputStyle.background,
+              color: disabled ? 'var(--text-dim)' : inputStyle.color,
+              WebkitTextFillColor: disabled ? 'var(--text-dim)' : undefined,
+              borderColor: error ? 'var(--red)' : disabled ? 'var(--border-subtle)' : undefined,
+              cursor: disabled ? 'not-allowed' : 'text',
+              opacity: disabled ? 0.72 : 1,
+            }}
+          />
+          <span
+            className="text-xs flex-shrink-0"
+            style={{ color: 'var(--text-dim)', width: 36, textAlign: 'left' }}
+          >
+            {unit}
+          </span>
+        </div>
+      </div>
       {error && (
         <span
           id={`${id}-error`}
@@ -74,6 +144,7 @@ function NumberField({ id, label, value, onChange, unit, min, max, step: stp, er
             color: 'var(--red)',
             fontWeight: 400,
             lineHeight: '16px',
+            marginLeft: 52,
             paddingLeft: 6,
             wordBreak: 'break-word',
             overflowWrap: 'break-word',
@@ -86,9 +157,73 @@ function NumberField({ id, label, value, onChange, unit, min, max, step: stp, er
   )
 }
 
+function ResourceProfileOption({
+  profile,
+  label,
+  description,
+  descriptionHeight,
+  selected,
+  onSelect,
+}) {
+  const descriptionId = `registration-resource-${profile.id}-description`
+  return (
+    <div className="flex flex-col min-w-0" style={{ position: 'relative', zIndex: 1 }}>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={selected}
+        aria-describedby={selected ? descriptionId : undefined}
+        className="flex items-center px-3 text-sm font-semibold min-w-0"
+        style={{
+          width: '100%',
+          height: PROFILE_OPTION_HEIGHT,
+          background: 'transparent',
+          border: 'none',
+          borderRadius: 4,
+          color: selected ? 'var(--blue)' : 'var(--text-secondary)',
+          cursor: 'pointer',
+          textAlign: 'left',
+          transition: 'color 150ms ease',
+        }}
+        onClick={onSelect}
+      >
+        {label}
+      </button>
+      <AnimatedCollapse
+        open={selected}
+        heightDuration={DURATION.panel}
+        opacityDuration={DURATION.hover}
+        heightEase={EASE_TAB}
+        opacityEase={EASE_TAB}
+        innerStyle={{
+          height: descriptionHeight,
+          boxSizing: 'border-box',
+          padding: `2px 12px ${PROFILE_DESCRIPTION_PADDING - 2}px`,
+        }}
+      >
+        <span
+          id={descriptionId}
+          data-resource-profile-description={selected ? profile.id : undefined}
+          aria-hidden={!selected}
+          className="text-xs block"
+          style={{
+            color: 'var(--text-secondary)',
+            lineHeight: '16px',
+            wordBreak: 'break-word',
+            overflowWrap: 'break-word',
+          }}
+        >
+          {description}
+        </span>
+      </AnimatedCollapse>
+    </div>
+  )
+}
+
 function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
   const { t } = useTranslation()
   const [step, setStep] = useState(1)
+  const reducedMotion = useReducedMotion()
 
   // Step 1 — account
   const [username, setUsername] = useState('')
@@ -98,9 +233,80 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
 
   // Step 2 — runner & resources
   const [runnerType, setRunnerType] = useState('auto_scale')
-  const [cpuCores, setCpuCores] = useState('1')
-  const [memoryMb, setMemoryMb] = useState('2048')
-  const [volumeGb, setVolumeGb] = useState('1')
+  const [resourceProfileId, setResourceProfileId] = useState('available')
+  const [customResources, setCustomResources] = useState({
+    cpuCores: '2',
+    memoryMb: '2048',
+    volumeGb: '10',
+  })
+  const resourceOptionsRef = useRef(null)
+  const resourceIndicatorRef = useRef(null)
+  const resourceIndicatorAnimationRef = useRef(null)
+  const resourceIndicatorMeasuredRef = useRef(false)
+  const resourceDescriptionMeasureRef = useRef(null)
+  const [resourceDescriptionHeight, setResourceDescriptionHeight] = useState(PROFILE_DESCRIPTION_FALLBACK_HEIGHT)
+
+  const selectedResourceProfile = RESOURCE_PROFILES.find(({ id }) => id === resourceProfileId) || RESOURCE_PROFILES[0]
+  const selectedResourceProfileIndex = Math.max(0, RESOURCE_PROFILES.findIndex(({ id }) => id === resourceProfileId))
+  const usingCustomResources = selectedResourceProfile.custom === true
+  const activeResources = usingCustomResources ? customResources : selectedResourceProfile
+  const { cpuCores, memoryMb, volumeGb } = activeResources
+  const resourceDescriptionMeasureKey = RESOURCE_PROFILES
+    .map(({ descriptionKey }) => t(descriptionKey))
+    .join('\u0000')
+  const resourceOptionsHeight =
+    (RESOURCE_PROFILES.length * PROFILE_OPTION_HEIGHT)
+    + ((RESOURCE_PROFILES.length - 1) * PROFILE_OPTION_GAP)
+    + resourceDescriptionHeight
+
+  useLayoutEffect(() => {
+    const measureRoot = resourceDescriptionMeasureRef.current
+    const optionsRoot = resourceOptionsRef.current
+    if (!measureRoot) return undefined
+
+    const measure = () => {
+      const textHeight = Array.from(measureRoot.children).reduce(
+        (maximum, node) => Math.max(maximum, Math.ceil(node.getBoundingClientRect().height)),
+        16
+      )
+      const nextHeight = textHeight + PROFILE_DESCRIPTION_PADDING
+      setResourceDescriptionHeight((current) => current === nextHeight ? current : nextHeight)
+    }
+
+    measure()
+    if (typeof ResizeObserver === 'undefined') return undefined
+
+    const observer = new ResizeObserver(measure)
+    observer.observe(measureRoot)
+    if (optionsRoot) observer.observe(optionsRoot)
+    return () => observer.disconnect()
+  }, [resourceDescriptionMeasureKey])
+
+  useLayoutEffect(() => {
+    const indicator = resourceIndicatorRef.current
+    if (!indicator) return undefined
+
+    const top = selectedResourceProfileIndex * (PROFILE_OPTION_HEIGHT + PROFILE_OPTION_GAP)
+    const height = PROFILE_OPTION_HEIGHT + resourceDescriptionHeight
+    resourceIndicatorAnimationRef.current?.cancel()
+    indicator.style.opacity = '1'
+
+    if (!resourceIndicatorMeasuredRef.current || reducedMotion) {
+      indicator.style.top = `${top}px`
+      indicator.style.height = `${height}px`
+      resourceIndicatorMeasuredRef.current = true
+      return undefined
+    }
+
+    resourceIndicatorAnimationRef.current = animate(indicator, {
+      top: `${top}px`,
+      height: `${height}px`,
+      duration: DURATION.panel,
+      ease: EASE_TAB,
+      onComplete: () => { resourceIndicatorAnimationRef.current = null },
+    })
+    return () => resourceIndicatorAnimationRef.current?.cancel()
+  }, [reducedMotion, resourceDescriptionHeight, selectedResourceProfileIndex])
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -130,6 +336,10 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
     'auth.regVolumeRange'
   )
   const resourceValid = !cpuError && !memoryError && !volumeError
+
+  const updateCustomResource = (field) => (value) => {
+    setCustomResources((current) => ({ ...current, [field]: value }))
+  }
 
   const handleSubmit = async () => {
     if (!resourceValid) return
@@ -173,7 +383,10 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
   const numberInputStyle = {
     ...inputStyle,
     width: 96,
+    minWidth: 72,
+    padding: '8px 10px',
     fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
+    textAlign: 'right',
   }
 
   const focusProps = {
@@ -200,13 +413,14 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
   const RunnerCard = ({ type, desc, selected, onSelect }) => (
     <button
       type="button"
-      className="flex items-start gap-3 px-3 py-3 text-left flex-1 min-w-0"
+      aria-pressed={selected}
+      className="flex items-start gap-3 px-3 py-2 flex-1 min-w-0"
       style={{
         background: selected ? 'var(--bg-elevated)' : 'transparent',
         border: '1px solid var(--border)',
-        borderLeft: `2px solid ${selected ? 'var(--blue)' : 'var(--border)'}`,
         borderRadius: 4,
         cursor: 'pointer',
+        textAlign: 'left',
         transition: 'background 150ms ease, border-color 150ms ease',
       }}
       onClick={onSelect}
@@ -236,7 +450,7 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
         >
           {type}
         </span>
-        <span className="text-xs font-light" style={{ color: 'var(--text-dim)' }}>
+        <span className="text-xs" style={{ color: 'var(--text-dim)' }}>
           {desc}
         </span>
       </span>
@@ -314,7 +528,7 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
         style={{
           width: 480,
           maxWidth: '90%',
-          maxHeight: '80vh',
+          maxHeight: 'calc(100vh - 32px)',
           overflowY: 'auto',
           background: 'var(--bg-surface)',
           border: '1px solid var(--border)',
@@ -502,47 +716,124 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-2">
                     <span style={labelStyle}>{t('auth.regResourceRequest')}</span>
-                    <NumberField
-                      id="registration-cpu"
-                      label={t('auth.regCpu')}
-                      value={cpuCores}
-                      onChange={setCpuCores}
-                      unit={t('auth.regCpuUnit')}
-                      min={MIN_CPU_CORES}
-                      max={MAX_CPU_CORES}
-                      step={0.001}
-                      error={cpuError}
-                      inputStyle={numberInputStyle}
-                      focusProps={focusProps}
-                    />
-                    <NumberField
-                      id="registration-memory"
-                      label={t('auth.regMemory')}
-                      value={memoryMb}
-                      onChange={setMemoryMb}
-                      unit={t('auth.regMemoryUnit')}
-                      min={MIN_MEMORY_MB}
-                      max={MAX_MEMORY_MB}
-                      step={256}
-                      error={memoryError}
-                      inputStyle={numberInputStyle}
-                      focusProps={focusProps}
-                    />
-                    <NumberField
-                      id="registration-volume"
-                      label={t('auth.regVolume')}
-                      value={volumeGb}
-                      onChange={setVolumeGb}
-                      unit={t('auth.regVolumeUnit')}
-                      min={MIN_VOLUME_GB}
-                      max={MAX_VOLUME_GB}
-                      step={1}
-                      error={volumeError}
-                      inputStyle={numberInputStyle}
-                      focusProps={focusProps}
-                    />
+                    <div className="flex items-stretch min-w-0">
+                      <div
+                        className="flex flex-col flex-shrink-0 min-w-0"
+                        style={{ width: '38%', paddingRight: 12 }}
+                      >
+                        <div
+                          ref={resourceOptionsRef}
+                          className="relative flex flex-col gap-1 min-w-0"
+                          role="radiogroup"
+                          aria-label={t('auth.regResourceRequest')}
+                          style={{ height: resourceOptionsHeight }}
+                        >
+                          <span
+                            ref={resourceIndicatorRef}
+                            data-resource-profile-indicator
+                            style={{
+                              position: 'absolute',
+                              left: 0,
+                              right: 0,
+                              height: PROFILE_OPTION_HEIGHT + resourceDescriptionHeight,
+                              background: 'var(--bg-elevated)',
+                              borderRadius: 4,
+                              pointerEvents: 'none',
+                              zIndex: 0,
+                            }}
+                          />
+                          {RESOURCE_PROFILES.map((profile) => (
+                            <ResourceProfileOption
+                              key={profile.id}
+                              profile={profile}
+                              label={t(profile.labelKey)}
+                              description={t(profile.descriptionKey)}
+                              descriptionHeight={resourceDescriptionHeight}
+                              selected={profile.id === resourceProfileId}
+                              onSelect={() => setResourceProfileId(profile.id)}
+                            />
+                          ))}
+                          <div
+                            ref={resourceDescriptionMeasureRef}
+                            aria-hidden="true"
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 12,
+                              right: 12,
+                              visibility: 'hidden',
+                              pointerEvents: 'none',
+                              zIndex: -1,
+                            }}
+                          >
+                            {RESOURCE_PROFILES.map((profile) => (
+                              <span
+                                key={profile.id}
+                                className="text-xs block"
+                                style={{
+                                  lineHeight: '16px',
+                                  wordBreak: 'break-word',
+                                  overflowWrap: 'break-word',
+                                }}
+                              >
+                                {t(profile.descriptionKey)}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div
+                        className="flex flex-col justify-center gap-3 flex-1 min-w-0"
+                        style={{ borderLeft: '1px solid var(--border)', paddingLeft: 12 }}
+                      >
+                        <NumberField
+                          id="registration-cpu"
+                          label={t('auth.regCpu')}
+                          value={cpuCores}
+                          onChange={updateCustomResource('cpuCores')}
+                          unit={t('auth.regCpuUnit')}
+                          min={MIN_CPU_CORES}
+                          nativeMin={0}
+                          max={MAX_CPU_CORES}
+                          step={0.5}
+                          error={cpuError}
+                          inputStyle={numberInputStyle}
+                          focusProps={focusProps}
+                          disabled={!usingCustomResources}
+                        />
+                        <NumberField
+                          id="registration-memory"
+                          label={t('auth.regMemory')}
+                          value={memoryMb}
+                          onChange={updateCustomResource('memoryMb')}
+                          unit={t('auth.regMemoryUnit')}
+                          min={MIN_MEMORY_MB}
+                          max={MAX_MEMORY_MB}
+                          step={512}
+                          error={memoryError}
+                          inputStyle={numberInputStyle}
+                          focusProps={focusProps}
+                          disabled={!usingCustomResources}
+                        />
+                        <NumberField
+                          id="registration-volume"
+                          label={t('auth.regVolume')}
+                          value={volumeGb}
+                          onChange={updateCustomResource('volumeGb')}
+                          unit={t('auth.regVolumeUnit')}
+                          min={MIN_VOLUME_GB}
+                          max={MAX_VOLUME_GB}
+                          step={10}
+                          error={volumeError}
+                          inputStyle={numberInputStyle}
+                          focusProps={focusProps}
+                          disabled={!usingCustomResources}
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between pt-2">
@@ -562,6 +853,7 @@ function RegistrationWizardBody({ onClose, active, panelRef, backdropRef }) {
                     <ReviewRow label={t('admin.username')} value={username} />
                     <ReviewRow label={t('auth.displayName')} value={displayName} />
                     <ReviewRow label={t('auth.regRunnerType')} value={runnerType} />
+                    <ReviewRow label={t('auth.regResourceProfile')} value={t(selectedResourceProfile.labelKey)} />
                     <ReviewRow label={t('auth.regCpu')} value={`${cpuCores} ${t('auth.regCpuUnit')}`} />
                     <ReviewRow label={t('auth.regMemory')} value={`${memoryMb} ${t('auth.regMemoryUnit')}`} />
                     <ReviewRow label={t('auth.regVolume')} value={`${volumeGb} ${t('auth.regVolumeUnit')}`} />
