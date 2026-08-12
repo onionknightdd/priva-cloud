@@ -1,5 +1,9 @@
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { animate } from 'animejs'
 import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { EASE_TAB } from '@shared/motion/tokens'
+import { useReducedMotion } from '@shared/motion/useReducedMotion'
 import useChatStore from '../../stores/chatStore'
 
 /**
@@ -13,17 +17,75 @@ import useChatStore from '../../stores/chatStore'
  * position. Waiting also matches when the text is refreshed: the backend only
  * regenerates once a turn has finished.
  */
-export default function SessionRecap() {
+export default function SessionRecap({ onHeightChange }) {
   const { t } = useTranslation()
+  const recapRef = useRef(null)
+  const dismissAnimationRef = useRef(null)
+  const [closing, setClosing] = useState(false)
+  const reducedMotion = useReducedMotion()
   const recap = useChatStore((s) => s.recap)
   const dismissed = useChatStore((s) => s.recapDismissed)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const dismissRecap = useChatStore((s) => s.dismissRecap)
+  const visible = Boolean(recap) && !dismissed && !isStreaming
 
-  if (!recap || dismissed || isStreaming) return null
+  useLayoutEffect(() => {
+    if (!visible) {
+      onHeightChange?.(0)
+      setClosing(false)
+      return undefined
+    }
+
+    const element = recapRef.current
+    if (!element) return undefined
+    const reportHeight = () => {
+      onHeightChange?.(Math.ceil(element.getBoundingClientRect().height))
+    }
+
+    reportHeight()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(reportHeight)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [onHeightChange, visible, recap])
+
+  useEffect(() => () => dismissAnimationRef.current?.cancel(), [])
+
+  const handleDismiss = () => {
+    const element = recapRef.current
+    if (!element || closing || reducedMotion) {
+      onHeightChange?.(0)
+      dismissRecap()
+      return
+    }
+
+    setClosing(true)
+    dismissAnimationRef.current?.cancel()
+    element.style.height = `${element.getBoundingClientRect().height}px`
+    element.style.overflow = 'hidden'
+    element.style.willChange = 'height, opacity, transform'
+    void element.offsetHeight
+    dismissAnimationRef.current = animate(element, {
+      height: '0px',
+      opacity: 0,
+      translateY: '4px',
+      duration: 250,
+      ease: EASE_TAB,
+      onUpdate: () => {
+        onHeightChange?.(Math.ceil(element.getBoundingClientRect().height))
+      },
+      onComplete: () => {
+        dismissAnimationRef.current = null
+        onHeightChange?.(0)
+        dismissRecap()
+      },
+    })
+  }
+
+  if (!visible) return null
 
   return (
-    <div className="flex-shrink-0" style={{ background: 'var(--bg-base)' }}>
+    <div ref={recapRef} className="flex-shrink-0" style={{ pointerEvents: 'none' }}>
       {/* Same track as ChatInput's inner column so the quote bar lines up
           with the composer's left edge. */}
       <div
@@ -32,6 +94,8 @@ export default function SessionRecap() {
           maxWidth: 'none',
           marginLeft: 'var(--session-summary-track-inline-margin, max(10%, calc(50% - 450px)))',
           marginRight: 'var(--session-summary-track-inline-margin, max(10%, calc(50% - 450px)))',
+          background: 'var(--bg-base)',
+          pointerEvents: closing ? 'none' : 'auto',
           transition: 'margin-left var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1)), margin-right var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1))',
         }}
       >
@@ -64,7 +128,8 @@ export default function SessionRecap() {
           </span>
           <button
             type="button"
-            onClick={dismissRecap}
+            onClick={handleDismiss}
+            disabled={closing}
             title={t('chat.recapDismiss')}
             aria-label={t('chat.recapDismiss')}
             className="flex-shrink-0 inline-flex items-center justify-center"

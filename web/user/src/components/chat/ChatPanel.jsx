@@ -395,6 +395,7 @@ export default function ChatPanel() {
   const canvasOpen = canvasVisible && !canvasMinimized
   const summaryVisible = summaryOpen && !canvasOpen
   const [summaryCardRightInset, setSummaryCardRightInset] = useState(12)
+  const [recapAnchorHeight, setRecapAnchorHeight] = useState(0)
   const sessionTitleInputMeasureRef = useRef(null)
   const [sessionTitleInputWidth, setSessionTitleInputWidth] = useState(0)
   const sessionTitleHandledRef = useRef(false)
@@ -799,18 +800,25 @@ export default function ChatPanel() {
       </SummaryAwareLayout>
       <MessageListBoundary resetKey={sessionId ? `${sessionId}:${messages.length}` : `draft:${messages.length}`}>
         <Suspense fallback={<div className="flex-1" style={{ background: 'var(--bg-base)' }} />}>
-          <MessageList />
+          <MessageList bottomInset={recapAnchorHeight} />
         </Suspense>
       </MessageListBoundary>
-      <SummaryAwareLayout className="flex-shrink-0" style={{ background: 'var(--bg-base)' }}>
-        <div style={SUMMARY_AWARE_TRACK_STYLE}>
-          <TaskProgressCapsule />
+      <SummaryAwareLayout className="flex-shrink-0" style={{ position: 'relative', zIndex: 30 }}>
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: '100%',
+            pointerEvents: 'none',
+            zIndex: 1,
+          }}
+        >
+          <div style={{ ...SUMMARY_AWARE_TRACK_STYLE, pointerEvents: 'none' }}>
+            <TaskProgressCapsule />
+          </div>
+          <SessionRecap onHeightChange={setRecapAnchorHeight} />
         </div>
-      </SummaryAwareLayout>
-      <SummaryAwareLayout className="flex-shrink-0">
-        <SessionRecap />
-      </SummaryAwareLayout>
-      <SummaryAwareLayout className="flex-shrink-0">
         <ChatInput cwd={activeCwd} cwdPlacement="below" summaryAware />
       </SummaryAwareLayout>
       <SessionSummaryOverlay

@@ -1,5 +1,24 @@
 # Priva — Claude Agent SDK Project Rules
 
+## Frontend-only changes — mandatory build + hotload
+
+Whenever a completed change affects only frontend files, immediately build the affected SPA and hotload the generated `dist/` into the currently running `control-panel` Pod. Do this automatically after every frontend-only change; do not wait for a separate user request.
+
+```bash
+# Build the affected SPA (use build:admin for admin-only changes, or build for both).
+cd web && npm run build:user
+
+# From the repository root, hotload the user SPA.
+POD=$(kubectl get pods -n priva-cloud -l app=control-panel \
+  --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp \
+  -o jsonpath='{.items[-1].metadata.name}')
+tar -C web/user/dist -cf - . \
+  | kubectl exec -i -n priva-cloud "$POD" -- \
+      tar -C /app/web/user/dist --warning=no-unknown-keyword -xf -
+```
+
+For admin-only changes, replace `web/user/dist` and `/app/web/user/dist` with the corresponding admin paths. After hotloading, verify that the Pod serves the newly generated hashed asset. Frontend hotload does not require an image rebuild or Pod restart.
+
 ## WebUI design
 
 > Full design spec: `web/design-spec.md`. This file is the executable summary.

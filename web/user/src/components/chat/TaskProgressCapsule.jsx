@@ -40,7 +40,7 @@ function TaskStatusIcon({ status, size = 16 }) {
   return <Circle size={size} strokeWidth={1.5} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
 }
 
-function HoverMarquee({ children, title }) {
+function HoverMarquee({ children }) {
   const viewportRef = useRef(null)
   const textRef = useRef(null)
   const animationRef = useRef(null)
@@ -106,7 +106,6 @@ function HoverMarquee({ children, title }) {
   return (
     <span
       ref={viewportRef}
-      title={title}
       onMouseEnter={start}
       onMouseLeave={reset}
       style={{
@@ -164,6 +163,7 @@ export default function TaskProgressCapsule() {
         minWidth: 0,
         marginBottom: 8,
         boxSizing: 'border-box',
+        pointerEvents: 'none',
       }}
     >
       <AnimatedCollapse
@@ -188,6 +188,7 @@ export default function TaskProgressCapsule() {
               background: 'var(--bg-surface)',
               border: '1px solid var(--border)',
               borderRadius: 14,
+              pointerEvents: 'auto',
             }}
           >
             {tasks.length > 0 ? (
@@ -213,7 +214,7 @@ export default function TaskProgressCapsule() {
                           lineHeight: '20px',
                         }}
                       >
-                        <HoverMarquee title={t('chat.taskProgressTask', { index: index + 1, subject })}>
+                        <HoverMarquee>
                           {t('chat.taskProgressTask', { index: index + 1, subject })}
                         </HoverMarquee>
                       </div>
@@ -241,7 +242,7 @@ export default function TaskProgressCapsule() {
         type="button"
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
-        title={expanded ? t('chat.taskProgressCollapse') : t('chat.taskProgressExpand')}
+        aria-label={expanded ? t('chat.taskProgressCollapse') : t('chat.taskProgressExpand')}
         className="inline-flex items-center justify-center"
         style={{
           minWidth: 0,
@@ -259,6 +260,7 @@ export default function TaskProgressCapsule() {
           fontWeight: 400,
           lineHeight: '20px',
           transition: 'background 150ms ease, border-color 150ms ease, color 150ms ease',
+          pointerEvents: 'auto',
         }}
         onMouseEnter={(event) => {
           event.currentTarget.style.background = 'var(--bg-elevated)'

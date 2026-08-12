@@ -28,7 +28,7 @@ const SUMMARY_AWARE_STAGE_STYLE = {
   transition: 'width var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1))',
 }
 
-export default function MessageList() {
+export default function MessageList({ bottomInset = 0 }) {
   const { t } = useTranslation()
   const messages = useChatStore((s) => s.messages)
   const sessionId = useChatStore((s) => s.sessionId)
@@ -215,6 +215,10 @@ export default function MessageList() {
     estimateSize: () => 120,
     overscan: 6,
     paddingStart: 24,
+    // The recap is an overlay above the composer. Reserve exactly its measured
+    // height at the virtualized tail so the live edge lands above it; without
+    // a recap the composer remains the scroll boundary.
+    paddingEnd: Math.max(0, bottomInset),
     getItemKey: (index) => renderItems[index].key,
     // Chat semantics: stay glued to the live edge. anchorTo 'end' compensates
     // item resizes while at the bottom (the streaming tail) and follows rows
@@ -473,13 +477,13 @@ export default function MessageList() {
           aria-hidden="true"
           style={{
             position: 'absolute',
-            left: 0,
-            right: 'var(--session-summary-layout-width, 0px)',
+            left: 'var(--session-summary-track-inline-margin, max(10%, calc(50% - 450px)))',
+            right: 'calc(var(--session-summary-layout-width, 0px) + var(--session-summary-track-inline-margin, max(10%, calc(50% - 450px))))',
             bottom: 0,
             height: 24,
             background: 'linear-gradient(to bottom, transparent, var(--bg-base))',
             pointerEvents: 'none',
-            transition: 'right var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1))',
+            transition: 'left var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1)), right var(--session-summary-motion-duration, 200ms) var(--session-summary-motion-ease, cubic-bezier(0.16, 1, 0.3, 1))',
             zIndex: 10,
           }}
         />

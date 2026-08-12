@@ -427,6 +427,53 @@ export function getSdkTaskRoundTasks(round) {
   return round.taskOrder.map((id) => round.tasks[id]).filter(Boolean)
 }
 
+function taskSubjectOrdinal(task) {
+  const match = String(task?.subject || '').trim().match(/^Task\s*#?(\d+)(?:\s*[:：\-–—]|\s|$)/i)
+  return match ? match[1] : null
+}
+
+function isGeneratedTaskPlaceholder(task) {
+  const id = asId(task?.id)
+  return Boolean(id) && String(task?.subject || '').trim() === `Task #${id}`
+}
+
+function mergeDisplayTask(primary, update) {
+  const primaryDone = isSdkTaskDone(primary)
+  const updateDone = isSdkTaskDone(update)
+  const status = updateDone || !primaryDone && normalizeStatus(update?.status) !== 'pending'
+    ? update.status
+    : primary.status
+  return {
+    ...primary,
+    status,
+    blocks: mergeUnique(primary?.blocks, update?.blocks),
+    blockedBy: mergeUnique(primary?.blockedBy, update?.blockedBy),
+  }
+}
+
+// A TaskUpdate can be replayed before the matching TaskCreate result exposes
+// its canonical id. In that ordering the tracker temporarily creates a
+// generated "Task #N" placeholder beside the richer "Task N: subject" row.
+// Coalesce that placeholder into the richer row for Composer presentation so
+// status changes survive without double-counting the same logical task.
+function coalesceComposerTaskPlaceholders(tasks) {
+  const result = [...tasks]
+  for (let index = result.length - 1; index >= 0; index -= 1) {
+    const placeholder = result[index]
+    if (!isGeneratedTaskPlaceholder(placeholder)) continue
+    const ordinal = asId(placeholder.id)
+    const primaryIndex = result.findIndex((task, candidateIndex) => (
+      candidateIndex !== index
+      && !isGeneratedTaskPlaceholder(task)
+      && taskSubjectOrdinal(task) === ordinal
+    ))
+    if (primaryIndex < 0) continue
+    result[primaryIndex] = mergeDisplayTask(result[primaryIndex], placeholder)
+    result.splice(index, 1)
+  }
+  return result
+}
+
 export function getSdkTaskComposerTasks(tracker) {
   if (!tracker) return []
   const byTaskId = new Map()
@@ -441,7 +488,7 @@ export function getSdkTaskComposerTasks(tracker) {
       byTaskId.set(key, task)
     }
   }
-  return [...byTaskId.values()]
+  return coalesceComposerTaskPlaceholders([...byTaskId.values()])
 }
 
 export function getSdkTaskComposerRoundIds(tracker) {
