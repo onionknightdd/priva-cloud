@@ -239,6 +239,14 @@ SettingsPopover 快捷菜单显示前 5 个标签 + API Doc 链接。
   `Tab` 或 `→` 接受
 - 可能增加一次模型请求，也不保证每轮都返回建议；同步 `/run` 不启用
 
+### Claude Code Teammate（实验性）
+
+- 开关持久化在服务端，开启后会为新启动的 Claude Code 任务设置
+  `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`
+- 要求 Claude Code v2.1.32 或更高版本；已有运行中的任务不会被动态修改
+- Agent Teams 会启动多个独立 Claude Code 实例并显著增加 Token 消耗
+- 关闭开关不会删除已有团队数据，也不会中止正在运行的 teammate
+
 ### 开发者模式 / 额外环境变量
 
 - 开发者模式只控制 K/V 编辑入口，不直接决定是否注入

@@ -74,7 +74,7 @@ async def update_recap_setting(
     return RecapSettingResponse(recap_enabled=request.recap_enabled)
 
 
-# ── Runtime environment / prompt suggestions ───────────────────────
+# ── Runtime environment / Claude Code feature gates ────────────────
 
 
 @router.get("/runtime-settings", response_model=RuntimeSettingsResponse)

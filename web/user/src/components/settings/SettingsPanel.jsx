@@ -1845,6 +1845,8 @@ function AdvancedTab() {
   const fetchRecapEnabled = useSettingsStore((s) => s.fetchRecapEnabled)
   const promptSuggestionEnabled = useSettingsStore((s) => s.promptSuggestionEnabled)
   const setPromptSuggestionEnabled = useSettingsStore((s) => s.setPromptSuggestionEnabled)
+  const agentTeamsEnabled = useSettingsStore((s) => s.agentTeamsEnabled)
+  const setAgentTeamsEnabled = useSettingsStore((s) => s.setAgentTeamsEnabled)
   const fetchRuntimeSettings = useSettingsStore((s) => s.fetchRuntimeSettings)
 
   // Unlike the localStorage switches above, this one's truth lives on the pod.
@@ -1911,6 +1913,16 @@ function AdvancedTab() {
         desc={t('settings.promptSuggestionDesc')}
         checked={promptSuggestionEnabled}
         onChange={(next) => { setPromptSuggestionEnabled(next).catch(() => {}) }}
+      />
+
+      <div style={{ borderBottom: '1px solid var(--border)' }} />
+
+      {/* Claude Code Agent Teams — experimental, applied to newly started runs */}
+      <SettingRow
+        label={t('settings.agentTeams')}
+        desc={t('settings.agentTeamsDesc')}
+        checked={agentTeamsEnabled}
+        onChange={(next) => { setAgentTeamsEnabled(next).catch(() => {}) }}
       />
 
       <div style={{ borderBottom: '1px solid var(--border)' }} />

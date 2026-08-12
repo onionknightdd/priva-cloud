@@ -53,6 +53,7 @@ def test_runtime_settings_patch_is_partial_and_durable(monkeypatch):
             "extra_env_enabled": False,
             "extra_env": {"FIRST": "one"},
             "prompt_suggestion_enabled": False,
+            "agent_teams_enabled": False,
         },
     }
 
@@ -74,6 +75,7 @@ def test_runtime_settings_patch_is_partial_and_durable(monkeypatch):
         "extra_env_enabled": False,
         "extra_env": {"FIRST": "one"},
         "prompt_suggestion_enabled": True,
+        "agent_teams_enabled": False,
     }
 
     after_env = runtime_settings.update_runtime_settings({
@@ -84,8 +86,19 @@ def test_runtime_settings_patch_is_partial_and_durable(monkeypatch):
         "extra_env_enabled": True,
         "extra_env": {"SECOND": "two"},
         "prompt_suggestion_enabled": True,
+        "agent_teams_enabled": False,
     }
-    assert stored["runtime_settings"] == after_env
+
+    after_agent_teams = runtime_settings.update_runtime_settings({
+        "agent_teams_enabled": True,
+    })
+    assert after_agent_teams == {
+        "extra_env_enabled": True,
+        "extra_env": {"SECOND": "two"},
+        "prompt_suggestion_enabled": True,
+        "agent_teams_enabled": True,
+    }
+    assert stored["runtime_settings"] == after_agent_teams
 
 
 def test_invalid_manually_edited_environment_is_never_injected(monkeypatch):
@@ -96,6 +109,7 @@ def test_invalid_manually_edited_environment_is_never_injected(monkeypatch):
             "extra_env_enabled": True,
             "extra_env": {"PATH": "/untrusted"},
             "prompt_suggestion_enabled": True,
+            "agent_teams_enabled": True,
         },
     )
 
@@ -103,4 +117,5 @@ def test_invalid_manually_edited_environment_is_never_injected(monkeypatch):
         "extra_env_enabled": True,
         "extra_env": {},
         "prompt_suggestion_enabled": True,
+        "agent_teams_enabled": True,
     }

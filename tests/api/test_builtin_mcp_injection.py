@@ -23,6 +23,7 @@ def _build_options(monkeypatch, tmp_path, **overrides):
             "extra_env_enabled": False,
             "extra_env": {},
             "prompt_suggestion_enabled": False,
+            "agent_teams_enabled": False,
         },
     )
     monkeypatch.setattr(
@@ -219,6 +220,7 @@ def test_streaming_prompt_suggestion_requires_server_toggle(monkeypatch, tmp_pat
             "extra_env_enabled": True,
             "extra_env": {"MY_RUNTIME_VALUE": "enabled"},
             "prompt_suggestion_enabled": True,
+            "agent_teams_enabled": False,
         },
     )
 
@@ -237,9 +239,36 @@ def test_streaming_prompt_suggestion_requires_server_toggle(monkeypatch, tmp_pat
             "extra_env_enabled": True,
             "extra_env": {"MY_RUNTIME_VALUE": "enabled"},
             "prompt_suggestion_enabled": False,
+            "agent_teams_enabled": False,
         },
     )
 
     assert "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION" not in disabled.env
     assert "prompt-suggestions" not in disabled.extra_args
     assert disabled._priva_prompt_suggestion_enabled is False
+
+
+def test_agent_teams_environment_gate_follows_server_toggle(monkeypatch, tmp_path):
+    enabled = _build_options(
+        monkeypatch,
+        tmp_path,
+        _runtime_settings={
+            "extra_env_enabled": False,
+            "extra_env": {},
+            "prompt_suggestion_enabled": False,
+            "agent_teams_enabled": True,
+        },
+    )
+    assert enabled.env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] == "1"
+
+    disabled = _build_options(
+        monkeypatch,
+        tmp_path,
+        _runtime_settings={
+            "extra_env_enabled": False,
+            "extra_env": {},
+            "prompt_suggestion_enabled": False,
+            "agent_teams_enabled": False,
+        },
+    )
+    assert "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS" not in disabled.env

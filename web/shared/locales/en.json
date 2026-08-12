@@ -1393,6 +1393,8 @@
     "debugLoggingDesc": "Print every API message sent and every chunk returned from the backend to the browser console.",
     "promptSuggestion": "Next-prompt Suggestion",
     "promptSuggestionDesc": "After a streaming turn, ask Claude Code for a possible next prompt and show it in the composer. This can add one model request and may not produce a suggestion on every turn.",
+    "agentTeams": "Teammate",
+    "agentTeamsDesc": "Enable Agent Teams so multiple Claude Code instances can collaborate. Requires Claude Code v2.1.32 or later, applies to newly started tasks, and significantly increases token usage.",
     "runtimeEnvInjection": "Inject Extra Environment",
     "runtimeEnvInjectionDesc": "Server-side master switch for adding the variables below to new agent processes. Developer Mode only controls whether this editor is available.",
     "runtimeEnvKey": "Key",

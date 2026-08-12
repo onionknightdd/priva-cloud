@@ -1367,6 +1367,8 @@
     "debugLoggingDesc": "将发送的每条 API 消息以及后端返回的每个数据块打印到浏览器控制台。",
     "promptSuggestion": "下一步提示建议",
     "promptSuggestionDesc": "流式对话结束后，让 Claude Code 生成一条可能的下一步提示并显示在输入框中。该功能可能增加一次模型请求，且并非每轮都会生成建议。",
+    "agentTeams": "Teammate",
+    "agentTeamsDesc": "启用 Agent Teams，让多个 Claude Code 实例协作。要求 Claude Code v2.1.32 或更高版本，仅对新启动的任务生效，并会显著增加 Token 消耗。",
     "runtimeEnvInjection": "注入额外环境变量",
     "runtimeEnvInjectionDesc": "控制是否把下方变量注入新启动的 Agent 进程。开发者模式只控制编辑入口，真正是否注入由此服务端开关决定。",
     "runtimeEnvKey": "键",

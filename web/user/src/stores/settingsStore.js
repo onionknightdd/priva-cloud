@@ -54,6 +54,7 @@ const useSettingsStore = create((set, get) => ({
   env: {},
   extraEnvEnabled: false,
   promptSuggestionEnabled: false,
+  agentTeamsEnabled: false,
   runtimeSettingsLoaded: false,
   runtimeSettingsLoading: false,
   runtimeSettingsSaving: false,
@@ -168,6 +169,7 @@ const useSettingsStore = create((set, get) => ({
         env: data.extra_env || {},
         extraEnvEnabled: data.extra_env_enabled === true,
         promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
+        agentTeamsEnabled: data.agent_teams_enabled === true,
         runtimeSettingsLoaded: true,
         runtimeSettingsLoading: false,
       })
@@ -199,6 +201,7 @@ const useSettingsStore = create((set, get) => ({
         env: data.extra_env || {},
         extraEnvEnabled: data.extra_env_enabled === true,
         promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
+        agentTeamsEnabled: data.agent_teams_enabled === true,
         runtimeSettingsSaving: false,
         runtimeSettingsLoaded: true,
       })
@@ -222,6 +225,7 @@ const useSettingsStore = create((set, get) => ({
         env: data.extra_env || {},
         extraEnvEnabled: data.extra_env_enabled === true,
         promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
+        agentTeamsEnabled: data.agent_teams_enabled === true,
         runtimeSettingsLoaded: true,
       })
       return data
@@ -240,11 +244,31 @@ const useSettingsStore = create((set, get) => ({
         env: data.extra_env || {},
         extraEnvEnabled: data.extra_env_enabled === true,
         promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
+        agentTeamsEnabled: data.agent_teams_enabled === true,
         runtimeSettingsLoaded: true,
       })
       return data
     } catch (err) {
       set({ promptSuggestionEnabled: previous, runtimeSettingsError: err?.message || String(err) })
+      throw err
+    }
+  },
+
+  setAgentTeamsEnabled: async (enabled) => {
+    const previous = get().agentTeamsEnabled
+    set({ agentTeamsEnabled: !!enabled, runtimeSettingsError: null })
+    try {
+      const data = await updateRuntimeSettingsAPI({ agent_teams_enabled: !!enabled })
+      set({
+        env: data.extra_env || {},
+        extraEnvEnabled: data.extra_env_enabled === true,
+        promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
+        agentTeamsEnabled: data.agent_teams_enabled === true,
+        runtimeSettingsLoaded: true,
+      })
+      return data
+    } catch (err) {
+      set({ agentTeamsEnabled: previous, runtimeSettingsError: err?.message || String(err) })
       throw err
     }
   },
@@ -492,6 +516,7 @@ const useSettingsStore = create((set, get) => ({
     env: {},
     extraEnvEnabled: false,
     promptSuggestionEnabled: false,
+    agentTeamsEnabled: false,
     runtimeSettingsLoaded: false,
     runtimeSettingsLoading: false,
     runtimeSettingsSaving: false,

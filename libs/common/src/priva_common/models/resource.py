@@ -47,12 +47,14 @@ class RuntimeSettingsResponse(BaseModel):
     extra_env_enabled: bool = False
     extra_env: dict[str, str] = Field(default_factory=dict)
     prompt_suggestion_enabled: bool = False
+    agent_teams_enabled: bool = False
 
 
 class RuntimeSettingsUpdateRequest(BaseModel):
     extra_env_enabled: bool | None = None
     extra_env: dict[str, str] | None = None
     prompt_suggestion_enabled: bool | None = None
+    agent_teams_enabled: bool | None = None
 
     @field_validator("extra_env")
     @classmethod

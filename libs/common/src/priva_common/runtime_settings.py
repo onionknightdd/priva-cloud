@@ -83,6 +83,7 @@ def read_runtime_settings() -> dict[str, Any]:
         "extra_env_enabled": bool(raw.get("extra_env_enabled", False)),
         "extra_env": extra_env,
         "prompt_suggestion_enabled": bool(raw.get("prompt_suggestion_enabled", False)),
+        "agent_teams_enabled": bool(raw.get("agent_teams_enabled", False)),
     }
 
 
@@ -94,5 +95,7 @@ def update_runtime_settings(patch: dict[str, Any]) -> dict[str, Any]:
         current["extra_env"] = validate_extra_env(patch["extra_env"])
     if "prompt_suggestion_enabled" in patch:
         current["prompt_suggestion_enabled"] = bool(patch["prompt_suggestion_enabled"])
+    if "agent_teams_enabled" in patch:
+        current["agent_teams_enabled"] = bool(patch["agent_teams_enabled"])
     _user_yaml.save_user_yaml_key(_KEY, current)
     return current

@@ -238,6 +238,11 @@ async def build_agent_options(
     if runtime_settings["extra_env_enabled"]:
         # read_runtime_settings has already validated names, values and limits.
         env_dict.update(runtime_settings["extra_env"])
+    if runtime_settings.get("agent_teams_enabled", False):
+        # Agent Teams is a Claude Code experimental gate. It is intentionally
+        # managed separately from user-defined env so CLAUDE_CODE_* remains
+        # protected in the generic environment editor.
+        env_dict["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
     try:
         from ..sandbox_venv import venv_env_overlay
         env_dict.update(venv_env_overlay(env_dict))

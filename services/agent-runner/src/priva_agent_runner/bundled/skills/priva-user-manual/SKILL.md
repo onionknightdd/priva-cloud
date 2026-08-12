@@ -188,7 +188,7 @@ Priva 是一个 AI Agent 对话与管理平台。你可以通过浏览器与 Cla
 - **LLM 提供商**：配置 Base URL + Auth Token（自动测试连接），选择 Default/Opus/Sonnet/Haiku 模型（可搜索下拉），配置 Vision 模型
 - **快捷操作**：创建聊天欢迎页快捷按钮（名称 + 提示词模板 + 50+ 图标选择），支持 `{变量}` 占位符
 - **Channels**：WeCom 机器人配置（Bot ID、Secret、代理 URL、用户白名单、欢迎/拒绝消息、模型覆盖、队列/超时），实时连接状态轮询；Feishu 即将推出
-- **Advanced**：传输模式、下一步 Prompt Suggestion、开发者模式与额外环境变量 K/V
+- **Advanced**：传输模式、下一步 Prompt Suggestion、Claude Code Teammate（Agent Teams）实验开关、开发者模式与额外环境变量 K/V
 
 **管理员专属：**
 - **Runtime**：历史保留天数、CLI 路径、工具重试配置（重试次数/间隔 + Script/WeCom 回调）；不再支持 append 自定义 system prompt

@@ -31,6 +31,7 @@ def _build_options(monkeypatch, tmp_path, **overrides):
             "extra_env_enabled": False,
             "extra_env": {},
             "prompt_suggestion_enabled": False,
+            "agent_teams_enabled": False,
         },
     )
     monkeypatch.setattr(
