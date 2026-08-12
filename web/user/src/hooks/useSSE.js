@@ -342,6 +342,44 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   // while older groups move into the collapsed process history.
   let processGroupSeq = 0
   const nextProcessGroupId = () => `${streamGen}-process-${++processGroupSeq}`
+  let activeMainProviderMessageId = [...S.chat().messages]
+    .reverse()
+    .find((entry) => entry?.role === 'assistant')?._activeProviderMessageId || null
+
+  // A single SDK run can contain several MAIN model generations (for example,
+  // a ResultMessage followed by task notifications and another message_start).
+  // The old Result metadata must stop being authoritative as soon as the next
+  // generation begins, otherwise the old text is rendered both as the external
+  // result and as an earlier block inside Summary.
+  const beginMainProviderMessage = (messageId) => {
+    if (!messageId || messageId === activeMainProviderMessageId) return
+    activeMainProviderMessageId = messageId
+
+    const chat = S.chat()
+    let assistantIndex = -1
+    for (let index = chat.messages.length - 1; index >= 0; index -= 1) {
+      if (chat.messages[index]?.role === 'assistant') { assistantIndex = index; break }
+    }
+    if (assistantIndex < 0) return
+
+    const assistant = chat.messages[assistantIndex]
+    const messages = [...chat.messages]
+    messages[assistantIndex] = {
+      ...assistant,
+      _activeProviderMessageId: messageId,
+      _resultProviderMessageId: null,
+      resultReceived: false,
+      resultText: null,
+      resultIsError: null,
+      resultSubtype: null,
+      duration: null,
+      inputTokens: null,
+      outputTokens: null,
+      agentLoops: null,
+      replayComplete: false,
+    }
+    S.chatSet({ messages })
+  }
 
   // Track tool_use_ids that are canvas-only (hidden from message flow)
   const hiddenToolIds = new Set()
@@ -556,6 +594,9 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
       return
     }
     if (event === 'stream_event') {
+      if (data?.event?.type === 'message_start' && !data.parent_tool_use_id) {
+        beginMainProviderMessage(data.event.message?.id)
+      }
       streamAssembler.accept(data)
       return
     }
@@ -567,6 +608,15 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     // Only ordering boundaries flush early. Provider telemetry such as Qwen's
     // thinking_tokens system events must not defeat the 40ms UI batching.
     if (STREAM_FLUSH_BOUNDARY_EVENTS.has(event)) streamAssembler.flush()
+    if (
+      (event === 'assistant' || event === 'tool_use')
+      && !data.parent_tool_use_id
+      && data.message_id
+    ) {
+      // A reconnect tail may begin after message_start. The authoritative
+      // envelope still carries the provider generation and can restore it.
+      beginMainProviderMessage(data.message_id)
+    }
     const authoritativeEntries = (event === 'assistant' || event === 'tool_use')
       ? streamAssembler.reconcileAssistant(data)
       : null
@@ -1524,6 +1574,12 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
           const serverDuration = Number(data.duration_ms)
           finalMsgs[finalIdx] = {
             ...finalMsgs[finalIdx],
+            _activeProviderMessageId: activeMainProviderMessageId
+              || finalMsgs[finalIdx]._activeProviderMessageId
+              || null,
+            _resultProviderMessageId: activeMainProviderMessageId
+              || finalMsgs[finalIdx]._activeProviderMessageId
+              || null,
             duration: Number.isFinite(serverDuration) && serverDuration >= 0
               ? serverDuration
               : Date.now() - streamStartTime,

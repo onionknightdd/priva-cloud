@@ -1328,15 +1328,21 @@ export default memo(function MessageBubble({
   const tooltipSetAtRef = useRef(0)
 
   const hasMetadata = Boolean(message.duration || message.inputTokens != null || message.agentLoops != null)
-  const finalResultIndexes = findFinalResultBlockIndexes(contentBlocks, message.resultText)
+  const resultMatchesActiveGeneration = !message._activeProviderMessageId
+    || !message._resultProviderMessageId
+    || message._activeProviderMessageId === message._resultProviderMessageId
+  const activeResultText = resultMatchesActiveGeneration ? message.resultText : null
+  const finalResultIndexes = findFinalResultBlockIndexes(contentBlocks, activeResultText)
   const finalResultIndexSet = new Set(finalResultIndexes)
-  const streamedResultText = typeof message.resultText === 'string' && message.resultText.trim()
-    ? resultTextFromBlocks([{ type: 'text', text: message.resultText }], [0])
+  const streamedResultText = typeof activeResultText === 'string' && activeResultText.trim()
+    ? resultTextFromBlocks([{ type: 'text', text: activeResultText }], [0])
     : ''
   const finalResultText = streamedResultText || resultTextFromBlocks(contentBlocks, finalResultIndexes)
-  const hasCompletedResult = message.resultReceived === true
+  const hasCompletedResult = resultMatchesActiveGeneration && (
+    message.resultReceived === true
     || message.duration != null
     || message.replayComplete === true
+  )
   // Before ResultMessage arrives, the newest assistant text is still part of
   // the live process stream. Once it arrives, only that authoritative result
   // remains outside the collapsible process history.
