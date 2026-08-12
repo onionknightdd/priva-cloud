@@ -1014,7 +1014,7 @@ export default function PromptComposer({
 
       <div
         ref={containerRef}
-        className="flex flex-col rounded relative"
+        className="chat-input-box flex flex-col rounded relative"
         style={{
           background: 'var(--chat-input-bg)',
           border: isDragging ? '0.25px solid var(--blue)' : '0.25px solid var(--border)',
@@ -1029,6 +1029,7 @@ export default function PromptComposer({
         {/* Expand-to-modal button (top-right corner) */}
         <button
           type="button"
+          aria-expanded={expanded}
           onClick={() => setExpanded(true)}
           title={t('chat.expandInput', 'Expand input')}
           className="absolute flex items-center justify-center"
@@ -1441,6 +1442,8 @@ export default function PromptComposer({
           <div className="flex items-center gap-1">
             <div className="relative">
               <button
+                type="button"
+                aria-expanded={showCompactPlusMenu}
                 className="flex items-center justify-center"
                 style={{
                   width: 28, height: 28,
@@ -1499,7 +1502,7 @@ export default function PromptComposer({
         >
           <div
             ref={expandPanelRef}
-            className="prompt-expand-modal flex flex-col relative"
+            className="chat-input-box prompt-expand-modal flex flex-col relative"
             onClick={(e) => e.stopPropagation()}
             style={{
               width: '70vw',
@@ -1643,6 +1646,7 @@ export default function PromptComposer({
               <div className="relative">
                 <button
                   type="button"
+                  aria-expanded={showModalPlusMenu}
                   className="flex items-center justify-center"
                   style={{
                     width: 28, height: 28,

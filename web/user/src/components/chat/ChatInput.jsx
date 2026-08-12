@@ -844,6 +844,8 @@ export default function ChatInput({ cwd, cwdPlacement = 'top', summaryAware = fa
     <div className="flex items-center" style={{ gap: 3 }}>
       <div className="relative" ref={permMenuRef}>
       <button
+        type="button"
+        aria-expanded={showPermissionMenu}
         className="flex items-center gap-1 px-2"
         style={{
           height: 28,
@@ -882,6 +884,8 @@ export default function ChatInput({ cwd, cwdPlacement = 'top', summaryAware = fa
             return (
               <button
                 key={mode.value}
+                type="button"
+                aria-pressed={isActive}
                 className="flex flex-col gap-0 px-3 py-2 w-full"
                 style={{
                   background: isActive ? 'var(--bg-surface)' : 'transparent',
@@ -1206,6 +1210,7 @@ function McpSubMenu({ mcpServers, setMcpServers, serverList, loading, t }) {
       />
       <button
         type="button"
+        aria-expanded={showSub}
         className="flex items-center gap-2 px-3 py-2 w-full text-sm"
         style={{
           background: showSub ? 'var(--bg-surface)' : 'transparent',
@@ -1249,6 +1254,7 @@ function McpSubMenu({ mcpServers, setMcpServers, serverList, loading, t }) {
                 <button
                   type="button"
                   key={mode.value}
+	                  aria-pressed={active}
 	                  className="px-2 py-0"
                   style={{
                     background: active ? 'var(--bg-surface)' : 'transparent',
@@ -1287,6 +1293,7 @@ function McpSubMenu({ mcpServers, setMcpServers, serverList, loading, t }) {
                 <button
                   type="button"
                   key={srv.name}
+	                  aria-pressed={checked}
 	                  className="flex items-center gap-1 w-full px-2 py-1"
                   style={{
                     background: 'transparent', border: 'none',

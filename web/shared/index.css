@@ -123,6 +123,7 @@
   --bg-elevated: #21262d;
   --bg-overlay: #0d1117e6;
   --chat-input-bg: var(--bg-elevated);
+  --chat-input-control-active-bg: rgb(48 54 61);
 
   --border-subtle: #21262d;
   --border: #30363d;
@@ -204,6 +205,7 @@
   --bg-elevated:   #f0f2f5;
   --bg-overlay:    #ffffffd9;
   --chat-input-bg: rgb(246 245 246);
+  --chat-input-control-active-bg: rgb(220 220 220);
 
   --border-subtle: #dfe3e8;
   --border:        #c9cfd6;
@@ -242,6 +244,21 @@
 
   --font-weight-base: 400;
   --font-weight-light: 400;
+}
+
+/* Keep every interactive control inside the compact and expanded composer on
+   one high-contrast hover/active treatment without changing its idle state. */
+.chat-input-box button:not(:disabled) {
+  transition: background 150ms ease, color 150ms ease;
+}
+.chat-input-box button:not(:disabled):hover,
+.chat-input-box button:not(:disabled):active,
+.chat-input-box button[aria-expanded="true"]:not(:disabled),
+.chat-input-box button[aria-pressed="true"]:not(:disabled),
+.chat-input-box button[aria-selected="true"]:not(:disabled),
+.chat-input-box button[data-active="true"]:not(:disabled) {
+  background: var(--chat-input-control-active-bg) !important;
+  color: var(--text-primary) !important;
 }
 
 /* Sidebar navigation labels stay pure black in the light theme without

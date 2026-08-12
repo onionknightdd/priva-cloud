@@ -13,6 +13,7 @@ export default function CheckpointToggle() {
   return (
     <button
       type="button"
+      aria-pressed={enabled}
       disabled={disabled}
       onClick={() => setEnabled(!enabled)}
       className="inline-flex items-center gap-1 flex-shrink-0"
