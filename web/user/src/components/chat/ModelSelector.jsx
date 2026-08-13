@@ -158,12 +158,17 @@ export default function ModelSelector() {
       const parent = pane.offsetParent
       const previousTransform = pane.style.transform
       pane.style.transform = 'translateX(0px)'
-      const rect = pane.getBoundingClientRect()
       const verticalPadding = 8
-      let offset = Math.min(0, window.innerHeight - verticalPadding - rect.bottom)
-      if (rect.top + offset < verticalPadding) offset += verticalPadding - (rect.top + offset)
       if (parent) {
         const parentRect = parent.getBoundingClientRect()
+        // The submenu grows upward from the primary menu's bottom edge. When
+        // vertical space is tight, shrink its scrollable list instead of
+        // shifting the whole pane and breaking the shared bottom baseline.
+        const availableHeight = Math.max(0, Math.floor(parentRect.bottom - verticalPadding))
+        pane.style.maxHeight = `${availableHeight}px`
+        pane.style.top = 'auto'
+        pane.style.bottom = '0px'
+        const rect = pane.getBoundingClientRect()
         const horizontalGap = 4
         const viewportWidth = document.documentElement.clientWidth || window.innerWidth
         const defaultLeft = parentRect.width + horizontalGap
@@ -173,7 +178,6 @@ export default function ModelSelector() {
         const nextLeft = rightSideFits ? defaultLeft : leftSideLeft
         pane.style.left = `${nextLeft}px`
       }
-      pane.style.top = `${offset}px`
       pane.style.transform = previousTransform || 'translateX(0px)'
     }
     reposition()
@@ -317,13 +321,13 @@ export default function ModelSelector() {
             {filteredProfiles.map((item) => <button key={item.id} type="button" onClick={() => chooseProfile(item.id)} onMouseEnter={(event) => { if (item.id !== profileId) event.currentTarget.style.background = 'var(--bg-surface)' }} onMouseLeave={(event) => { if (item.id !== profileId) event.currentTarget.style.background = 'transparent' }} className="flex items-center justify-between w-full px-2 text-xs" style={{ height: 34, paddingTop: 3, paddingBottom: 3, background: item.id === profileId ? 'var(--bg-surface)' : 'transparent', border: 'none', color: 'var(--text-primary)', textAlign: 'left', cursor: 'pointer', overflow: 'hidden' }}><span className="font-semibold truncate" style={{ flex: '1 1 auto', minWidth: 0, fontSize: 11 }}>{item.label}</span><span className="flex items-center gap-1" style={{ flexShrink: 0, color: 'var(--text-dim)', fontSize: 11 }}>{item.id === defaultProfileId && <span style={{ whiteSpace: 'nowrap', fontSize: 11 }}>{t('settings.defaultProfile')}</span>}<ChevronRight size={12} strokeWidth={1.5} /></span></button>)}
           </div>
         </div>}
-        {profileCount > 1 && level === 'models' && activeProfile && <div ref={submenuRef} className="absolute flex flex-col" style={{ left: 'calc(100% + 4px)', top: 0, width: MODEL_MENU_WIDTH, minWidth: MODEL_MENU_WIDTH, maxWidth: MODEL_MENU_WIDTH, maxHeight: 'calc(100vh - 16px)', boxSizing: 'border-box', overflow: 'hidden', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, zIndex: 51 }}>
+        {profileCount > 1 && level === 'models' && activeProfile && <div ref={submenuRef} className="absolute flex flex-col" style={{ left: 'calc(100% + 4px)', top: 'auto', bottom: 0, width: MODEL_MENU_WIDTH, minWidth: MODEL_MENU_WIDTH, maxWidth: MODEL_MENU_WIDTH, maxHeight: 'calc(100vh - 16px)', boxSizing: 'border-box', overflow: 'hidden', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, zIndex: 51 }}>
           <div className="flex items-center gap-2 px-2 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
             <Search size={11} strokeWidth={1.5} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
             <input ref={modelFilterRef} value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={t('settings.filterModels')} className="flex-1 text-xs" style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)', fontFamily: 'var(--font-code)', minWidth: 0 }} />
           </div>
           <div className="mx-2 text-xs" style={{ paddingTop: 7, paddingBottom: 7, color: 'var(--text-primary)', borderBottom: '1px solid var(--border)', fontSize: 12 }}><span className="font-semibold truncate" style={{ display: 'block', fontSize: 12 }}>{activeProfile.label}</span></div>
-          <div className="overflow-y-auto" style={{ maxHeight: `min(${MODEL_LIST_MAX_HEIGHT}px, calc(100vh - 84px))` }}>
+          <div className="flex-1 overflow-y-auto" style={{ minHeight: 0, maxHeight: `min(${MODEL_LIST_MAX_HEIGHT}px, calc(100vh - 84px))` }}>
             {cache?.loading ? <div className="px-2 py-2 text-xs" style={{ color: 'var(--text-dim)' }}>{t('settings.loadingModels')}</div> : filteredModels.length ? filteredModels.map((item) => { const active = isModelSelected(activeProfile, item.id); return <button key={item.id} type="button" onClick={() => chooseModel(item.id)} onMouseEnter={(event) => { if (!active) event.currentTarget.style.background = 'var(--bg-surface)' }} onMouseLeave={(event) => { if (!active) event.currentTarget.style.background = 'transparent' }} className="flex items-center w-full px-2 text-xs" style={{ height: MODEL_ROW_HEIGHT, background: active ? 'var(--bg-surface)' : 'transparent', border: 'none', color: active ? 'var(--text-primary)' : 'var(--text-secondary)', textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-code)', overflow: 'hidden' }}><AnimeMarqueeText hoverable title={item.id} style={{ flex: '1 1 auto', minWidth: 0, textAlign: 'left' }}>{item.id}</AnimeMarqueeText></button> }) : <div className="px-2 py-2 text-xs" style={{ color: 'var(--text-dim)' }}>{cache?.loaded ? t('settings.noModelsAvailable') : t('settings.openToLoadModels')}</div>}
           </div>
         </div>}
