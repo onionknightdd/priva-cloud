@@ -5,8 +5,6 @@ import { useTranslation } from 'react-i18next'
 import useFileOpsStore from '../../stores/fileOpsStore'
 import useChatStore from '../../stores/chatStore'
 import { copyTextToClipboard } from '@shared/utils/clipboard'
-import { downloadFile } from '../../api/userFiles'
-import RichFilePreview from '../shared/RichFilePreview'
 import { RollingInteger } from '../shared/Odometer'
 import { AnimatedChevron, AnimatedCollapse } from '@shared/components/shared/Accordion'
 import ResizeHandle from '@shared/components/shared/ResizeHandle'
@@ -281,14 +279,16 @@ const LINE_NUM_STYLE = {
 
 function DiffLine({ oldNum, newNum, line, lineStyle }) {
   return (
-    <div className="flex text-xs" style={{ ...lineStyle, lineHeight: 1.6 }}>
+    <div className="flex text-xs min-w-0" style={{ ...lineStyle, lineHeight: 1.6 }}>
       <span style={LINE_NUM_STYLE}>{oldNum ?? ''}</span>
       <span style={LINE_NUM_STYLE}>{newNum ?? ''}</span>
       <span
-        className="px-2 flex-1"
+        className="px-2 flex-1 min-w-0"
         style={{
           fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-          whiteSpace: 'pre',
+          whiteSpace: 'pre-wrap',
+          overflowWrap: 'anywhere',
+          wordBreak: 'break-word',
         }}
       >
         {line}
@@ -309,7 +309,11 @@ function VirtualizedRows({ rows, renderRow }) {
     overscan: 30,
   })
   return (
-    <div ref={scrollRef} className="overflow-y-auto" style={{ flex: 1, overflowAnchor: 'none' }}>
+    <div
+      ref={scrollRef}
+      className="overflow-y-auto"
+      style={{ flex: 1, minWidth: 0, minHeight: 0, overflowX: 'hidden', overflowAnchor: 'none' }}
+    >
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
         {virtualizer.getVirtualItems().map((vi) => (
           <div
@@ -443,7 +447,7 @@ function DiffView({ op }) {
 }
 
 function CodeView({ content }) {
-  const lines = useMemo(() => (content ? content.split('\n') : null), [content])
+  const lines = useMemo(() => (typeof content === 'string' ? content.split('\n') : null), [content])
   if (!lines) {
     return (
       <div className="px-3 py-4 text-xs" style={{ color: 'var(--text-dim)' }}>
@@ -455,7 +459,7 @@ function CodeView({ content }) {
     <VirtualizedRows
       rows={lines}
       renderRow={(line, i) => (
-        <div className="flex text-xs" style={{ lineHeight: 1.6 }}>
+        <div className="flex text-xs min-w-0" style={{ lineHeight: 1.6 }}>
           <span
             className="text-xs flex-shrink-0 px-2"
             style={{
@@ -469,11 +473,13 @@ function CodeView({ content }) {
             {i + 1}
           </span>
           <span
-            className="px-2"
+            className="px-2 flex-1 min-w-0"
             style={{
               color: 'var(--text-primary)',
               fontFamily: "'JetBrains Mono', 'Source Han Mono SC', monospace",
-              whiteSpace: 'pre',
+              whiteSpace: 'pre-wrap',
+              overflowWrap: 'anywhere',
+              wordBreak: 'break-word',
             }}
           >
             {line}
@@ -484,51 +490,14 @@ function CodeView({ content }) {
   )
 }
 
-function WorkspaceFilePreview({ op }) {
-  const fallbackText = op.type === 'write'
-    ? (op.content || op.input?.content || '')
-    : null
-  const previewVersion = op.endTime || op.startTime || op.toolUseId || op.id
-
-  const previewFile = useMemo(() => {
-    const parts = (op.filePath || '').split('/')
-    const name = parts[parts.length - 1] || op.filePath || '(untitled)'
-    const dotIndex = name.lastIndexOf('.')
-    return {
-      name,
-      path: op.filePath,
-      ext: dotIndex >= 0 ? name.slice(dotIndex).toLowerCase() : '',
-      mime_type: op.mimeType || null,
-    }
-  }, [op.filePath, op.mimeType])
-
-  const loadBlob = useCallback(
-    async () => downloadFile(op.filePath, { cacheBustKey: previewVersion, cacheMode: 'no-store' }),
-    [op.filePath, previewVersion]
-  )
-
-  const loadText = useCallback(async () => {
-    const blob = await downloadFile(op.filePath, { cacheBustKey: previewVersion, cacheMode: 'no-store' })
-    return blob.text()
-  }, [op.filePath, previewVersion])
-
-  const loadArrayBuffer = useCallback(async () => {
-    const blob = await downloadFile(op.filePath, { cacheBustKey: previewVersion, cacheMode: 'no-store' })
-    return blob.arrayBuffer()
-  }, [op.filePath, previewVersion])
-
-  return (
-    <div className="flex-1 min-h-0 overflow-hidden">
-      <RichFilePreview
-        file={previewFile}
-        cacheKey={`${op.id}:${op.status}:${op.filePath}:${op.mimeType || ''}:${previewVersion}`}
-        loadText={loadText}
-        loadArrayBuffer={loadArrayBuffer}
-        loadBlob={loadBlob}
-        fallbackText={fallbackText}
-      />
-    </div>
-  )
+function getWriteSource(op) {
+  const candidates = [
+    op.input?.content,
+    op.content,
+    op.toolUseResult?.new_content,
+    op.toolUseResult?.content,
+  ]
+  return candidates.find((value) => typeof value === 'string') ?? null
 }
 
 function PreviewPanel({ op }) {
@@ -541,9 +510,7 @@ function PreviewPanel({ op }) {
     )
   }
 
-  const fullContent = op.type === 'write'
-    ? (op.content || op.input?.content || '')
-    : null
+  const fullContent = op.type === 'write' ? getWriteSource(op) : null
   const { color, label } = getFileOpMeta(op)
 
   return (
@@ -579,7 +546,7 @@ function PreviewPanel({ op }) {
       {op.type === 'edit' ? (
         <DiffView op={op} />
       ) : (
-        <WorkspaceFilePreview op={op} />
+        <CodeView content={fullContent} />
       )}
     </div>
   )
