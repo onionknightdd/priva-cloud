@@ -367,7 +367,12 @@ def resolve_model(reference: str | None, vision_model: str | None = None) -> Res
 
 
 @contextmanager
-def profile_settings_overlay(profile: LlmProfile, *, model: str | None) -> Iterator[str]:
+def profile_settings_overlay(
+    profile: LlmProfile,
+    *,
+    model: str | None,
+    extra_settings: dict[str, Any] | None = None,
+) -> Iterator[str]:
     """Write a per-run, app-config-local settings file for ``--settings``.
 
     The file is removed in the context manager's finally block.  Secrets never
@@ -389,7 +394,9 @@ def profile_settings_overlay(profile: LlmProfile, *, model: str | None) -> Itera
         env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = profile.sonnet_model
     if profile.haiku_model:
         env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = profile.haiku_model
-    _atomic_write(path, {"env": env})
+    payload = dict(extra_settings or {})
+    payload["env"] = env
+    _atomic_write(path, payload)
     try:
         yield str(path)
     finally:
@@ -399,13 +406,22 @@ def profile_settings_overlay(profile: LlmProfile, *, model: str | None) -> Itera
             pass
 
 
-def open_profile_settings_overlay(profile: LlmProfile, *, model: str | None) -> tuple[str, Any]:
+def open_profile_settings_overlay(
+    profile: LlmProfile,
+    *,
+    model: str | None,
+    extra_settings: dict[str, Any] | None = None,
+) -> tuple[str, Any]:
     """Open an overlay and return ``(path, context_manager)``.
 
     The caller owns the context manager and must call ``close_profile_settings_overlay``
     after the complete SDK retry/stream lifecycle.
     """
-    manager = profile_settings_overlay(profile, model=model)
+    manager = profile_settings_overlay(
+        profile,
+        model=model,
+        extra_settings=extra_settings,
+    )
     path = manager.__enter__()
     return path, manager
 

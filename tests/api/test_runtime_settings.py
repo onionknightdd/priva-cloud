@@ -54,6 +54,9 @@ def test_runtime_settings_patch_is_partial_and_durable(monkeypatch):
             "extra_env": {"FIRST": "one"},
             "prompt_suggestion_enabled": False,
             "agent_teams_enabled": False,
+            # A stale value from an earlier development build must disappear
+            # from both the public response and the next persisted write.
+            "session_pool_size": 5,
         },
     }
 
@@ -76,6 +79,7 @@ def test_runtime_settings_patch_is_partial_and_durable(monkeypatch):
         "extra_env": {"FIRST": "one"},
         "prompt_suggestion_enabled": True,
         "agent_teams_enabled": False,
+        "cross_session_interaction_enabled": False,
     }
 
     after_env = runtime_settings.update_runtime_settings({
@@ -87,6 +91,7 @@ def test_runtime_settings_patch_is_partial_and_durable(monkeypatch):
         "extra_env": {"SECOND": "two"},
         "prompt_suggestion_enabled": True,
         "agent_teams_enabled": False,
+        "cross_session_interaction_enabled": False,
     }
 
     after_agent_teams = runtime_settings.update_runtime_settings({
@@ -97,6 +102,7 @@ def test_runtime_settings_patch_is_partial_and_durable(monkeypatch):
         "extra_env": {"SECOND": "two"},
         "prompt_suggestion_enabled": True,
         "agent_teams_enabled": True,
+        "cross_session_interaction_enabled": False,
     }
     assert stored["runtime_settings"] == after_agent_teams
 
@@ -118,4 +124,5 @@ def test_invalid_manually_edited_environment_is_never_injected(monkeypatch):
         "extra_env": {},
         "prompt_suggestion_enabled": True,
         "agent_teams_enabled": True,
+        "cross_session_interaction_enabled": False,
     }

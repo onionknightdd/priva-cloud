@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
 from priva_common.logging import get_app_logger
@@ -166,6 +165,7 @@ async def test_subagent_stream(
                 emit=emit,
                 extra_allowed_tools=["Agent", "Task"],
                 inject_openclaw_tools=False,
+                keep_runtime_warm=False,
             )
         except Exception as exc:
             logger.exception("subagent test run failed")

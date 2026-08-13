@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { streamAgentRun, streamAgentRunWS, attachAgentRunWS, respondPermission as respondPermissionAPI } from '../api/sse'
+import { streamAgentRunWS, attachAgentRunWS, respondPermission as respondPermissionAPI } from '../api/sse'
 import { setSessionAddDirs } from '../api/sessions'
 import useChatStore from '../stores/chatStore'
 import { isTerminalRawStatus, rawToTaskStatus } from '../stores/workflowStore'
@@ -526,8 +526,6 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   }
 
   const selectedModel = useSettingsStore.getState().selectedModel
-  const transport = useSettingsStore.getState().transport
-
   // First session-id assignment of a brand-new conversation: rekey the draft
   // runtime, migrate its dot, and surface the new sidebar row mid-run.
   let announcedNewSession = Boolean(sessionIdAtSend)
@@ -876,12 +874,39 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         break
       }
 
-      case 'permission_timeout': {
-        // Backend gave up waiting (default 600s) and auto-denied. Clear the
-        // stale card so the UI matches reality.
+      case 'permission_timeout':
+      case 'permission_resolved': {
+        // The backend either gave up waiting or another attached client
+        // answered first. Clear the stale card so every tab matches the
+        // coordinator's authoritative state.
         const rid = data?.request_id
         if (!rid) break
         const chat = S.chat()
+        if (chat.pendingAskUser?._permissionRequestId === rid) {
+          const submitted = chat.pendingAskUser?._submittedAnswer
+          const answerText = data?.updated_input?.answer || submitted?.answerText || ''
+          const currentMessages = chat.messages
+          const updatedMessages = currentMessages.map((message) => {
+            if (message.role !== 'assistant' || !Array.isArray(message.content)) return message
+            let changed = false
+            const content = message.content.map((block) => {
+              if (block?._permissionRequestId !== rid) return block
+              changed = true
+              if (data?.decision === 'allow') {
+                return {
+                  ...block,
+                  status: 'answered',
+                  answeredText: answerText,
+                  answeredSelections: submitted?.selections || {},
+                  answeredCustomInputs: submitted?.customInputs || {},
+                }
+              }
+              return { ...block, status: 'declined' }
+            })
+            return changed ? { ...message, content } : message
+          })
+          S.chatSet({ messages: updatedMessages })
+        }
         if (chat.pendingPlanApproval?.requestId === rid) chat.clearPendingPlanApproval()
         if (chat.pendingAskUser?._permissionRequestId === rid) chat.clearPendingAskUser()
         if (chat.pendingPermission?.request_id === rid) {
@@ -1981,6 +2006,27 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
         break
       }
 
+      case 'queue_rejected': {
+        // Command-level backpressure must not terminate the live agent stream.
+        // Roll back the optimistic queued row and surface the rejection only.
+        if (data?.id) S.chat().removeQueuedMessage(data.id)
+        pushToast({
+          level: 'warning',
+          title: i18n.t('chat.queueRejectedTitle'),
+          body: data?.message,
+        })
+        break
+      }
+
+      case 'command_error': {
+        pushToast({
+          level: 'error',
+          title: i18n.t('connection.errorTitle'),
+          body: data?.message,
+        })
+        break
+      }
+
       case 'retry_attempt': {
         setRetryState({
           attempt: data.attempt,
@@ -2170,15 +2216,10 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
   // hydrated set is re-sent on resume).
   const cwdForRun = sessionIdAtSend ? null : (cwdDraft || null)
 
-  if (transport === 'ws') {
-    const { abort, sendPermission, sendQueue, sendQueueCancel } = streamAgentRunWS(message, sessionIdAtSend, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, { tabId }, enableFileCheckpointing, cwdForRun, addDirs, runModeAtSend, surfaceConnUi)
-    setStreamAbort(bindAbort(abort))
-    setWsSendPermission(sendPermission)
-    S.chat().setQueueSender({ sendQueue, sendQueueCancel })
-  } else {
-    const { abort } = streamAgentRun(message, sessionIdAtSend, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, enableFileCheckpointing, cwdForRun, addDirs, runModeAtSend)
-    setStreamAbort(bindAbort(abort))
-  }
+  const { abort, sendPermission, sendQueue, sendQueueCancel } = streamAgentRunWS(message, sessionIdAtSend, onEvent, permissionMode, onComplete, selectedModel, attachments, mcpServers, images, { tabId }, enableFileCheckpointing, cwdForRun, addDirs, runModeAtSend, surfaceConnUi)
+  setStreamAbort(bindAbort(abort))
+  setWsSendPermission(sendPermission)
+  S.chat().setQueueSender({ sendQueue, sendQueueCancel })
   return true
 }
 
@@ -2206,41 +2247,52 @@ export function useSSE() {
     const { pendingAskUser } = useChatStore.getState()
     const isPermissionBased = pendingAskUser?._permissionRequestId
 
-    // Update the ask_user block: status + persist selections/customInputs + answeredText
-    const msgs = [...useChatStore.getState().messages]
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const msg = msgs[i]
-      if (msg.role !== 'assistant') continue
-      const newContent = msg.content.map((b) => {
-        if (b.type === 'ask_user' && b.toolUseId === toolUseId) {
-          return {
-            ...b,
-            status: 'answered',
-            answeredText: answerText,
-            answeredSelections: answerData?.selections || {},
-            answeredCustomInputs: answerData?.customInputs || {},
+    const markAnswered = () => {
+      const msgs = [...useChatStore.getState().messages]
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const msg = msgs[i]
+        if (msg.role !== 'assistant') continue
+        const newContent = msg.content.map((b) => {
+          if (b.type === 'ask_user' && b.toolUseId === toolUseId) {
+            return {
+              ...b,
+              status: 'answered',
+              answeredText: answerText,
+              answeredSelections: answerData?.selections || {},
+              answeredCustomInputs: answerData?.customInputs || {},
+            }
           }
+          return b
+        })
+        const changed = newContent.some((b, j) => b !== msg.content[j])
+        if (changed) {
+          msgs[i] = { ...msg, content: newContent }
+          useChatStore.setState({ messages: msgs })
+          break
         }
-        return b
-      })
-      const changed = newContent.some((b, j) => b !== msg.content[j])
-      if (changed) {
-        msgs[i] = { ...msg, content: newContent }
-        useChatStore.setState({ messages: msgs })
-        break
       }
     }
-    useChatStore.getState().clearPendingAskUser()
 
     if (isPermissionBased) {
-      // Route through permission: WS if available, otherwise POST
+      // WS send acceptance is not a permission ACK. Keep the card authoritative
+      // until the backend broadcasts permission_resolved to every attached tab.
       const { streamId, wsSendPermission } = useChatStore.getState()
       const updatedInput = { questions: pendingAskUser.questions, answer: answerText }
-      if (wsSendPermission) {
-        wsSendPermission(isPermissionBased, 'allow', null, updatedInput)
+      const submitted = {
+        answerText,
+        selections: answerData?.selections || {},
+        customInputs: answerData?.customInputs || {},
+      }
+      if (wsSendPermission?.(isPermissionBased, 'allow', null, updatedInput)) {
+        useChatStore.getState().setPendingAskUser({
+          ...pendingAskUser,
+          _submittedAnswer: submitted,
+        })
       } else if (streamId) {
         try {
           await respondPermissionAPI(streamId, isPermissionBased, 'allow', null, updatedInput)
+          markAnswered()
+          useChatStore.getState().clearPendingAskUser()
         } catch (err) {
           useToastStore.getState().pushToast({
             level: 'error',
@@ -2248,10 +2300,18 @@ export function useSSE() {
             body: String(err?.message || err),
           })
         }
+      } else {
+        useToastStore.getState().pushToast({
+          level: 'error',
+          title: i18n.t('chat.permissionRespondFailed'),
+          body: i18n.t('connection.lost'),
+        })
       }
       recomputeActiveStatus()
     } else {
       // Original flow: send the answer as a new message to resume the session
+      markAnswered()
+      useChatStore.getState().clearPendingAskUser()
       sendMessage(answerText)
     }
   }, [sendMessage])
@@ -2261,33 +2321,37 @@ export function useSSE() {
     if (!pendingAskUser) return
     const toolUseId = pendingAskUser.toolUseId
     const isPermissionBased = pendingAskUser._permissionRequestId
-    // Mark all pending ask_user blocks as 'declined'
-    const msgs = [...useChatStore.getState().messages]
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const msg = msgs[i]
-      if (msg.role !== 'assistant') continue
-      const newContent = msg.content.map((b) => {
-        if (b.type === 'ask_user' && b.toolUseId === toolUseId) {
-          return { ...b, status: 'declined' }
+    const markDeclined = () => {
+      const msgs = [...useChatStore.getState().messages]
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const msg = msgs[i]
+        if (msg.role !== 'assistant') continue
+        const newContent = msg.content.map((b) => (
+          b.type === 'ask_user' && b.toolUseId === toolUseId
+            ? { ...b, status: 'declined' }
+            : b
+        ))
+        const changed = newContent.some((b, j) => b !== msg.content[j])
+        if (changed) {
+          msgs[i] = { ...msg, content: newContent }
+          useChatStore.setState({ messages: msgs })
+          break
         }
-        return b
-      })
-      const changed = newContent.some((b, j) => b !== msg.content[j])
-      if (changed) {
-        msgs[i] = { ...msg, content: newContent }
-        useChatStore.setState({ messages: msgs })
-        break
       }
     }
-    useChatStore.getState().clearPendingAskUser()
     // If permission-based, send deny: WS if available, otherwise POST
     if (isPermissionBased) {
       const { streamId, wsSendPermission } = useChatStore.getState()
-      if (wsSendPermission) {
-        wsSendPermission(isPermissionBased, 'deny', 'User skipped the question')
+      if (wsSendPermission?.(isPermissionBased, 'deny', 'User skipped the question')) {
+        useChatStore.getState().setPendingAskUser({
+          ...pendingAskUser,
+          _submittedAnswer: { declined: true },
+        })
       } else if (streamId) {
         try {
           await respondPermissionAPI(streamId, isPermissionBased, 'deny', 'User skipped the question')
+          markDeclined()
+          useChatStore.getState().clearPendingAskUser()
         } catch (err) {
           useToastStore.getState().pushToast({
             level: 'error',
@@ -2295,18 +2359,31 @@ export function useSSE() {
             body: String(err?.message || err),
           })
         }
+      } else {
+        useToastStore.getState().pushToast({
+          level: 'error',
+          title: i18n.t('chat.permissionDeclineFailed'),
+          body: i18n.t('connection.lost'),
+        })
       }
+    } else {
+      markDeclined()
+      useChatStore.getState().clearPendingAskUser()
     }
     recomputeActiveStatus()
   }, [])
 
   const respondPermission = useCallback(async (requestId, decision, message, updatedInput) => {
     const { streamId, wsSendPermission } = useChatStore.getState()
-    if (wsSendPermission) {
-      wsSendPermission(requestId, decision, message, updatedInput)
-    } else if (streamId) {
+    if (wsSendPermission?.(requestId, decision, message, updatedInput)) {
+      // permission_resolved is the authoritative ACK and clears every tab.
+      return
+    }
+    if (streamId) {
       try {
         await respondPermissionAPI(streamId, requestId, decision, message, updatedInput)
+        useChatStore.getState().resolvePermission(requestId)
+        recomputeActiveStatus()
       } catch (err) {
         useToastStore.getState().pushToast({
           level: 'error',
@@ -2316,10 +2393,12 @@ export function useSSE() {
       }
     } else {
       console.warn('[SSE] respondPermission: no streamId, skipping API call')
+      useToastStore.getState().pushToast({
+        level: 'error',
+        title: i18n.t('chat.permissionRespondFailed'),
+        body: i18n.t('connection.lost'),
+      })
     }
-    // Always resolve the permission UI regardless of API success
-    useChatStore.getState().resolvePermission(requestId)
-    recomputeActiveStatus()
   }, [])
 
   const stopStream = useCallback(() => stopActiveStream(), [])

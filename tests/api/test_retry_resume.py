@@ -171,13 +171,16 @@ class HealOrphanToolUsesTests(unittest.TestCase):
 class RetryOrchestrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_agent_run_resumes_pending_turn_without_resending_prompt(self) -> None:
         queries: list[tuple[str | None, str | list[dict]]] = []
-        session_id = SESSION_ID
+        preallocated_session_id: str | None = None
 
         class FakeClient:
             attempts = 0
 
             def __init__(self, options):
+                nonlocal preallocated_session_id
                 self.options = options
+                if preallocated_session_id is None:
+                    preallocated_session_id = options.session_id
                 type(self).attempts += 1
                 self.attempt = type(self).attempts
 
@@ -197,6 +200,8 @@ class RetryOrchestrationTests(unittest.IsolatedAsyncioTestCase):
                 queries.append((self.options.resume, submitted))
 
             async def receive_response(self):
+                session_id = self.options.resume or self.options.session_id
+                assert session_id
                 if self.attempt == 1:
                     yield SystemMessage("init", {"session_id": session_id})
                     yield AssistantMessage(
@@ -238,11 +243,12 @@ class RetryOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await service.agent_run("perform one side effect")
 
+        self.assertIsNotNone(preallocated_session_id)
         self.assertEqual(
             queries,
             [
                 (None, "perform one side effect"),
-                (session_id, []),
+                (preallocated_session_id, []),
             ],
         )
         self.assertEqual(audit_prompt.call_count, 1)
@@ -351,6 +357,7 @@ class RetryOrchestrationTests(unittest.IsolatedAsyncioTestCase):
                 "perform one side effect",
                 emit=emit,
                 coordinator_out=[coordinator],
+                new_session_id=session_id,
             )
 
         self.assertEqual(

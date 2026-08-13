@@ -23,8 +23,12 @@ class PermissionCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request["data"]["session_id"], "stream-A")
 
         coordinator.resolve(request["data"]["request_id"], "allow", updated_input={"cmd": "ls"})
+        acknowledgement = await queue.get()
         result = await task
 
+        self.assertEqual(acknowledgement["event"], "permission_resolved")
+        self.assertEqual(acknowledgement["data"]["decision"], "allow")
+        self.assertEqual(acknowledgement["data"]["updated_input"], {"cmd": "ls"})
         self.assertIsInstance(result, PermissionResultAllow)
         self.assertEqual(result.updated_input, {"cmd": "ls"})
 
@@ -75,6 +79,34 @@ class PermissionCoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
         anon = PermissionCoordinator("stream-A", asyncio.Queue())
         self.assertIsNone(anon.owner_username)
+
+    async def test_pending_snapshot_survives_independently_of_event_replay(self) -> None:
+        queue: asyncio.Queue = asyncio.Queue()
+        coordinator = PermissionCoordinator("stream-A", queue)
+
+        task = asyncio.create_task(
+            coordinator.can_use_tool("Bash", {"command": "pwd"}, context=None)
+        )
+        request = await queue.get()
+        request_id = request["data"]["request_id"]
+
+        self.assertEqual(coordinator.pending_request_snapshots(), [request["data"]])
+
+        coordinator.resolve(request_id, "allow")
+        # A done Future must disappear from the authoritative view before the
+        # request coroutine gets its next event-loop turn.
+        self.assertEqual(coordinator.pending_request_snapshots(), [])
+        resolved = await queue.get()
+        self.assertEqual(resolved["event"], "permission_resolved")
+        self.assertEqual(resolved["data"]["request_id"], request_id)
+        self.assertEqual(resolved["data"]["decision"], "allow")
+        await task
+
+        # A late response from another tab is an idempotent no-op, while a
+        # fabricated id remains distinguishable from a real settled request.
+        self.assertFalse(coordinator.resolve(request_id, "deny"))
+        with self.assertRaises(ValueError):
+            coordinator.resolve("unknown-request", "allow")
 
     async def test_timeout_emits_event_then_denies(self) -> None:
         queue: asyncio.Queue = asyncio.Queue()

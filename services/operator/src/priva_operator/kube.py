@@ -284,6 +284,10 @@ def _deployment_body(namespace, account_id, username, image, pull_policy, settin
                     "hostPID": False,
                     "hostIPC": False,
                     "hostNetwork": False,
+                    # Uvicorn lifespan gets SIGTERM and has enough time to
+                    # interrupt live turns, close pooled Claude clients, and
+                    # reap their CLI subprocesses before kubelet sends SIGKILL.
+                    "terminationGracePeriodSeconds": 45,
                     "containers": [{
                         "name": "agent-runner",
                         "image": image,

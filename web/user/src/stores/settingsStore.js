@@ -29,6 +29,16 @@ function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object, key)
 }
 
+function runtimeFeatureState(data) {
+  return {
+    env: data?.extra_env || {},
+    extraEnvEnabled: data?.extra_env_enabled === true,
+    promptSuggestionEnabled: data?.prompt_suggestion_enabled === true,
+    agentTeamsEnabled: data?.agent_teams_enabled === true,
+    crossSessionInteractionEnabled: data?.cross_session_interaction_enabled === true,
+  }
+}
+
 function modelSelectionFromResponse(lastResponseModel, profiles, defaultProfileId) {
   const modelId = lastResponseModel?.model_id || lastResponseModel?.modelId
   if (typeof modelId !== 'string' || !modelId.trim()) return null
@@ -55,6 +65,7 @@ const useSettingsStore = create((set, get) => ({
   extraEnvEnabled: false,
   promptSuggestionEnabled: false,
   agentTeamsEnabled: false,
+  crossSessionInteractionEnabled: false,
   runtimeSettingsLoaded: false,
   runtimeSettingsLoading: false,
   runtimeSettingsSaving: false,
@@ -89,7 +100,6 @@ const useSettingsStore = create((set, get) => ({
   // makes, so the pod is the one that has to know. Optimistic default matches
   // the backend's "absent means on".
   recapEnabled: true,
-  transport: safeStorage.getItem('priva-transport') || 'ws',
   // Developer Mode is the master gate; Debug Logging is one switch under it.
   // Persisted so the plain-JS API layer (debugLog) can read the flags directly.
   developerMode: safeStorage.getItem(DEVELOPER_MODE_KEY) === '1',
@@ -166,10 +176,7 @@ const useSettingsStore = create((set, get) => ({
     try {
       const data = await getRuntimeSettingsAPI()
       set({
-        env: data.extra_env || {},
-        extraEnvEnabled: data.extra_env_enabled === true,
-        promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
-        agentTeamsEnabled: data.agent_teams_enabled === true,
+        ...runtimeFeatureState(data),
         runtimeSettingsLoaded: true,
         runtimeSettingsLoading: false,
       })
@@ -198,10 +205,7 @@ const useSettingsStore = create((set, get) => ({
         extra_env_enabled: !!enabled,
       })
       set({
-        env: data.extra_env || {},
-        extraEnvEnabled: data.extra_env_enabled === true,
-        promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
-        agentTeamsEnabled: data.agent_teams_enabled === true,
+        ...runtimeFeatureState(data),
         runtimeSettingsSaving: false,
         runtimeSettingsLoaded: true,
       })
@@ -222,10 +226,7 @@ const useSettingsStore = create((set, get) => ({
     try {
       const data = await updateRuntimeSettingsAPI({ extra_env_enabled: !!enabled })
       set({
-        env: data.extra_env || {},
-        extraEnvEnabled: data.extra_env_enabled === true,
-        promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
-        agentTeamsEnabled: data.agent_teams_enabled === true,
+        ...runtimeFeatureState(data),
         runtimeSettingsLoaded: true,
       })
       return data
@@ -241,10 +242,7 @@ const useSettingsStore = create((set, get) => ({
     try {
       const data = await updateRuntimeSettingsAPI({ prompt_suggestion_enabled: !!enabled })
       set({
-        env: data.extra_env || {},
-        extraEnvEnabled: data.extra_env_enabled === true,
-        promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
-        agentTeamsEnabled: data.agent_teams_enabled === true,
+        ...runtimeFeatureState(data),
         runtimeSettingsLoaded: true,
       })
       return data
@@ -260,15 +258,39 @@ const useSettingsStore = create((set, get) => ({
     try {
       const data = await updateRuntimeSettingsAPI({ agent_teams_enabled: !!enabled })
       set({
-        env: data.extra_env || {},
-        extraEnvEnabled: data.extra_env_enabled === true,
-        promptSuggestionEnabled: data.prompt_suggestion_enabled === true,
-        agentTeamsEnabled: data.agent_teams_enabled === true,
+        ...runtimeFeatureState(data),
         runtimeSettingsLoaded: true,
       })
       return data
     } catch (err) {
       set({ agentTeamsEnabled: previous, runtimeSettingsError: err?.message || String(err) })
+      throw err
+    }
+  },
+
+  setCrossSessionInteractionEnabled: async (enabled) => {
+    const previous = get().crossSessionInteractionEnabled
+    set({
+      crossSessionInteractionEnabled: !!enabled,
+      runtimeSettingsSaving: true,
+      runtimeSettingsError: null,
+    })
+    try {
+      const data = await updateRuntimeSettingsAPI({
+        cross_session_interaction_enabled: !!enabled,
+      })
+      set({
+        ...runtimeFeatureState(data),
+        runtimeSettingsSaving: false,
+        runtimeSettingsLoaded: true,
+      })
+      return data
+    } catch (err) {
+      set({
+        crossSessionInteractionEnabled: previous,
+        runtimeSettingsSaving: false,
+        runtimeSettingsError: err?.message || String(err),
+      })
       throw err
     }
   },
@@ -400,11 +422,6 @@ const useSettingsStore = create((set, get) => ({
     }
   },
 
-  setTransport: (t) => {
-    safeStorage.setItem('priva-transport', t)
-    set({ transport: t })
-  },
-
   setDeveloperMode: (on) => {
     safeStorage.setItem(DEVELOPER_MODE_KEY, on ? '1' : '0')
     set({ developerMode: on })
@@ -517,6 +534,7 @@ const useSettingsStore = create((set, get) => ({
     extraEnvEnabled: false,
     promptSuggestionEnabled: false,
     agentTeamsEnabled: false,
+    crossSessionInteractionEnabled: false,
     runtimeSettingsLoaded: false,
     runtimeSettingsLoading: false,
     runtimeSettingsSaving: false,
@@ -545,7 +563,6 @@ const useSettingsStore = create((set, get) => ({
     apiKeyLoading: false,
     visionModel: null,
     recapEnabled: true,
-    transport: safeStorage.getItem('priva-transport') || 'ws',
     developerMode: safeStorage.getItem(DEVELOPER_MODE_KEY) === '1',
     debugMode: safeStorage.getItem(DEBUG_LOGGING_KEY) === '1',
   }),

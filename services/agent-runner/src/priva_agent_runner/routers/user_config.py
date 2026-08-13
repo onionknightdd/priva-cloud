@@ -90,4 +90,20 @@ async def patch_runtime_settings(
 ):
     del user
     patch = request.model_dump(exclude_unset=True, exclude_none=True)
-    return RuntimeSettingsResponse(**update_runtime_settings(patch))
+    previous = read_runtime_settings()
+    updated = update_runtime_settings(patch)
+
+    # Startup-only Claude settings retire idle clients now and mark live clients
+    # for recycle after their turn. Pool capacity is an internal platform
+    # safety limit and is intentionally absent from this user-facing API.
+    from ..services.claude_sdk.session_runtime_pool import session_runtime_pool
+    startup_keys = {
+        "extra_env_enabled",
+        "extra_env",
+        "prompt_suggestion_enabled",
+        "agent_teams_enabled",
+        "cross_session_interaction_enabled",
+    }
+    if any(previous.get(key) != updated.get(key) for key in startup_keys):
+        await session_runtime_pool.recycle_all()
+    return RuntimeSettingsResponse(**updated)

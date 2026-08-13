@@ -166,6 +166,7 @@ async def build_agent_options(
     extra_disallowed_tools: list[str] | None = None,
     include_partial_messages: bool = False,
     vision_image_paths: list[str] | None = None,
+    enable_cross_session_interaction: bool | None = None,
 ) -> ClaudeAgentOptions:
     if run_mode not in {"agent", "code"}:
         raise HTTPException(422, f"Invalid run_mode: {run_mode!r}")
@@ -234,6 +235,11 @@ async def build_agent_options(
     # runner SERVICE's own os.environ is untouched and a user-installed package can't
     # shadow a dependency this service imports.
     runtime_settings = read_runtime_settings()
+    cross_session_enabled = (
+        runtime_settings.get("cross_session_interaction_enabled", False)
+        if enable_cross_session_interaction is None
+        else bool(enable_cross_session_interaction)
+    )
     env_dict: dict[str, str] = {}
     if runtime_settings["extra_env_enabled"]:
         # read_runtime_settings has already validated names, values and limits.
@@ -275,6 +281,10 @@ async def build_agent_options(
         enabled_skill_names = None
 
     disallowed_tools = list(BUILTIN_DISALLOWED_TOOLS)
+    if not cross_session_enabled:
+        # ListPeers is the legacy alias for ListAgents in CLI 2.1.226. Deny
+        # both so the product switch cannot be bypassed through the alias.
+        disallowed_tools.extend(["ListAgents", "ListPeers"])
     if not enable_permission_feedback:
         # Caller cannot answer prompts — strip AskUserQuestion so the model
         # can't call it and stall the run waiting on a human.
@@ -307,13 +317,30 @@ async def build_agent_options(
     # settings layer) and ``model`` to --model.  Keep the secret in a 0600 file
     # under the app config path; it never appears in argv or options.env.
     overlay_path, overlay_manager = open_profile_settings_overlay(
-        resolved.profile, model=model,
+        resolved.profile,
+        model=model,
+        extra_settings={
+            # Discovery is controlled by the ListAgents deny rule and this
+            # matching inbound rule prevents warm sockets from accepting peer
+            # turns. SendMessage is intentionally not denied here: Claude uses
+            # the same tool for subagents and Agent Teams, so a bare deny would
+            # silently disable those independent features as well. Therefore
+            # this product setting is not an outbound egress-isolation boundary.
+            "crossSessionInbound": (
+                "accept" if cross_session_enabled else "refuse"
+            ),
+            # This feature is scoped to the account Pod's local warm sessions.
+            # If Remote Control is ever connected, crossing a machine boundary
+            # must still require explicit approval even in bypass mode.
+            "isolatePeerMachines": True,
+        },
     )
     options.settings = overlay_path
     options._priva_profile_id = resolved.profile.id
     options._priva_model_id = model
     options._priva_overlay_manager = overlay_manager
     options._priva_overlay_path = overlay_path
+    options._priva_vision_image_paths = tuple(vision_image_paths or ())
     if max_turns and max_turns > 0:
         # D14 runaway guard for unattended runs: the CLI stops at the cap and
         # the result message carries subtype=error_max_turns.

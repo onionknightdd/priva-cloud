@@ -18,11 +18,10 @@ import { create, useStore } from 'zustand'
 const sliceFactories = {}
 const runtimes = new Map() // key -> runtime; key = sessionId or 'draft-<n>'
 
-// Former keys → canonical key. The CLI mints a NEW session id on every
-// resume spawn (see agent-runner service.py: current_resume_id), so a
-// conversation's id rotates per turn while sidebar rows / status entries /
-// split channels may still hold an older id. Every lookup resolves through
-// this map so a stale id always finds the live runtime.
+// Former keys → canonical key. Normal pooled runs keep one stable session
+// UUID. Aliases remain useful for draft→session promotion and the exceptional
+// reset/recovery path, while sidebar rows / status entries / split channels may
+// still briefly hold the former key.
 const keyAliases = new Map()
 
 // Monotonic — never reset, so a logout/reset always mints a fresh draft key
@@ -125,10 +124,10 @@ export function newDraftRuntime() {
   return key
 }
 
-// Draft got its real session id (system.init / result), or a resume rotated
-// the id (the CLI mints a new one per spawn). Moves the runtime under the
-// new key and leaves an alias behind so sidebar rows / status entries still
-// holding the former id keep resolving to this live runtime.
+// Draft got its stable session id (preallocated by the server and confirmed by
+// system.init), or an exceptional recovery replaced the identity. Move the
+// runtime under the new key and leave an alias behind so concurrent UI state
+// still holding the former key resolves to the live runtime.
 export function rekeyRuntime(oldKey, sessionId) {
   const rt = runtimes.get(resolveKey(oldKey))
   if (!rt || !sessionId || rt.key === sessionId) return rt || null

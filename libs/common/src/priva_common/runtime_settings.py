@@ -84,6 +84,9 @@ def read_runtime_settings() -> dict[str, Any]:
         "extra_env": extra_env,
         "prompt_suggestion_enabled": bool(raw.get("prompt_suggestion_enabled", False)),
         "agent_teams_enabled": bool(raw.get("agent_teams_enabled", False)),
+        "cross_session_interaction_enabled": bool(
+            raw.get("cross_session_interaction_enabled", False)
+        ),
     }
 
 
@@ -97,5 +100,9 @@ def update_runtime_settings(patch: dict[str, Any]) -> dict[str, Any]:
         current["prompt_suggestion_enabled"] = bool(patch["prompt_suggestion_enabled"])
     if "agent_teams_enabled" in patch:
         current["agent_teams_enabled"] = bool(patch["agent_teams_enabled"])
+    if "cross_session_interaction_enabled" in patch:
+        current["cross_session_interaction_enabled"] = bool(
+            patch["cross_session_interaction_enabled"]
+        )
     _user_yaml.save_user_yaml_key(_KEY, current)
     return current

@@ -20,7 +20,7 @@ export async function fetchCwdSessions(cwd, limit = 20, offset = 0) {
 }
 
 // Runs still executing on the backend (RunRegistry). Returns
-// { running: [{ session_id, run_id, status, started_at, last_seq,
+// { running: [{ session_id, run_id, status, started_at, first_seq, last_seq,
 //   first_user_uuid, pending_permission }] }.
 export async function fetchRunningSessions() {
   return sandboxRead('/agent/sessions/running')
@@ -68,6 +68,9 @@ export async function fetchSessionMessages(sessionId, limit, offset) {
   // Large/workflow transcripts run 35-300KB. sandboxRead rides the control-panel
   // "/" lane (no GIE/EPP ~8KB ext_proc truncation), falling back to the direct
   // sandbox lane on 404 (route not deployed yet) or network error.
+  // A live full snapshot also carries {live_run_id, live_first_seq, live_seq}.
+  // Together they form the barrier used to recover when the bounded WS replay
+  // tail has a gap.
   return sandboxRead(`/agent/sessions/${suffix}`)
 }
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from types import SimpleNamespace
 
 import pytest
 from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
@@ -272,3 +274,107 @@ def test_agent_teams_environment_gate_follows_server_toggle(monkeypatch, tmp_pat
         },
     )
     assert "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS" not in disabled.env
+
+
+def test_cross_session_toggle_controls_list_agents_and_inbound_policy(
+    monkeypatch, tmp_path
+):
+    base = {
+        "extra_env_enabled": False,
+        "extra_env": {},
+        "prompt_suggestion_enabled": False,
+        "agent_teams_enabled": False,
+    }
+    disabled = _build_options(
+        monkeypatch,
+        tmp_path,
+        _runtime_settings={
+            **base,
+            "cross_session_interaction_enabled": False,
+        },
+    )
+    assert "ListAgents" in disabled.disallowed_tools
+    assert "ListPeers" in disabled.disallowed_tools
+    disabled_settings = json.loads(open(disabled.settings, encoding="utf-8").read())
+    assert disabled_settings["crossSessionInbound"] == "refuse"
+    assert disabled_settings["isolatePeerMachines"] is True
+
+    enabled = _build_options(
+        monkeypatch,
+        tmp_path,
+        _runtime_settings={
+            **base,
+            "cross_session_interaction_enabled": True,
+        },
+    )
+    assert "ListAgents" not in enabled.disallowed_tools
+    assert "ListPeers" not in enabled.disallowed_tools
+    enabled_settings = json.loads(open(enabled.settings, encoding="utf-8").read())
+    assert enabled_settings["crossSessionInbound"] == "accept"
+    assert enabled_settings["isolatePeerMachines"] is True
+
+    ephemeral = _build_options(
+        monkeypatch,
+        tmp_path,
+        _runtime_settings={
+            **base,
+            "cross_session_interaction_enabled": True,
+        },
+        enable_cross_session_interaction=False,
+    )
+    assert "ListAgents" in ephemeral.disallowed_tools
+    assert "ListPeers" in ephemeral.disallowed_tools
+    ephemeral_settings = json.loads(open(ephemeral.settings, encoding="utf-8").read())
+    assert ephemeral_settings["crossSessionInbound"] == "refuse"
+
+
+def test_preallocated_session_id_is_forwarded_to_cli(monkeypatch, tmp_path):
+    options = _build_options(monkeypatch, tmp_path)
+    options.session_id = "11111111-2222-3333-4444-555555555555"
+    command = _cli_command(options)
+    assert f"--session-id={options.session_id}" in command
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("keep_runtime_warm", "expected_override"),
+    [(True, None), (False, False)],
+)
+async def test_stream_runtime_only_forces_cross_session_off_for_ephemeral_runs(
+    monkeypatch,
+    tmp_path,
+    keep_runtime_warm,
+    expected_override,
+):
+    from priva_agent_runner.services.claude_sdk import service as service_module
+
+    captured: dict[str, object] = {}
+
+    async def fake_build_agent_options(*_args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            cwd=str(tmp_path),
+            permission_mode="bypassPermissions",
+            _priva_overlay_manager=None,
+        )
+
+    async def discard_event(_event, _data):
+        return None
+
+    monkeypatch.setattr(
+        service_module,
+        "build_agent_options",
+        fake_build_agent_options,
+    )
+    cancelled = asyncio.Event()
+    cancelled.set()
+
+    await service_module.agent_run_events(
+        "test",
+        cwd=str(tmp_path),
+        emit=discard_event,
+        cancelled=cancelled,
+        keep_runtime_warm=keep_runtime_warm,
+    )
+
+    assert captured["enable_cross_session_interaction"] is expected_override

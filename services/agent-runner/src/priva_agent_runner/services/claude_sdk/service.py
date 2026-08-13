@@ -28,7 +28,14 @@ from .agent_communication_log import record_stream_delivery
 from .options import build_agent_options
 from ..llm_profiles import close_profile_settings_overlay, resolve_model
 from priva_common.logging import get_app_logger
+from .bounded_queue import BoundedAsyncQueue
 from .permission_coordinator import PermissionCoordinator, registry
+from .session_runtime_pool import (
+    PermissionBridge,
+    RuntimeMessageEnvelope,
+    RuntimeSessionCollisionError,
+    session_runtime_pool,
+)
 from priva_common.serialization import (
     get_event_label,
     serialize_assistant_message,
@@ -39,7 +46,8 @@ from .session_heal import heal_orphan_tool_uses
 
 logger = get_app_logger(__name__)
 
-StreamQueue = asyncio.Queue[dict[str, Any] | None]
+StreamQueue = BoundedAsyncQueue[dict[str, Any] | None]
+_MAX_STREAM_QUEUE_BYTES = 16 * 1024 * 1024
 
 # Task `status` (task_notification) / `patch.status` (task_updated) values that
 # mean the task has actually finished. Superset of the SDK's
@@ -317,7 +325,15 @@ def _vision_image_paths(attachments: list[dict] | None) -> list[str]:
 
 
 def _cleanup_options(options: Any) -> None:
-    close_profile_settings_overlay(getattr(options, "_priva_overlay_manager", None))
+    if options is None:
+        return
+    manager = getattr(options, "_priva_overlay_manager", None)
+    if manager is None:
+        return
+    close_profile_settings_overlay(manager)
+    # Cleanup is shared by retry failure, pool eviction and function-finally
+    # paths. Make it exactly-once so overlapping ownership handoffs are safe.
+    options._priva_overlay_manager = None
 
 
 async def _resolve_effective_run_mode(
@@ -408,7 +424,7 @@ def _askuser_answers_map(questions: list | None, answer_text: str) -> dict[str, 
 
 
 def _make_unified_can_use_tool(
-    coordinator: PermissionCoordinator,
+    coordinator: PermissionCoordinator | None,
     effective_mode: str,
     enable_feedback: bool = True,
 ):
@@ -659,13 +675,24 @@ async def agent_run(
     extra_disallowed_tools: list[str] | None = None,
     run_mode: RunMode | None = None,
 ) -> dict[str, Any]:
+    source_session_id = session_id
+    target_session_id = (
+        str(uuid.uuid4()) if session_id is None or fork_session else session_id
+    )
     effective_run_mode = await _resolve_effective_run_mode(session_id, run_mode)
     model_override, selected_profile_id, vision_model = _model_ref_for_images(
         model_override, session_id, images,
     )
 
+    permission_bridge = PermissionBridge()
+    permission_callback = _make_unified_can_use_tool(
+        None,
+        permission_mode or "bypassPermissions",
+        enable_feedback=False,
+    )
     options = await build_agent_options(
         session_id, permission_mode, cwd=cwd, add_dirs=add_dirs, username=username,
+        can_use_tool=permission_bridge,
         auth_method=auth_method,
         run_mode=effective_run_mode,
         model_override=model_override, mcp_servers=mcp_servers,
@@ -677,15 +704,17 @@ async def agent_run(
         extra_disallowed_tools=extra_disallowed_tools,
         vision_image_paths=_vision_image_paths(attachments),
     )
+    if source_session_id is None or fork_session:
+        options.session_id = target_session_id
     messages: list[dict[str, Any]] = []
     result_data: dict[str, Any] = {}
     # The provider-reported value is diagnostic only: gateways may rewrite the
     # Profile-side model alias before returning AssistantMessage.model.
     last_provider_model: str | None = None
     assistant_responded = False
-    # Track the CLI-assigned session id across retries — same role as in
-    # agent_run_events. See the explanation there.
-    current_resume_id: str | None = session_id
+    # CREATE is preassigned with --session-id; RESUME must preserve its UUID.
+    # Any different id from the CLI is an ownership violation, not rotation.
+    current_resume_id: str = target_session_id
     effective_prompt = _build_prompt_with_images(prompt, images, attachments)
 
     if session_id:
@@ -699,17 +728,33 @@ async def agent_run(
     title_pending = session_id is None
     resume_in_place = False
     attempt_resumable = False
+    options_owned_by_pool = False
 
     async def _run_one_attempt(resume_pending_turn: bool) -> None:
         nonlocal last_provider_model, assistant_responded
         nonlocal current_resume_id, title_pending, attempt_resumable
+        nonlocal options, options_owned_by_pool, permission_bridge
         last_provider_model = None
         assistant_responded = False
         # A transport failure while reconnecting does not make the already
         # persisted pending turn disappear; the next attempt must still resume
         # it rather than fall back to the original prompt.
         attempt_resumable = resume_pending_turn
-        async with ClaudeSDKClient(options=options) as client:
+        runtime_context = session_runtime_pool.client_context(
+            key=current_resume_id or session_id or f"pending:sync-{uuid.uuid4()}",
+            options=options,
+            bridge=permission_bridge,
+            permission_callback=permission_callback,
+            coordinator=None,
+            cancelled=None,
+            client_factory=ClaudeSDKClient,
+            cleanup_options=_cleanup_options,
+        )
+        async with runtime_context as client:
+            assert runtime_context.runtime is not None
+            assert runtime_context.lease is not None
+            options = runtime_context.runtime.options
+            permission_bridge = runtime_context.runtime.bridge
             if resume_pending_turn:
                 # `--resume` continues the transcript's pending user/tool-result
                 # turn on startup.  Do not append the original request again.
@@ -727,6 +772,11 @@ async def agent_run(
                 if isinstance(message, SystemMessage) and message.subtype == "init":
                     sid = (message.data or {}).get("session_id")
                     if isinstance(sid, str) and sid:
+                        if sid != current_resume_id:
+                            raise RuntimeSessionCollisionError(
+                                f"expected session {current_resume_id}, CLI returned {sid}"
+                            )
+                        await runtime_context.lease.remap_session(sid)
                         await session_meta.claim_new_session_run_mode(
                             sid, effective_run_mode
                         )
@@ -761,6 +811,11 @@ async def agent_run(
                     result_data.update(serialize_result_message(message))
                     new_sid = result_data.get("session_id")
                     if isinstance(new_sid, str) and new_sid:
+                        if new_sid != current_resume_id:
+                            raise RuntimeSessionCollisionError(
+                                f"expected session {current_resume_id}, CLI returned {new_sid}"
+                            )
+                        await runtime_context.lease.remap_session(new_sid)
                         await session_meta.claim_new_session_run_mode(
                             new_sid, effective_run_mode
                         )
@@ -770,10 +825,16 @@ async def agent_run(
             # immediately, not spend the settle budget waiting on a title whose
             # transport is already closing. An abandoned request times out on
             # its own and is swallowed inside session_title.
+            runtime_context.tainted = not await runtime_context.runtime.quiesce_turn_security()
+            runtime_context.keep_warm = not bool(
+                getattr(options, "_priva_vision_image_paths", ())
+            )
             await session_title.settle(title_task)
 
             # Grace period for CLI subprocess to flush session JSONL writes
             await asyncio.sleep(1)
+
+        options_owned_by_pool = runtime_context.retained
 
     last_error: dict | None = None
     final_attempts = 1
@@ -784,6 +845,8 @@ async def agent_run(
                 await asyncio.sleep(delay)
             if current_resume_id:
                 options.resume = current_resume_id
+                options.session_id = None
+                options.fork_session = False
                 try:
                     healed = heal_orphan_tool_uses(current_resume_id, options.cwd)
                     if healed:
@@ -872,7 +935,8 @@ async def agent_run(
     }
     if last_error:
         response["retried_due_to"] = last_error.get("code")
-    _cleanup_options(options)
+    if not options_owned_by_pool:
+        _cleanup_options(options)
     return response
 
 
@@ -885,6 +949,7 @@ async def _pump_stream_messages(
     assistant_response_tracker: list[bool] | None = None,
     prompt_suggestions_enabled: bool = False,
 ) -> None:
+    cancelled = False
     try:
         async for message in _receive_response_items(
             client,
@@ -896,6 +961,11 @@ async def _pump_stream_messages(
                     "data": message,
                 })
                 continue
+
+            origin: dict[str, Any] | None = None
+            if isinstance(message, RuntimeMessageEnvelope):
+                origin = message.origin
+                message = message.message
 
             # Detect synthetic-error messages (CLI exhausted its own retries).
             # Push an internal retry sentinel so the outer loop can decide.
@@ -922,13 +992,13 @@ async def _pump_stream_messages(
                     assistant_response_tracker[0] = True
                 if model_tracker is not None and message.model:
                     model_tracker[0] = message.model
-            await output_queue.put(
-                {
-                    "event": event_label,
-                    "data": serialize_message(message),
-                }
-            )
+            data = serialize_message(message)
+            if origin is not None:
+                data["origin"] = origin
+                data["native_peer_turn"] = origin.get("kind") == "peer"
+            await output_queue.put({"event": event_label, "data": data})
     except asyncio.CancelledError:
+        cancelled = True
         raise
     except Exception as exc:
         kind = "exception" if retry.should_retry_exception(exc) else "fatal"
@@ -942,7 +1012,17 @@ async def _pump_stream_messages(
             },
         })
     finally:
-        await output_queue.put(None)
+        if cancelled:
+            # The owner has stopped consuming this turn queue. A blocking
+            # sentinel write while the bounded queue is full would deadlock
+            # cancellation and, in turn, runtime/CLI shutdown. The sentinel is
+            # unnecessary for a cancelled consumer, so make this best-effort.
+            try:
+                output_queue.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
+        else:
+            await output_queue.put(None)
 
 
 def _prompt_suggestion_payload(raw: dict[str, Any]) -> dict[str, Any] | None:
@@ -974,6 +1054,14 @@ async def _receive_response_items(
     own parser, then drain for at most ten seconds after the result.  The
     compatibility seam can be removed once the public SDK exposes this event.
     """
+    pooled_iter = getattr(client, "iter_response_items", None)
+    if callable(pooled_iter):
+        async for item in pooled_iter(
+            prompt_suggestions_enabled=prompt_suggestions_enabled
+        ):
+            yield item
+        return
+
     if not prompt_suggestions_enabled:
         async for message in client.receive_response():
             yield message
@@ -1083,6 +1171,8 @@ async def agent_run_events(
     max_turns: int | None = None,
     extra_disallowed_tools: list[str] | None = None,
     include_partial_messages: bool = False,
+    keep_runtime_warm: bool = True,
+    new_session_id: str | None = None,
 ) -> None:
     """Run agent and push events to emit callback.
 
@@ -1104,19 +1194,26 @@ async def agent_run_events(
     )
 
     needs_permissions = True  # streaming runs always need a coordinator
-    stream_id = session_id or str(uuid.uuid4())
-    # The CLI assigns its own session UUID on every spawn and writes the
-    # turn's JSONL under that id. We capture it from the first `system.init`
-    # event (or fall back to `result.session_id`) so retries can point
-    # options.resume at the same on-disk file — without this, every retry
-    # gets a fresh session and the prior attempt's tool history is lost.
-    current_resume_id: str | None = session_id
+    source_session_id = session_id
+    target_session_id = (
+        new_session_id
+        or (str(uuid.uuid4()) if session_id is None or fork_session else session_id)
+    )
+    if new_session_id and session_id and not fork_session:
+        raise ValueError("new_session_id is only valid for create or fork")
+    stream_id = target_session_id
+    current_resume_id: str = target_session_id
     logger.info("[STREAM] agent_run_events stream_id=%s session_id=%s", stream_id, session_id)
-    output_queue: StreamQueue = asyncio.Queue()
+    output_queue = StreamQueue(
+        maxsize=256,
+        max_bytes=_MAX_STREAM_QUEUE_BYTES,
+    )
 
     # Mid-stream user-message queue: each entry becomes its own turn, injected
     # at the next tool-result boundary (mid-turn, via interrupt) or at end-of-turn.
-    pending_user_msgs: asyncio.Queue[tuple[str, str, list, list]] = asyncio.Queue()
+    pending_user_msgs: asyncio.Queue[tuple[str, str, list, list]] = asyncio.Queue(
+        maxsize=32
+    )
     if queue_out is not None:
         queue_out[0] = pending_user_msgs
 
@@ -1141,11 +1238,12 @@ async def agent_run_events(
     cut_cb = _make_unified_can_use_tool(
         coordinator, effective_mode, enable_permission_feedback
     )
+    permission_bridge = PermissionBridge()
 
     options = await build_agent_options(
         session_id,
         permission_mode,
-        can_use_tool=cut_cb,
+        can_use_tool=permission_bridge,
         cwd=cwd,
         add_dirs=add_dirs,
         username=username,
@@ -1164,7 +1262,13 @@ async def agent_run_events(
         extra_disallowed_tools=extra_disallowed_tools,
         include_partial_messages=include_partial_messages,
         vision_image_paths=_vision_image_paths(attachments),
+        # Warm WebUI/API runtimes follow the user's global setting. Scheduled
+        # and subagent-test callers intentionally use ephemeral clients and
+        # must never appear as cross-session targets during their run.
+        enable_cross_session_interaction=(None if keep_runtime_warm else False),
     )
+    if source_session_id is None or fork_session:
+        options.session_id = target_session_id
     prompt_suggestions_enabled = bool(
         getattr(options, "_priva_prompt_suggestion_enabled", False)
     )
@@ -1191,6 +1295,7 @@ async def agent_run_events(
     title_pending = session_id is None
     resume_in_place = False
     attempt_resumable = False
+    options_owned_by_pool = False
 
     async def _run_one_attempt(resume_pending_turn: bool) -> None:
         """Open SDK, query, pump until end-of-turn.
@@ -1201,6 +1306,7 @@ async def agent_run_events(
         via a ``stream_error`` emit and not retried).
         """
         nonlocal stream_id, current_resume_id, title_pending, attempt_resumable
+        nonlocal options, options_owned_by_pool, permission_bridge
         model_tracker[0] = None
         assistant_response_tracker[0] = False
         # Preserve native-resume mode across transient reconnect failures.  The
@@ -1208,7 +1314,23 @@ async def agent_run_events(
         attempt_resumable = resume_pending_turn
         retry_signal: dict | None = None
 
-        async with ClaudeSDKClient(options=options) as client:
+        runtime_context = session_runtime_pool.client_context(
+            key=current_resume_id or session_id or f"pending:{stream_id}",
+            options=options,
+            bridge=permission_bridge,
+            permission_callback=cut_cb,
+            coordinator=coordinator,
+            cancelled=cancelled,
+            client_factory=ClaudeSDKClient,
+            cleanup_options=_cleanup_options,
+        )
+        async with runtime_context as client:
+            assert runtime_context.runtime is not None
+            # A sticky acquire may reuse an older options object and closes the
+            # freshly-built duplicate. Retry and audit logic must follow the
+            # options actually owned by the physical runtime.
+            options = runtime_context.runtime.options
+            permission_bridge = runtime_context.runtime.bridge
             if resume_pending_turn:
                 # Resuming with no new input lets Claude Code continue the
                 # pending transcript turn (including healed tool results)
@@ -1348,7 +1470,12 @@ async def agent_run_events(
                         if sdata.get("subtype") == "init":
                             inner = sdata.get("data") if isinstance(sdata.get("data"), dict) else None
                             new_sid = inner.get("session_id") if inner else None
-                            if isinstance(new_sid, str) and new_sid and new_sid != current_resume_id:
+                            if isinstance(new_sid, str) and new_sid:
+                                if new_sid != current_resume_id:
+                                    raise RuntimeSessionCollisionError(
+                                        f"expected session {current_resume_id}, CLI returned {new_sid}"
+                                    )
+                                await runtime_context.lease.remap_session(new_sid)
                                 await session_meta.claim_new_session_run_mode(
                                     new_sid, effective_run_mode
                                 )
@@ -1399,6 +1526,11 @@ async def agent_run_events(
                     if item["event"] == "result":
                         new_sid = item["data"].get("session_id")
                         if new_sid:
+                            if new_sid != current_resume_id:
+                                raise RuntimeSessionCollisionError(
+                                    f"expected session {current_resume_id}, CLI returned {new_sid}"
+                                )
+                            await runtime_context.lease.remap_session(new_sid)
                             _track_vision_session(new_sid, selected_profile_id, vision_model)
                             if new_sid != current_resume_id:
                                 current_resume_id = new_sid
@@ -1442,9 +1574,37 @@ async def agent_run_events(
                 except asyncio.CancelledError:
                     pass
 
+            timed_out_background = bool(
+                draining_bg and wf_tracker.outstanding_count
+            )
+            cancelled_now = bool(cancelled and cancelled.is_set())
+            runtime_context.keep_warm = (
+                keep_runtime_warm
+                and retry_signal is None
+                and not timed_out_background
+                and not cancelled_now
+                # Vision MCP captures the current turn's attachment allowlist.
+                # Rebuild rather than exposing those paths to a later peer or
+                # browser turn while the runtime is warm.
+                and not bool(getattr(options, "_priva_vision_image_paths", ()))
+            )
+            security_quiesced = await runtime_context.runtime.quiesce_turn_security()
+            runtime_context.tainted = (
+                not security_quiesced
+                or retry_signal is not None
+                or timed_out_background
+                or cancelled_now
+            )
+            runtime_context.preserve_options = retry_signal is not None
+
+            # Enter plan mode and detach the user permission coordinator before
+            # metadata settling. The native inbox remains reachable during
+            # that window and may already start a peer-origin turn.
             await session_title.settle(title_task)
 
             await asyncio.sleep(1)
+
+        options_owned_by_pool = runtime_context.retained
 
         if retry_signal is not None:
             kind = retry_signal.get("_retry_signal")
@@ -1469,15 +1629,22 @@ async def agent_run_events(
         """The lazy resume guard's recovery half: warn the user, drop the dead
         resume target, and let the attempt loop rerun the turn fresh. Fires at
         most once per run — a second failure surfaces as a genuine error."""
-        nonlocal resume_fallback_used, current_resume_id
+        nonlocal resume_fallback_used, current_resume_id, stream_id
         resume_fallback_used = True
         logger.warning(
             "[RESUME-GUARD] resume target %s no longer exists (deleted?); "
             "rerunning on a fresh session (cause: %s)",
             options.resume, payload.get("message"),
         )
+        old_stream_id = stream_id
         options.resume = None
-        current_resume_id = None
+        options.fork_session = False
+        current_resume_id = str(uuid.uuid4())
+        options.session_id = current_resume_id
+        stream_id = current_resume_id
+        if coordinator:
+            coordinator.session_id = current_resume_id
+            registry.remap_session(old_stream_id, current_resume_id, coordinator)
         await emit("session_reset", {
             "old_session_id": session_id,
             "message": _SESSION_RESET_NOTE,
@@ -1514,6 +1681,8 @@ async def agent_run_events(
                 # the previous attempt is lost.
                 if current_resume_id:
                     options.resume = current_resume_id
+                    options.session_id = None
+                    options.fork_session = False
                     try:
                         healed = heal_orphan_tool_uses(current_resume_id, options.cwd)
                         if healed:
@@ -1604,7 +1773,8 @@ async def agent_run_events(
     finally:
         if coordinator:
             coordinator.cancel_all()
-        _cleanup_options(locals().get("options"))
+        if not options_owned_by_pool:
+            _cleanup_options(locals().get("options"))
 
 
 async def agent_run_stream(
@@ -1628,17 +1798,30 @@ async def agent_run_stream(
     run_mode: RunMode | None = None,
 ):
     needs_permissions = True  # streaming runs always need a coordinator
-    stream_id = session_id or str(uuid.uuid4())
+    stream_id = (
+        str(uuid.uuid4())
+        if session_id is None or fork_session
+        else session_id
+    )
     logger.info("[STREAM] agent_run_stream stream_id=%s session_id=%s", stream_id, session_id)
     coordinator_out: list[PermissionCoordinator | None] = [None]
 
     if needs_permissions:
-        output_queue: StreamQueue = asyncio.Queue()
+        output_queue = StreamQueue(
+            maxsize=64,
+            max_bytes=1024 * 1024,
+        )
         coordinator = PermissionCoordinator(stream_id, output_queue, owner_username=username)
         coordinator_out[0] = coordinator
         registry.register(stream_id, coordinator)
 
-    q: asyncio.Queue[str | None] = asyncio.Queue()
+    # Backpressure a slow external SSE consumer instead of retaining an
+    # unbounded number of serialized tool events in the account Pod.
+    q = BoundedAsyncQueue[str | None](
+        maxsize=256,
+        max_bytes=_MAX_STREAM_QUEUE_BYTES,
+    )
+    consumer_closed = asyncio.Event()
 
     # Read masking patterns once at stream start.
     # Only applies when admin has explicitly saved patterns.
@@ -1683,6 +1866,7 @@ async def agent_run_stream(
                     fork_session=fork_session,
                     enable_permission_feedback=enable_permission_feedback,
                     extra_disallowed_tools=extra_disallowed_tools,
+                    new_session_id=(stream_id if session_id is None or fork_session else None),
                 )
             except asyncio.CancelledError:
                 raise
@@ -1698,7 +1882,8 @@ async def agent_run_stream(
                 except Exception:
                     pass
         finally:
-            await q.put(None)
+            if not consumer_closed.is_set():
+                await q.put(None)
 
     run_task = asyncio.create_task(run_agent())
     try:
@@ -1708,6 +1893,7 @@ async def agent_run_stream(
                 break
             yield item
     finally:
+        consumer_closed.set()
         run_task.cancel()
         try:
             await run_task

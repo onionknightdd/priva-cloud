@@ -99,6 +99,8 @@ def test_terminal_manifest_has_independent_security_and_scratch_boundary():
     assert terminal_spec["hostIPC"] is False
     assert terminal_spec["hostNetwork"] is False
     assert terminal_spec["shareProcessNamespace"] is False
+    assert runner_spec["terminationGracePeriodSeconds"] == 45
+    assert terminal_spec["terminationGracePeriodSeconds"] == 10
     assert container["securityContext"] == {
         "allowPrivilegeEscalation": False,
         "privileged": False,

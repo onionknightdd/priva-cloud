@@ -9,6 +9,16 @@ from claude_agent_sdk._internal.sessions import _canonicalize_path, _get_project
 
 from priva_common.logging import get_app_logger
 
+from .bounded_queue import QueueByteLimitError
+from .session_runtime_pool import (
+    RuntimeFrameLimitError,
+    RuntimePoolCapacityError,
+    RuntimePoolShuttingDownError,
+    RuntimeSessionCollisionError,
+    RuntimeWriteScopeBusyError,
+    SessionRuntimeBusyError,
+)
+
 logger = get_app_logger(__name__)
 
 MAX_ATTEMPTS = 10
@@ -29,7 +39,20 @@ def should_retry(message: AssistantMessage) -> bool:
 
 def should_retry_exception(exc: BaseException) -> bool:
     """True for SDK process / transport errors. Cancellation is never retried."""
-    return not isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt))
+    return not isinstance(
+        exc,
+        (
+            asyncio.CancelledError,
+            KeyboardInterrupt,
+            QueueByteLimitError,
+            RuntimeFrameLimitError,
+            RuntimePoolCapacityError,
+            RuntimePoolShuttingDownError,
+            RuntimeSessionCollisionError,
+            RuntimeWriteScopeBusyError,
+            SessionRuntimeBusyError,
+        ),
+    )
 
 
 def backoff(attempt: int) -> float:

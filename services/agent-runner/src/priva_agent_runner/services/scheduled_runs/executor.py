@@ -283,6 +283,7 @@ async def _execute_agent(
             queue_out=record.queue_out,
             max_turns=cfg.max_turns if cfg.max_turns and cfg.max_turns > 0 else None,
             enable_permission_feedback=False,  # D14: AskUserQuestion stripped, prompts deny
+            keep_runtime_warm=False,
         )
         if wall_clock:
             # Hard bound in case the graceful stop wedges past the grace.

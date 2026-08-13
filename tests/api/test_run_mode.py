@@ -161,3 +161,40 @@ def test_sync_run_forwards_disallowed_tools_and_never_permission_feedback(tmp_pa
     assert response.run_mode == "agent"
     assert runner.await_args.kwargs["extra_disallowed_tools"] == ["Bash"]
     assert "enable_permission_feedback" not in runner.await_args.kwargs
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code"),
+    [
+        ("RuntimePoolCapacityError", 429),
+        ("SessionRuntimeBusyError", 409),
+        ("RuntimeWriteScopeBusyError", 409),
+        ("RuntimePoolShuttingDownError", 503),
+    ],
+)
+def test_sync_run_maps_pool_admission_failures(error, status_code, tmp_path):
+    from priva_agent_runner.services.claude_sdk import session_runtime_pool as pool_module
+
+    request = AgentRunRequest(message="hello", run_mode="agent")
+    http_request = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/api/sandbox/agent/run",
+        "headers": [],
+    })
+    http_request.state.auth_method = "jwt"
+    user = UserRecord(username="alice", password_hash="")
+    runner = AsyncMock(side_effect=getattr(pool_module, error)("pool unavailable"))
+
+    with (
+        patch.object(agent_router, "agent_run", runner),
+        patch.object(agent_router, "_resolve_run_cwd", return_value=str(tmp_path)),
+        patch.object(agent_router, "_resolve_run_add_dirs", return_value=[]),
+        patch.object(agent_router, "_validate_attachments", return_value=None),
+        patch.object(agent_router, "_validate_images", return_value=None),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            _run(agent_router.run_agent(http_request, request, user))
+
+    assert exc.value.status_code == status_code
+    assert exc.value.detail == "pool unavailable"

@@ -261,6 +261,12 @@ class SessionMessagesResponse(BaseModel):
     # from the server-side sidecar so the UI chip hydrates on open/resume.
     add_dirs: list[str] = Field(default_factory=list)
     run_mode: RunMode
+    # When this session is live, these form a transcript/stream barrier. The
+    # server reads the snapshot and captures next_seq without yielding the
+    # event loop, so a replay-gap client can attach strictly after live_seq.
+    live_run_id: str | None = None
+    live_seq: int | None = None
+    live_first_seq: int | None = None
 
 
 class SessionGroupResponse(BaseModel):

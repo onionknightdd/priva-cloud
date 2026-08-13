@@ -66,6 +66,10 @@ def main(argv: list[str] | None = None) -> int:
         reload=args.reload,
         ws_ping_interval=None,
         ws_ping_timeout=None,
+        # Bound Uvicorn's connection/task drain so FastAPI lifespan still has
+        # time to interrupt turns and reap pooled Claude CLI children inside
+        # the Pod's 45-second termination grace period.
+        timeout_graceful_shutdown=5,
         # WebSocket frames bypass MaxBodySizeMiddleware entirely (it short-circuits
         # on non-http scopes), so the per-frame ceiling has to come from the server.
         ws_max_size=MAX_WS_FRAME_BYTES,

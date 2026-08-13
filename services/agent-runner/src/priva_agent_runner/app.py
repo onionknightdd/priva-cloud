@@ -12,6 +12,7 @@ single gateway rule, distinct from the control-plane /api/* served by control-pa
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -143,7 +144,6 @@ def create_app() -> FastAPI:
         # Detached task — a large backlog must never delay pod readiness
         # (this boot IS the wake path a scheduled fire is waiting on).
         try:
-            import asyncio
             from .services.scheduled_runs.retention import prune_scheduler_transcripts
             asyncio.get_running_loop().create_task(prune_scheduler_transcripts())
         except Exception as exc:
@@ -156,9 +156,52 @@ def create_app() -> FastAPI:
             os.environ.get("USERNAME"),
             os.environ.get("WORKSPACE_DIR"),
         )
+        from .services.claude_sdk.run_registry import run_registry
+        from .services.claude_sdk.session_runtime_pool import session_runtime_pool
+        await session_runtime_pool.startup()
+        registry_sweeper_stop = asyncio.Event()
+
+        async def _sweep_terminal_runs() -> None:
+            ticks = 0
+            while not registry_sweeper_stop.is_set():
+                try:
+                    await asyncio.wait_for(registry_sweeper_stop.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    # cgroup limits and live pressure are authoritative. This
+                    # retires idle LRU entries before the kernel OOM killer has
+                    # to choose a process, while active runs remain pinned.
+                    try:
+                        await session_runtime_pool.refresh_capacity()
+                    except Exception:
+                        logger.warning(
+                            "session runtime memory refresh failed",
+                            exc_info=True,
+                        )
+                    ticks += 1
+                    if ticks % 12 == 0:
+                        run_registry.sweep()
+
+        registry_sweeper = asyncio.create_task(
+            _sweep_terminal_runs(),
+            name="run-registry-sweeper",
+        )
         try:
             yield
         finally:
+            # SIGTERM/Pod scale-down reaches FastAPI lifespan. Warm clients do
+            # not block scale-to-zero, but every CLI child is explicitly reaped
+            # before uvicorn exits instead of relying on loop cancellation.
+            logger.info("agent-runner draining session runtime pool")
+            run_tasks = run_registry.cancel_active()
+            await session_runtime_pool.shutdown(grace_seconds=8.0)
+            if run_tasks:
+                _done, pending = await asyncio.wait(run_tasks, timeout=2.0)
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*run_tasks, return_exceptions=True)
+            run_registry.finish_cancelled()
+            registry_sweeper_stop.set()
+            await registry_sweeper
             logger.info("agent-runner shutdown complete")
             shutdown_logging()
 
@@ -216,6 +259,7 @@ def create_app() -> FastAPI:
     async def health():
         import asyncio
         import os
+        from .services.claude_sdk.session_runtime_pool import session_runtime_pool
         active, last = activity.snapshot()
 
         # Self-reported downstream connectivity for the admin System Map. Fail-soft
@@ -248,6 +292,7 @@ def create_app() -> FastAPI:
             "account_id": os.environ.get("ACCOUNT_ID"),
             "active_runs": active,
             "last_activity_ts": last,
+            "session_pool": session_runtime_pool.stats(),
             "deps": deps,
             "volume": volume,
             "time": datetime.now(timezone.utc).isoformat(),

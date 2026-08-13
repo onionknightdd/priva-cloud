@@ -8,7 +8,11 @@ import i18n from '@shared/i18n'
 const BASE_URL = '/api/sandbox'
 
 const RECONNECT_BACKOFF = [1, 2, 4, 8, 16] // seconds — max 5 attempts
-const PROTOCOL_AUTH_CLOSE_CODES = new Set([1000, 1001, 4000, 4001])
+const PROTOCOL_AUTH_CLOSE_CODES = new Set([4000, 4001])
+
+function requestRunningSessionReconcile() {
+  window.dispatchEvent(new Event('priva:reconcile-running-sessions'))
+}
 
 // Shared WS engine for both entry modes:
 //   init   — start a new agent run (sends the init frame with the message)
@@ -95,8 +99,19 @@ function openAgentWS({ entryMode, message, sessionId, runId, sinceSeq = 0, onEve
   const scheduleReconnect = (closeCode) => {
     if (reconnectAttempt >= RECONNECT_BACKOFF.length) {
       marks.disconnected({ code: closeCode })
-      onEvent('error', { message: 'Connection lost — please refresh the page.' })
+      // If no sequenced/identified registry run was ever observed, this may
+      // have been a failed initial handshake rather than a detached backend
+      // run. Preserve the existing actionable error in that case; confirmed
+      // registry runs are recovered by the reconcile event below.
+      const registryRunConfirmed = entryMode === 'attach' || activeRunId || lastSeq !== null
+      if (!registryRunConfirmed) {
+        onEvent('error', { message: i18n.t('connection.lost') })
+      }
       finalize()
+      // The backend run is registry-owned and may still be healthy. Reconcile
+      // from the authoritative running list instead of marking the turn failed
+      // merely because this socket exhausted its local retry budget.
+      requestRunningSessionReconcile()
       return
     }
     reconnectAttempt += 1
@@ -127,7 +142,7 @@ function openAgentWS({ entryMode, message, sessionId, runId, sinceSeq = 0, onEve
       reconnectAttempt = 0
       if (entryMode === 'attach') {
         sendAttach()
-      } else if (isReconnect && lastSeq !== null) {
+      } else if (isReconnect && (lastSeq !== null || activeRunId)) {
         // Registry backend: rejoin the SAME run losslessly instead of
         // re-initing (which would double-resume the session).
         sendAttach()
@@ -150,7 +165,9 @@ function openAgentWS({ entryMode, message, sessionId, runId, sinceSeq = 0, onEve
         if (event === 'system' && data?.subtype === 'init' && data?.data?.session_id) {
           activeSessionId = data.data.session_id
         }
-        if (event === 'stream_init' && data?.stream_id) activeRunId = data.stream_id
+        if (event === 'stream_init' && data?.stream_id && !activeRunId) {
+          activeRunId = data.stream_id
+        }
         if (event === 'attach_ok') {
           if (data?.session_id) activeSessionId = data.session_id
           if (data?.run_id) activeRunId = data.run_id
@@ -171,7 +188,18 @@ function openAgentWS({ entryMode, message, sessionId, runId, sinceSeq = 0, onEve
         finalize()
         return
       }
-      // Clean / protocol / auth closes — terminate.
+      if (evt.code === 1000) {
+        marks.connected()
+        finalize()
+        // 1000 normally follows RUN_END, but intermediaries may also close a
+        // still-live socket cleanly. The cheap authoritative reconciliation
+        // makes that edge lossless without resubmitting the prompt.
+        requestRunningSessionReconcile()
+        return
+      }
+      // A server "going away" close can happen during a proxy restart while
+      // the registry-owned run remains alive, so it follows the attach retry
+      // path. Clean completion and protocol/auth closes terminate normally.
       if (PROTOCOL_AUTH_CLOSE_CODES.has(evt.code)) {
         marks.connected()
         finalize()
@@ -214,7 +242,9 @@ function openAgentWS({ entryMode, message, sessionId, runId, sinceSeq = 0, onEve
       if (msg) frame.message = msg
       if (updatedInput) frame.updated_input = updatedInput
       wsSend(frame)
+      return true
     }
+    return false
   }
 
   const sendQueue = ({ id, text, attachments, images }) => {
@@ -280,118 +310,6 @@ export function attachAgentRunWS(sessionId, sinceSeq, onEvent, onComplete, trace
     entryMode: 'attach',
     sessionId, sinceSeq, onEvent, onComplete, trace, surfaceConnUi,
   })
-}
-
-/**
- * POST-based SSE client.
- * Returns { abort } — call abort() to cancel the stream.
- */
-export function streamAgentRun(message, sessionId, onEvent, permissionMode, onComplete, model, attachments, mcpServers, images, enableFileCheckpointing = false, cwd = null, addDirs = null, runMode = 'agent') {
-  const controller = new AbortController()
-
-  const run = async () => {
-    const body = { message, session_id: sessionId }
-    body.run_mode = runMode === 'code' ? 'code' : 'agent'
-    if (permissionMode) {
-      body.permission_mode = permissionMode
-    }
-    if (model) {
-      body.model = model
-    }
-    if (attachments && attachments.length > 0) {
-      body.attachments = attachments
-    }
-    if (images && images.length > 0) {
-      body.images = images
-    }
-    if (mcpServers !== undefined) {
-      body.mcp_servers = mcpServers
-    }
-    if (enableFileCheckpointing) {
-      body.enable_file_checkpointing = true
-    }
-    if (cwd) {
-      body.cwd = cwd
-    }
-    if (addDirs && addDirs.length > 0) {
-      body.add_dirs = addDirs
-    }
-    // cp-proxy, not the /api/sandbox lane: agentgateway's GIE EPP ext_proc cuts
-    // every response body at ~8KB (ADR 0003), and an event stream is a response
-    // body like any other — past 8KB the stream dies and `result` never lands.
-    // Accept: text/event-stream puts the control-panel proxy in relay mode.
-    const init = {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'text/event-stream',
-        ...getAuthHeaders(),
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    }
-    debugLog('send', `SSE ▶ POST /api/cp-proxy/agent/run/stream`, body)
-    let res
-    try {
-      res = await fetch('/api/cp-proxy/agent/run/stream', init)
-      if (res.status === 404) res = await fetch(`${BASE_URL}/agent/run/stream`, init)
-    } catch {
-      res = await fetch(`${BASE_URL}/agent/run/stream`, init)
-    }
-
-    if (!res.ok) {
-      if (res.status === 401) {
-        window.dispatchEvent(new Event('auth:unauthorized'))
-      }
-      const text = await res.text()
-      throw new Error(`SSE error ${res.status}: ${text}`)
-    }
-
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-
-      // Parse SSE frames
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      let currentEvent = null
-
-      for (const line of lines) {
-        if (line.startsWith('event: ')) {
-          currentEvent = line.slice(7).trim()
-        } else if (line.startsWith('data: ') && currentEvent) {
-          try {
-            const data = JSON.parse(line.slice(6))
-            debugLog('recv', `SSE ◀ ${currentEvent}`, data)
-            onEvent(currentEvent, data)
-          } catch {
-            // skip malformed JSON
-          }
-          currentEvent = null
-        } else if (line === '') {
-          currentEvent = null
-        }
-      }
-    }
-  }
-
-  run().then(() => {
-    if (onComplete) onComplete()
-  }).catch((err) => {
-    if (err.name !== 'AbortError') {
-      onEvent('error', { message: err.message })
-    }
-    if (onComplete) onComplete()
-  })
-
-  return { abort: () => controller.abort() }
 }
 
 /**

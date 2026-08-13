@@ -1834,8 +1834,6 @@ function RuntimeEnvironmentEditor({ disabled }) {
 
 function AdvancedTab() {
   const { t } = useTranslation()
-  const transport = useSettingsStore((s) => s.transport)
-  const setTransport = useSettingsStore((s) => s.setTransport)
   const developerMode = useSettingsStore((s) => s.developerMode)
   const setDeveloperMode = useSettingsStore((s) => s.setDeveloperMode)
   const debugMode = useSettingsStore((s) => s.debugMode)
@@ -1847,6 +1845,10 @@ function AdvancedTab() {
   const setPromptSuggestionEnabled = useSettingsStore((s) => s.setPromptSuggestionEnabled)
   const agentTeamsEnabled = useSettingsStore((s) => s.agentTeamsEnabled)
   const setAgentTeamsEnabled = useSettingsStore((s) => s.setAgentTeamsEnabled)
+  const crossSessionInteractionEnabled = useSettingsStore((s) => s.crossSessionInteractionEnabled)
+  const setCrossSessionInteractionEnabled = useSettingsStore((s) => s.setCrossSessionInteractionEnabled)
+  const runtimeSettingsSaving = useSettingsStore((s) => s.runtimeSettingsSaving)
+  const runtimeSettingsError = useSettingsStore((s) => s.runtimeSettingsError)
   const fetchRuntimeSettings = useSettingsStore((s) => s.fetchRuntimeSettings)
 
   // Unlike the localStorage switches above, this one's truth lives on the pod.
@@ -1855,43 +1857,26 @@ function AdvancedTab() {
     fetchRuntimeSettings()
   }, [fetchRecapEnabled, fetchRuntimeSettings])
 
-  const options = [
-    { value: 'ws', label: t('settings.transportWs') },
-    { value: 'sse', label: t('settings.transportSse') },
-  ]
-
   return (
     <div className="flex flex-col gap-5">
-      {/* Streaming transport */}
+      {/* Cross-session discovery is server-side; WebUI streaming is WS-only. */}
       <div className="flex flex-col gap-4">
-        <label style={{ ...labelStyle, marginBottom: 0 }}>{t('settings.transportMode')}</label>
-        <div className="flex gap-2">
-          {options.map((opt) => {
-            const isActive = transport === opt.value
-            return (
-              <button
-                key={opt.value}
-                className="flex items-center gap-2 px-3 py-2 text-sm"
-                style={{
-                  background: isActive ? 'var(--bg-elevated)' : 'var(--bg-surface)',
-                  border: isActive ? '1px solid var(--blue)' : '1px solid var(--border)',
-                  borderRadius: 4,
-                  color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                  cursor: 'pointer',
-                  fontWeight: isActive ? 600 : 400,
-                  transition: 'background 150ms ease, border-color 150ms ease, color 150ms ease',
-                }}
-                onClick={() => setTransport(opt.value)}
-              >
-                {isActive && <Check size={14} strokeWidth={1.5} style={{ color: 'var(--blue)' }} />}
-                {opt.label}
-              </button>
-            )
-          })}
-        </div>
-        <p className="text-xs" style={{ color: 'var(--text-dim)', lineHeight: 1.5 }}>
-          {t('settings.transportNote')}
+        <label style={{ ...labelStyle, marginBottom: 0 }}>{t('settings.crossSessionSection')}</label>
+        <SettingRow
+          label={t('settings.crossSessionInteraction')}
+          desc={t('settings.crossSessionInteractionDesc')}
+          checked={crossSessionInteractionEnabled}
+          onChange={(next) => { setCrossSessionInteractionEnabled(next).catch(() => {}) }}
+          disabled={runtimeSettingsSaving}
+        />
+        <p className="text-xs" style={{ color: 'var(--text-dim)', lineHeight: 1.5, margin: 0 }}>
+          {t('settings.webSocketOnlyNote')}
         </p>
+        {runtimeSettingsError && (
+          <p className="text-xs" style={{ color: 'var(--red)', lineHeight: 1.5, margin: 0 }}>
+            {runtimeSettingsError}
+          </p>
+        )}
       </div>
 
       {/* Divider */}

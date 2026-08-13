@@ -218,19 +218,19 @@ SettingsPopover 快捷菜单显示前 5 个标签 + API Doc 链接。
 
 ## Advanced
 
-### 传输模式
+### 跨 Session 交互
 
-```
-[WebSocket (WS)]  [Server-Sent Events (SSE)]
-```
-
-| 模式 | 说明 | 适用场景 |
-|------|------|----------|
-| **WebSocket** | 双向实时通信（推荐） | 默认选择，支持权限交互 |
-| **SSE** | 单向服务端推送 | WebSocket 被网络策略阻止时 |
-
-- 选择后持久化到 localStorage
-- 对话无法流式传输时可尝试切换为 SSE
+- 「允许跨 Session 交互」持久化在服务端。开启后，新启动的 Claude
+  Session 可以通过 `ListAgents` 发现当前 Pod 内在线的其他 Session，并接收
+  Claude 原生跨 Session 消息。
+- 关闭后，新启动的 Session 不提供 `ListAgents` / `ListPeers`，并拒绝跨
+  Session 入站消息；已运行 Session 会在当前轮结束后安全重建。
+- Session Pool 大小不是用户设置。服务端按 Pod 的 cgroup 内存自动计算；当前
+  1639 MiB 规格最多保留 5 个在线 Session，同时重负载 turn 另行限制为 3，
+  并在内存水位升高时自动收缩或暂停新任务。
+- WebUI 固定使用 WebSocket，以支持浏览器断线后继续后台运行、重新 attach
+  和实时追踪。SSE 运行接口仍为外部 API 与 Channel Connector 保留，不是
+  WebUI 的回退传输方式。
 
 ### 下一步提示建议
 

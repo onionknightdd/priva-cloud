@@ -4,7 +4,10 @@ import asyncio
 import base64
 import binascii
 import json
+import os
 import re
+import shutil
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -28,7 +31,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSo
 from fastapi.responses import StreamingResponse
 from pydantic import TypeAdapter, ValidationError
 
+from priva_common.audit_log import AuditEntry, get_audit_logger
 from priva_common.logging import get_app_logger
+from priva_common.metrics import AGENT_RUNS_FINISHED, AGENT_RUNS_STARTED
 from priva_common.models.agent import (
     AddDirsRequest,
     AgentRunRequest,
@@ -62,32 +67,49 @@ from priva_common.models.agent import (
     WsQueueCancelFrame,
     WsQueueFrame,
 )
-from ..services.claude_sdk.options import build_agent_options
-from ..services.llm_profiles import store as llm_profile_store
-from ..services.claude_sdk.session_add_dirs import (
-    delete_add_dirs,
-    read_add_dirs,
-    write_add_dirs,
+from priva_common.user_store import UserRecord
+
+from ..deps import (
+    account_from_ws,
+    get_current_user,
+    get_user_workspace,
+    negotiated_subprotocol,
+    require_user,
 )
+from ..services.claude_sdk import session_meta
 from ..services.claude_sdk.agent_communication_log import (
     delete_stream_deliveries,
     parse_delivery_content,
     read_stream_deliveries,
 )
-from ..services.claude_sdk import session_meta
-
-_ws_frame_adapter = TypeAdapter(WsClientFrame)
-from priva_common.audit_log import AuditEntry, get_audit_logger
-from ..deps import account_from_ws, get_current_user, get_user_workspace, negotiated_subprotocol, require_user
 from ..services.claude_sdk.client import agent_run, agent_run_events, agent_run_stream
+from ..services.claude_sdk.options import build_agent_options
 from ..services.claude_sdk.permission_coordinator import registry
-from ..services.claude_sdk.run_registry import RUN_END_EVENT, RunRecord, run_registry
-from priva_common.user_store import UserRecord
-from priva_common.metrics import AGENT_RUNS_FINISHED, AGENT_RUNS_STARTED
+from ..services.claude_sdk.run_registry import (
+    RUN_END_EVENT,
+    SUBSCRIBER_OVERFLOW_EVENT,
+    RunAlreadyActiveError,
+    RunRecord,
+    run_registry,
+)
+from ..services.claude_sdk.session_add_dirs import (
+    delete_add_dirs,
+    read_add_dirs,
+    write_add_dirs,
+)
+from ..services.claude_sdk.session_runtime_pool import (
+    RuntimePoolCapacityError,
+    RuntimePoolShuttingDownError,
+    RuntimeWriteScopeBusyError,
+    SessionRuntimeBusyError,
+    session_runtime_pool,
+)
+from ..services.llm_profiles import close_profile_settings_overlay
+from ..services.llm_profiles import store as llm_profile_store
 from ..services.temp_files import get_file_by_id
 from ..services.vision import detect_image_media_type, resolve_image_route
 
-import os
+_ws_frame_adapter = TypeAdapter(WsClientFrame)
 
 
 # Claude-native image block types. The web client rasterizes SVG/BMP to PNG
@@ -95,6 +117,24 @@ import os
 _ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 _MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MiB decoded
 _MAX_IMAGES = 5
+_MAX_QUEUED_USER_BYTES = 8 * 1024 * 1024
+
+
+def _queued_entry_size(entry: tuple[str, str, list, list]) -> int:
+    entry_id, text, attachments, images = entry
+    size = len(entry_id.encode("utf-8")) + len(text.encode("utf-8"))
+    for attachment in attachments:
+        if isinstance(attachment, dict):
+            size += sum(
+                len(str(value).encode("utf-8"))
+                for value in attachment.values()
+                if value is not None
+            )
+    for image in images:
+        if isinstance(image, dict):
+            size += len(str(image.get("data") or "").encode("ascii", errors="ignore"))
+            size += len(str(image.get("media_type") or "").encode("utf-8"))
+    return size
 
 
 def _is_within_directory(path: str, directory: str) -> bool:
@@ -1071,6 +1111,15 @@ async def run_agent(
             fork_session=request.fork_session,
             extra_disallowed_tools=request.disallowed_tools,
         )
+    except RuntimePoolCapacityError as exc:
+        outcome = "error"
+        raise HTTPException(429, str(exc)) from exc
+    except (SessionRuntimeBusyError, RuntimeWriteScopeBusyError) as exc:
+        outcome = "error"
+        raise HTTPException(409, str(exc)) from exc
+    except RuntimePoolShuttingDownError as exc:
+        outcome = "error"
+        raise HTTPException(503, str(exc)) from exc
     except asyncio.CancelledError:
         outcome = "cancelled"
         raise
@@ -1255,10 +1304,10 @@ async def get_agent_session_messages(
 ):
     """Retrieve messages from a specific past session."""
     cwd = _find_session_cwd(session_id) or get_user_workspace(user)
+    run_mode = await session_meta.ensure_existing_session_run_mode(session_id)
     messages = get_session_messages(
         session_id=session_id, directory=cwd, limit=limit, offset=offset
     )
-    await session_meta.record_recent_activity(cwd, session_id)
     replay_metadata = _build_message_replay_metadata(cwd, session_id)
     sidechain_messages: list[SessionMessageResponse] = []
     if limit is None and offset == 0:
@@ -1267,7 +1316,11 @@ async def get_agent_session_messages(
         except Exception:
             logger.exception("Failed to hydrate subagent messages for session %s", session_id)
 
-    return SessionMessagesResponse(
+    # No await between the transcript read above and this barrier. Incoming
+    # SDK events run on the same event loop, so anything after live_seq is
+    # guaranteed to arrive through attach replay/live follow.
+    live_record = run_registry.live_for_session(session_id)
+    response = SessionMessagesResponse(
         messages=[
             SessionMessageResponse(
                 type=m.type,
@@ -1280,8 +1333,13 @@ async def get_agent_session_messages(
             for m in messages
         ] + sidechain_messages,
         add_dirs=read_add_dirs(cwd, session_id),
-        run_mode=await session_meta.ensure_existing_session_run_mode(session_id),
+        run_mode=run_mode,
+        live_run_id=live_record.run_id if live_record is not None else None,
+        live_seq=live_record.next_seq - 1 if live_record is not None else None,
+        live_first_seq=live_record.first_seq if live_record is not None else None,
     )
+    await session_meta.record_recent_activity(cwd, session_id)
+    return response
 
 
 @router.get("/sessions/{session_id}/recap")
@@ -1307,10 +1365,6 @@ async def get_agent_session_recap(
 @router.delete("/sessions/{session_id}")
 async def delete_agent_session(session_id: str, user: UserRecord | None = Depends(get_current_user)):
     """Delete a session's transcript (any cwd in this account)."""
-    # A still-running detached run must not keep appending to a deleted file.
-    live = run_registry.live_for_session(session_id)
-    if live is not None:
-        live.cancelled.set()
     cwd = _find_session_cwd(session_id)
     if not cwd:
         raise HTTPException(404, "Session not found")
@@ -1319,20 +1373,40 @@ async def delete_agent_session(session_id: str, user: UserRecord | None = Depend
     if not session_file.exists():
         raise HTTPException(404, "Session file not found")
 
-    session_file.unlink()
-    delete_add_dirs(cwd, session_id)
-    delete_stream_deliveries(cwd, session_id)
-    await session_meta.prune_session(session_id)
+    maintenance = await session_runtime_pool.reserve_session(
+        session_id,
+        cancel_active=True,
+    )
+    if maintenance is None:
+        raise HTTPException(409, "Session is already being modified")
+    try:
+        if maintenance.tasks:
+            _done, pending = await asyncio.wait(maintenance.tasks, timeout=2.0)
+            if pending:
+                raise HTTPException(
+                    409,
+                    "Session run did not stop cleanly; transcript was not deleted",
+                )
 
-    actor = user.username if user else "anonymous"
-    audit = get_audit_logger()
-    audit.append(AuditEntry(
-        actor=actor,
-        action="session.deleted",
-        target=session_id,
-    ))
+        session_file.unlink()
+        sidecar_dir = session_file.with_suffix("")
+        if sidecar_dir.is_dir():
+            shutil.rmtree(sidecar_dir)
+        delete_add_dirs(cwd, session_id)
+        delete_stream_deliveries(cwd, session_id)
+        await session_meta.prune_session(session_id)
 
-    return {"status": "ok"}
+        actor = user.username if user else "anonymous"
+        audit = get_audit_logger()
+        audit.append(AuditEntry(
+            actor=actor,
+            action="session.deleted",
+            target=session_id,
+        ))
+
+        return {"status": "ok"}
+    finally:
+        await maintenance.release()
 
 
 @router.post("/permission/respond")
@@ -1353,7 +1427,7 @@ async def respond_permission(
     if owner is not None and (user is None or user.username != owner):
         raise HTTPException(403, "Not authorized for this permission request")
     try:
-        coordinator.resolve(
+        resolved = coordinator.resolve(
             request.request_id,
             request.decision,
             request.message or "",
@@ -1361,7 +1435,7 @@ async def respond_permission(
         )
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
-    return {"status": "ok"}
+    return {"status": "ok" if resolved is not False else "already_resolved"}
 
 
 @router.post("/rewind", response_model=RewindResponse)
@@ -1382,14 +1456,24 @@ async def rewind_session(
     auth_method = getattr(http_request.state, "auth_method", "jwt")
     if registry.get(req.session_id) or run_registry.live_for_session(req.session_id):
         raise HTTPException(409, "Finish the current run before rewinding")
-    opts = await build_agent_options(
-        session_id=req.session_id,
-        permission_mode="bypassPermissions",
-        cwd=cwd, username=username,
-        auth_method=auth_method,
-        enable_file_checkpointing=True,
+    maintenance = await session_runtime_pool.reserve_session(
+        req.session_id,
+        cancel_active=False,
     )
+    if maintenance is None:
+        raise HTTPException(409, "Finish the current run before rewinding")
+    opts = None
     try:
+        opts = await build_agent_options(
+            session_id=req.session_id,
+            permission_mode="bypassPermissions",
+            cwd=cwd, username=username,
+            auth_method=auth_method,
+            enable_file_checkpointing=True,
+            # Rewind is an exclusive maintenance client, not a reachable
+            # conversational session.
+            enable_cross_session_interaction=False,
+        )
         async with ClaudeSDKClient(options=opts) as client:
             await client.query("")
             async for _ in client.receive_response():
@@ -1407,6 +1491,12 @@ async def rewind_session(
     except Exception as exc:
         logger.exception("rewind failed")
         raise HTTPException(400, f"Rewind failed: {exc}") from exc
+    finally:
+        if opts is not None:
+            close_profile_settings_overlay(
+                getattr(opts, "_priva_overlay_manager", None)
+            )
+        await maintenance.release()
 
 
 @router.post("/fork", response_model=ForkResponse)
@@ -1733,21 +1823,45 @@ async def ws_run(websocket: WebSocket):
         await websocket.close(code=4000)
         return
 
-    record = run_registry.create(
-        session_id=frame.session_id,
-        run_mode=effective_run_mode,
+    preallocated_session_id = (
+        str(_uuid.uuid4())
+        if frame.session_id is None or frame.fork_session
+        else frame.session_id
     )
+    try:
+        record = run_registry.create(
+            session_id=preallocated_session_id,
+            run_mode=effective_run_mode,
+        )
+    except RunAlreadyActiveError as exc:
+        # Atomic second check: another init may have crossed the await at
+        # _resolve_request_run_mode after the optimistic check above.
+        await websocket.send_json({"event": "stream_error", "data": {
+            "code": "RunAlreadyActive",
+            "message": str(exc),
+            "fatal": True,
+        }})
+        await websocket.close(code=4000)
+        return
     record.task = asyncio.create_task(
         _execute_run(
             record, frame, cwd, add_dirs, username, attachments, images,
             effective_run_mode,
+            (
+                preallocated_session_id
+                if frame.session_id is None or frame.fork_session
+                else None
+            ),
         ),
         name=f"agent-run-{record.run_id[:8]}",
     )
     await _ws_follow(
         websocket, record,
         since_seq=0,
-        send_attach_ok=False,
+        # Confirm the registry-owned identity before option/profile loading or
+        # CLI startup. A disconnect in that pre-init window can then attach to
+        # this run instead of resending `init` and duplicating the prompt.
+        send_attach_ok=True,
         cwd_for_queue=cwd,
         username_for_queue=username,
         ws_id=ws_id,
@@ -1763,6 +1877,7 @@ async def _execute_run(
     attachments: list | None,
     images: list | None,
     effective_run_mode: RunMode,
+    new_session_id: str | None,
 ) -> None:
     """Registry-owned run task: pump agent_run_events into the record.
 
@@ -1814,6 +1929,7 @@ async def _execute_run(
             fork_session=frame.fork_session,
             enable_permission_feedback=frame.enable_permission_feedback,
             include_partial_messages=frame.include_partial_messages,
+            new_session_id=new_session_id,
         )
     except asyncio.CancelledError:
         # Process shutdown — finalize synchronously and let cancellation flow.
@@ -1834,7 +1950,10 @@ async def _execute_run(
         except Exception:
             pass
     finally:
-        if record.status == "running":
+        if (
+            record.status == "running"
+            and not session_runtime_pool.owns_native_record(record)
+        ):
             if uncaught_exc is not None:
                 outcome, status = "error", "error"
             elif record.cancelled.is_set():
@@ -1862,15 +1981,30 @@ async def _ws_follow(
     in the registry and a later `attach` resumes from the last seen seq.
     """
 
+    send_lock = asyncio.Lock()
+
+    async def send_json(payload: dict) -> None:
+        # The follower and command reader are independent tasks. Starlette's
+        # WebSocket send state is not a multi-writer queue, so serialize every
+        # frame for this socket through one choke point.
+        async with send_lock:
+            await websocket.send_json(payload)
+
     async def send_event(seq: int | None, event_type: str, data: dict) -> None:
         payload = {"event": event_type, "data": data}
         if seq is not None:
             payload["seq"] = seq
-        await websocket.send_json(payload)
+        await send_json(payload)
 
     sub_id, q = record.subscribe()
     reader_task = asyncio.create_task(
-        _ws_reader(websocket, record, cwd_for_queue, username_for_queue)
+        _ws_reader(
+            websocket,
+            record,
+            cwd_for_queue,
+            username_for_queue,
+            send_json,
+        )
     )
     sent_through = since_seq
     socket_alive = True
@@ -1888,17 +2022,25 @@ async def _ws_follow(
                 "queued": record.queued_entries(),
                 "run_mode": record.run_mode,
             })
-        # Replay the buffer. permission_requests already resolved are filtered
-        # so a stale approval card can't reappear after a refresh.
-        outstanding = record.outstanding_permission_ids()
-        for seq, event_type, data in record.replay_since(since_seq):
+        # Capture both views in one event-loop tick. Permission requests use a
+        # coordinator-owned snapshot because the bounded event tail is not an
+        # authoritative inbox. Requests created after this barrier arrive via
+        # the subscriber queue below.
+        replay_events = record.replay_since(since_seq)
+        outstanding_permissions = record.outstanding_permission_requests()
+        for seq, event_type, data in replay_events:
             sent_through = seq
             if event_type == RUN_END_EVENT:
                 run_ended = True
                 break
-            if event_type == "permission_request" and data.get("request_id") not in outstanding:
+            if event_type == "permission_request":
                 continue
             await send_event(seq, event_type, data)
+        if not run_ended:
+            for data in outstanding_permissions:
+                # Snapshot events are deliberately unsequenced: they describe
+                # current state and must not advance the replay cursor.
+                await send_event(None, "permission_request", data)
         # Live follow.
         while not run_ended:
             try:
@@ -1907,6 +2049,14 @@ async def _ws_follow(
                 await send_event(None, "keepalive", {})
                 continue
             seq, event_type, data = item
+            if event_type == SUBSCRIBER_OVERFLOW_EVENT:
+                await send_event(None, "stream_error", {
+                    "code": "SubscriberBackpressure",
+                    "message": "Live stream fell behind; reconnecting is required",
+                    "fatal": True,
+                })
+                run_ended = True
+                break
             if seq <= sent_through:
                 continue  # already covered by the replay snapshot
             sent_through = seq
@@ -1940,6 +2090,7 @@ async def _ws_reader(
     record: RunRecord,
     cwd: str,
     username: str | None,
+    send_json: Callable[[dict], Awaitable[None]],
 ) -> None:
     """Incoming frames from one attached socket → the record's run."""
     try:
@@ -1949,29 +2100,64 @@ async def _ws_reader(
                 raw_msg = json.loads(text)
                 msg = _ws_frame_adapter.validate_python(raw_msg)
             except (json.JSONDecodeError, ValidationError) as exc:
-                await websocket.send_json({"event": "error", "data": {"message": f"Invalid frame: {exc}"}})
+                await send_json({
+                    "event": "command_error",
+                    "data": {"message": f"Invalid frame: {exc}"},
+                })
                 continue
 
             if isinstance(msg, WsPermissionFrame):
                 coord = record.coordinator_out[0]
                 if coord:
                     try:
-                        coord.resolve(
+                        resolved = coord.resolve(
                             msg.request_id,
                             msg.decision,
                             msg.message or "",
                             msg.updated_input,
                         )
                     except ValueError as exc:
-                        await websocket.send_json({"event": "error", "data": {"message": str(exc)}})
+                        logger.warning(
+                            "Permission response rejected run_id={} request_id={}: {}",
+                            record.run_id,
+                            msg.request_id,
+                            exc,
+                        )
+                        # A command-level rejection must not turn into the
+                        # stream-level `error` event that terminates the UI.
+                        record.record_event("permission_resolved", {
+                            "request_id": msg.request_id,
+                            "session_id": record.session_id,
+                            "status": "not_pending",
+                        })
+                    else:
+                        if resolved is False:
+                            record.record_event("permission_resolved", {
+                                "request_id": msg.request_id,
+                                "session_id": record.session_id,
+                                "status": "already_resolved",
+                            })
                 else:
-                    await websocket.send_json({"event": "error", "data": {"message": "No permission coordinator active"}})
+                    record.record_event("permission_resolved", {
+                        "request_id": msg.request_id,
+                        "session_id": record.session_id,
+                        "status": "not_pending",
+                    })
             elif isinstance(msg, (WsInitFrame, WsAttachFrame)):
-                await websocket.send_json({"event": "error", "data": {"message": "Already initialized"}})
+                await send_json({
+                    "event": "command_error",
+                    "data": {"message": "Already initialized"},
+                })
             elif isinstance(msg, WsQueueFrame):
                 q = record.queue_out[0]
                 if q is None:
-                    await websocket.send_json({"event": "error", "data": {"message": "No active stream to queue into"}})
+                    await send_json({
+                        "event": "queue_rejected",
+                        "data": {
+                            "id": msg.id,
+                            "message": "No active stream to queue into",
+                        },
+                    })
                     continue
                 try:
                     q_attachments = _validate_attachments(
@@ -1979,22 +2165,59 @@ async def _ws_reader(
                     ) if msg.attachments else []
                     q_images = _validate_images(msg.images) if msg.images else []
                 except HTTPException as exc:
-                    await websocket.send_json({"event": "error", "data": {"message": f"Queue validation failed: {exc.detail}"}})
+                    await send_json({
+                        "event": "queue_rejected",
+                        "data": {
+                            "id": msg.id,
+                            "message": f"Queue validation failed: {exc.detail}",
+                        },
+                    })
                     continue
                 if any(attachment.get("is_image") for attachment in q_attachments):
-                    await websocket.send_json({
-                        "event": "error",
+                    await send_json({
+                        "event": "queue_rejected",
                         "data": {
+                            "id": msg.id,
                             "message": "Vision image attachments require a new run",
                         },
                     })
                     continue
-                await q.put((msg.id, msg.text, q_attachments or [], q_images or []))
-                await websocket.send_json({"event": "queued", "data": {"id": msg.id}})
+                entry = (msg.id, msg.text, q_attachments or [], q_images or [])
+                queued_bytes = sum(
+                    _queued_entry_size(existing)
+                    for existing in list(getattr(q, "_queue", ()))
+                )
+                if queued_bytes + _queued_entry_size(entry) > _MAX_QUEUED_USER_BYTES:
+                    await send_json({
+                        "event": "queue_rejected",
+                        "data": {
+                            "id": msg.id,
+                            "message": "Queued message byte limit reached (8 MiB)",
+                        },
+                    })
+                    continue
+                try:
+                    q.put_nowait(entry)
+                except asyncio.QueueFull:
+                    await send_json({
+                        "event": "queue_rejected",
+                        "data": {
+                            "id": msg.id,
+                            "message": "Queued message limit reached (32)",
+                        },
+                    })
+                    continue
+                await send_json({"event": "queued", "data": {"id": msg.id}})
             elif isinstance(msg, WsQueueCancelFrame):
                 q = record.queue_out[0]
                 if q is None:
-                    await websocket.send_json({"event": "error", "data": {"message": "No active stream to cancel from"}})
+                    await send_json({
+                        "event": "queue_rejected",
+                        "data": {
+                            "id": msg.id,
+                            "message": "No active stream to cancel from",
+                        },
+                    })
                     continue
                 # asyncio.Queue has no random-access delete: drain + rebuild
                 remaining: list[tuple[str, str, list, list]] = []
@@ -2011,9 +2234,18 @@ async def _ws_reader(
                 for entry in remaining:
                     q.put_nowait(entry)
                 if removed:
-                    await websocket.send_json({"event": "queue_cancelled", "data": {"id": msg.id}})
+                    await send_json({
+                        "event": "queue_cancelled",
+                        "data": {"id": msg.id},
+                    })
                 else:
-                    await websocket.send_json({"event": "error", "data": {"message": f"Queued id not found: {msg.id}"}})
+                    await send_json({
+                        "event": "queue_rejected",
+                        "data": {
+                            "id": msg.id,
+                            "message": f"Queued id not found: {msg.id}",
+                        },
+                    })
             else:
                 # WsAbortFrame — cancel the RUN itself (stop button), not just
                 # this socket. The follower closes once RUN_END drains through.
