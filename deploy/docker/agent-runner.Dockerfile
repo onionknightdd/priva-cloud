@@ -34,6 +34,7 @@ RUN apt-get update \
         iputils-ping \
         jq \
         less \
+        openssh-client \
         procps \
         tar \
         unzip \
