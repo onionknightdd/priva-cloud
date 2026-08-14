@@ -6,6 +6,7 @@ import usePopoverTransition from '@shared/motion/usePopoverTransition'
 import useReducedMotion from '@shared/motion/useReducedMotion'
 import { EASE_SPRING } from '@shared/motion/tokens'
 import useSettingsStore from '../../stores/settingsStore'
+import { MODEL_CONTEXT_1M } from '../../utils/modelSelection'
 
 const MODEL_ROW_HEIGHT = 28
 const MODEL_LIST_MAX_HEIGHT = 196
@@ -116,6 +117,7 @@ export default function ModelSelector() {
   const [profileId, setProfileId] = useState(null)
   const [filter, setFilter] = useState('')
   const [selectorHovered, setSelectorHovered] = useState(false)
+  const [contextButtonHovered, setContextButtonHovered] = useState(false)
   const dropdownRef = useRef(null)
   const profileFilterRef = useRef(null)
   const modelFilterRef = useRef(null)
@@ -128,7 +130,9 @@ export default function ModelSelector() {
   const fetchProfiles = useSettingsStore((s) => s.fetchProfiles)
   const fetchModelsForProfile = useSettingsStore((s) => s.fetchModelsForProfile)
   const selectedModel = useSettingsStore((s) => s.selectedModel)
+  const selectedModelCapabilities = useSettingsStore((s) => s.selectedModelCapabilities)
   const setSelectedModel = useSettingsStore((s) => s.setSelectedModel)
+  const setSelectedModelContext = useSettingsStore((s) => s.setSelectedModelContext)
   const profileCount = profiles.length
 
   useEffect(() => { if (!profiles.length) fetchProfiles() }, [profiles.length, fetchProfiles])
@@ -210,7 +214,16 @@ export default function ModelSelector() {
     }
   }, [level, open, profileId, profileCount, reducedMotion])
 
-  const separator = selectedModel?.indexOf(':') ?? -1
+  const candidateSeparator = selectedModel?.indexOf(':') ?? -1
+  const candidateProfileId = candidateSeparator >= 0
+    ? selectedModel.slice(0, candidateSeparator)
+    : null
+  // Match the backend resolver: a colon is a Profile separator only when the
+  // prefix names a configured Profile. Model ids such as ollama:llama3:8b
+  // otherwise remain intact.
+  const separator = candidateProfileId && profiles.some((item) => item.id === candidateProfileId)
+    ? candidateSeparator
+    : -1
   const effectiveDefaultProfileId = defaultProfileId || profiles[0]?.id || null
   const selectedParts = separator >= 0 ? [selectedModel.slice(0, separator), selectedModel.slice(separator + 1)] : [effectiveDefaultProfileId, selectedModel]
   const selectedProfile = profiles.find((item) => item.id === selectedParts[0])
@@ -220,6 +233,9 @@ export default function ModelSelector() {
     ? selectedParts[1]
     : (displayProfile?.default_model || 'model')
   const displayModel = `${displayProfileName}·${displayModelName}`
+  const context1mEnabled = selectedModelCapabilities?.context === MODEL_CONTEXT_1M
+  const context1mAvailable = Boolean(selectedModel || displayProfile?.default_model)
+  const context1mLabel = t(context1mEnabled ? 'chat.disable1mContext' : 'chat.enable1mContext')
 
   useLayoutEffect(() => {
     const selector = dropdownRef.current
@@ -333,6 +349,36 @@ export default function ModelSelector() {
         </div>}
         </div>}
       </div>
+      <button
+        type="button"
+        aria-label={context1mLabel}
+        aria-pressed={context1mEnabled}
+        title={context1mLabel}
+        disabled={!context1mAvailable}
+        onClick={() => setSelectedModelContext(context1mEnabled ? null : MODEL_CONTEXT_1M)}
+        onMouseEnter={() => setContextButtonHovered(true)}
+        onMouseLeave={() => setContextButtonHovered(false)}
+        onFocus={() => setContextButtonHovered(true)}
+        onBlur={() => setContextButtonHovered(false)}
+        className="flex items-center justify-center flex-shrink-0"
+        style={{
+          width: 34,
+          height: 28,
+          boxSizing: 'border-box',
+          background: context1mEnabled ? 'var(--text-primary)' : 'transparent',
+          border: 'none',
+          borderRadius: 4,
+          color: context1mEnabled ? 'var(--text-inverse)' : (contextButtonHovered ? 'var(--text-secondary)' : 'var(--text-dim)'),
+          cursor: context1mAvailable ? 'pointer' : 'not-allowed',
+          fontFamily: 'var(--font-code)',
+          fontSize: 11,
+          fontWeight: 600,
+          opacity: context1mAvailable ? 1 : 0.55,
+          transition: 'color 150ms ease, border-color 150ms ease, background 150ms ease',
+        }}
+      >
+        1M
+      </button>
     </div>
   )
 }

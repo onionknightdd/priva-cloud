@@ -201,13 +201,28 @@ class HookEventPayload(BaseModel):
     data: dict[str, Any] | None = None
 
 
+class SessionModelCapabilities(BaseModel):
+    """Per-run capabilities applied to a session model selection."""
+
+    context: Literal["1m"] | None = None
+
+
+class SessionModelSelection(BaseModel):
+    """Base model id plus capabilities that do not belong in the Profile."""
+
+    id: str
+    capabilities: SessionModelCapabilities = Field(
+        default_factory=SessionModelCapabilities
+    )
+
+
 class SessionResponseModel(BaseModel):
     """Profile-side model selection used for the latest assistant response."""
 
     # Nullable only for legacy wire compatibility. New metadata is persisted
     # from the resolved Profile selection and always carries its profile id.
     profile_id: str | None = None
-    model_id: str
+    model: SessionModelSelection
     observed_at: int | None = None
 
 

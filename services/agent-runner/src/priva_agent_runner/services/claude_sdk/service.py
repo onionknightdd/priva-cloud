@@ -352,6 +352,7 @@ async def _record_last_response_model(
     session_id: str | None,
     model_id: str | None,
     profile_id: str | None,
+    capabilities: dict | None = None,
 ) -> None:
     """Persist the Profile-side model selection used for the latest reply.
 
@@ -364,7 +365,10 @@ async def _record_last_response_model(
     try:
         await session_meta.set_last_response_model(
             session_id,
-            model_id=model_id,
+            model={
+                "id": model_id,
+                "capabilities": capabilities or {"context": None},
+            },
             profile_id=profile_id,
         )
     except Exception:
@@ -918,6 +922,7 @@ async def agent_run(
                 new_sid or current_resume_id or session_id,
                 profile_model_id,
                 getattr(options, "_priva_profile_id", None),
+                getattr(options, "_priva_model_capabilities", None),
             )
         _audit_run_completed(
             username, new_sid or session_id, result_data.get("usage"), last_provider_model,
@@ -1550,6 +1555,7 @@ async def agent_run_events(
                                 new_sid or current_resume_id or session_id,
                                 profile_model_id,
                                 getattr(options, "_priva_profile_id", None),
+                                getattr(options, "_priva_model_capabilities", None),
                             )
                         await session_meta.record_recent_activity(
                             options.cwd,

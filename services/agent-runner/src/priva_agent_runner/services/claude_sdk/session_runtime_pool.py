@@ -401,6 +401,9 @@ def options_fingerprint(options: Any) -> str:
     values["startup_files"] = [sig for path in watched if (sig := _file_signature(path))]
     values["priva_profile_id"] = getattr(options, "_priva_profile_id", None)
     values["priva_model_id"] = getattr(options, "_priva_model_id", None)
+    values["priva_model_capabilities"] = _stable_value(
+        getattr(options, "_priva_model_capabilities", {})
+    )
     values["prompt_suggestions"] = bool(
         getattr(options, "_priva_prompt_suggestion_enabled", False)
     )

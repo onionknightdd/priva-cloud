@@ -20,6 +20,12 @@ import {
   updateRuntimeSettings as updateRuntimeSettingsAPI,
 } from '../api/settings'
 import { getMyApiKey, generateMyApiKey, revokeMyApiKey } from '@shared/api/auth'
+import {
+  MODEL_CONTEXT_1M,
+  modelCapabilitiesFromResponse,
+  modelSelectionFromResponse,
+  normalizeModelCapabilities,
+} from '../utils/modelSelection'
 
 const SESSION_MODEL_DRAFT_KEY = '__draft__'
 const storedRunMode = safeStorage.getItem('priva-run-mode')
@@ -37,25 +43,6 @@ function runtimeFeatureState(data) {
     agentTeamsEnabled: data?.agent_teams_enabled === true,
     crossSessionInteractionEnabled: data?.cross_session_interaction_enabled === true,
   }
-}
-
-function modelSelectionFromResponse(lastResponseModel, profiles, defaultProfileId) {
-  const modelId = lastResponseModel?.model_id || lastResponseModel?.modelId
-  if (typeof modelId !== 'string' || !modelId.trim()) return null
-
-  const profileId = lastResponseModel?.profile_id || lastResponseModel?.profileId
-  if (!profileId) {
-    const defaultProfile = profiles.find((profile) => profile.id === defaultProfileId)
-    return defaultProfile?.default_model === modelId ? null : modelId
-  }
-
-  // A profile-qualified reference is valid even before the profile list has
-  // finished loading. Once profiles are available, do not restore a deleted
-  // profile as the next-run selection.
-  if (profiles.length > 0 && !profiles.some((profile) => profile.id === profileId)) return null
-  const profile = profiles.find((item) => item.id === profileId)
-  if (profileId === defaultProfileId && profile?.default_model === modelId) return null
-  return `${profileId}:${modelId}`
 }
 
 const useSettingsStore = create((set, get) => ({
@@ -86,11 +73,13 @@ const useSettingsStore = create((set, get) => ({
   quickActions: [],
   quickActionsLoaded: false,
   selectedModel: null,
+  selectedModelCapabilities: { context: null },
   // The model picker is rendered globally, but its selection belongs to the
   // active conversation. The server-side last_response_model seeds a session
   // after a refresh; an explicit local selection takes precedence thereafter.
   activeModelSessionKey: null,
   selectedModelBySession: {},
+  selectedModelCapabilitiesBySession: {},
   selectedModelSourceBySession: {},
   defaultModel: null,
   apiKey: null,
@@ -436,19 +425,32 @@ const useSettingsStore = create((set, get) => ({
     const key = sessionKey || SESSION_MODEL_DRAFT_KEY
     const current = get()
     const selections = current.selectedModelBySession || {}
+    const capabilitiesBySession = current.selectedModelCapabilitiesBySession || {}
     const sources = current.selectedModelSourceBySession || {}
     if (hasOwn(selections, key) && sources[key] === 'explicit') {
-      set({ activeModelSessionKey: key, selectedModel: selections[key] })
+      set({
+        activeModelSessionKey: key,
+        selectedModel: selections[key],
+        selectedModelCapabilities: normalizeModelCapabilities(capabilitiesBySession[key]),
+      })
       return selections[key]
     }
 
     const selectedModel = options.preserveCurrent
       ? current.selectedModel
       : modelSelectionFromResponse(lastResponseModel, current.profiles, current.defaultProfileId)
+    const selectedModelCapabilities = options.preserveCurrent
+      ? normalizeModelCapabilities(current.selectedModelCapabilities)
+      : modelCapabilitiesFromResponse(lastResponseModel)
     set({
       activeModelSessionKey: key,
       selectedModel,
+      selectedModelCapabilities,
       selectedModelBySession: { ...selections, [key]: selectedModel },
+      selectedModelCapabilitiesBySession: {
+        ...capabilitiesBySession,
+        [key]: selectedModelCapabilities,
+      },
       selectedModelSourceBySession: { ...sources, [key]: 'server' },
     })
     return selectedModel
@@ -458,6 +460,7 @@ const useSettingsStore = create((set, get) => ({
     if (!oldKey || !newKey || oldKey === newKey) return
     set((state) => {
       const selections = state.selectedModelBySession || {}
+      const capabilities = state.selectedModelCapabilitiesBySession || {}
       const sources = state.selectedModelSourceBySession || {}
       if (!hasOwn(selections, oldKey)) {
         return state.activeModelSessionKey === oldKey
@@ -465,14 +468,20 @@ const useSettingsStore = create((set, get) => ({
           : {}
       }
       const next = { ...selections, [newKey]: selections[oldKey] }
+      const nextCapabilities = {
+        ...capabilities,
+        [newKey]: normalizeModelCapabilities(capabilities[oldKey]),
+      }
       const nextSources = { ...sources, [newKey]: sources[oldKey] || 'server' }
       delete next[oldKey]
+      delete nextCapabilities[oldKey]
       delete nextSources[oldKey]
       return {
         activeModelSessionKey: state.activeModelSessionKey === oldKey
           ? newKey
           : state.activeModelSessionKey,
         selectedModelBySession: next,
+        selectedModelCapabilitiesBySession: nextCapabilities,
         selectedModelSourceBySession: nextSources,
       }
     })
@@ -480,11 +489,39 @@ const useSettingsStore = create((set, get) => ({
 
   setSelectedModel: (model) => set((state) => {
     const key = state.activeModelSessionKey || SESSION_MODEL_DRAFT_KEY
+    const capabilities = { context: null }
     return {
       selectedModel: model,
+      selectedModelCapabilities: capabilities,
       selectedModelBySession: {
         ...(state.selectedModelBySession || {}),
         [key]: model,
+      },
+      selectedModelCapabilitiesBySession: {
+        ...(state.selectedModelCapabilitiesBySession || {}),
+        [key]: capabilities,
+      },
+      selectedModelSourceBySession: {
+        ...(state.selectedModelSourceBySession || {}),
+        [key]: 'explicit',
+      },
+    }
+  }),
+
+  setSelectedModelContext: (context) => set((state) => {
+    const key = state.activeModelSessionKey || SESSION_MODEL_DRAFT_KEY
+    const capabilities = {
+      context: context === MODEL_CONTEXT_1M ? MODEL_CONTEXT_1M : null,
+    }
+    return {
+      selectedModelCapabilities: capabilities,
+      selectedModelBySession: {
+        ...(state.selectedModelBySession || {}),
+        [key]: state.selectedModel,
+      },
+      selectedModelCapabilitiesBySession: {
+        ...(state.selectedModelCapabilitiesBySession || {}),
+        [key]: capabilities,
       },
       selectedModelSourceBySession: {
         ...(state.selectedModelSourceBySession || {}),
@@ -555,8 +592,10 @@ const useSettingsStore = create((set, get) => ({
     quickActions: [],
     quickActionsLoaded: false,
     selectedModel: null,
+    selectedModelCapabilities: { context: null },
     activeModelSessionKey: null,
     selectedModelBySession: {},
+    selectedModelCapabilitiesBySession: {},
     selectedModelSourceBySession: {},
     defaultModel: null,
     apiKey: null,

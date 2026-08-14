@@ -17,7 +17,11 @@ from fastapi import HTTPException
 from priva_common.models.agent import McpServersSelection, PermissionMode, RunMode
 from priva_common.models.llm_profiles import LlmProfile
 from priva_common.user_env import read_settings_env
-from ..llm_profiles import open_profile_settings_overlay, resolve_model
+from ..llm_profiles import (
+    open_profile_settings_overlay,
+    resolve_model,
+    resolve_model_reference,
+)
 from priva_common.workspace import get_workspace_for_username
 from priva_common.runtime_settings import read_runtime_settings
 from .system_prompt import build_run_system_prompt
@@ -214,10 +218,11 @@ async def build_agent_options(
             haiku_model=legacy.get("ANTHROPIC_DEFAULT_HAIKU_MODEL") or None,
         )
         from ..llm_profiles import ResolvedProfile
-        if model_override and ":" in model_override:
-            _, model = model_override.split(":", 1)
-        else:
-            model = model_override or legacy_profile.default_model
+        _, model = resolve_model_reference(
+            model_override,
+            profiles=[legacy_profile],
+            default_profile_id=legacy_profile.id,
+        )
         resolved = ResolvedProfile(profile=legacy_profile, model=model)
     model = resolved.model
     if vision_image_paths and not resolved.profile.vision_model:
@@ -337,7 +342,8 @@ async def build_agent_options(
     )
     options.settings = overlay_path
     options._priva_profile_id = resolved.profile.id
-    options._priva_model_id = model
+    options._priva_model_id = resolved.model_id
+    options._priva_model_capabilities = resolved.capabilities
     options._priva_overlay_manager = overlay_manager
     options._priva_overlay_path = overlay_path
     options._priva_vision_image_paths = tuple(vision_image_paths or ())

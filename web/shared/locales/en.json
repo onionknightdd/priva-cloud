@@ -119,6 +119,8 @@
     "acceptSuggestionHint": "Tab or → to accept the suggested next prompt",
     "recapDismiss": "Hide recap",
     "recentActivityDismiss": "Dismiss recent activity",
+    "enable1mContext": "Enable 1M context for the selected model",
+    "disable1mContext": "Disable 1M context for the selected model",
     "sessionSummary": {
       "toggle": "Toggle session summary",
       "title": "File handling",

@@ -119,6 +119,8 @@
     "acceptSuggestionHint": "按 Tab 或 → 接受下一步提示建议",
     "recapDismiss": "隐藏摘要",
     "recentActivityDismiss": "关闭最近活动",
+    "enable1mContext": "为所选模型开启 1M 上下文",
+    "disable1mContext": "关闭所选模型的 1M 上下文",
     "sessionSummary": {
       "toggle": "切换会话摘要",
       "title": "文件处理",

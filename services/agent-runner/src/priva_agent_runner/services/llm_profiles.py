@@ -32,6 +32,8 @@ PROFILE_STORE_VERSION = 2
 PROFILE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 PROFILE_STORE_PATH = "llm-profiles.json"
 RUNTIME_OVERLAY_DIR = "runtime/llm-profile-overlays"
+MODEL_CONTEXT_1M = "1m"
+MODEL_CONTEXT_1M_SUFFIX = "[1m]"
 
 _thread_lock = threading.RLock()
 _CAPABILITY_UNSET = object()
@@ -329,6 +331,33 @@ def profile_summary(profile: LlmProfile, model_count: int | None = None) -> dict
     }
 
 
+def split_model_context(model: str | None) -> tuple[str | None, str | None]:
+    """Split a Claude Code context suffix from an upstream model id.
+
+    ``[1m]`` is a per-run Claude Code capability, not part of a Profile's
+    configured model id. Matching is case-insensitive and output is
+    canonicalized to ``"1m"``.
+    """
+    value = (model or "").strip()
+    if not value:
+        return None, None
+    if value.lower().endswith(MODEL_CONTEXT_1M_SUFFIX):
+        model_id = value[: -len(MODEL_CONTEXT_1M_SUFFIX)].strip()
+        return (model_id or None), MODEL_CONTEXT_1M
+    return value, None
+
+
+def apply_model_context(model_id: str | None, context: str | None) -> str | None:
+    """Build the Claude Code model argument from a base id and capability."""
+    value, existing_context = split_model_context(model_id)
+    if not value:
+        return None
+    effective_context = MODEL_CONTEXT_1M if context == MODEL_CONTEXT_1M else existing_context
+    if effective_context == MODEL_CONTEXT_1M:
+        return f"{value}{MODEL_CONTEXT_1M_SUFFIX}"
+    return value
+
+
 def resolve_model_reference(reference: str | None, *, profiles: list[LlmProfile], default_profile_id: str | None) -> tuple[LlmProfile, str | None]:
     """Resolve ``profile:model`` or an unqualified model in the default profile.
 
@@ -357,13 +386,29 @@ class ResolvedProfile:
     profile: LlmProfile
     model: str | None
 
+    @property
+    def model_id(self) -> str | None:
+        """Base model id used for Profile validation and persisted metadata."""
+        model_id, _ = split_model_context(self.model)
+        return model_id
+
+    @property
+    def capabilities(self) -> dict[str, str | None]:
+        """Per-run capabilities encoded in the Claude Code model argument."""
+        _, context = split_model_context(self.model)
+        return {"context": context}
+
 
 def resolve_model(reference: str | None, vision_model: str | None = None) -> ResolvedProfile:
     profiles, default_id = store.read(vision_model)
     profile, model = resolve_model_reference(reference, profiles=profiles, default_profile_id=default_id)
-    if not profile.base_url or not profile.auth_token or not model:
+    model_id, context = split_model_context(model)
+    if not profile.base_url or not profile.auth_token or not model_id:
         raise HTTPException(400, "profile_not_ready")
-    return ResolvedProfile(profile=profile, model=model)
+    return ResolvedProfile(
+        profile=profile,
+        model=apply_model_context(model_id, context),
+    )
 
 
 @contextmanager

@@ -279,7 +279,9 @@ async def resolve_image_route(model_reference: str | None) -> ImageRouteResponse
         return ImageRouteResponse(route="probe_failed", reason="model_unavailable")
 
     profile = resolved.profile
-    model_id = resolved.model
+    # Claude Code's ``[1m]`` suffix is a per-run context capability. Image
+    # routing and Profile capability caches are keyed by the base model id.
+    model_id = resolved.model_id
     if not model_id:
         return ImageRouteResponse(
             route="probe_failed",

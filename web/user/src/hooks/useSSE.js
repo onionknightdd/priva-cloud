@@ -48,6 +48,7 @@ import {
 } from '../utils/askUserQuestion'
 import { parseAgentMessageEnvelope } from '../utils/agentCommunication'
 import { normalizeRunMode } from '../utils/runMode'
+import { modelReferenceForRequest } from '../utils/modelSelection'
 
 // Max characters of background-shell output kept in the task store; only the
 // tail is retained beyond this.
@@ -525,7 +526,13 @@ function startStream({ key, message, permissionMode, attachments, attachmentsMet
     S.chatSet({ messages })
   }
 
-  const selectedModel = useSettingsStore.getState().selectedModel
+  const modelSettings = useSettingsStore.getState()
+  const selectedModel = modelReferenceForRequest(
+    modelSettings.selectedModel,
+    modelSettings.selectedModelCapabilities,
+    modelSettings.profiles,
+    modelSettings.defaultProfileId,
+  )
   // First session-id assignment of a brand-new conversation: rekey the draft
   // runtime, migrate its dot, and surface the new sidebar row mid-run.
   let announcedNewSession = Boolean(sessionIdAtSend)

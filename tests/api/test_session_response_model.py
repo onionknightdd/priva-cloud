@@ -34,7 +34,10 @@ class SessionResponseModelMetadataTests(unittest.IsolatedAsyncioTestCase):
         await session_meta.set_last_response_model(
             "session-1",
             profile_id="ollama",
-            model_id="ollama:llama3:8b",
+            model={
+                "id": "ollama:llama3:8b",
+                "capabilities": {"context": "1m"},
+            },
             observed_at=123,
         )
 
@@ -42,7 +45,10 @@ class SessionResponseModelMetadataTests(unittest.IsolatedAsyncioTestCase):
             session_meta.get_last_response_model("session-1"),
             {
                 "profile_id": "ollama",
-                "model_id": "ollama:llama3:8b",
+                "model": {
+                    "id": "ollama:llama3:8b",
+                    "capabilities": {"context": "1m"},
+                },
                 "observed_at": 123,
             },
         )
@@ -51,18 +57,44 @@ class SessionResponseModelMetadataTests(unittest.IsolatedAsyncioTestCase):
             "profile",
         )
 
+    def test_legacy_suffixed_model_id_migrates_to_context_capability(self) -> None:
+        meta = {
+            "last_response_models": {
+                "session-1": {
+                    "profile_id": "default",
+                    "model_id": "claude-sonnet-4-5[1M]",
+                    "model_source": "profile",
+                    "observed_at": 456,
+                }
+            }
+        }
+
+        self.assertEqual(
+            session_meta.get_last_response_model("session-1", meta),
+            {
+                "profile_id": "default",
+                "model": {
+                    "id": "claude-sonnet-4-5",
+                    "capabilities": {"context": "1m"},
+                },
+                "observed_at": 456,
+            },
+        )
+
     async def test_response_model_without_profile_is_not_persisted(self) -> None:
         await session_meta.set_last_response_model(
             "session-1",
             profile_id=None,
-            model_id="unqualified-model",
+            model={"id": "unqualified-model", "capabilities": {"context": None}},
         )
 
         self.assertIsNone(session_meta.get_last_response_model("session-1"))
 
     async def test_prune_removes_response_model_metadata(self) -> None:
         await session_meta.set_last_response_model(
-            "session-1", profile_id="default", model_id="claude-sonnet-4-5"
+            "session-1",
+            profile_id="default",
+            model={"id": "claude-sonnet-4-5", "capabilities": {"context": None}},
         )
 
         await session_meta.prune_session("session-1")
@@ -125,7 +157,10 @@ class SessionInfoResponseModelTests(unittest.TestCase):
             "last_response_models": {
                 "session-1": {
                     "profile_id": "default",
-                    "model_id": "claude-sonnet-4-5",
+                    "model": {
+                        "id": "claude-sonnet-4-5",
+                        "capabilities": {"context": "1m"},
+                    },
                     "model_source": "profile",
                     "observed_at": 123,
                 }
@@ -137,7 +172,8 @@ class SessionInfoResponseModelTests(unittest.TestCase):
 
         self.assertIsNotNone(response.last_response_model)
         self.assertEqual(response.last_response_model.profile_id, "default")
-        self.assertEqual(response.last_response_model.model_id, "claude-sonnet-4-5")
+        self.assertEqual(response.last_response_model.model.id, "claude-sonnet-4-5")
+        self.assertEqual(response.last_response_model.model.capabilities.context, "1m")
 
     def test_session_info_backfills_latest_real_model_from_legacy_transcript(self) -> None:
         rows = [
@@ -190,7 +226,8 @@ class SessionInfoResponseModelTests(unittest.TestCase):
 
         self.assertIsNotNone(response.last_response_model)
         self.assertEqual(response.last_response_model.profile_id, "profile-legacy")
-        self.assertEqual(response.last_response_model.model_id, "legacy-model")
+        self.assertEqual(response.last_response_model.model.id, "legacy-model")
+        self.assertIsNone(response.last_response_model.model.capabilities.context)
         self.assertEqual(response.last_response_model.observed_at, 1784126306123)
 
     def test_transcript_backfill_rejects_gateway_mapped_model(self) -> None:
@@ -342,6 +379,7 @@ class AgentRunResponseModelTests(unittest.IsolatedAsyncioTestCase):
                 resume=None,
                 _priva_profile_id="profile-a",
                 _priva_model_id="requested-model",
+                _priva_model_capabilities={"context": "1m"},
             )
 
         persist_model = AsyncMock()
@@ -368,7 +406,10 @@ class AgentRunResponseModelTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(preallocated_session_id)
         persist_model.assert_awaited_once_with(
             preallocated_session_id,
-            model_id="requested-model",
+            model={
+                "id": "requested-model",
+                "capabilities": {"context": "1m"},
+            },
             profile_id="profile-a",
         )
 
@@ -441,7 +482,10 @@ class AgentRunResponseModelTests(unittest.IsolatedAsyncioTestCase):
 
         persist_model.assert_awaited_once_with(
             session_id,
-            model_id="profile-stream-model",
+            model={
+                "id": "profile-stream-model",
+                "capabilities": {"context": None},
+            },
             profile_id="profile-stream",
         )
         self.assertIn("result", emitted)

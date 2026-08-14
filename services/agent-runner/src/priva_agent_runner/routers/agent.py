@@ -104,7 +104,7 @@ from ..services.claude_sdk.session_runtime_pool import (
     SessionRuntimeBusyError,
     session_runtime_pool,
 )
-from ..services.llm_profiles import close_profile_settings_overlay
+from ..services.llm_profiles import close_profile_settings_overlay, split_model_context
 from ..services.llm_profiles import store as llm_profile_store
 from ..services.temp_files import get_file_by_id
 from ..services.vision import detect_image_media_type, resolve_image_route
@@ -246,7 +246,7 @@ def _session_info_to_response(
         # Older metadata stored AssistantMessage.model. Gateways may rewrite
         # that value, so trust it only when it exactly matches one configured
         # Profile model and agrees with any recorded profile id.
-        inferred_profile = model_profiles.get(last_response_model["model_id"])
+        inferred_profile = model_profiles.get(last_response_model["model"]["id"])
         recorded_profile = last_response_model.get("profile_id")
         if inferred_profile and (recorded_profile is None or recorded_profile == inferred_profile):
             last_response_model = {
@@ -486,7 +486,10 @@ def _last_response_model_from_transcript(
         return None
     return {
         "profile_id": profile_id,
-        "model_id": model_id,
+        "model": {
+            "id": model_id,
+            "capabilities": {"context": None},
+        },
         "observed_at": observed_at,
     }
 
@@ -511,7 +514,9 @@ def _configured_profile_by_model() -> dict[str, str | None]:
         for field in fields:
             model_id = getattr(profile, field, None)
             if isinstance(model_id, str) and model_id:
-                owners.setdefault(model_id, set()).add(profile.id)
+                base_model_id, _ = split_model_context(model_id)
+                if base_model_id:
+                    owners.setdefault(base_model_id, set()).add(profile.id)
     return {
         model_id: next(iter(profile_ids)) if len(profile_ids) == 1 else None
         for model_id, profile_ids in owners.items()

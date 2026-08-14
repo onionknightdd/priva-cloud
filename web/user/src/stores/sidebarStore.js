@@ -11,6 +11,7 @@ import { UnauthorizedError } from '@shared/api/client'
 import safeStorage from '@shared/utils/safeStorage'
 import { normalizeSessionTags, normalizeTagColorMap } from '../utils/sessionTags'
 import { dismissRecentActivity as dismissRecentActivityApi } from '../api/userData'
+import { normalizeLastResponseModel } from '../utils/modelSelection'
 
 const STORAGE_KEY_WIDTH = 'sidebar-width'
 const STORAGE_KEY_COLLAPSED = 'sidebar-collapsed'
@@ -59,15 +60,7 @@ const persistWidth = (width) => {
 
 function mapSession(s) {
   const tags = normalizeSessionTags(Array.isArray(s.tags) ? s.tags : s.tag)
-  const responseModel = s.last_response_model
-  const lastResponseModel = responseModel && typeof responseModel === 'object'
-    && typeof responseModel.model_id === 'string'
-    ? {
-        profileId: responseModel.profile_id || null,
-        modelId: responseModel.model_id,
-        observedAt: responseModel.observed_at || null,
-      }
-    : null
+  const lastResponseModel = normalizeLastResponseModel(s.last_response_model)
   return {
     id: s.session_id,
     sessionId: s.session_id,

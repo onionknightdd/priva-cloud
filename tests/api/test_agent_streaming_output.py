@@ -100,7 +100,7 @@ def test_sdk_options_preserve_profile_side_model_identity(monkeypatch, tmp_path)
         "resolve_model",
         lambda _reference: ResolvedProfile(
             profile=profile,
-            model="profile-model-alias",
+            model="profile-model-alias[1m]",
         ),
     )
 
@@ -112,6 +112,8 @@ def test_sdk_options_preserve_profile_side_model_identity(monkeypatch, tmp_path)
 
     assert options._priva_profile_id == "gateway"
     assert options._priva_model_id == "profile-model-alias"
+    assert options._priva_model_capabilities == {"context": "1m"}
+    assert options.model == "profile-model-alias[1m]"
 
 
 def test_stream_event_uses_stable_whitelisted_wire_envelope():

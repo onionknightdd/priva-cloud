@@ -21,7 +21,11 @@ ourselves in a single **account-level** index next to the SDK's data:
       "recaps":   { "<session_id>": {"text": str, "turns": int} },
       "last_response_models": {
         "<session_id>": {
-          "profile_id": str, "model_id": str,
+          "profile_id": str,
+          "model": {
+            "id": str,
+            "capabilities": {"context": "1m" | null}
+          },
           "model_source": "profile", "observed_at": int
         }
       },
@@ -66,6 +70,8 @@ from claude_agent_sdk._internal.sessions import (
 )
 
 from priva_common.logging import get_app_logger
+
+from ..llm_profiles import MODEL_CONTEXT_1M, split_model_context
 
 logger = get_app_logger(__name__)
 
@@ -373,6 +379,35 @@ def get_recap(session_id: str, meta: dict | None = None) -> dict | None:
     return {"text": text, "turns": turns if isinstance(turns, int) else 0}
 
 
+def _normalize_response_model(entry: dict) -> dict | None:
+    """Normalize new and legacy metadata to the nested session model shape."""
+    raw_model = entry.get("model")
+    raw_capabilities = None
+    if isinstance(raw_model, dict):
+        raw_model_id = raw_model.get("id")
+        raw_capabilities = raw_model.get("capabilities")
+    else:
+        # Legacy entries persisted a flat ``model_id``. A suffix may have
+        # leaked into that field before capabilities were represented.
+        raw_model_id = entry.get("model_id")
+
+    if not isinstance(raw_model_id, str):
+        return None
+    model_id, encoded_context = split_model_context(raw_model_id)
+    if not model_id:
+        return None
+
+    context = None
+    if isinstance(raw_capabilities, dict) and raw_capabilities.get("context") == MODEL_CONTEXT_1M:
+        context = MODEL_CONTEXT_1M
+    elif encoded_context == MODEL_CONTEXT_1M:
+        context = MODEL_CONTEXT_1M
+    return {
+        "id": model_id,
+        "capabilities": {"context": context},
+    }
+
+
 def get_last_response_model(session_id: str, meta: dict | None = None) -> dict | None:
     """Return the Profile-side model selection for the latest response.
 
@@ -384,14 +419,14 @@ def get_last_response_model(session_id: str, meta: dict | None = None) -> dict |
     entry = data.get("last_response_models", {}).get(session_id)
     if not isinstance(entry, dict):
         return None
-    model_id = entry.get("model_id")
-    if not isinstance(model_id, str) or not model_id:
+    model = _normalize_response_model(entry)
+    if model is None:
         return None
     profile_id = entry.get("profile_id")
     observed_at = entry.get("observed_at")
     return {
         "profile_id": profile_id if isinstance(profile_id, str) and profile_id else None,
-        "model_id": model_id,
+        "model": model,
         "observed_at": observed_at if isinstance(observed_at, int) else None,
     }
 
@@ -637,14 +672,16 @@ async def set_recap(session_id: str, text: str, turns: int) -> None:
 async def set_last_response_model(
     session_id: str,
     *,
-    model_id: str | None,
+    model: dict | None,
     profile_id: str | None = None,
     observed_at: int | None = None,
 ) -> None:
     """Persist the resolved Profile model used for the latest response."""
-    if not session_id or not isinstance(model_id, str) or not model_id.strip():
+    if not session_id or not isinstance(model, dict):
         return
-    model_id = model_id.strip()
+    normalized_model = _normalize_response_model({"model": model})
+    if normalized_model is None:
+        return
     if not isinstance(profile_id, str) or not profile_id.strip():
         return
     profile_id = profile_id.strip()
@@ -654,7 +691,7 @@ async def set_last_response_model(
         data = _read_raw()
         data["last_response_models"][session_id] = {
             "profile_id": profile_id,
-            "model_id": model_id,
+            "model": normalized_model,
             "model_source": "profile",
             "observed_at": observed_at,
         }

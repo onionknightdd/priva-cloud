@@ -10,6 +10,7 @@ from priva_agent_runner.services.llm_profiles import (
     close_profile_settings_overlay,
     open_profile_settings_overlay,
     profile_store_path,
+    resolve_model,
     resolve_model_reference,
     store,
 )
@@ -47,6 +48,26 @@ def test_model_reference_preserves_colons_in_model_ids():
     profile, model = resolve_model_reference("ollama:llama3:8b", profiles=profiles, default_profile_id="default")
     assert profile.id == "default"
     assert model == "ollama:llama3:8b"
+
+
+def test_resolved_model_keeps_1m_for_cli_but_exposes_base_profile_id(monkeypatch):
+    profiles = [
+        LlmProfile(
+            id="gateway",
+            label="Gateway",
+            base_url="https://x",
+            auth_token="x",
+            default_model="fallback",
+        )
+    ]
+    monkeypatch.setattr(store, "read", lambda _vision_model=None: (profiles, "gateway"))
+
+    resolved = resolve_model("gateway:ollama:llama3:8b[1M]")
+
+    assert resolved.profile.id == "gateway"
+    assert resolved.model == "ollama:llama3:8b[1m]"
+    assert resolved.model_id == "ollama:llama3:8b"
+    assert resolved.capabilities == {"context": "1m"}
 
 
 def test_profile_overlay_is_private_and_removed():
