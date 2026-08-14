@@ -335,6 +335,36 @@ def test_preallocated_session_id_is_forwarded_to_cli(monkeypatch, tmp_path):
     assert f"--session-id={options.session_id}" in command
 
 
+@pytest.mark.parametrize(
+    ("permission_mode", "expects_bypass_capability"),
+    [
+        (None, True),
+        ("bypassPermissions", True),
+        ("default", False),
+        ("plan", False),
+    ],
+)
+def test_bypass_mode_opts_cli_into_safe_runtime_switching(
+    monkeypatch,
+    tmp_path,
+    permission_mode,
+    expects_bypass_capability,
+):
+    options = _build_options(
+        monkeypatch,
+        tmp_path,
+        permission_mode=permission_mode,
+    )
+
+    command = _cli_command(options)
+
+    assert (
+        "--allow-dangerously-skip-permissions" in command
+    ) is expects_bypass_capability
+    # The direct flag would force a pooled CLI to start in bypass while idle.
+    assert "--dangerously-skip-permissions" not in command
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("keep_runtime_warm", "expected_override"),

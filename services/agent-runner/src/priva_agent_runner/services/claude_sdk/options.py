@@ -388,6 +388,16 @@ async def build_agent_options(
     if fork_session and session_id:
         options.fork_session = True
     effective_mode = permission_mode or "bypassPermissions"
+    if effective_mode == "bypassPermissions":
+        # Claude Code 2.1.226 rejects both an initial bypass permission mode
+        # and a later SDK set_permission_mode("bypassPermissions") unless the
+        # process was launched with an explicit bypass capability flag. Use
+        # the opt-in capability variant instead of
+        # --dangerously-skip-permissions itself: pooled runtimes can then boot
+        # safely in plan mode while idle and enter bypass only for the bound
+        # user turn. The direct dangerous flag would make the warm inbox start
+        # in bypass before PermissionBridge is bound.
+        options.extra_args["allow-dangerously-skip-permissions"] = None
     # In bypass mode with no explicit callback, fall back to _auto_approve_tool
     # (auto-allow, but managed-hook "ask" decisions fail closed). Streaming
     # runs always pass the coordinator-backed unified callback upstream, so
